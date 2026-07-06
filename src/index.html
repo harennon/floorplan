@@ -2,69 +2,319 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
     <title>floorplan · danbing.app</title>
-    <meta name="description" content="A friction-free floor-plan sketcher. Draw, measure, share — no signup." />
+    <meta
+      name="description"
+      content="A friction-free floor-plan sketcher. Draw, measure, share — no signup."
+    />
 
     <!-- Open Graph -->
     <meta property="og:title" content="floorplan" />
-    <meta property="og:description" content="A friction-free floor-plan sketcher. Draw, measure, share — no signup." />
+    <meta
+      property="og:description"
+      content="A friction-free floor-plan sketcher. Draw, measure, share — no signup."
+    />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://floorplan.danbing.app" />
 
-    <!-- Fonts -->
+    <!-- Fonts: DM Sans, DM Mono, Libre Baskerville -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
       rel="stylesheet"
     />
 
     <style>
+      /* ── Design tokens ────────────────────────────────────────────────── */
       :root {
-        --bg: #14140f;
-        --grid: rgba(201, 168, 76, 0.08);
-        --ink: #ece7d6;
-        --muted: #8f8a78;
-        --gold: #c9a84c;
+        --bg:         #14140f;
+        --bg-deep:    #100f0b;
+        --ink:        #ece7d6;
+        --muted:      #8f8a78;
+        --gold:       #c9a84c;
+        --gold-soft:  rgba(201, 168, 76, 0.55);
+
+        /* Grid line tiers */
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --grid-axis:  rgba(201, 168, 76, 0.34);
+
+        /* Chrome */
+        --panel:      rgba(20, 20, 15, 0.72);
+        --hairline:   rgba(201, 168, 76, 0.18);
+
+        /* Typography */
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
       }
-      * { box-sizing: border-box; }
-      html, body { height: 100%; margin: 0; }
-      body {
-        background-color: var(--bg);
-        /* graph-paper hint — a nod to the intended aesthetic */
-        background-image:
-          linear-gradient(var(--grid) 1px, transparent 1px),
-          linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-        background-size: 28px 28px;
+
+      /* ── Reset ────────────────────────────────────────────────────────── */
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      /* ── App shell ────────────────────────────────────────────────────── */
+      .app {
+        position: fixed;
+        inset: 0;
+        font-family: var(--font-ui);
         color: var(--ink);
-        font-family: "DM Sans", system-ui, sans-serif;
+        background: var(--bg-deep);
+      }
+
+      /* ── Stage (SVG drawing surface) ──────────────────────────────────── */
+      .stage {
+        position: absolute;
+        inset: 0;
+        touch-action: none;
+        cursor: grab;
+
+        /* Radial "table" ground with vignette */
+        background:
+          radial-gradient(
+            ellipse 90% 80% at 50% 50%,
+            var(--bg) 0%,
+            var(--bg-deep) 100%
+          );
+      }
+
+      .stage.panning     { cursor: grabbing; }
+      .stage.space-ready { cursor: grab; }
+
+      /* SVG fills the stage */
+      #drawing {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      /* Grid line styles */
+      #drawing .grid-fine  { stroke: var(--grid-fine);  stroke-width: 1; shape-rendering: crispEdges; }
+      #drawing .grid-major { stroke: var(--grid-major); stroke-width: 1; shape-rendering: crispEdges; }
+      #drawing .grid-axis  { stroke: var(--grid-axis);  stroke-width: 1.5; shape-rendering: crispEdges; }
+
+      /* Placeholder room outline */
+      #drawing .placeholder {
+        fill: none;
+        stroke: var(--gold-soft);
+        stroke-width: 1.5;
+        stroke-dasharray: 6 4;
+        shape-rendering: crispEdges;
+      }
+
+      /* ── Grain overlay ────────────────────────────────────────────────── */
+      .grain {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        mix-blend-mode: overlay;
+        opacity: 0.035;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+        background-size: 200px 200px;
+      }
+
+      /* ── Floating chrome ──────────────────────────────────────────────── */
+
+      /* Brand — top left */
+      .brand {
+        position: absolute;
+        top: 1.25rem;
+        left: 1.25rem;
+        pointer-events: none;
+        user-select: none;
+      }
+      .brand-name {
+        font-family: var(--font-display);
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--gold);
+        line-height: 1.2;
+      }
+      .brand-sub {
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        color: var(--muted);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      /* Unit toggle — top right */
+      .unit-toggle {
+        position: absolute;
+        top: 1.25rem;
+        right: 1.25rem;
+        display: flex;
+        gap: 0.25rem;
+      }
+      .unit-toggle button {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        letter-spacing: 0.06em;
+        padding: 0.3rem 0.7rem;
+        border-radius: 100px;
+        cursor: pointer;
+        transition: color 0.15s, border-color 0.15s;
+      }
+      .unit-toggle button[aria-pressed="true"] {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+      }
+      .unit-toggle button:hover:not([aria-pressed="true"]) {
+        color: var(--ink);
+      }
+
+      /* Zoom cluster — bottom left */
+      .zoom-cluster {
+        position: absolute;
+        bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+        left: 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+      .zoom-cluster button {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 0.85rem;
+        width: 2.2rem;
+        height: 2.2rem;
+        border-radius: 6px;
+        cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
-        text-align: center;
-        padding: 1.5rem;
+        transition: color 0.15s, border-color 0.15s;
       }
-      main { max-width: 34rem; }
-      h1 {
-        font-family: "Libre Baskerville", Georgia, serif;
-        font-weight: 700;
-        font-size: clamp(2.2rem, 7vw, 3.4rem);
-        margin: 0 0 0.5rem;
+      .zoom-cluster button:hover {
+        border-color: var(--gold-soft);
         color: var(--gold);
       }
-      p { color: var(--muted); font-size: 1.05rem; line-height: 1.6; margin: 0.5rem 0; }
-      .tag { color: var(--ink); font-weight: 700; }
-      .back { display: inline-block; margin-top: 1.75rem; color: var(--gold); text-decoration: none; font-size: 0.95rem; }
-      .back:hover { text-decoration: underline; }
+      .zoom-cluster .reset-btn {
+        font-size: 0.6rem;
+        letter-spacing: 0.05em;
+      }
+
+      /* HUD — bottom right */
+      .hud {
+        position: absolute;
+        bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+        right: 1.25rem;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.15rem;
+        pointer-events: none;
+      }
+      .hud-cell {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        padding: 0.2rem 0.55rem;
+        border-radius: 4px;
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .hud-cell span {
+        color: var(--ink);
+      }
+
+      /* Hide cursor cell on narrow screens */
+      @media (max-width: 560px) {
+        .hud-cursor { display: none; }
+      }
+
+      /* Hint — centered */
+      .hint {
+        position: absolute;
+        bottom: 30%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--muted);
+        white-space: nowrap;
+        pointer-events: none;
+        transition: opacity 0.4s;
+      }
+      .hint.dismissed {
+        opacity: 0;
+      }
     </style>
   </head>
   <body>
-    <main>
-      <h1>floorplan</h1>
-      <p class="tag">Draw. Measure. Share. No signup.</p>
-      <p>A friction-free floor-plan sketcher is under construction here.</p>
-      <a class="back" href="https://danbing.app">← back to danbing.app</a>
-    </main>
+    <div class="app">
+      <!-- Drawing stage -->
+      <div class="stage" id="stage">
+        <svg id="drawing" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <!-- Grid lines (redrawn each render) -->
+          <g id="grid"></g>
+          <!-- World geometry mount point for future phases -->
+          <g id="world"></g>
+        </svg>
+      </div>
+
+      <!-- Grain texture overlay -->
+      <div class="grain" aria-hidden="true"></div>
+
+      <!-- Brand -->
+      <div class="brand" aria-hidden="true">
+        <div class="brand-name">floorplan</div>
+        <div class="brand-sub">warm blueprint</div>
+      </div>
+
+      <!-- Unit toggle -->
+      <div class="unit-toggle" role="group" aria-label="Unit system">
+        <button id="unit-imperial" aria-pressed="true">IMPERIAL</button>
+        <button id="unit-metric"   aria-pressed="false">METRIC</button>
+      </div>
+
+      <!-- Zoom cluster -->
+      <div class="zoom-cluster" aria-label="Zoom controls">
+        <button id="btn-zoom-in"    aria-label="Zoom in">+</button>
+        <button id="btn-zoom-out"   aria-label="Zoom out">−</button>
+        <button id="btn-zoom-reset" class="reset-btn" aria-label="Reset zoom">RESET</button>
+      </div>
+
+      <!-- HUD -->
+      <div class="hud" aria-live="off" aria-atomic="true">
+        <div class="hud-cell">
+          Scale&nbsp;<span id="hud-scale">—</span>
+        </div>
+        <div class="hud-cell">
+          Zoom&nbsp;<span id="hud-zoom">—</span>
+        </div>
+        <div class="hud-cell hud-cursor">
+          Cursor&nbsp;<span id="hud-cursor">—</span>
+        </div>
+      </div>
+
+      <!-- One-time interaction hint -->
+      <div class="hint" id="hint" role="status" aria-live="polite">
+        Scroll / pinch to zoom · drag or hold Space to pan
+      </div>
+    </div>
+
+    <script type="module" src="./js/main.js"></script>
   </body>
 </html>
