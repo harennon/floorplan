@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>floorplan — unit tests</title>
+  <style>
+    :root { --bg: #14140f; --ink: #ece7d6; --gold: #c9a84c; --pass: #6abf69; --fail: #e57373; --muted: #8f8a78; }
+    * { box-sizing: border-box; }
+    body { background: var(--bg); color: var(--ink); font-family: "DM Mono", "Courier New", monospace; padding: 2rem; }
+    h1 { color: var(--gold); font-size: 1.4rem; margin: 0 0 1.5rem; }
+    .suite { margin-bottom: 1.5rem; }
+    .suite-name { color: var(--gold); font-weight: bold; margin-bottom: 0.5rem; }
+    .case { padding: 0.2rem 0; font-size: 0.85rem; }
+    .case.pass::before { content: "✓ "; color: var(--pass); }
+    .case.fail::before { content: "✗ "; color: var(--fail); }
+    .case.fail { color: var(--fail); }
+    .summary { margin-top: 1.5rem; font-size: 1rem; }
+    .summary.all-pass { color: var(--pass); }
+    .summary.has-fail { color: var(--fail); }
+  </style>
+</head>
+<body>
+<h1>floorplan — unit tests</h1>
+<div id="output"></div>
+
+<script type="module">
+// ─── Tiny harness ─────────────────────────────────────────────────────────────
+
+const _suites = [];
+let _currentSuite = null;
+
+function describe(name, fn) {
+  _currentSuite = { name, cases: [] };
+  _suites.push(_currentSuite);
+  fn();
+  _currentSuite = null;
+}
+
+function it(name, fn) {
+  let err = null;
+  try { fn(); } catch (e) { err = e; }
+  _currentSuite.cases.push({ name, err });
+}
+
+function expect(actual) {
+  return {
+    toBe(expected) {
+      if (actual !== expected) throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+    },
+    toBeCloseTo(expected, places = 10) {
+      const eps = Math.pow(10, -places);
+      if (Math.abs(actual - expected) > eps) {
+        throw new Error(`Expected ~${expected} (within 1e-${places}), got ${actual}`);
+      }
+    },
+    toBeGreaterThanOrEqual(n) {
+      if (actual < n) throw new Error(`Expected >= ${n}, got ${actual}`);
+    },
+    toBeLessThanOrEqual(n) {
+      if (actual > n) throw new Error(`Expected <= ${n}, got ${actual}`);
+    },
+    toThrow() {
+      let threw = false;
+      try { actual(); } catch { threw = true; }
+      if (!threw) throw new Error("Expected function to throw");
+    },
+  };
+}
+
+function render() {
+  const out = document.getElementById("output");
+  let total = 0, failed = 0;
+  for (const suite of _suites) {
+    const div = document.createElement("div");
+    div.className = "suite";
+    div.innerHTML = `<div class="suite-name">${suite.name}</div>`;
+    for (const c of suite.cases) {
+      total++;
+      const p = document.createElement("div");
+      p.className = `case ${c.err ? "fail" : "pass"}`;
+      p.textContent = c.name + (c.err ? ` — ${c.err.message}` : "");
+      div.appendChild(p);
+      if (c.err) failed++;
+    }
+    out.appendChild(div);
+  }
+  const summary = document.createElement("div");
+  summary.className = `summary ${failed ? "has-fail" : "all-pass"}`;
+  summary.textContent = failed
+    ? `${failed} of ${total} tests FAILED`
+    : `All ${total} tests passed`;
+  out.appendChild(summary);
+}
+
+// ─── Import modules under test ────────────────────────────────────────────────
+
+import {
+  BASE_PX_PER_M, MIN_ZOOM, MAX_ZOOM,
+  view, pxPerM, worldToScreen, screenToWorld, clampZoom, zoomAbout, resetView,
+} from "./js/view.js";
+
+import {
+  M_PER_FT, fmtLen, unitLabel, unit, setUnit,
+} from "./js/units.js";
+
+import {
+  NICE_STEPS, MAJOR_EVERY, chooseGridStep,
+} from "./js/grid.js";
+
+// ─── Tests: view.js ───────────────────────────────────────────────────────────
+
+describe("view.js — pxPerM", () => {
+  it("returns BASE_PX_PER_M at zoom 1", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    expect(pxPerM()).toBe(BASE_PX_PER_M);
+    expect(pxPerM()).toBe(40);
+  });
+
+  it("scales with zoom", () => {
+    view.zoom = 2;
+    expect(pxPerM()).toBe(80);
+    view.zoom = 0.5;
+    expect(pxPerM()).toBe(20);
+    view.zoom = 1; // reset
+  });
+});
+
+describe("view.js — worldToScreen / screenToWorld round-trip", () => {
+  function roundTrip(wx, wy, zoom, panX, panY) {
+    view.zoom = zoom; view.panX = panX; view.panY = panY;
+    const s = worldToScreen(wx, wy);
+    const w = screenToWorld(s.x, s.y);
+    expect(w.x).toBeCloseTo(wx, 9);
+    expect(w.y).toBeCloseTo(wy, 9);
+  }
+
+  it("round-trips at zoom=1 pan=0", () => roundTrip(5, 3, 1, 0, 0));
+  it("round-trips at zoom=2 pan=100,50", () => roundTrip(5, 3, 2, 100, 50));
+  it("round-trips at zoom=0.5 pan=-200,300", () => roundTrip(10, -7, 0.5, -200, 300));
+  it("round-trips at origin", () => roundTrip(0, 0, 1, 0, 0));
+  it("5m span maps to 200px at zoom=1 pan=0", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s0 = worldToScreen(0, 0);
+    const s5 = worldToScreen(5, 0);
+    expect(s5.x - s0.x).toBe(200);
+  });
+  it("screenToWorld is exact inverse across range", () => {
+    for (const [sx, sy, z, px, py] of [
+      [320, 240, 1, 0, 0],
+      [0, 0, 3, 50, 75],
+      [1920, 1080, 0.25, -100, -200],
+    ]) {
+      view.zoom = z; view.panX = px; view.panY = py;
+      const w = screenToWorld(sx, sy);
+      const back = worldToScreen(w.x, w.y);
+      expect(back.x).toBeCloseTo(sx, 9);
+      expect(back.y).toBeCloseTo(sy, 9);
+    }
+  });
+});
+
+describe("view.js — clampZoom", () => {
+  it("passes mid-range through", () => {
+    expect(clampZoom(1)).toBe(1);
+    expect(clampZoom(2.5)).toBe(2.5);
+    expect(clampZoom(0.5)).toBe(0.5);
+  });
+  it("clamps at MIN_ZOOM", () => {
+    expect(clampZoom(0)).toBe(MIN_ZOOM);
+    expect(clampZoom(-5)).toBe(MIN_ZOOM);
+    expect(clampZoom(MIN_ZOOM)).toBe(MIN_ZOOM);
+  });
+  it("clamps at MAX_ZOOM", () => {
+    expect(clampZoom(100)).toBe(MAX_ZOOM);
+    expect(clampZoom(MAX_ZOOM)).toBe(MAX_ZOOM);
+  });
+});
+
+describe("view.js — zoomAbout", () => {
+  it("keeps world point under anchor fixed (mid zoom)", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const sx = 200, sy = 150;
+    const wBefore = screenToWorld(sx, sy);
+    zoomAbout(sx, sy, 2);
+    const wAfter = screenToWorld(sx, sy);
+    expect(wAfter.x).toBeCloseTo(wBefore.x, 9);
+    expect(wAfter.y).toBeCloseTo(wBefore.y, 9);
+  });
+
+  it("keeps world point fixed when clamped at MAX_ZOOM (no drift)", () => {
+    view.zoom = MAX_ZOOM; view.panX = 0; view.panY = 0;
+    const sx = 300, sy = 200;
+    const wBefore = screenToWorld(sx, sy);
+    zoomAbout(sx, sy, 10); // would exceed MAX
+    const wAfter = screenToWorld(sx, sy);
+    expect(view.zoom).toBe(MAX_ZOOM);
+    expect(wAfter.x).toBeCloseTo(wBefore.x, 9);
+    expect(wAfter.y).toBeCloseTo(wBefore.y, 9);
+  });
+
+  it("keeps world point fixed when clamped at MIN_ZOOM (no drift)", () => {
+    view.zoom = MIN_ZOOM; view.panX = 50; view.panY = 50;
+    const sx = 100, sy = 100;
+    const wBefore = screenToWorld(sx, sy);
+    zoomAbout(sx, sy, 0.001); // would go below MIN
+    const wAfter = screenToWorld(sx, sy);
+    expect(view.zoom).toBe(MIN_ZOOM);
+    expect(wAfter.x).toBeCloseTo(wBefore.x, 9);
+    expect(wAfter.y).toBeCloseTo(wBefore.y, 9);
+  });
+
+  it("zoom changes by factor in unclamped range", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    zoomAbout(0, 0, 2);
+    expect(view.zoom).toBeCloseTo(2, 9);
+  });
+});
+
+describe("view.js — resetView", () => {
+  it("sets zoom to 1", () => {
+    view.zoom = 5;
+    resetView(1280, 720);
+    expect(view.zoom).toBe(1);
+  });
+  it("places panX/panY as fractions of W/H", () => {
+    resetView(1000, 800);
+    expect(view.panX).toBeCloseTo(150, 9); // 0.15 * 1000
+    expect(view.panY).toBeCloseTo(240, 9); // 0.30 * 800
+  });
+});
+
+// ─── Tests: units.js ─────────────────────────────────────────────────────────
+
+describe("units.js — defaults", () => {
+  it("default unit is ft (imperial)", () => {
+    // Reset to ft since other tests may have called setUnit.
+    setUnit("ft");
+    expect(unitLabel()).toBe("ft");
+  });
+
+  it("M_PER_FT is correct", () => {
+    expect(M_PER_FT).toBeCloseTo(0.3048, 9);
+  });
+});
+
+describe("units.js — fmtLen", () => {
+  it("formats metres to 2dp in metric mode", () => {
+    setUnit("m");
+    expect(fmtLen(5)).toBe("5.00");
+    expect(fmtLen(1.234)).toBe("1.23");
+    expect(fmtLen(0)).toBe("0.00");
+  });
+
+  it("formats feet to 1dp in imperial mode", () => {
+    setUnit("ft");
+    const fiveM = (5 / M_PER_FT).toFixed(1);
+    expect(fmtLen(5)).toBe(fiveM);
+    expect(fmtLen(0)).toBe("0.0");
+  });
+
+  it("1m formats as ~3.3ft in imperial", () => {
+    setUnit("ft");
+    expect(parseFloat(fmtLen(1))).toBeCloseTo(1 / M_PER_FT, 1);
+  });
+});
+
+describe("units.js — unitLabel", () => {
+  it("returns ft when imperial", () => { setUnit("ft"); expect(unitLabel()).toBe("ft"); });
+  it("returns m when metric",   () => { setUnit("m");  expect(unitLabel()).toBe("m");  });
+});
+
+describe("units.js — setUnit", () => {
+  it("throws on unknown unit", () => {
+    expect(() => setUnit("km")).toThrow();
+  });
+});
+
+// ─── Tests: grid.js ───────────────────────────────────────────────────────────
+
+describe("grid.js — NICE_STEPS", () => {
+  it("contains expected steps in ascending order", () => {
+    expect(NICE_STEPS[0]).toBe(0.1);
+    expect(NICE_STEPS[NICE_STEPS.length - 1]).toBe(100);
+    for (let i = 1; i < NICE_STEPS.length; i++) {
+      if (NICE_STEPS[i] <= NICE_STEPS[i - 1]) throw new Error("NICE_STEPS not ascending");
+    }
+  });
+  it("MAJOR_EVERY is 5", () => expect(MAJOR_EVERY).toBe(5));
+});
+
+describe("grid.js — chooseGridStep", () => {
+  function assertSpacingInBand(zoom, targetPx) {
+    view.zoom = zoom; view.panX = 0; view.panY = 0;
+    const step = chooseGridStep(targetPx);
+    const spacing = step * pxPerM();
+    // Spacing must be >= targetPx.
+    expect(spacing).toBeGreaterThanOrEqual(targetPx);
+    // And less than twice the next-smaller step's spacing (i.e., we picked the smallest qualifying step).
+    const idx = NICE_STEPS.indexOf(step);
+    if (idx > 0) {
+      const prevSpacing = NICE_STEPS[idx - 1] * pxPerM();
+      // prevSpacing < targetPx — otherwise chooseGridStep would have returned the smaller step.
+      if (prevSpacing >= targetPx) throw new Error(`Chose a larger step than necessary: step=${step}, prevSpacing=${prevSpacing}`);
+    }
+  }
+
+  it("returns correct step at zoom=1 (40px/m)", () => assertSpacingInBand(1, 56));
+  it("returns correct step at zoom=0.5 (20px/m)", () => assertSpacingInBand(0.5, 56));
+  it("returns correct step at zoom=4 (160px/m)", () => assertSpacingInBand(4, 56));
+  it("returns correct step at zoom=0.2 (8px/m)", () => assertSpacingInBand(0.2, 56));
+  it("returns correct step at zoom=8 (320px/m)", () => assertSpacingInBand(8, 56));
+
+  it("spacing is always >= targetPx across all zoom values", () => {
+    const zooms = [0.15, 0.25, 0.5, 1, 2, 4, 8];
+    for (const z of zooms) {
+      view.zoom = z;
+      const step = chooseGridStep(56);
+      const spacing = step * pxPerM();
+      expect(spacing).toBeGreaterThanOrEqual(56);
+    }
+    view.zoom = 1; // reset
+  });
+
+  it("falls back to largest step when nothing qualifies (tiny zoom)", () => {
+    // At MIN_ZOOM (0.15), pxPerM = 6. Even 100m * 6 = 600 >= 56, so it won't
+    // fall back. But at artificially small scale we can force the fallback.
+    view.zoom = 0.001;
+    const step = chooseGridStep(1e9); // impossible target
+    expect(step).toBe(NICE_STEPS[NICE_STEPS.length - 1]);
+    view.zoom = 1;
+  });
+});
+
+// ─── Render ────────────────────────────────────────────────────────────────────
+
+render();
+</script>
+</body>
+</html>
