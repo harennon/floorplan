@@ -1,0 +1,1 @@
+../../../danbing-automation/agents/architect.md

@@ -1,0 +1,1 @@
+../../../danbing-automation/workflows/ship-batch.js

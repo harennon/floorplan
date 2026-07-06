@@ -1,0 +1,21 @@
+{
+  "stack": "Static HTML + CSS + vanilla JS, Cloudflare Pages (no build step)",
+  "docs": {
+    "hld": "CLAUDE.md",
+    "lldDir": "docs/lld/",
+    "mockupDir": "design-mockups/"
+  },
+  "hasFrontend": true,
+  "mockupPort": 8093,
+  "mockupHosting": {
+    "branch": "gh-pages",
+    "baseUrl": "https://harennon.github.io/floorplan/"
+  },
+  "defaultBranch": "main",
+  "frontendPaths": ["src/"],
+  "proposal": {
+    "mode": "improve",
+    "references": ["neal.fun", "pudding.cool", "floorplancreator.net", "excalidraw.com"],
+    "focus": "Polish and features for the floor-plan sketcher — the drawing/snapping UX, live area/perimeter, furniture + clearance checks, and the PNG/SVG/URL-hash share artifacts. Client-side only in v1, no backend, deploy cheap."
+  }
+}

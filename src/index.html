@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>floorplan · danbing.app</title>
+    <meta name="description" content="A friction-free floor-plan sketcher. Draw, measure, share — no signup." />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="floorplan" />
+    <meta property="og:description" content="A friction-free floor-plan sketcher. Draw, measure, share — no signup." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://floorplan.danbing.app" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      :root {
+        --bg: #14140f;
+        --grid: rgba(201, 168, 76, 0.08);
+        --ink: #ece7d6;
+        --muted: #8f8a78;
+        --gold: #c9a84c;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background-color: var(--bg);
+        /* graph-paper hint — a nod to the intended aesthetic */
+        background-image:
+          linear-gradient(var(--grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+        background-size: 28px 28px;
+        color: var(--ink);
+        font-family: "DM Sans", system-ui, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 1.5rem;
+      }
+      main { max-width: 34rem; }
+      h1 {
+        font-family: "Libre Baskerville", Georgia, serif;
+        font-weight: 700;
+        font-size: clamp(2.2rem, 7vw, 3.4rem);
+        margin: 0 0 0.5rem;
+        color: var(--gold);
+      }
+      p { color: var(--muted); font-size: 1.05rem; line-height: 1.6; margin: 0.5rem 0; }
+      .tag { color: var(--ink); font-weight: 700; }
+      .back { display: inline-block; margin-top: 1.75rem; color: var(--gold); text-decoration: none; font-size: 0.95rem; }
+      .back:hover { text-decoration: underline; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>floorplan</h1>
+      <p class="tag">Draw. Measure. Share. No signup.</p>
+      <p>A friction-free floor-plan sketcher is under construction here.</p>
+      <a class="back" href="https://danbing.app">← back to danbing.app</a>
+    </main>
+  </body>
+</html>
