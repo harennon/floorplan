@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>floorplan · drawing surface (cyan blueprint)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        /* classic architect's blueprint — cool blues, cyan-white ink */
+        --bg: #0b2038;
+        --bg-deep: #081627;
+        --ink: #e6f1fb;
+        --muted: #7fa2c4;
+        --cyan: #6fd3ff;
+        --cyan-soft: rgba(111, 211, 255, 0.55);
+
+        --grid-fine: rgba(155, 205, 246, 0.08);
+        --grid-major: rgba(155, 205, 246, 0.2);
+        --grid-axis: rgba(155, 205, 246, 0.42);
+
+        --panel: rgba(9, 26, 45, 0.72);
+        --hairline: rgba(155, 205, 246, 0.22);
+
+        --font-ui: "DM Sans", system-ui, sans-serif;
+        --font-mono: "DM Mono", ui-monospace, monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+      body {
+        background: var(--bg-deep);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .app { position: fixed; inset: 0; display: grid; grid-template-rows: 1fr; }
+
+      .stage {
+        position: relative; width: 100%; height: 100%;
+        touch-action: none; cursor: grab;
+        background: radial-gradient(130% 120% at 50% 0%, #0d2743 0%, var(--bg-deep) 72%);
+      }
+      .stage.panning { cursor: grabbing; }
+
+      svg.surface { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+      .vignette { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 200px 50px rgba(0,0,0,0.5); }
+      .grain {
+        position: absolute; inset: 0; pointer-events: none; opacity: 0.45; mix-blend-mode: soft-light;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/></filter><rect width='120' height='120' filter='url(%23n)' opacity='0.4'/></svg>");
+      }
+
+      .brand { position: absolute; top: 16px; left: 18px; z-index: 5; display: flex; align-items: baseline; gap: 10px; pointer-events: none; user-select: none; }
+      .brand h1 { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; margin: 0; color: var(--cyan); }
+      .brand .crumb { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+
+      .zoom-cluster {
+        position: absolute; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 6;
+        display: flex; flex-direction: column; border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden;
+        background: var(--panel); backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px); box-shadow: 0 6px 22px rgba(0,0,0,0.4);
+      }
+      .zoom-cluster button {
+        appearance: none; border: 0; background: transparent; color: var(--ink); width: 46px; height: 44px;
+        font-size: 1.25rem; cursor: pointer; display: grid; place-items: center; transition: background 0.14s, color 0.14s;
+      }
+      .zoom-cluster button:hover { background: rgba(111,211,255,0.14); color: var(--cyan); }
+      .zoom-cluster button + button { border-top: 1px solid var(--hairline); }
+      .zoom-cluster .fit { font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; font-family: var(--font-mono); }
+
+      .hud {
+        position: absolute; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 6;
+        display: flex; gap: 1px; border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden;
+        background: var(--panel); backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+        box-shadow: 0 6px 22px rgba(0,0,0,0.4); font-family: var(--font-mono);
+      }
+      .hud .cell { padding: 8px 13px; display: flex; flex-direction: column; gap: 2px; min-width: 74px; }
+      .hud .cell + .cell { border-left: 1px solid var(--hairline); }
+      .hud .label { font-size: 0.56rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+      .hud .val { font-size: 0.86rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+      .hud .val .u { color: var(--cyan-soft); font-size: 0.7em; margin-left: 2px; }
+
+      .unit-toggle {
+        position: absolute; top: 16px; right: 16px; z-index: 6; display: flex;
+        border: 1px solid var(--hairline); border-radius: 999px; overflow: hidden;
+        background: var(--panel); backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px); font-family: var(--font-mono); font-size: 0.72rem;
+      }
+      .unit-toggle button { appearance: none; border: 0; background: transparent; color: var(--muted); padding: 7px 15px; cursor: pointer; letter-spacing: 0.08em; transition: color 0.14s, background 0.14s; }
+      .unit-toggle button[aria-pressed="true"] { color: var(--bg-deep); background: var(--cyan); font-weight: 700; }
+
+      .hint {
+        position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 4; pointer-events: none;
+        text-align: center; color: var(--muted); font-size: 0.82rem; line-height: 1.7; opacity: 0.9; transition: opacity 0.5s ease; max-width: 78vw;
+      }
+      .hint kbd { font-family: var(--font-mono); font-size: 0.72rem; color: var(--cyan); border: 1px solid var(--hairline); border-radius: 5px; padding: 1px 6px; margin: 0 1px; }
+      .hint.gone { opacity: 0; }
+
+      @media (max-width: 560px) {
+        .brand { top: 12px; left: 14px; }
+        .hud .cell { min-width: 60px; padding: 7px 10px; }
+        .hud .cell.coords { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="stage" id="stage">
+        <svg class="surface" id="surface" aria-label="Floor-plan drawing surface">
+          <g id="grid"></g>
+          <g id="world"><g id="sample" opacity="0.95"></g></g>
+        </svg>
+        <div class="vignette"></div>
+        <div class="grain"></div>
+        <div class="hint" id="hint">
+          Scroll or pinch to <strong>zoom</strong> · drag empty space or hold <kbd>Space</kbd> to <strong>pan</strong>
+          <br /><span style="font-size:0.74rem">the drawing foundation — walls, doors &amp; measuring arrive in later phases</span>
+        </div>
+      </div>
+
+      <div class="brand"><h1>floorplan</h1><span class="crumb">cyan blueprint</span></div>
+
+      <div class="unit-toggle" role="group" aria-label="Units">
+        <button id="unit-m" aria-pressed="true">METRIC</button>
+        <button id="unit-ft" aria-pressed="false">IMPERIAL</button>
+      </div>
+
+      <div class="zoom-cluster">
+        <button id="zoom-in" aria-label="Zoom in">+</button>
+        <button id="zoom-out" aria-label="Zoom out">−</button>
+        <button id="zoom-fit" class="fit" aria-label="Reset view">RESET</button>
+      </div>
+
+      <div class="hud">
+        <div class="cell"><span class="label">Scale</span><span class="val" id="hud-scale">1 : 50</span></div>
+        <div class="cell"><span class="label">Zoom</span><span class="val" id="hud-zoom">100<span class="u">%</span></span></div>
+        <div class="cell coords"><span class="label">Cursor</span><span class="val" id="hud-coords">0.00, 0.00<span class="u">m</span></span></div>
+      </div>
+    </div>
+
+    <script>
+      // Identical coordinate/scale + interaction module as the warm variant —
+      // only the palette (CSS vars) differs. See warm mockup for annotated comments.
+      const view = { BASE_PX_PER_M: 40, zoom: 1, MIN_ZOOM: 0.15, MAX_ZOOM: 8, panX: 0, panY: 0 };
+      const pxPerM = () => view.zoom * view.BASE_PX_PER_M;
+      const worldToScreen = (wx, wy) => ({ x: wx * pxPerM() + view.panX, y: wy * pxPerM() + view.panY });
+      const screenToWorld = (sx, sy) => ({ x: (sx - view.panX) / pxPerM(), y: (sy - view.panY) / pxPerM() });
+      const NICE = [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100];
+      function chooseGridStep(targetPx = 56) { const w = targetPx / pxPerM(); let s = NICE[NICE.length-1]; for (const n of NICE){ if(n>=w){s=n;break;} } return s; }
+      let unit = "m"; const M_PER_FT = 0.3048;
+      const fmtLen = (m) => unit === "m" ? m.toFixed(2) : (m / M_PER_FT).toFixed(1);
+      const unitLabel = () => unit === "m" ? "m" : "ft";
+
+      const stage = document.getElementById("stage");
+      const svg = document.getElementById("surface");
+      const gGrid = document.getElementById("grid");
+      const gSample = document.getElementById("sample");
+      let W = 0, H = 0;
+      function resize() { const r = stage.getBoundingClientRect(); W = r.width; H = r.height; svg.setAttribute("viewBox", `0 0 ${W} ${H}`); }
+      const SVGNS = "http://www.w3.org/2000/svg";
+      function line(x1,y1,x2,y2,stroke,w=1){ const l=document.createElementNS(SVGNS,"line"); l.setAttribute("x1",x1); l.setAttribute("y1",y1); l.setAttribute("x2",x2); l.setAttribute("y2",y2); l.setAttribute("stroke",stroke); l.setAttribute("stroke-width",w); l.setAttribute("shape-rendering","crispEdges"); return l; }
+
+      function drawGrid() {
+        gGrid.textContent = "";
+        const step = chooseGridStep(); const majorEvery = 5;
+        const tl = screenToWorld(0,0), br = screenToWorld(W,H);
+        const startX = Math.floor(tl.x/step)*step, endX = Math.ceil(br.x/step)*step;
+        const startY = Math.floor(tl.y/step)*step, endY = Math.ceil(br.y/step)*step;
+        const frag = document.createDocumentFragment();
+        for (let wx=startX; wx<=endX+1e-9; wx+=step){ const s=worldToScreen(wx,0).x; const idx=Math.round(wx/step); const isAxis=idx===0; const isMajor=idx%majorEvery===0; const stroke=isAxis?"var(--grid-axis)":isMajor?"var(--grid-major)":"var(--grid-fine)"; frag.appendChild(line(s,0,s,H,stroke,isAxis?1.4:1)); }
+        for (let wy=startY; wy<=endY+1e-9; wy+=step){ const s=worldToScreen(0,wy).y; const idx=Math.round(wy/step); const isAxis=idx===0; const isMajor=idx%majorEvery===0; const stroke=isAxis?"var(--grid-axis)":isMajor?"var(--grid-major)":"var(--grid-fine)"; frag.appendChild(line(0,s,W,s,stroke,isAxis?1.4:1)); }
+        gGrid.appendChild(frag);
+        document.getElementById("hud-scale").textContent = `${fmtLen(step*majorEvery)} ${unitLabel()} / cell`;
+      }
+
+      const ROOM = { x: 0, y: 0, w: 5.2, h: 3.8 };
+      function drawSample() {
+        gSample.textContent = "";
+        const a = worldToScreen(ROOM.x, ROOM.y), b = worldToScreen(ROOM.x+ROOM.w, ROOM.y+ROOM.h);
+        const rect = document.createElementNS(SVGNS,"rect");
+        rect.setAttribute("x",a.x); rect.setAttribute("y",a.y);
+        rect.setAttribute("width",b.x-a.x); rect.setAttribute("height",b.y-a.y);
+        rect.setAttribute("fill","rgba(111,211,255,0.05)");
+        rect.setAttribute("stroke","var(--cyan-soft)"); rect.setAttribute("stroke-width","2");
+        rect.setAttribute("stroke-dasharray","1 6"); rect.setAttribute("stroke-linecap","round");
+        gSample.appendChild(rect);
+        const o = worldToScreen(0,0); const dot = document.createElementNS(SVGNS,"circle");
+        dot.setAttribute("cx",o.x); dot.setAttribute("cy",o.y); dot.setAttribute("r",3.5); dot.setAttribute("fill","var(--cyan)");
+        gSample.appendChild(dot);
+      }
+
+      function render() {
+        drawGrid(); drawSample();
+        const z = document.getElementById("hud-zoom"); z.textContent = Math.round(view.zoom*100);
+        const u = document.createElement("span"); u.className="u"; u.textContent="%"; z.appendChild(u);
+      }
+
+      const clampZoom = (z) => Math.min(view.MAX_ZOOM, Math.max(view.MIN_ZOOM, z));
+      function zoomAbout(sx, sy, factor) {
+        const before = screenToWorld(sx, sy);
+        view.zoom = clampZoom(view.zoom * factor);
+        const after = screenToWorld(sx, sy);
+        view.panX += (after.x - before.x) * pxPerM();
+        view.panY += (after.y - before.y) * pxPerM();
+        render();
+      }
+
+      stage.addEventListener("wheel", (e) => { e.preventDefault(); zoomAbout(e.clientX, e.clientY, Math.exp(-e.deltaY*0.0015)); dismissHint(); }, { passive: false });
+
+      let dragging=false, lastX=0, lastY=0, spaceHeld=false;
+      stage.addEventListener("pointerdown", (e)=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; stage.classList.add("panning"); stage.setPointerCapture(e.pointerId); dismissHint(); });
+      stage.addEventListener("pointermove", (e)=>{
+        const w=screenToWorld(e.clientX,e.clientY); const c=document.getElementById("hud-coords");
+        if(c) c.innerHTML = `${fmtLen(w.x)}, ${fmtLen(w.y)}<span class="u">${unitLabel()}</span>`;
+        if(!dragging) return; view.panX += e.clientX-lastX; view.panY += e.clientY-lastY; lastX=e.clientX; lastY=e.clientY; render();
+      });
+      const endDrag=()=>{ dragging=false; stage.classList.remove("panning"); };
+      stage.addEventListener("pointerup", endDrag); stage.addEventListener("pointercancel", endDrag);
+      window.addEventListener("keydown",(e)=>{ if(e.code==="Space"&&!spaceHeld){spaceHeld=true;} });
+      window.addEventListener("keyup",(e)=>{ if(e.code==="Space"){spaceHeld=false;} });
+
+      const pointers = new Map(); let pinchStartDist=0, pinchStartZoom=1;
+      stage.addEventListener("pointerdown",(e)=>pointers.set(e.pointerId,e));
+      stage.addEventListener("pointermove",(e)=>{ if(!pointers.has(e.pointerId))return; pointers.set(e.pointerId,e);
+        if(pointers.size===2){ const[p1,p2]=[...pointers.values()]; const dist=Math.hypot(p2.clientX-p1.clientX,p2.clientY-p1.clientY); const mid={x:(p1.clientX+p2.clientX)/2,y:(p1.clientY+p2.clientY)/2};
+          if(!pinchStartDist){pinchStartDist=dist;pinchStartZoom=view.zoom;dragging=false;} else { const target=clampZoom(pinchStartZoom*(dist/pinchStartDist)); zoomAbout(mid.x,mid.y,target/view.zoom); } } });
+      const clearPinch=(e)=>{ pointers.delete(e.pointerId); if(pointers.size<2) pinchStartDist=0; };
+      stage.addEventListener("pointerup", clearPinch); stage.addEventListener("pointercancel", clearPinch);
+
+      document.getElementById("zoom-in").onclick = () => zoomAbout(W/2,H/2,1.25);
+      document.getElementById("zoom-out").onclick = () => zoomAbout(W/2,H/2,1/1.25);
+      document.getElementById("zoom-fit").onclick = () => resetView();
+
+      const setUnit=(u)=>{ unit=u; document.getElementById("unit-m").setAttribute("aria-pressed",u==="m"); document.getElementById("unit-ft").setAttribute("aria-pressed",u==="ft"); render(); };
+      document.getElementById("unit-m").onclick = () => setUnit("m");
+      document.getElementById("unit-ft").onclick = () => setUnit("ft");
+
+      let hintGone=false; function dismissHint(){ if(hintGone)return; hintGone=true; document.getElementById("hint").classList.add("gone"); }
+
+      function resetView(){ view.zoom=1; view.panX=W*0.34; view.panY=H*0.30; render(); }
+      function boot(){ resize(); resetView(); }
+      window.addEventListener("resize",()=>{ resize(); render(); });
+      boot();
+    </script>
+  </body>
+</html>
