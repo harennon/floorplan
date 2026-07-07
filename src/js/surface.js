@@ -8,16 +8,20 @@
 
 import { drawGrid } from "./grid.js";
 import { update as hudUpdate } from "./hud.js";
-import { worldToScreen } from "./view.js";
-
-const NS = "http://www.w3.org/2000/svg";
 
 /** DOM refs — set by init(). */
 let _stage = null;
 let _svg = null;
 let _gGrid = null;
 let _gWorld = null;
-let _placeholder = null;
+
+/** Wall-layer refs (set by initWallLayer). */
+let _gDraft   = null;
+let _gSnap    = null;
+let _labelsEl = null;
+
+/** wallRender.render callback — injected after wallRender init. */
+let _wallRender = null;
 
 /** Current viewport dimensions. */
 export let W = 0;
@@ -32,11 +36,21 @@ export function init(stage, svg, gGrid, gWorld) {
   _svg = svg;
   _gGrid = gGrid;
   _gWorld = gWorld;
+}
 
-  // Create placeholder rectangle (scale reference, not a data model).
-  _placeholder = document.createElementNS(NS, "rect");
-  _placeholder.setAttribute("class", "placeholder");
-  _gWorld.appendChild(_placeholder);
+/**
+ * Bind the wall-layer SVG groups and labels overlay, and supply the
+ * wallRender.render function. Called once from main.js after init().
+ * @param {SVGGElement} gDraft
+ * @param {SVGGElement} gSnap
+ * @param {HTMLElement} labelsEl
+ * @param {()=>void} wallRenderFn
+ */
+export function initWallLayer(gDraft, gSnap, labelsEl, wallRenderFn) {
+  _gDraft    = gDraft;
+  _gSnap     = gSnap;
+  _labelsEl  = labelsEl;
+  _wallRender = wallRenderFn;
 }
 
 /**
@@ -81,21 +95,6 @@ function _doRender() {
   if (W <= 0 || H <= 0) return;
 
   drawGrid(_gGrid, W, H);
-  _drawPlaceholder();
+  if (_wallRender) _wallRender();
   hudUpdate();
-}
-
-/**
- * Draw a faint placeholder rectangle to convey scale.
- * 5m wide × 3m tall room outline, offset 1m from origin.
- * Not editable, not a data model.
- */
-function _drawPlaceholder() {
-  if (!_placeholder) return;
-  const tl = worldToScreen(1, 1);
-  const br = worldToScreen(6, 4);
-  _placeholder.setAttribute("x", tl.x);
-  _placeholder.setAttribute("y", tl.y);
-  _placeholder.setAttribute("width", br.x - tl.x);
-  _placeholder.setAttribute("height", br.y - tl.y);
 }

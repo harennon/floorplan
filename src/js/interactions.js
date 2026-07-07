@@ -9,11 +9,31 @@
  *  - +/−/RESET zoom buttons
  *  - Hint dismissal on first interaction
  *  - Cursor state classes on stage
+ *  - Mode-aware draw hooks injected from main.js (no static wall import)
  */
 
 import { view, zoomAbout, resetView, clampZoom, screenToWorld, BASE_PX_PER_M } from "./view.js";
 import { setCursorScreen } from "./hud.js";
 import { scheduleRender, W, H } from "./surface.js";
+
+// ─── Draw hooks (injected by main.js; no static wall import) ─────────────────
+
+/**
+ * @type {{ isDrawMode:()=>boolean, onHover:(sx:number,sy:number)=>void,
+ *          onClick:(sx:number,sy:number)=>void, onLeave:()=>void } | null}
+ */
+let _drawHooks = null;
+
+/**
+ * Inject draw-mode hooks. Called once by main.js after wallTool is initialised.
+ * interactions.js has no static import of wall modules (avoids cycles).
+ */
+export function setDrawHooks(h) {
+  _drawHooks = h;
+}
+
+/** Click-vs-drag threshold in screen pixels. */
+const DRAG_THRESHOLD = 6;
 
 // ─── Transient state ────────────────────────────────────────────────────────
 
@@ -22,6 +42,11 @@ let _lastX = 0;
 let _lastY = 0;
 let _spaceHeld = false;
 let _hintDismissed = false;
+
+/** Pending draw-mode tap state. */
+let _drawPending = false;
+let _drawDownX = 0;
+let _drawDownY = 0;
 
 /** Map<pointerId, PointerEvent> for multi-touch tracking. */
 const _pointers = new Map();
@@ -51,10 +76,11 @@ export function init(stage, hint, btnZoomIn, btnZoomOut, btnReset) {
   _hint = hint;
 
   // Pointer events (pan + pinch).
-  stage.addEventListener("pointerdown", _onPointerDown);
-  stage.addEventListener("pointermove", _onPointerMove);
-  stage.addEventListener("pointerup", _onPointerEnd);
+  stage.addEventListener("pointerdown",  _onPointerDown);
+  stage.addEventListener("pointermove",  _onPointerMove);
+  stage.addEventListener("pointerup",    _onPointerEnd);
   stage.addEventListener("pointercancel", _onPointerEnd);
+  stage.addEventListener("pointerleave", _onPointerLeave);
 
   // Wheel zoom.
   stage.addEventListener("wheel", _onWheel, { passive: false });
@@ -79,13 +105,26 @@ function _onPointerDown(e) {
   if (_pointers.size === 2) {
     // Second finger: cancel any in-flight single-pointer pan, seed pinch.
     _dragging = false;
+    _drawPending = false;
     _seedPinch();
     _updateCursor();
     return;
   }
 
   if (_pointers.size === 1) {
+    // Draw mode: record down position; defer pan start until drag threshold exceeded.
+    if (_drawHooks && _drawHooks.isDrawMode() && !_spaceHeld) {
+      _drawPending = true;
+      _drawDownX = e.clientX;
+      _drawDownY = e.clientY;
+      _dragging = false;
+      _lastX = e.clientX;
+      _lastY = e.clientY;
+      _updateCursor();
+      return;
+    }
     _dragging = true;
+    _drawPending = false;
     _lastX = e.clientX;
     _lastY = e.clientY;
     _updateCursor();
@@ -103,6 +142,29 @@ function _onPointerMove(e) {
     return;
   }
 
+  // Draw-mode: plain hover (no button) → update snap preview.
+  if (_drawHooks && _drawHooks.isDrawMode() && e.buttons === 0) {
+    _drawHooks.onHover(e.clientX, e.clientY);
+    return;
+  }
+
+  // Draw-mode with button down: check for drag threshold.
+  if (_drawPending && _drawHooks && _drawHooks.isDrawMode()) {
+    const dx = e.clientX - _drawDownX;
+    const dy = e.clientY - _drawDownY;
+    if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
+      // Crossed threshold → cancel pending click, start panning.
+      _drawPending = false;
+      _dragging = true;
+      _lastX = e.clientX;
+      _lastY = e.clientY;
+    } else {
+      // Still within threshold; update snap preview (touch feedback).
+      _drawHooks.onHover(e.clientX, e.clientY);
+    }
+    _updateCursor();
+  }
+
   if (_dragging) {
     const dx = e.clientX - _lastX;
     const dy = e.clientY - _lastY;
@@ -112,6 +174,11 @@ function _onPointerMove(e) {
     _lastY = e.clientY;
     scheduleRender();
   }
+}
+
+function _onPointerLeave() {
+  if (_drawHooks) _drawHooks.onLeave();
+  _drawPending = false;
 }
 
 function _onPointerEnd(e) {
@@ -126,7 +193,17 @@ function _onPointerEnd(e) {
   }
 
   if (_pointers.size === 0) {
+    // Draw mode tap: pending click → commit vertex.
+    if (_drawPending && _drawHooks && _drawHooks.isDrawMode()) {
+      _drawHooks.onClick(e.clientX, e.clientY);
+    }
+    _drawPending = false;
     _dragging = false;
+
+    // If it was a cancel / leave, clear snap preview.
+    if (e.type === "pointercancel" || e.type === "pointerleave") {
+      if (_drawHooks) _drawHooks.onLeave();
+    }
   }
 
   _updateCursor();

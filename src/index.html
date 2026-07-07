@@ -52,6 +52,15 @@
         --font-ui:      "DM Sans", system-ui, sans-serif;
         --font-mono:    "DM Mono", "Courier New", monospace;
         --font-display: "Libre Baskerville", Georgia, serif;
+
+        /* Wall / snap palette */
+        --wall-body:   rgba(201,168,76,0.30);
+        --wall-line:   #d9be6e;
+        --draft:       #d9be6e;
+        --room-fill:   rgba(201,168,76,0.07);
+        --snap-grid:   #7fd0c8;
+        --snap-point:  #e0b64f;
+        --snap-close:  #9cd67a;
       }
 
       /* ── Reset ────────────────────────────────────────────────────────── */
@@ -91,6 +100,7 @@
 
       .stage.panning     { cursor: grabbing; }
       .stage.space-ready { cursor: grab; }
+      .stage.draw-mode   { cursor: crosshair; }
 
       /* SVG fills the stage */
       #drawing {
@@ -104,13 +114,17 @@
       #drawing .grid-major { stroke: var(--grid-major); stroke-width: 1; shape-rendering: crispEdges; }
       #drawing .grid-axis  { stroke: var(--grid-axis);  stroke-width: 1.5; shape-rendering: crispEdges; }
 
-      /* Placeholder room outline */
-      #drawing .placeholder {
-        fill: none;
-        stroke: var(--gold-soft);
-        stroke-width: 1.5;
-        stroke-dasharray: 6 4;
-        shape-rendering: crispEdges;
+      /* Snap pulse animation */
+      @keyframes snap-pulse {
+        0%   { opacity: 1; r: 10; }
+        50%  { opacity: 0.5; r: 14; }
+        100% { opacity: 1; r: 10; }
+      }
+      #drawing .snap-pulse {
+        animation: snap-pulse 1.2s ease-in-out infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #drawing .snap-pulse { animation: none; }
       }
 
       /* ── Grain overlay ────────────────────────────────────────────────── */
@@ -260,6 +274,158 @@
       .hint.dismissed {
         opacity: 0;
       }
+
+      /* ── Labels overlay (length chips) ───────────────────────────────────── */
+      .labels {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+      }
+      .length-chip {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        padding: 0.1rem 0.35rem;
+        border-radius: 3px;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      .length-chip--live {
+        background: rgba(217, 190, 110, 0.85);
+        color: #14140f;
+      }
+      .length-chip--placed {
+        background: rgba(20, 20, 15, 0.62);
+        color: var(--muted);
+        border: 1px solid var(--hairline);
+      }
+
+      /* ── Snap tag (cursor-side type label) ───────────────────────────────── */
+      .snap-tag {
+        display: none;
+        position: fixed;
+        font-family: var(--font-mono);
+        font-size: 0.6rem;
+        padding: 0.1rem 0.4rem;
+        border-radius: 3px;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        pointer-events: none;
+        white-space: nowrap;
+        z-index: 10;
+      }
+
+      /* ── Tool rail ───────────────────────────────────────────────────────── */
+      .tool-rail {
+        position: absolute;
+        left: 1.25rem;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        padding: 0.4rem 0.3rem;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        z-index: 5;
+      }
+      .tool-rail button {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        width: 2.4rem;
+        height: 2.4rem;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.1rem;
+        position: relative;
+        transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .tool-rail button:hover:not(:disabled) {
+        color: var(--ink);
+        border-color: var(--hairline);
+      }
+      .tool-rail button[aria-pressed="true"] {
+        color: var(--gold);
+        background: rgba(201, 168, 76, 0.1);
+        border-color: var(--gold-soft);
+      }
+      .tool-rail button:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+      .tool-rail .tool-key-hint {
+        font-size: 0.5rem;
+        color: var(--muted);
+        opacity: 0.7;
+      }
+      .tool-rail-sep {
+        width: 100%;
+        height: 1px;
+        background: var(--hairline);
+        margin: 0.1rem 0;
+      }
+      /* Rail collapse toggle (mobile <=480px) */
+      .tool-rail-toggle {
+        display: none;
+        position: absolute;
+        left: 1.25rem;
+        top: 50%;
+        transform: translateY(-50%);
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--gold);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        width: 2.4rem;
+        height: 2.4rem;
+        border-radius: 6px;
+        cursor: pointer;
+        align-items: center;
+        justify-content: center;
+        z-index: 6;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      /* Collapsed state: hide all children except the toggle; toggle shown above */
+      .tool-rail.rail--collapsed {
+        padding: 0;
+        border: none;
+        background: none;
+        gap: 0;
+      }
+      .tool-rail.rail--collapsed > * {
+        display: none !important;
+      }
+
+      /* Mobile adaptations */
+      @media (max-width: 640px) {
+        .tool-rail {
+          left: 0.75rem;
+          padding: 0.25rem 0.2rem;
+        }
+        .tool-rail button {
+          width: 2rem;
+          height: 2rem;
+          font-size: 0.65rem;
+        }
+        .tool-key-hint { display: none; }
+      }
+      @media (max-width: 480px) {
+        .tool-rail-toggle { display: flex; }
+        .tool-rail { left: 0.5rem; }
+      }
     </style>
   </head>
   <body>
@@ -269,13 +435,52 @@
         <svg id="drawing" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <!-- Grid lines (redrawn each render) -->
           <g id="grid"></g>
-          <!-- World geometry mount point for future phases -->
+          <!-- Committed room geometry -->
           <g id="world"></g>
+          <!-- Active chain + rubber-band -->
+          <g id="draft"></g>
+          <!-- Snap indicator glyph -->
+          <g id="snap"></g>
         </svg>
+        <!-- Length chip HTML overlay (pointer-events:none) -->
+        <div class="labels" aria-hidden="true"></div>
       </div>
 
       <!-- Grain texture overlay -->
       <div class="grain" aria-hidden="true"></div>
+
+      <!-- Snap type tag (cursor-side label, hidden when not drawing) -->
+      <div class="snap-tag" aria-hidden="true"></div>
+
+      <!-- Tool rail (left-center) -->
+      <nav class="tool-rail" aria-label="Drawing tools">
+        <button id="tool-select" aria-label="Select tool (V)" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 2 L4 13 L7 10 L9 14 L11 13 L9 9 L13 9 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+          </svg>
+          <span class="tool-key-hint">V</span>
+        </button>
+        <button id="tool-wall" aria-label="Draw wall tool (W)" aria-pressed="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+          </svg>
+          <span class="tool-key-hint">W</span>
+        </button>
+        <div class="tool-rail-sep" aria-hidden="true"></div>
+        <button id="tool-undo" aria-label="Undo last point (Backspace)" disabled>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M6 4 L2 8 L6 12 M2 8 H12 Q15 8 15 5 Q15 2 12 2 H9" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+        <button id="tool-finish" aria-label="Finish chain (Enter)" disabled>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <polyline points="2,8 6,12 14,4" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+      </nav>
+
+      <!-- Rail collapse toggle (mobile ≤480px) -->
+      <button class="tool-rail-toggle" aria-label="Toggle tool rail" aria-hidden="true">≡</button>
 
       <!-- Brand -->
       <div class="brand" aria-hidden="true">
@@ -299,6 +504,9 @@
       <!-- HUD -->
       <div class="hud" aria-live="off" aria-atomic="true">
         <div class="hud-cell">
+          Snap&nbsp;<span id="hud-snap-val">—</span>
+        </div>
+        <div class="hud-cell">
           Scale&nbsp;<span id="hud-scale">—</span>
         </div>
         <div class="hud-cell">
@@ -311,7 +519,7 @@
 
       <!-- One-time interaction hint -->
       <div class="hint" id="hint" role="status" aria-live="polite">
-        Scroll / pinch to zoom · drag or hold Space to pan
+        Click to place wall points · snaps to grid &amp; existing corners · click the first point to close the room
       </div>
     </div>
 

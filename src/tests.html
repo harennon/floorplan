@@ -107,6 +107,13 @@ import {
   NICE_STEPS, MAJOR_EVERY, chooseGridStep,
 } from "./js/grid.js";
 
+import {
+  WALL_M, SNAP_PT_PX, CLOSE_PX, MIN_SEG_M,
+  model,
+  gridSnap, closestEndpoint, canClose, resolveSnap,
+  allVertices, placeVertex, closeRoom, finishChain, undoPoint,
+} from "./js/walls.js";
+
 // ─── Tests: view.js ───────────────────────────────────────────────────────────
 
 describe("view.js — pxPerM", () => {
@@ -328,6 +335,440 @@ describe("grid.js — chooseGridStep", () => {
     const step = chooseGridStep(1e9); // impossible target
     expect(step).toBe(NICE_STEPS[NICE_STEPS.length - 1]);
     view.zoom = 1;
+  });
+});
+
+// ─── Helpers ────────────────────────────────────────────────────────────────────
+
+/** Reset walls model to a clean state between suites. */
+function resetModel() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+}
+
+/** Set view to a known state for projection-dependent tests. */
+function setView(zoom, panX, panY) {
+  view.zoom = zoom;
+  view.panX = panX;
+  view.panY = panY;
+}
+
+// ─── Tests: walls.js — constants ─────────────────────────────────────────────
+
+describe("walls.js — constants", () => {
+  it("WALL_M is 0.12", () => { expect(WALL_M).toBe(0.12); });
+  it("SNAP_PT_PX is 15", () => { expect(SNAP_PT_PX).toBe(15); });
+  it("CLOSE_PX is 16 and >= SNAP_PT_PX", () => {
+    expect(CLOSE_PX).toBe(16);
+    if (CLOSE_PX < SNAP_PT_PX) throw new Error("CLOSE_PX must be >= SNAP_PT_PX");
+  });
+  it("MIN_SEG_M is 1e-4", () => { expect(MIN_SEG_M).toBe(1e-4); });
+});
+
+// ─── Tests: walls.js — gridSnap ─────────────────────────────────────────────
+
+describe("walls.js — gridSnap", () => {
+  it("rounds to step=1: (2.4, 3.6) → (2, 4)", () => {
+    const r = gridSnap({ x: 2.4, y: 3.6 }, 1);
+    expect(r.x).toBe(2);
+    expect(r.y).toBe(4);
+  });
+  it("rounds to step=0.5: (1.2, 1.2) → (1.0, 1.0)", () => {
+    const r = gridSnap({ x: 1.2, y: 1.2 }, 0.5);
+    expect(r.x).toBeCloseTo(1.0, 9);
+    expect(r.y).toBeCloseTo(1.0, 9);
+  });
+  it("rounds to step=0.5: (1.3, 1.8) → (1.5, 2.0)", () => {
+    const r = gridSnap({ x: 1.3, y: 1.8 }, 0.5);
+    expect(r.x).toBeCloseTo(1.5, 9);
+    expect(r.y).toBeCloseTo(2.0, 9);
+  });
+  it("rounds to step=10: (13, 27) → (10, 30)", () => {
+    const r = gridSnap({ x: 13, y: 27 }, 10);
+    expect(r.x).toBe(10);
+    expect(r.y).toBe(30);
+  });
+  it("origin snaps to itself at any step", () => {
+    const r = gridSnap({ x: 0, y: 0 }, 1);
+    expect(r.x).toBe(0);
+    expect(r.y).toBe(0);
+  });
+  it("negative values round correctly", () => {
+    const r = gridSnap({ x: -1.4, y: -2.6 }, 1);
+    expect(r.x).toBe(-1);
+    expect(r.y).toBe(-3);
+  });
+});
+
+// ─── Tests: walls.js — closestEndpoint ───────────────────────────────────────
+
+describe("walls.js — closestEndpoint", () => {
+  it("returns null when candidate list is empty", () => {
+    setView(1, 0, 0);
+    const r = closestEndpoint(100, 100, [], null, SNAP_PT_PX);
+    expect(r).toBe(null);
+  });
+
+  it("returns null when all candidates are outside tolPx", () => {
+    setView(1, 0, 0);
+    // vertex at world (5,5) = screen (200,200)
+    const verts = [{ x: 5, y: 5 }];
+    // cursor at screen (220,220): dist = ~28px > 15px
+    const r = closestEndpoint(220, 220, verts, null, SNAP_PT_PX);
+    expect(r).toBe(null);
+  });
+
+  it("returns vertex when cursor is within tolPx", () => {
+    setView(1, 0, 0);
+    // vertex at world (5,5) = screen (200,200)
+    const v = { x: 5, y: 5 };
+    const r = closestEndpoint(205, 200, [v], null, SNAP_PT_PX); // dist=5 < 15
+    if (r === null) throw new Error("Expected a vertex, got null");
+    expect(r.x).toBe(5);
+    expect(r.y).toBe(5);
+  });
+
+  it("excludes the skip vertex", () => {
+    setView(1, 0, 0);
+    const v = { x: 5, y: 5 };
+    const r = closestEndpoint(200, 200, [v], v, SNAP_PT_PX);
+    expect(r).toBe(null);
+  });
+
+  it("returns the nearest of two candidates within tolerance", () => {
+    setView(1, 0, 0);
+    const v1 = { x: 5, y: 5 };   // screen (200,200)
+    const v2 = { x: 5.1, y: 5 }; // screen (204,200)
+    // cursor at (201,200): v1 is closer
+    const r = closestEndpoint(201, 200, [v1, v2], null, SNAP_PT_PX);
+    if (r === null) throw new Error("Expected a vertex");
+    expect(r.x).toBe(5);
+  });
+
+  it("screen-space tolerance changes with zoom: same world gap, different tolerances", () => {
+    const v = { x: 5, y: 5 };
+    // At zoom=1: screen (200,200). Cursor at (210,200): dist=10 < 15 → found.
+    setView(1, 0, 0);
+    const r1 = closestEndpoint(210, 200, [v], null, SNAP_PT_PX);
+    if (r1 === null) throw new Error("zoom=1: expected snap");
+
+    // At zoom=0.15: pxPerM=6, screen(5*6,5*6)=(30,30). Cursor at (40,30): dist=10 < 15 → found.
+    setView(0.15, 0, 0);
+    const r2 = closestEndpoint(40, 30, [v], null, SNAP_PT_PX);
+    if (r2 === null) throw new Error("zoom=0.15: expected snap");
+
+    // Same vertex; both zoom levels within tolerance → equal vertex coords.
+    expect(r1.x).toBe(r2.x);
+  });
+
+  it("cursor just beyond tolPx returns null, just within returns vertex", () => {
+    setView(1, 0, 0);
+    const v = { x: 0, y: 0 }; // screen (0,0)
+    // exactly at boundary: dist=15 → should be found (<=)
+    const atBoundary = closestEndpoint(15, 0, [v], null, SNAP_PT_PX);
+    if (atBoundary === null) throw new Error("Expected snap at exactly tolPx");
+    // just beyond: dist=16 > 15
+    const beyond = closestEndpoint(16, 0, [v], null, SNAP_PT_PX);
+    expect(beyond).toBe(null);
+  });
+});
+
+// ─── Tests: walls.js — canClose ──────────────────────────────────────────────
+
+describe("walls.js — canClose", () => {
+  it("false for 0 verts", () => { expect(canClose([])).toBe(false); });
+  it("false for 1 vert",  () => { expect(canClose([{x:0,y:0}])).toBe(false); });
+  it("false for 2 verts", () => { expect(canClose([{x:0,y:0},{x:1,y:0}])).toBe(false); });
+  it("true for 3 verts",  () => { expect(canClose([{x:0,y:0},{x:1,y:0},{x:0.5,y:1}])).toBe(true); });
+  it("true for 4 verts",  () => {
+    expect(canClose([{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}])).toBe(true);
+  });
+});
+
+// ─── Tests: walls.js — resolveSnap ───────────────────────────────────────────
+
+describe("walls.js — resolveSnap: close priority", () => {
+  it("returns close when chain >= 3 and cursor near chain[0]", () => {
+    setView(1, 0, 0);
+    // chain[0] at world(0,0) = screen(0,0); chain has 3 verts
+    const chain = [{x:0,y:0},{x:1,y:0},{x:0.5,y:1}];
+    const rooms = [];
+    // cursor at screen(5,0): dist=5 <= CLOSE_PX(16)
+    const snap = resolveSnap(5, 0, { chain, rooms, altHeld: false, step: 1 });
+    expect(snap.type).toBe("close");
+    expect(snap.x).toBe(0);
+    expect(snap.y).toBe(0);
+  });
+
+  it("returns close even when a grid point is also near", () => {
+    setView(1, 0, 0);
+    // chain[0] at world(0,0) = screen(0,0)
+    const chain = [{x:0,y:0},{x:5,y:0},{x:2.5,y:5}];
+    // cursor exactly at screen(0,0) — right on a grid intersection too
+    const snap = resolveSnap(0, 0, { chain, rooms: [], altHeld: false, step: 1 });
+    expect(snap.type).toBe("close");
+  });
+
+  it("does NOT return close with < 3 chain verts even if cursor is on chain[0]", () => {
+    setView(1, 0, 0);
+    const chain = [{x:0,y:0},{x:5,y:0}];
+    // cursor at screen(0,0): on chain[0] but only 2 verts
+    const snap = resolveSnap(0, 0, { chain, rooms: [], altHeld: false, step: 1 });
+    // Should be point (chain[0] is a vertex) or grid — not close
+    if (snap.type === "close") throw new Error("Got close with only 2-vert chain");
+  });
+});
+
+describe("walls.js — resolveSnap: point priority", () => {
+  it("returns point when cursor is within SNAP_PT_PX of a vertex", () => {
+    setView(1, 0, 0);
+    // vertex at world(3,3) = screen(120,120)
+    const rooms = [{ id:"r0", closed:false, verts:[{x:3,y:3}] }];
+    const snap = resolveSnap(125, 120, { chain: [], rooms, altHeld: false, step: 1 });
+    expect(snap.type).toBe("point");
+    expect(snap.x).toBe(3);
+    expect(snap.y).toBe(3);
+  });
+
+  it("point returns exact stored coordinates (weld precision)", () => {
+    setView(1, 0, 0);
+    const stored = { x: 3.7777, y: 2.1111 };
+    const rooms = [{ id:"r0", closed:false, verts:[stored] }];
+    const s = worldToScreen(stored.x, stored.y);
+    const snap = resolveSnap(s.x + 1, s.y, { chain: [], rooms, altHeld: false, step: 1 });
+    expect(snap.type).toBe("point");
+    expect(snap.x).toBe(stored.x);
+    expect(snap.y).toBe(stored.y);
+  });
+
+  it("returns grid when cursor is just outside SNAP_PT_PX", () => {
+    setView(1, 0, 0);
+    // vertex at world(5,5) = screen(200,200)
+    const rooms = [{ id:"r0", closed:false, verts:[{x:5,y:5}] }];
+    // cursor at (216,200): dist=16 > SNAP_PT_PX(15)
+    const snap = resolveSnap(216, 200, { chain: [], rooms, altHeld: false, step: 1 });
+    expect(snap.type).toBe("grid");
+  });
+
+  it("point beats grid when both are near cursor", () => {
+    setView(1, 0, 0);
+    // vertex exactly at a grid intersection: world(5,5) = screen(200,200) with step=1
+    const rooms = [{ id:"r0", closed:false, verts:[{x:5,y:5}] }];
+    const snap = resolveSnap(200, 200, { chain: [], rooms, altHeld: false, step: 1 });
+    expect(snap.type).toBe("point");
+  });
+});
+
+describe("walls.js — resolveSnap: free (altHeld)", () => {
+  it("returns free when altHeld and no nearby vertex", () => {
+    setView(1, 0, 0);
+    // No vertices anywhere near screen(50,50)
+    const snap = resolveSnap(50, 50, { chain: [], rooms: [], altHeld: true, step: 1 });
+    expect(snap.type).toBe("free");
+  });
+
+  it("returns point even when altHeld, if vertex is within SNAP_PT_PX", () => {
+    setView(1, 0, 0);
+    const v = { x: 1, y: 1 }; // screen(40,40)
+    const rooms = [{ id:"r0", closed:false, verts:[v] }];
+    // cursor at screen(45,40): dist=5 < SNAP_PT_PX → point wins over free
+    const snap = resolveSnap(45, 40, { chain: [], rooms, altHeld: true, step: 1 });
+    expect(snap.type).toBe("point");
+  });
+});
+
+describe("walls.js — resolveSnap: grid (default)", () => {
+  it("returns grid when no snap conditions met", () => {
+    setView(1, 0, 0);
+    // cursor at screen(105,85): world(2.625,2.125) → snap to grid step=1 → (3,2)
+    const snap = resolveSnap(105, 85, { chain: [], rooms: [], altHeld: false, step: 1 });
+    expect(snap.type).toBe("grid");
+    expect(snap.x).toBe(3);
+    expect(snap.y).toBe(2);
+  });
+});
+
+// ─── Tests: walls.js — mutations: placeVertex ────────────────────────────────
+
+describe("walls.js — placeVertex", () => {
+  it("pushes a grid snap to chain", () => {
+    resetModel();
+    setView(1, 0, 0);
+    placeVertex({ x: 1, y: 1, type: "grid" });
+    expect(model.chain.length).toBe(1);
+    expect(model.chain[0].x).toBe(1);
+  });
+
+  it("ignores a snap within MIN_SEG_M of the last vertex (zero-length guard)", () => {
+    resetModel();
+    model.chain.push({ x: 1, y: 1 });
+    // snap essentially at same point
+    placeVertex({ x: 1, y: 1 + MIN_SEG_M * 0.5, type: "grid" });
+    expect(model.chain.length).toBe(1); // still 1
+  });
+
+  it("places a vertex just beyond MIN_SEG_M", () => {
+    resetModel();
+    model.chain.push({ x: 0, y: 0 });
+    placeVertex({ x: 0, y: MIN_SEG_M * 2, type: "grid" });
+    expect(model.chain.length).toBe(2);
+  });
+
+  it("routes a close snap to closeRoom (>= 3 verts)", () => {
+    resetModel();
+    model.chain.push({ x: 0, y: 0 });
+    model.chain.push({ x: 1, y: 0 });
+    model.chain.push({ x: 0.5, y: 1 });
+    placeVertex({ x: 0, y: 0, type: "close" });
+    expect(model.rooms.length).toBe(1);
+    expect(model.rooms[0].closed).toBe(true);
+    expect(model.chain.length).toBe(0);
+  });
+
+  it("close snap with < 3 verts is a no-op on rooms (closeRoom returns false)", () => {
+    resetModel();
+    model.chain.push({ x: 0, y: 0 });
+    model.chain.push({ x: 1, y: 0 });
+    placeVertex({ x: 0, y: 0, type: "close" });
+    expect(model.rooms.length).toBe(0);
+  });
+});
+
+// ─── Tests: walls.js — mutations: closeRoom ──────────────────────────────────
+
+describe("walls.js — closeRoom", () => {
+  it("no-op (returns false) when chain has < 3 verts", () => {
+    resetModel();
+    model.chain.push({ x: 0, y: 0 });
+    model.chain.push({ x: 1, y: 0 });
+    const ok = closeRoom();
+    expect(ok).toBe(false);
+    expect(model.rooms.length).toBe(0);
+    expect(model.chain.length).toBe(2); // chain unchanged
+  });
+
+  it("closes a 3-vert chain into a closed room", () => {
+    resetModel();
+    const v0 = { x: 0, y: 0 };
+    const v1 = { x: 1, y: 0 };
+    const v2 = { x: 0.5, y: 1 };
+    model.chain.push(v0, v1, v2);
+    const ok = closeRoom();
+    expect(ok).toBe(true);
+    expect(model.rooms.length).toBe(1);
+    expect(model.rooms[0].closed).toBe(true);
+    expect(model.rooms[0].verts.length).toBe(3);
+    expect(model.chain.length).toBe(0);
+  });
+
+  it("room verts equal the chain at time of close", () => {
+    resetModel();
+    model.chain.push({ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 5 }, { x: 0, y: 5 });
+    closeRoom();
+    expect(model.rooms[0].verts.length).toBe(4);
+    expect(model.rooms[0].verts[2].x).toBe(5);
+    expect(model.rooms[0].verts[2].y).toBe(5);
+  });
+
+  it("room has a unique id string", () => {
+    resetModel();
+    model.chain.push({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 });
+    closeRoom();
+    if (typeof model.rooms[0].id !== "string") throw new Error("id not a string");
+    if (model.rooms[0].id.length === 0) throw new Error("id is empty");
+  });
+});
+
+// ─── Tests: walls.js — mutations: finishChain ────────────────────────────────
+
+describe("walls.js — finishChain", () => {
+  it("discards a 1-vert chain", () => {
+    resetModel();
+    model.chain.push({ x: 0, y: 0 });
+    finishChain();
+    expect(model.rooms.length).toBe(0);
+    expect(model.chain.length).toBe(0);
+  });
+
+  it("commits a 2-vert chain as closed:false", () => {
+    resetModel();
+    model.chain.push({ x: 0, y: 0 }, { x: 1, y: 0 });
+    finishChain();
+    expect(model.rooms.length).toBe(1);
+    expect(model.rooms[0].closed).toBe(false);
+    expect(model.chain.length).toBe(0);
+  });
+
+  it("commits a 4-vert chain as open polyline", () => {
+    resetModel();
+    model.chain.push({ x: 0,y:0 }, { x:1,y:0 }, { x:1,y:1 }, { x:0,y:1 });
+    finishChain();
+    expect(model.rooms.length).toBe(1);
+    expect(model.rooms[0].closed).toBe(false);
+    expect(model.rooms[0].verts.length).toBe(4);
+    expect(model.chain.length).toBe(0);
+  });
+
+  it("no-op (no crash) on empty chain", () => {
+    resetModel();
+    finishChain();
+    expect(model.rooms.length).toBe(0);
+  });
+});
+
+// ─── Tests: walls.js — mutations: undoPoint ──────────────────────────────────
+
+describe("walls.js — undoPoint", () => {
+  it("no-op on empty chain", () => {
+    resetModel();
+    undoPoint();
+    expect(model.chain.length).toBe(0);
+  });
+
+  it("pops exactly one vertex", () => {
+    resetModel();
+    model.chain.push({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 });
+    undoPoint();
+    expect(model.chain.length).toBe(2);
+    expect(model.chain[model.chain.length - 1].x).toBe(1);
+  });
+
+  it("pops until empty, then stable", () => {
+    resetModel();
+    model.chain.push({ x: 0, y: 0 }, { x: 1, y: 0 });
+    undoPoint();
+    expect(model.chain.length).toBe(1);
+    undoPoint();
+    expect(model.chain.length).toBe(0);
+    undoPoint(); // no-op
+    expect(model.chain.length).toBe(0);
+  });
+});
+
+// ─── Tests: walls.js — allVertices ───────────────────────────────────────────
+
+describe("walls.js — allVertices", () => {
+  it("returns empty array when model is empty", () => {
+    resetModel();
+    expect(allVertices().length).toBe(0);
+  });
+
+  it("includes vertices from rooms and chain", () => {
+    resetModel();
+    model.rooms.push({ id:"r0", closed:true, verts:[{x:0,y:0},{x:1,y:0},{x:0.5,y:1}] });
+    model.chain.push({ x:2, y:2 });
+    const all = allVertices();
+    expect(all.length).toBe(4);
+  });
+
+  it("chain-only case: new chain can start welded to existing room vertex", () => {
+    resetModel();
+    const corner = { x: 3, y: 3 };
+    model.rooms.push({ id:"r0", closed:true, verts:[corner,{x:4,y:3},{x:3.5,y:4}] });
+    // allVertices should include corner, enabling endpoint snap
+    const all = allVertices();
+    const found = all.some(v => v.x === 3 && v.y === 3);
+    if (!found) throw new Error("corner not in allVertices");
   });
 });
 
