@@ -170,6 +170,36 @@ Owns a single floating `<input class="dim-input" inputmode="decimal">` appended 
 is prefilled with the current length via `fmtLen` (no unit suffix), selected, focused. Enter
 → `commit`; Esc/blur → `cancel`.
 
+**Pointer isolation from the draw handler (required — see Edge Case 12).** The default (and
+only usable) tool this phase is wall/draw mode, so a closed room's chips are visible *while
+`isDrawMode()` is true*. `interactions.js` binds `pointerdown`/`pointerup` on `.stage`
+(interactions.js:79-82); because `.dim-labels` and the `.dim-input` are descendants of
+`.stage`, pointer events on a chip/input **bubble up to `.stage`** and would arm
+`_drawPending` on pointerdown → call `_drawHooks.onClick()` on pointerup, dropping a stray
+wall vertex, *even though* `pointer-events:auto` correctly makes the chip the event target.
+`click` delegation cannot undo this — the pointerup already fired.
+
+`dimEntry.init` therefore binds capture-agnostic **bubble listeners for `pointerdown`,
+`pointerup`, and `pointercancel` on the `dimLabels` element and on the lazily-created
+`.dim-input`**, each calling `e.stopPropagation()` when `e.target.closest('.dim-chip,
+.dim-input')` matches. Because both are strict descendants of `.stage`, stopping propagation
+at the descendant guarantees the event never reaches `.stage`'s own listeners (order-
+independent — no reliance on listener registration order or `stopImmediatePropagation`), so
+`_drawPending` is never armed and no vertex is placed. The existing `click` delegation on
+`dimLabels` then runs `beginEdit` normally.
+
+*Alternative considered:* have `interactions._onPointerDown` bail when
+`e.target.closest('.dim-chip, .dim-input')`. Rejected as primary because it couples the
+generic pointer layer to `dimEntry`'s DOM classes; the descendant-`stopPropagation` approach
+keeps `interactions.js` unaware of dimensions. (Flag for reviewer if the coupling is
+preferred instead.)
+
+**Cancel-on-unit-change wiring.** `dimEntry.init` registers its own
+`units.onChange(() => { if (isEditing()) cancel(); })` so an open edit is discarded when the
+unit toggles (Edge Case 6). This is separate from `main.js`'s existing
+`onUnitChange(scheduleRender)`, which only reformats committed chips/inspector and does not
+cancel edits.
+
 ### `measure.js` — Measure inspector (new)
 
 ```js
@@ -197,8 +227,11 @@ export function onRender(cb: () => void): void; // push a post-render hook, run 
 
 Grab new DOM refs (`.dim-labels`, `.measure` panel/list/total/toggle); `initWallRender` with
 the extended signature (`measure.getHighlightRoomId`, `dimEntry.getEditingEdge`);
-`measure.init`, `dimEntry.init`; register `measure.update` and `dimEntry.reposition` via
-`surface.onRender`. `onUnitChange(scheduleRender)` already covers unit-driven refresh.
+`measure.init`, `dimEntry.init` (which internally does its own pointer-isolation binding and
+`units.onChange(cancel)` registration — see `dimEntry.js`); register `measure.update` and
+`dimEntry.reposition` via `surface.onRender`. `onUnitChange(scheduleRender)` (verified
+main.js:83) stays as-is and covers unit-driven *reformat*; the *cancel-open-edit-on-toggle*
+behavior is owned by `dimEntry`'s own `units.onChange` registration, not added here.
 
 ## State Model
 
@@ -220,7 +253,7 @@ All state is **in-memory only** this phase (persistence is #MVP-6).
 **DOM additions** (`index.html`):
 ```
 <div class="labels"></div>       <!-- existing: drawing-time chips, pointer-events:none -->
-<div class="dim-labels"></div>   <!-- NEW: committed dimension chips; chips pointer-events:auto -->
+<div class="dim-labels"></div>   <!-- NEW: committed dimension chips; chips pointer-events:auto; pointerdown/up stopPropagation'd in dimEntry so draw handler on .stage never fires -->
 <aside class="measure"> …total, list of rows, collapse toggle… </aside>  <!-- NEW inspector -->
 ```
 The `.dim-input` element is created lazily by `dimEntry` and attached to `.stage`.
@@ -247,7 +280,10 @@ The `.dim-input` element is created lazily by `dimEntry` and attached to `.stage
    (Flag for reviewer.)
 6. **Unit toggle while editing.** The open edit is cancelled on unit change (the typed,
    uncommitted number would otherwise be ambiguous about its unit). Committed geometry and
-   all chips/inspector values simply reformat.
+   all chips/inspector values simply reformat. **Wiring:** `dimEntry.init` registers its own
+   `units.onChange(() => { if (isEditing()) cancel(); })`; `main.js`'s existing
+   `onUnitChange(scheduleRender)` only reformats and does *not* cancel, so the cancel must be
+   registered by `dimEntry` itself (see Interfaces → `dimEntry.js`).
 7. **Pan/zoom while editing.** `dimEntry.reposition` (post-render hook) re-anchors the input
    to the edge's current screen midpoint every frame, so it tracks the view. If the edge
    scrolls far off-screen the input follows and may clip — acceptable for v1.
@@ -261,9 +297,21 @@ The `.dim-input` element is created lazily by `dimEntry` and attached to `.stage
     rooms double-count (no boolean union in v1). Documented limitation.
 11. **Empty state.** No closed rooms → inspector shows Total `0` (formatted) and an empty/hint
     row; no chips render. No errors.
-12. **Chip vs canvas interaction.** `.dim-chip` buttons are `pointer-events:auto` and sit
-    above the SVG, so tapping a chip never places a wall vertex underneath. Drawing-time
-    chips in `.labels` remain `pointer-events:none`.
+12. **Chip vs canvas interaction (draw mode).** Chip editing is intended to work in
+    wall/draw mode — that is the default and only usable tool this phase (index.html:
+    `tool-wall aria-pressed="true"`; selection/move is out of scope, #MVP-5), so a closed
+    room's chips are normally shown while `isDrawMode()` is true. `pointer-events:auto` alone
+    is **insufficient**: it only decides the event *target*, but pointerdown/pointerup on a
+    chip still **bubble to `.stage`**, whose `interactions.js` listeners (interactions.js:79-
+    82) would arm `_drawPending` and fire `_drawHooks.onClick()` (interactions.js:116-124,
+    195-199), dropping a stray wall vertex; `click`-based `beginEdit` delegation cannot undo
+    that pointerup. **Fix:** `dimEntry` attaches `pointerdown`/`pointerup`/`pointercancel`
+    listeners on `.dim-labels` and on the `.dim-input` that call `e.stopPropagation()` for
+    events originating on `.dim-chip`/`.dim-input`. Since both elements are descendants of
+    `.stage`, stopping propagation at the descendant guarantees `.stage` never sees the event,
+    so no vertex is placed regardless of listener order. See `dimEntry.js` → "Pointer
+    isolation from the draw handler." Drawing-time chips in `.labels` remain
+    `pointer-events:none`.
 13. **Mobile inspector.** The inspector is collapsible and defaults **collapsed** on narrow
     screens to a compact pill showing only Total Floor Area; tap to expand. It never
     permanently occupies the small-screen canvas (frontend constraint).
@@ -387,6 +435,13 @@ projection-dependent assert (existing pattern).
 - Clicking a chip opens the inline input prefilled in the current unit; typing `3.2m` + Enter
   rescales that wall to exactly 3.2 m (chip re-reads 3.2 m / 10.5 ft); Esc cancels with no
   change; invalid input flags error and does not mutate.
+- **Draw-mode pointer isolation (regression guard for Edge Case 12):** with the wall tool
+  active (`isDrawMode()` true) and a closed room on screen, tapping a `.dim-chip` opens the
+  editor and adds **no** new vertex to `walls.model` (assert model vertex count unchanged);
+  tapping the empty canvas still places a vertex normally. Same for tapping inside the open
+  `.dim-input`.
+- **Cancel-on-unit-toggle (Edge Case 6):** with an edit open, toggling the unit closes the
+  input (`isEditing()` false) and leaves geometry unchanged; committed chips reformat.
 - Area + perimeter in the inspector update live as vertices/edges change; Total Floor Area is
   the sum of closed rooms.
 - Unit toggle reformats every chip, the inspector, and HUD with no geometry change and no view
