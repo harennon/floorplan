@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>floorplan · MVP-3 dimensions — Direction B "Drafting Table"</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg:         #14140f;
+        --bg-deep:    #100f0b;
+        --ink:        #ece7d6;
+        --muted:      #8f8a78;
+        --gold:       #c9a84c;
+        --gold-soft:  rgba(201, 168, 76, 0.55);
+
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+
+        --panel:      rgba(20, 20, 15, 0.72);
+        --panel-solid:rgba(18, 18, 13, 0.94);
+        --hairline:   rgba(201, 168, 76, 0.18);
+
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+
+        --wall-body:   rgba(201,168,76,0.30);
+        --wall-line:   #d9be6e;
+        --room-fill:   rgba(201,168,76,0.07);
+        --room-fill-sel: rgba(127,208,200,0.10);
+
+        /* Direction B — architectural dimension strings */
+        --dim-line:    rgba(201,168,76,0.42);  /* witness + dimension lines */
+        --dim-ink:     #cdbf95;                /* dimension text */
+        --dim-edit:    #d9be6e;
+        --measure:     #7fd0c8;                /* teal accent for the measure panel */
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+      .app { position: fixed; inset: 0; font-family: var(--font-ui); color: var(--ink); background: var(--bg-deep); }
+      .stage { position: absolute; inset: 0; cursor: crosshair;
+        background: radial-gradient(ellipse 90% 80% at 50% 50%, var(--bg) 0%, var(--bg-deep) 100%); }
+      #drawing { display: block; width: 100%; height: 100%; }
+      #drawing .grid-fine  { stroke: var(--grid-fine);  stroke-width: 1; shape-rendering: crispEdges; }
+      #drawing .grid-major { stroke: var(--grid-major); stroke-width: 1; shape-rendering: crispEdges; }
+      .grain { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: overlay; opacity: 0.035;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+        background-size: 200px 200px; }
+
+      /* ── Chrome ────────────────────────────────────────────────────────── */
+      .brand { position: absolute; top: 1.25rem; left: 1.25rem; pointer-events: none; user-select: none; }
+      .brand-name { font-family: var(--font-display); font-size: 1.1rem; font-weight: 700; color: var(--gold); line-height: 1.2; }
+      .brand-sub  { font-family: var(--font-mono); font-size: 0.65rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+
+      .unit-toggle { position: absolute; top: 1.25rem; right: 1.25rem; display: flex; gap: 0.25rem; z-index: 8; }
+      .unit-toggle button {
+        background: var(--panel); border: 1px solid var(--hairline); color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.06em;
+        padding: 0.3rem 0.7rem; border-radius: 100px; cursor: pointer;
+        transition: color 0.15s, border-color 0.15s, background 0.15s;
+      }
+      .unit-toggle button[aria-pressed="true"] { color: var(--gold); border-color: var(--gold-soft); background: rgba(201,168,76,0.1); }
+      .unit-toggle button:hover:not([aria-pressed="true"]) { color: var(--ink); }
+
+      /* Tool rail */
+      .tool-rail { position: absolute; left: 1.25rem; top: 50%; transform: translateY(-50%);
+        display: flex; flex-direction: column; gap: 0.15rem; background: var(--panel);
+        border: 1px solid var(--hairline); border-radius: 8px; padding: 0.4rem 0.3rem;
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 5; }
+      .tool-rail button { background: transparent; border: 1px solid transparent; color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.7rem; width: 2.4rem; height: 2.4rem; border-radius: 6px;
+        cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1rem;
+        transition: color 0.12s, border-color 0.12s, background 0.12s; }
+      .tool-rail button:hover { color: var(--ink); border-color: var(--hairline); }
+      .tool-rail button[aria-pressed="true"] { color: var(--gold); background: rgba(201,168,76,0.1); border-color: var(--gold-soft); }
+      .tool-rail .tool-key-hint { font-size: 0.5rem; color: var(--muted); opacity: 0.7; }
+      .tool-rail-sep { width: 100%; height: 1px; background: var(--hairline); margin: 0.1rem 0; }
+
+      /* ── Labels overlay ───────────────────────────────────────────────── */
+      .labels { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+
+      /* Dimension text sits on the dimension line (rotated), architectural style */
+      .dim-text {
+        position: absolute; transform-origin: center; white-space: nowrap;
+        font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.02em;
+        color: var(--dim-ink); background: var(--bg); padding: 0 0.28rem;
+        pointer-events: auto; cursor: text; border-radius: 2px;
+        transition: color 0.12s, background 0.12s;
+      }
+      .dim-text:hover { color: var(--ink); background: rgba(201,168,76,0.12); }
+      .dim-text.editing { color: var(--dim-edit); }
+
+      .dim-editor {
+        position: absolute; display: flex; align-items: center; gap: 0.15rem;
+        background: #14140f; border: 1px solid var(--dim-edit);
+        box-shadow: 0 0 0 3px rgba(217,190,110,0.14);
+        border-radius: 5px; padding: 0.1rem 0.3rem; pointer-events: auto; z-index: 12;
+        transform: translate(-50%, -50%);
+      }
+      .dim-editor input { width: 3.2rem; background: transparent; border: none; outline: none;
+        color: var(--ink); font-family: var(--font-mono); font-size: 0.72rem; text-align: right; }
+      .dim-editor .dim-unit { color: var(--muted); font-family: var(--font-mono); font-size: 0.66rem; }
+
+      /* ── Measure inspector (bottom-right dock) ────────────────────────── */
+      .measure {
+        position: absolute; bottom: 1.25rem; right: 1.25rem; width: 234px;
+        background: var(--panel-solid); border: 1px solid var(--hairline);
+        border-radius: 10px; overflow: hidden; z-index: 6;
+        backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+      }
+      .measure-head {
+        display: flex; align-items: baseline; justify-content: space-between;
+        padding: 0.55rem 0.8rem 0.4rem; border-bottom: 1px solid var(--hairline);
+      }
+      .measure-head .m-title {
+        font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.14em;
+        text-transform: uppercase; color: var(--measure);
+      }
+      .measure-head .m-count { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); }
+
+      .measure-total { padding: 0.65rem 0.8rem 0.55rem; border-bottom: 1px solid var(--hairline); }
+      .measure-total .mt-label { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+      .measure-total .mt-value {
+        font-family: var(--font-mono); font-size: 1.7rem; color: var(--ink); line-height: 1.1;
+        transition: color 0.2s; margin-top: 0.1rem;
+      }
+      .measure-total .mt-value .u { font-size: 0.72rem; color: var(--gold); vertical-align: super; margin-left: 0.15em; }
+      .measure-total.flash .mt-value { color: var(--gold); }
+
+      .measure-list { max-height: 168px; overflow-y: auto; }
+      .m-room {
+        display: grid; grid-template-columns: 1fr auto; gap: 0.1rem 0.5rem;
+        align-items: baseline; padding: 0.5rem 0.8rem; cursor: pointer;
+        border-bottom: 1px solid rgba(201,168,76,0.07);
+        transition: background 0.12s;
+      }
+      .m-room:last-child { border-bottom: none; }
+      .m-room:hover, .m-room.hi { background: var(--room-fill-sel); }
+      .m-room .mr-name { font-family: var(--font-display); font-style: italic; font-size: 0.82rem; color: var(--ink); }
+      .m-room .mr-area { font-family: var(--font-mono); font-size: 0.82rem; color: var(--ink); text-align: right; }
+      .m-room .mr-area .u { color: var(--gold); font-size: 0.62rem; }
+      .m-room .mr-peri { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); grid-column: 1 / -1; letter-spacing: 0.03em; }
+
+      /* Collapsed (mobile) */
+      .measure.collapsed .measure-list, .measure.collapsed .measure-head .m-count { display: none; }
+
+      .note {
+        position: absolute; bottom: 1.25rem; left: 1.25rem; max-width: 300px;
+        font-family: var(--font-mono); font-size: 0.64rem; color: var(--muted);
+        background: var(--panel); border: 1px solid var(--hairline);
+        padding: 0.45rem 0.75rem; border-radius: 8px; line-height: 1.5;
+      }
+      .note b { color: var(--gold); font-weight: 500; }
+
+      @media (max-width: 640px) {
+        .measure { width: auto; left: 0.75rem; right: 0.75rem; bottom: 0.75rem; }
+        .note { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="stage" id="stage">
+        <svg id="drawing" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <g id="grid"></g>
+          <g id="world"></g>
+          <g id="dims"></g>
+        </svg>
+        <div class="labels" id="labels"></div>
+      </div>
+
+      <div class="grain" aria-hidden="true"></div>
+
+      <div class="brand" aria-hidden="true">
+        <div class="brand-name">floorplan</div>
+        <div class="brand-sub">warm blueprint</div>
+      </div>
+
+      <div class="unit-toggle" role="group" aria-label="Unit system">
+        <button id="unit-imperial" aria-pressed="false">IMPERIAL</button>
+        <button id="unit-metric"   aria-pressed="true">METRIC</button>
+      </div>
+
+      <nav class="tool-rail" aria-label="Drawing tools">
+        <button aria-label="Select tool (V)" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 2 L4 13 L7 10 L9 14 L11 13 L9 9 L13 9 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg><span class="tool-key-hint">V</span>
+        </button>
+        <button aria-label="Draw wall tool (W)" aria-pressed="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg><span class="tool-key-hint">W</span>
+        </button>
+        <div class="tool-rail-sep" aria-hidden="true"></div>
+        <button aria-label="Undo last point (Backspace)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M6 4 L2 8 L6 12 M2 8 H12 Q15 8 15 5 Q15 2 12 2 H9" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button aria-label="Finish chain (Enter)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <polyline points="2,8 6,12 14,4" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </nav>
+
+      <!-- Measure inspector -->
+      <aside class="measure" id="measure" aria-label="Measurements">
+        <div class="measure-head">
+          <span class="m-title">Measure</span>
+          <span class="m-count" id="m-count">2 rooms</span>
+        </div>
+        <div class="measure-total" id="m-total">
+          <div class="mt-label">Total floor area</div>
+          <div class="mt-value" id="mt-value">—</div>
+        </div>
+        <div class="measure-list" id="m-list"></div>
+      </aside>
+
+      <div class="note">
+        Dimensions are drawn <b>outside</b> each wall like a real plan. Click any number to type an
+        exact length. The <b>Measure</b> panel totals every closed room — toggle units and it all converts.
+      </div>
+    </div>
+
+    <script>
+      "use strict";
+      // ── Units ────────────────────────────────────────────────────────────
+      const M_PER_FT = 0.3048;
+      let unit = "m";
+      const fmtLen  = (m) => unit === "ft" ? (m / M_PER_FT).toFixed(1) : m.toFixed(2);
+      const fmtArea = (m2) => unit === "ft"
+        ? Math.round(m2 / (M_PER_FT * M_PER_FT)).toLocaleString()
+        : m2.toFixed(2);
+      const lenUnit  = () => unit;
+      const areaUnit = () => unit === "ft" ? "ft²" : "m²";
+      const parseLen = (str) => {
+        const v = parseFloat(String(str).replace(/[^0-9.]/g, ""));
+        if (!isFinite(v) || v <= 0) return null;
+        return unit === "ft" ? v * M_PER_FT : v;
+      };
+
+      // ── Fixed demo view ───────────────────────────────────────────────────
+      const PX_PER_M = 46;
+      const pan = { x: 0, y: 0 };
+      const w2s = (x, y) => ({ x: x * PX_PER_M + pan.x, y: y * PX_PER_M + pan.y });
+
+      const model = {
+        rooms: [
+          { id: "r0", name: "Living", closed: true,
+            verts: [ {x:0,y:0}, {x:5,y:0}, {x:5,y:4}, {x:0,y:4} ] },
+          { id: "r1", name: "Bath", closed: true,
+            verts: [ {x:5.6,y:1.6}, {x:7.8,y:1.6}, {x:7.8,y:4}, {x:5.6,y:4} ] },
+        ],
+      };
+
+      // ── Geometry ──────────────────────────────────────────────────────────
+      const dist = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+      function perimeter(v) { let p = 0; for (let i = 0; i < v.length; i++) p += dist(v[i], v[(i+1)%v.length]); return p; }
+      function area(v) { let s = 0; for (let i = 0; i < v.length; i++) { const a=v[i], b=v[(i+1)%v.length]; s += a.x*b.y - b.x*a.y; } return Math.abs(s)/2; }
+      function centroid(v) {
+        let cx=0, cy=0, a=0;
+        for (let i=0;i<v.length;i++){ const p=v[i],q=v[(i+1)%v.length]; const cr=p.x*q.y-q.x*p.y; a+=cr; cx+=(p.x+q.x)*cr; cy+=(p.y+q.y)*cr; }
+        a*=0.5; if (Math.abs(a) < 1e-9) return v[0];
+        return { x: cx/(6*a), y: cy/(6*a) };
+      }
+
+      // ── DOM refs ──────────────────────────────────────────────────────────
+      const NS = "http://www.w3.org/2000/svg";
+      const svg    = document.getElementById("drawing");
+      const gGrid  = document.getElementById("grid");
+      const gWorld = document.getElementById("world");
+      const gDims  = document.getElementById("dims");
+      const labels = document.getElementById("labels");
+      const stage  = document.getElementById("stage");
+      let editing = null;   // { roomId, edgeIndex }
+      let hiRoom  = null;    // highlighted room id (hover from panel)
+
+      function centerView() {
+        const r = stage.getBoundingClientRect();
+        pan.x = r.width * 0.5 - (3.9 * PX_PER_M);
+        pan.y = r.height * 0.5 - (2.0 * PX_PER_M);
+      }
+
+      function svgline(x1,y1,x2,y2,stroke,sw,cls){ const l=document.createElementNS(NS,"line");
+        l.setAttribute("x1",x1);l.setAttribute("y1",y1);l.setAttribute("x2",x2);l.setAttribute("y2",y2);
+        if(stroke)l.setAttribute("stroke",stroke); if(sw)l.setAttribute("stroke-width",sw); if(cls)l.setAttribute("class",cls);
+        return l; }
+
+      function drawGrid(W, H) {
+        gGrid.innerHTML = "";
+        const step = PX_PER_M; const frag = document.createDocumentFragment();
+        for (let sx = pan.x % step; sx < W; sx += step) frag.appendChild(svgline(sx,0,sx,H,null,null,"grid-fine"));
+        for (let sy = pan.y % step; sy < H; sy += step) frag.appendChild(svgline(0,sy,W,sy,null,null,"grid-fine"));
+        for (let sx = pan.x % (step*5); sx < W; sx += step*5) frag.appendChild(svgline(sx,0,sx,H,null,null,"grid-major"));
+        for (let sy = pan.y % (step*5); sy < H; sy += step*5) frag.appendChild(svgline(0,sy,W,sy,null,null,"grid-major"));
+        gGrid.appendChild(frag);
+      }
+
+      function polyPts(verts) { return verts.map(v => { const s = w2s(v.x, v.y); return `${s.x},${s.y}`; }).join(" "); }
+
+      function renderRooms() {
+        gWorld.innerHTML = "";
+        const WALL_PX = Math.max(6, 0.12 * PX_PER_M);
+        for (const room of model.rooms) {
+          const pts = polyPts(room.verts);
+          const fill = document.createElementNS(NS, "polygon");
+          fill.setAttribute("points", pts);
+          fill.setAttribute("fill", room.id === hiRoom ? "var(--room-fill-sel)" : "var(--room-fill)");
+          fill.setAttribute("stroke", "none"); gWorld.appendChild(fill);
+          const body = document.createElementNS(NS, "polygon");
+          body.setAttribute("points", pts); body.setAttribute("fill", "none");
+          body.setAttribute("stroke", "var(--wall-body)"); body.setAttribute("stroke-width", WALL_PX);
+          body.setAttribute("stroke-linejoin", "round"); gWorld.appendChild(body);
+          const cl = document.createElementNS(NS, "polygon");
+          cl.setAttribute("points", pts); cl.setAttribute("fill", "none");
+          cl.setAttribute("stroke", "var(--wall-line)"); cl.setAttribute("stroke-width", "1.5");
+          cl.setAttribute("stroke-linejoin", "round"); gWorld.appendChild(cl);
+          for (const v of room.verts) { const s = w2s(v.x, v.y);
+            const d = document.createElementNS(NS, "circle");
+            d.setAttribute("cx", s.x); d.setAttribute("cy", s.y); d.setAttribute("r", "3");
+            d.setAttribute("fill", "var(--wall-line)"); gWorld.appendChild(d);
+          }
+        }
+      }
+
+      // Architectural dimension string for one edge: two short witness lines
+      // stepping OUT from each endpoint, a dimension line between them with
+      // tick marks, and (rendered separately) rotated text at the midpoint.
+      const OFFSET_M = 0.42;   // how far outside the wall the dim line sits
+      const WITNESS_GAP = 0.06;
+
+      function edgeGeom(room, i) {
+        const a = room.verts[i], b = room.verts[(i+1)%room.verts.length];
+        const mid = { x:(a.x+b.x)/2, y:(a.y+b.y)/2 };
+        const c = centroid(room.verts);
+        let nx = mid.x - c.x, ny = mid.y - c.y; const nl = Math.hypot(nx,ny)||1; nx/=nl; ny/=nl;
+        return { a, b, mid, nx, ny };
+      }
+
+      function renderDims() {
+        gDims.innerHTML = "";
+        for (const room of model.rooms) {
+          for (let i = 0; i < room.verts.length; i++) {
+            const { a, b, nx, ny } = edgeGeom(room, i);
+            const a0 = w2s(a.x + nx*WITNESS_GAP, a.y + ny*WITNESS_GAP);
+            const a1 = w2s(a.x + nx*OFFSET_M,    a.y + ny*OFFSET_M);
+            const b0 = w2s(b.x + nx*WITNESS_GAP, b.y + ny*WITNESS_GAP);
+            const b1 = w2s(b.x + nx*OFFSET_M,    b.y + ny*OFFSET_M);
+            gDims.appendChild(svgline(a0.x,a0.y,a1.x,a1.y,"var(--dim-line)","1"));
+            gDims.appendChild(svgline(b0.x,b0.y,b1.x,b1.y,"var(--dim-line)","1"));
+            gDims.appendChild(svgline(a1.x,a1.y,b1.x,b1.y,"var(--dim-line)","1"));
+            // 45° tick marks at each end
+            tick(a1, b1); tick(b1, a1);
+          }
+        }
+      }
+      function tick(p, toward) {
+        let dx = toward.x - p.x, dy = toward.y - p.y; const d = Math.hypot(dx,dy)||1; dx/=d; dy/=d;
+        // rotate direction 45°, draw a 6px tick centered on p
+        const ang = Math.atan2(dy,dx) + Math.PI/4; const tx = Math.cos(ang)*5, ty = Math.sin(ang)*5;
+        gDims.appendChild(svgline(p.x-tx,p.y-ty,p.x+tx,p.y+ty,"var(--dim-line)","1.2"));
+      }
+
+      function renderLabels() {
+        labels.innerHTML = "";
+        for (const room of model.rooms) {
+          const v = room.verts;
+          for (let i = 0; i < v.length; i++) {
+            const { a, b, mid, nx, ny } = edgeGeom(room, i);
+            const p = w2s(mid.x + nx*OFFSET_M, mid.y + ny*OFFSET_M);
+            if (editing && editing.roomId === room.id && editing.edgeIndex === i) {
+              labels.appendChild(makeEditor(room, i, p)); continue;
+            }
+            // rotate text to run along the dimension line, keep upright
+            const sa = w2s(a.x, a.y), sb = w2s(b.x, b.y);
+            let deg = Math.atan2(sb.y - sa.y, sb.x - sa.x) * 180 / Math.PI;
+            if (deg > 90 || deg < -90) deg += 180;
+            const t = document.createElement("span");
+            t.className = "dim-text";
+            t.textContent = `${fmtLen(dist(a,b))} ${lenUnit()}`;
+            t.style.left = p.x + "px"; t.style.top = p.y + "px";
+            t.style.transform = `translate(-50%,-50%) rotate(${deg}deg)`;
+            t.title = "Click to type exact length";
+            t.addEventListener("click", () => { editing = { roomId: room.id, edgeIndex: i }; render(); });
+            labels.appendChild(t);
+          }
+        }
+      }
+
+      function makeEditor(room, i, p) {
+        const cur = dist(room.verts[i], room.verts[(i+1)%room.verts.length]);
+        const wrap = document.createElement("div");
+        wrap.className = "dim-editor"; wrap.style.left = p.x + "px"; wrap.style.top = p.y + "px";
+        const input = document.createElement("input");
+        input.type = "text"; input.value = fmtLen(cur);
+        const u = document.createElement("span"); u.className = "dim-unit"; u.textContent = lenUnit();
+        wrap.appendChild(input); wrap.appendChild(u);
+        const commit = () => { const m = parseLen(input.value); if (m) setEdgeLength(room, i, m); editing = null; render(); };
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") commit(); else if (e.key === "Escape") { editing = null; render(); }
+        });
+        input.addEventListener("blur", commit);
+        setTimeout(() => { input.focus(); input.select(); }, 0);
+        return wrap;
+      }
+      function setEdgeLength(room, i, metres) {
+        const a = room.verts[i]; const j = (i+1)%room.verts.length; const b = room.verts[j];
+        let dx = b.x - a.x, dy = b.y - a.y; const d = Math.hypot(dx,dy)||1;
+        room.verts[j] = { x: a.x + dx/d*metres, y: a.y + dy/d*metres };
+      }
+
+      // ── Measure inspector ──────────────────────────────────────────────
+      const mTotal = document.getElementById("m-total");
+      const mtValue = document.getElementById("mt-value");
+      const mList = document.getElementById("m-list");
+      const mCount = document.getElementById("m-count");
+      let lastTotal = null;
+
+      function renderMeasure() {
+        const closed = model.rooms.filter(r => r.closed && r.verts.length >= 3);
+        mCount.textContent = `${closed.length} room${closed.length === 1 ? "" : "s"}`;
+        let totalM2 = 0;
+        mList.innerHTML = "";
+        for (const room of closed) {
+          const a = area(room.verts), p = perimeter(room.verts); totalM2 += a;
+          const row = document.createElement("div");
+          row.className = "m-room" + (room.id === hiRoom ? " hi" : "");
+          row.innerHTML =
+            `<span class="mr-name">${room.name}</span>` +
+            `<span class="mr-area">${fmtArea(a)} <span class="u">${areaUnit()}</span></span>` +
+            `<span class="mr-peri">perimeter ${fmtLen(p)} ${lenUnit()}</span>`;
+          row.addEventListener("mouseenter", () => { hiRoom = room.id; renderRooms(); syncHi(); });
+          row.addEventListener("mouseleave", () => { hiRoom = null; renderRooms(); syncHi(); });
+          mList.appendChild(row);
+        }
+        mtValue.innerHTML = `${fmtArea(totalM2)}<span class="u">${areaUnit()}</span>`;
+        // flash the total when it changes (live-update affordance)
+        if (lastTotal !== null && Math.abs(lastTotal - totalM2) > 1e-6) {
+          mTotal.classList.add("flash"); setTimeout(() => mTotal.classList.remove("flash"), 450);
+        }
+        lastTotal = totalM2;
+      }
+      function syncHi() {
+        [...mList.children].forEach((el, idx) => {
+          const closed = model.rooms.filter(r => r.closed);
+          el.classList.toggle("hi", closed[idx] && closed[idx].id === hiRoom);
+        });
+      }
+
+      // ── Render + wiring ────────────────────────────────────────────────
+      function render() {
+        const r = stage.getBoundingClientRect();
+        svg.setAttribute("viewBox", `0 0 ${r.width} ${r.height}`);
+        drawGrid(r.width, r.height);
+        renderRooms(); renderDims(); renderLabels(); renderMeasure();
+      }
+      function setUnit(u) {
+        unit = u;
+        document.getElementById("unit-imperial").setAttribute("aria-pressed", u === "ft");
+        document.getElementById("unit-metric").setAttribute("aria-pressed", u === "m");
+        render();
+      }
+      document.getElementById("unit-imperial").addEventListener("click", () => setUnit("ft"));
+      document.getElementById("unit-metric").addEventListener("click", () => setUnit("m"));
+      window.addEventListener("resize", () => { centerView(); render(); });
+      centerView(); render();
+    </script>
+  </body>
+</html>
