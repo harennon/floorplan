@@ -10,16 +10,18 @@
 
 import { worldToScreen, pxPerM } from "./view.js";
 import { fmtLen, unitLabel } from "./units.js";
-import { model, WALL_M, canClose } from "./walls.js";
+import { model, WALL_M, canClose, edgeLength } from "./walls.js";
 
 const NS = "http://www.w3.org/2000/svg";
 
 // Palette tokens (from LLD / Direction A)
-const WALL_BODY_COLOR = "rgba(201,168,76,0.30)";
-const WALL_LINE_COLOR = "#d9be6e";
-const DRAFT_COLOR     = "#d9be6e";
-const ROOM_FILL_COLOR = "rgba(201,168,76,0.07)";
-const SNAP_GRID_COLOR = "#7fd0c8";
+const WALL_BODY_COLOR  = "rgba(201,168,76,0.30)";
+const WALL_LINE_COLOR  = "#d9be6e";
+const DRAFT_COLOR      = "#d9be6e";
+const ROOM_FILL_COLOR  = "rgba(201,168,76,0.07)";
+const ROOM_FILL_HI     = "rgba(201,168,76,0.15)";
+const WALL_LINE_HI     = "#e8cf7a";
+const SNAP_GRID_COLOR  = "#7fd0c8";
 const SNAP_POINT_COLOR = "#e0b64f";
 const SNAP_CLOSE_COLOR = "#9cd67a";
 
@@ -33,9 +35,12 @@ let _gWorld  = null;
 let _gDraft  = null;
 let _gSnap   = null;
 let _labelsEl = null;
+let _dimLabelsEl = null;
 
-// Injected getter for current snap (set via init, populated by wallTool)
-let _getSnap = () => null;
+// Injected getters (set via init)
+let _getSnap         = () => null;
+let _getHighlight    = () => null;
+let _getEditingEdge  = () => null;
 
 /**
  * Bind mount points. Called once from main.js.
@@ -43,14 +48,20 @@ let _getSnap = () => null;
  * @param {SVGGElement} gDraft
  * @param {SVGGElement} gSnap
  * @param {HTMLElement} labelsEl
+ * @param {HTMLElement} dimLabelsEl         interactive committed-dimension chip layer
  * @param {()=>import("./walls.js").Snap|null} getSnap
+ * @param {()=>string|null} getHighlight    measure.getHighlightRoomId
+ * @param {()=>{roomId:string,edgeIndex:number}|null} getEditingEdge  dimEntry.getEditingEdge
  */
-export function init(gWorld, gDraft, gSnap, labelsEl, getSnap) {
-  _gWorld   = gWorld;
-  _gDraft   = gDraft;
-  _gSnap    = gSnap;
-  _labelsEl = labelsEl;
-  _getSnap  = getSnap;
+export function init(gWorld, gDraft, gSnap, labelsEl, dimLabelsEl, getSnap, getHighlight, getEditingEdge) {
+  _gWorld       = gWorld;
+  _gDraft       = gDraft;
+  _gSnap        = gSnap;
+  _labelsEl     = labelsEl;
+  _dimLabelsEl  = dimLabelsEl;
+  _getSnap      = getSnap;
+  _getHighlight = getHighlight  || (() => null);
+  _getEditingEdge = getEditingEdge || (() => null);
 }
 
 /**
@@ -64,13 +75,21 @@ export function render() {
   _clearGroup(_gDraft);
   _clearGroup(_gSnap);
   _clearLabels();
+  _clearDimLabels();
 
   const snap = _getSnap();
   const ppm = pxPerM();
+  const highlightId = _getHighlight();
+  const editingEdge = _getEditingEdge();
 
   // ── Committed rooms ────────────────────────────────────────────────────────
   for (const room of model.rooms) {
-    _renderRoom(room, ppm);
+    _renderRoom(room, ppm, highlightId === room.id);
+  }
+
+  // ── Interactive dimension chips for committed rooms ─────────────────────────
+  for (const room of model.rooms) {
+    _renderDimChips(room, editingEdge);
   }
 
   // ── Active chain (draft) ───────────────────────────────────────────────────
@@ -126,14 +145,17 @@ export function render() {
 
 // ── Private: committed room rendering ────────────────────────────────────────
 
-function _renderRoom(room, ppm) {
+function _renderRoom(room, ppm, highlighted) {
   const pts = room.verts;
   if (pts.length === 0) return;
+
+  const fillColor    = highlighted ? ROOM_FILL_HI  : ROOM_FILL_COLOR;
+  const lineColor    = highlighted ? WALL_LINE_HI  : WALL_LINE_COLOR;
 
   // Fill (closed rooms only)
   if (room.closed && pts.length >= 3) {
     const fill = _buildPolygon(pts);
-    fill.setAttribute("fill", ROOM_FILL_COLOR);
+    fill.setAttribute("fill", fillColor);
     fill.setAttribute("stroke", "none");
     _gWorld.appendChild(fill);
   }
@@ -154,15 +176,64 @@ function _renderRoom(room, ppm) {
   if (pts.length >= 2) {
     const center = room.closed ? _buildPolygon(pts) : _buildPolyline(pts);
     center.setAttribute("fill", "none");
-    center.setAttribute("stroke", WALL_LINE_COLOR);
-    center.setAttribute("stroke-width", "1.5");
+    center.setAttribute("stroke", lineColor);
+    center.setAttribute("stroke-width", highlighted ? "2" : "1.5");
     center.setAttribute("stroke-linejoin", "round");
     center.setAttribute("stroke-linecap", "round");
     _gWorld.appendChild(center);
   }
 
   // Vertex dots
-  _renderVertexDots(_gWorld, pts, WALL_LINE_COLOR);
+  _renderVertexDots(_gWorld, pts, lineColor);
+}
+
+// ── Private: interactive committed dimension chips ────────────────────────────
+
+/**
+ * Render one interactive dim-chip per edge into _dimLabelsEl.
+ * Skips the edge currently being edited (getEditingEdge).
+ * @param {import("./walls.js").Room} room
+ * @param {{roomId:string,edgeIndex:number}|null} editingEdge
+ */
+function _renderDimChips(room, editingEdge) {
+  if (!_dimLabelsEl) return;
+  const pts = room.verts;
+  const n = pts.length;
+  if (n < 2) return;
+
+  const edgeCount = room.closed ? n : n - 1;
+
+  for (let i = 0; i < edgeCount; i++) {
+    const iA = i;
+    const iB = room.closed ? (i + 1) % n : i + 1;
+
+    // Skip the chip for the edge currently being edited
+    if (editingEdge && editingEdge.roomId === room.id && editingEdge.edgeIndex === i) {
+      continue;
+    }
+
+    const a = pts[iA];
+    const b = pts[iB];
+    const len = edgeLength(a, b);
+    if (len === 0) continue;
+
+    const pa = worldToScreen(a.x, a.y);
+    const pb = worldToScreen(b.x, b.y);
+    const mx = (pa.x + pb.x) / 2;
+    const my = (pa.y + pb.y) / 2;
+
+    const labelText = fmtLen(len) + " " + unitLabel();
+
+    const btn = document.createElement("button");
+    btn.className = "dim-chip";
+    btn.setAttribute("data-room-id", room.id);
+    btn.setAttribute("data-edge", String(i));
+    btn.setAttribute("aria-label", `Wall length ${labelText}, click to edit`);
+    btn.textContent = labelText;
+    btn.style.left = mx + "px";
+    btn.style.top  = my + "px";
+    _dimLabelsEl.appendChild(btn);
+  }
 }
 
 // ── Private: chain segment rendering ─────────────────────────────────────────
@@ -328,6 +399,11 @@ function _clearGroup(g) {
 function _clearLabels() {
   if (!_labelsEl) return;
   while (_labelsEl.firstChild) _labelsEl.removeChild(_labelsEl.firstChild);
+}
+
+function _clearDimLabels() {
+  if (!_dimLabelsEl) return;
+  while (_dimLabelsEl.firstChild) _dimLabelsEl.removeChild(_dimLabelsEl.firstChild);
 }
 
 function _makeLine(x1, y1, x2, y2) {

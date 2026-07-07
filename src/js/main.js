@@ -7,11 +7,13 @@
 
 import { onChange as onViewChange, resetView } from "./view.js";
 import { onChange as onUnitChange } from "./units.js";
-import { init as initSurface, initWallLayer, resize, render, scheduleRender } from "./surface.js";
+import { init as initSurface, initWallLayer, onRender, resize, render, scheduleRender } from "./surface.js";
 import { init as initHud } from "./hud.js";
 import { init as initInteractions, setDrawHooks } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
 import { init as initWallTool, isDrawMode, getSnap, onHover, onClick, onLeave } from "./wallTool.js";
+import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from "./measure.js";
+import { init as initDimEntry, reposition as dimReposition, getEditingEdge } from "./dimEntry.js";
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
@@ -23,7 +25,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const gWorld   = document.getElementById("world");
   const gDraft   = document.getElementById("draft");
   const gSnap    = document.getElementById("snap");
-  const labelsEl = document.querySelector(".labels");
+  const labelsEl    = document.querySelector(".labels");
+  const dimLabelsEl = document.querySelector(".dim-labels");
   const hint     = document.getElementById("hint");
 
   // HUD
@@ -49,12 +52,18 @@ document.addEventListener("DOMContentLoaded", () => {
   const railToggleEl  = document.querySelector(".tool-rail-toggle");
   const railCollapseEl = document.querySelector(".tool-rail-collapse");
 
+  // Measure inspector
+  const measurePanel  = document.querySelector(".measure");
+  const measureList   = document.querySelector(".measure-list");
+  const measureTotal  = document.querySelector(".measure-total-val");
+  const measureToggle = document.querySelector(".measure-toggle");
+
   // ── Initialise modules ─────────────────────────────────────────────────────
   initSurface(stage, svg, gGrid, gWorld);
   initHud(elZoom, elScale, elCursor, elUnitImp, elUnitMet);
 
-  // wallRender binds mount points + getSnap
-  initWallRender(gWorld, gDraft, gSnap, labelsEl, getSnap);
+  // wallRender binds mount points + injected getters
+  initWallRender(gWorld, gDraft, gSnap, labelsEl, dimLabelsEl, getSnap, getHighlightRoomId, getEditingEdge);
 
   // wallTool binds rail, hud, keyboard
   initWallTool({
@@ -77,6 +86,23 @@ document.addEventListener("DOMContentLoaded", () => {
   setDrawHooks({ isDrawMode, onHover, onClick, onLeave });
 
   initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
+
+  // Measure inspector
+  initMeasure({ panel: measurePanel, list: measureList, total: measureTotal, toggle: measureToggle });
+
+  // dimEntry (handles its own pointer-isolation and unit-cancel binding internally)
+  initDimEntry({ stage, dimLabels: dimLabelsEl });
+
+  // Register post-render hooks
+  onRender(measureUpdate);
+  onRender(dimReposition);
+
+  // Default measure inspector to collapsed on narrow screens (Edge Case 13)
+  if (window.matchMedia("(max-width: 640px)").matches) {
+    measurePanel.classList.add("measure--collapsed");
+    measureToggle.textContent = "▸";
+    measureToggle.setAttribute("aria-expanded", "false");
+  }
 
   // ── Wire re-render on view / unit changes ──────────────────────────────────
   onViewChange(scheduleRender);
