@@ -214,3 +214,149 @@ export function undoPoint() {
     model.chain.pop();
   }
 }
+
+// ── New pure geometry (LLD 10) ───────────────────────────────────────────────
+
+/**
+ * Number of edges in a room.
+ * Closed: verts.length (includes the closing edge back to verts[0]).
+ * Open:   verts.length - 1.
+ * @param {Room} room
+ * @returns {number}
+ */
+export function edgeCount(room) {
+  if (room.verts.length === 0) return 0;
+  return room.closed ? room.verts.length : room.verts.length - 1;
+}
+
+/**
+ * Endpoints of edge i as [A, B] vertex refs.
+ * For the closing edge of a closed room, B wraps to verts[0].
+ * @param {Room} room
+ * @param {number} i
+ * @returns {[Vertex, Vertex]}
+ */
+export function edgeEndpoints(room, i) {
+  const n = room.verts.length;
+  const a = room.verts[i];
+  const b = room.verts[(i + 1) % n];
+  return [a, b];
+}
+
+/**
+ * Signed-area shoelace magnitude in m² (0 for < 3 verts).
+ * Returns absolute area — meaningful for closed rooms.
+ * @param {Vertex[]} verts
+ * @returns {number}
+ */
+export function polygonArea(verts) {
+  const n = verts.length;
+  if (n < 3) return 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % n];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(sum) / 2;
+}
+
+/**
+ * Total edge length in metres.
+ * When closed is true, includes the closing edge from verts[n-1] back to verts[0].
+ * @param {Vertex[]} verts
+ * @param {boolean} closed
+ * @returns {number}
+ */
+export function polygonPerimeter(verts, closed) {
+  const n = verts.length;
+  if (n < 2) return 0;
+  let total = 0;
+  const count = closed ? n : n - 1;
+  for (let i = 0; i < count; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % n];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    total += Math.sqrt(dx * dx + dy * dy);
+  }
+  return total;
+}
+
+/**
+ * Area-weighted polygon centroid in world metres.
+ * Falls back to vertex mean if the polygon has zero area (degenerate/collinear).
+ * @param {Vertex[]} verts
+ * @returns {{ x:number, y:number }}
+ */
+export function centroid(verts) {
+  const n = verts.length;
+  if (n === 0) return { x: 0, y: 0 };
+  if (n === 1) return { x: verts[0].x, y: verts[0].y };
+
+  // Shoelace-based centroid formula
+  let cx = 0;
+  let cy = 0;
+  let area2 = 0; // 2 * signed area
+  for (let i = 0; i < n; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % n];
+    const cross = a.x * b.y - b.x * a.y;
+    area2 += cross;
+    cx += (a.x + b.x) * cross;
+    cy += (a.y + b.y) * cross;
+  }
+
+  if (Math.abs(area2) < 1e-12) {
+    // Degenerate: fall back to vertex mean
+    let sx = 0, sy = 0;
+    for (const v of verts) { sx += v.x; sy += v.y; }
+    return { x: sx / n, y: sy / n };
+  }
+
+  const inv = 1 / (3 * area2);
+  return { x: cx * inv, y: cy * inv };
+}
+
+/**
+ * Find a committed room by id, or null.
+ * @param {string} id
+ * @returns {Room|null}
+ */
+export function findRoom(id) {
+  for (const room of model.rooms) {
+    if (room.id === id) return room;
+  }
+  return null;
+}
+
+/**
+ * Set edge i of `room` to exactly `metres`, keeping the start vertex fixed
+ * and moving the end vertex along the current edge direction.
+ * No-op (returns false) if:
+ *   - the edge is degenerate (zero-length, can't derive a direction)
+ *   - metres < MIN_SEG_M
+ * Mutates room.verts in place.
+ * @param {Room} room
+ * @param {number} i  edge index
+ * @param {number} metres  desired length in metres
+ * @returns {boolean} true if geometry changed
+ */
+export function setEdgeLength(room, i, metres) {
+  if (metres < MIN_SEG_M) return false;
+
+  const [a, b] = edgeEndpoints(room, i);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < MIN_SEG_M) return false; // degenerate edge: no direction
+
+  // Unit vector from A to B
+  const ux = dx / len;
+  const uy = dy / len;
+
+  // Move B to A + metres * unit direction
+  b.x = a.x + ux * metres;
+  b.y = a.y + uy * metres;
+  return true;
+}

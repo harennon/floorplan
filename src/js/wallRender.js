@@ -9,8 +9,8 @@
  */
 
 import { worldToScreen, pxPerM } from "./view.js";
-import { fmtLen, unitLabel } from "./units.js";
-import { model, WALL_M, canClose } from "./walls.js";
+import { fmtLen, unitLabel, fmtArea, areaUnitLabel } from "./units.js";
+import { model, WALL_M, canClose, edgeCount, edgeEndpoints, polygonArea, polygonPerimeter, centroid } from "./walls.js";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -29,10 +29,11 @@ const GLYPH_SIZE   = 10;    // half-size for diamond / radius for ring
 const GLYPH_SW     = 1.5;   // glyph stroke width
 
 // DOM refs
-let _gWorld  = null;
-let _gDraft  = null;
-let _gSnap   = null;
-let _labelsEl = null;
+let _gWorld    = null;
+let _gDraft    = null;
+let _gSnap     = null;
+let _labelsEl  = null;
+let _dimLayerEl = null;
 
 // Injected getter for current snap (set via init, populated by wallTool)
 let _getSnap = () => null;
@@ -43,14 +44,16 @@ let _getSnap = () => null;
  * @param {SVGGElement} gDraft
  * @param {SVGGElement} gSnap
  * @param {HTMLElement} labelsEl
+ * @param {HTMLElement} dimLayerEl  - the .dim-layer overlay (NOT aria-hidden)
  * @param {()=>import("./walls.js").Snap|null} getSnap
  */
-export function init(gWorld, gDraft, gSnap, labelsEl, getSnap) {
-  _gWorld   = gWorld;
-  _gDraft   = gDraft;
-  _gSnap    = gSnap;
-  _labelsEl = labelsEl;
-  _getSnap  = getSnap;
+export function init(gWorld, gDraft, gSnap, labelsEl, dimLayerEl, getSnap) {
+  _gWorld     = gWorld;
+  _gDraft     = gDraft;
+  _gSnap      = gSnap;
+  _labelsEl   = labelsEl;
+  _dimLayerEl = dimLayerEl;
+  _getSnap    = getSnap;
 }
 
 /**
@@ -64,6 +67,7 @@ export function render() {
   _clearGroup(_gDraft);
   _clearGroup(_gSnap);
   _clearLabels();
+  _clearDimLayer();
 
   const snap = _getSnap();
   const ppm = pxPerM();
@@ -163,6 +167,25 @@ function _renderRoom(room, ppm) {
 
   // Vertex dots
   _renderVertexDots(_gWorld, pts, WALL_LINE_COLOR);
+
+  // Dimension chips on each committed edge (interactive, into .dim-layer)
+  const n = edgeCount(room);
+  for (let i = 0; i < n; i++) {
+    const [a, b] = edgeEndpoints(room, i);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 0) {
+      const pa = worldToScreen(a.x, a.y);
+      const pb = worldToScreen(b.x, b.y);
+      _addDimChip(len, (pa.x + pb.x) / 2, (pa.y + pb.y) / 2, room.id, i);
+    }
+  }
+
+  // Room tag at centroid (closed rooms only, with min-size gate)
+  if (room.closed && pts.length >= 3) {
+    _renderRoomTag(room, ppm);
+  }
 }
 
 // ── Private: chain segment rendering ─────────────────────────────────────────
@@ -319,6 +342,74 @@ function _addLengthChip(metres, sx, sy, live) {
   _labelsEl.appendChild(chip);
 }
 
+/**
+ * Add an interactive dimension chip to the .dim-layer overlay.
+ * @param {number} metres    segment length in metres
+ * @param {number} sx        screen x of chip center
+ * @param {number} sy        screen y of chip center
+ * @param {string} roomId    data attribute for delegation
+ * @param {number} edgeIndex data attribute for delegation
+ */
+function _addDimChip(metres, sx, sy, roomId, edgeIndex) {
+  if (!_dimLayerEl) return;
+  const chip = document.createElement("span");
+  chip.className = "dim-chip";
+  chip.textContent = fmtLen(metres) + " " + unitLabel();
+  chip.style.left = sx + "px";
+  chip.style.top  = sy + "px";
+  chip.dataset.roomId    = roomId;
+  chip.dataset.edgeIndex = String(edgeIndex);
+  chip.setAttribute("tabindex", "0");
+  chip.setAttribute("role", "button");
+  chip.setAttribute("aria-label", "Edit wall: " + fmtLen(metres) + " " + unitLabel());
+  _dimLayerEl.appendChild(chip);
+}
+
+/**
+ * Render the centroid area+perimeter tag for a closed room.
+ * Suppresses the tag if the room's on-screen bounding box is too small (Edge Case 8).
+ * @param {import("./walls.js").Room} room
+ * @param {number} ppm  pixels per metre
+ */
+function _renderRoomTag(room, ppm) {
+  if (!_dimLayerEl) return;
+  const pts = room.verts;
+
+  // Compute screen bounding box
+  let minSx = Infinity, maxSx = -Infinity;
+  let minSy = Infinity, maxSy = -Infinity;
+  for (const v of pts) {
+    const s = worldToScreen(v.x, v.y);
+    if (s.x < minSx) minSx = s.x;
+    if (s.x > maxSx) maxSx = s.x;
+    if (s.y < minSy) minSy = s.y;
+    if (s.y > maxSy) maxSy = s.y;
+  }
+  const boxW = maxSx - minSx;
+  const boxH = maxSy - minSy;
+  const MIN_TAG_PX = 64;
+  if (boxW < MIN_TAG_PX || boxH < MIN_TAG_PX) return;
+
+  const area      = polygonArea(pts);
+  const perimeter = polygonPerimeter(pts, true);
+  const c         = centroid(pts);
+  const sc        = worldToScreen(c.x, c.y);
+
+  const tag = document.createElement("div");
+  tag.className = "room-tag";
+  tag.style.left = sc.x + "px";
+  tag.style.top  = sc.y + "px";
+
+  const areaLine = document.createElement("div");
+  areaLine.textContent = fmtArea(area) + " " + areaUnitLabel();
+  const perimLine = document.createElement("div");
+  perimLine.textContent = fmtLen(perimeter) + " " + unitLabel();
+
+  tag.appendChild(areaLine);
+  tag.appendChild(perimLine);
+  _dimLayerEl.appendChild(tag);
+}
+
 // ── Private: SVG helpers ──────────────────────────────────────────────────────
 
 function _clearGroup(g) {
@@ -328,6 +419,11 @@ function _clearGroup(g) {
 function _clearLabels() {
   if (!_labelsEl) return;
   while (_labelsEl.firstChild) _labelsEl.removeChild(_labelsEl.firstChild);
+}
+
+function _clearDimLayer() {
+  if (!_dimLayerEl) return;
+  while (_dimLayerEl.firstChild) _dimLayerEl.removeChild(_dimLayerEl.firstChild);
 }
 
 function _makeLine(x1, y1, x2, y2) {

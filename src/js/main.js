@@ -12,6 +12,7 @@ import { init as initHud } from "./hud.js";
 import { init as initInteractions, setDrawHooks } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
 import { init as initWallTool, isDrawMode, getSnap, onHover, onClick, onLeave } from "./wallTool.js";
+import { init as initDimensions } from "./dimensions.js";
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
@@ -23,8 +24,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const gWorld   = document.getElementById("world");
   const gDraft   = document.getElementById("draft");
   const gSnap    = document.getElementById("snap");
-  const labelsEl = document.querySelector(".labels");
-  const hint     = document.getElementById("hint");
+  const labelsEl  = document.querySelector(".labels");
+  const dimLayerEl = document.querySelector(".dim-layer");
+  const hint       = document.getElementById("hint");
 
   // HUD
   const elZoom    = document.getElementById("hud-zoom");
@@ -54,7 +56,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initHud(elZoom, elScale, elCursor, elUnitImp, elUnitMet);
 
   // wallRender binds mount points + getSnap
-  initWallRender(gWorld, gDraft, gSnap, labelsEl, getSnap);
+  initWallRender(gWorld, gDraft, gSnap, labelsEl, dimLayerEl, getSnap);
 
   // wallTool binds rail, hud, keyboard
   initWallTool({
@@ -72,6 +74,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Wire wall render into surface loop
   initWallLayer(gDraft, gSnap, labelsEl, wallRender);
+
+  // Dimension interaction controller
+  initDimensions({ dimLayer: dimLayerEl, stage, onCommit: scheduleRender });
 
   // Inject draw hooks into interactions (no static wall import there)
   setDrawHooks({ isDrawMode, onHover, onClick, onLeave });

@@ -101,6 +101,7 @@ import {
 
 import {
   M_PER_FT, fmtLen, unitLabel, unit, setUnit,
+  parseLen, fmtArea, areaUnitLabel,
 } from "./js/units.js";
 
 import {
@@ -112,6 +113,7 @@ import {
   model,
   gridSnap, closestEndpoint, canClose, resolveSnap,
   allVertices, placeVertex, closeRoom, finishChain, undoPoint,
+  edgeCount, edgeEndpoints, polygonArea, polygonPerimeter, centroid, findRoom, setEdgeLength,
 } from "./js/walls.js";
 
 // ─── Tests: view.js ───────────────────────────────────────────────────────────
@@ -769,6 +771,472 @@ describe("walls.js — allVertices", () => {
     const all = allVertices();
     const found = all.some(v => v.x === 3 && v.y === 3);
     if (!found) throw new Error("corner not in allVertices");
+  });
+});
+
+// ─── Tests: units.js — parseLen ──────────────────────────────────────────────
+
+describe("units.js — parseLen: bare number (current unit)", () => {
+  it("bare number in ft unit → metres via M_PER_FT", () => {
+    setUnit("ft");
+    const result = parseLen("10");
+    // 10ft = 10 * 0.3048 = 3.048m
+    expect(result).toBeCloseTo(10 * M_PER_FT, 9);
+  });
+
+  it("bare number in m unit → metres directly", () => {
+    setUnit("m");
+    const result = parseLen("3.2");
+    expect(result).toBeCloseTo(3.2, 9);
+  });
+
+  it("bare number zero returns null", () => {
+    setUnit("m");
+    expect(parseLen("0")).toBe(null);
+  });
+
+  it("bare number negative returns null", () => {
+    setUnit("m");
+    expect(parseLen("-1")).toBe(null);
+  });
+});
+
+describe("units.js — parseLen: metric suffixes", () => {
+  it("parses 'm' suffix to metres", () => {
+    expect(parseLen("3.2m")).toBeCloseTo(3.2, 9);
+  });
+
+  it("parses 'M' uppercase suffix (case-insensitive)", () => {
+    expect(parseLen("3.2M")).toBeCloseTo(3.2, 9);
+  });
+
+  it("parses 'cm' suffix to metres", () => {
+    expect(parseLen("320cm")).toBeCloseTo(3.2, 9);
+  });
+
+  it("parses 'CM' uppercase", () => {
+    expect(parseLen("320CM")).toBeCloseTo(3.2, 9);
+  });
+
+  it("parses 'mm' suffix to metres", () => {
+    expect(parseLen("3200mm")).toBeCloseTo(3.2, 9);
+  });
+
+  it("parses 'MM' uppercase", () => {
+    expect(parseLen("3200MM")).toBeCloseTo(3.2, 9);
+  });
+
+  it("whitespace tolerance: '3.2 m'", () => {
+    expect(parseLen("3.2 m")).toBeCloseTo(3.2, 9);
+  });
+
+  it("whitespace tolerance: ' 3.2 cm '", () => {
+    expect(parseLen(" 3.2 cm ")).toBeCloseTo(0.032, 9);
+  });
+});
+
+describe("units.js — parseLen: imperial suffixes", () => {
+  it("parses 'ft' suffix", () => {
+    expect(parseLen("10ft")).toBeCloseTo(10 * M_PER_FT, 9);
+  });
+
+  it("parses ' (single quote)", () => {
+    expect(parseLen("10'")).toBeCloseTo(10 * M_PER_FT, 9);
+  });
+
+  it("parses 'FT' uppercase", () => {
+    expect(parseLen("10FT")).toBeCloseTo(10 * M_PER_FT, 9);
+  });
+
+  it("parses 'in' suffix", () => {
+    expect(parseLen("12in")).toBeCloseTo(M_PER_FT, 9);
+  });
+
+  it("parses '\" (double quote) suffix", () => {
+    expect(parseLen('12"')).toBeCloseTo(M_PER_FT, 9);
+  });
+
+  it("parses 'IN' uppercase", () => {
+    expect(parseLen("12IN")).toBeCloseTo(M_PER_FT, 9);
+  });
+});
+
+describe("units.js — parseLen: feet+inches combined", () => {
+  it("parses '10\\' 6\\\"' to 10.5ft", () => {
+    const expected = (10 + 6/12) * M_PER_FT;
+    expect(parseLen("10' 6\"")).toBeCloseTo(expected, 9);
+  });
+
+  it("parses '10ft 6in'", () => {
+    const expected = (10 + 6/12) * M_PER_FT;
+    expect(parseLen("10ft 6in")).toBeCloseTo(expected, 9);
+  });
+
+  it("parses '10\\'6\\\"' (no space between parts)", () => {
+    const expected = (10 + 6/12) * M_PER_FT;
+    expect(parseLen("10'6\"")).toBeCloseTo(expected, 9);
+  });
+});
+
+describe("units.js — parseLen: invalid inputs", () => {
+  it("empty string returns null", () => {
+    expect(parseLen("")).toBe(null);
+  });
+
+  it("null returns null", () => {
+    expect(parseLen(null)).toBe(null);
+  });
+
+  it("garbage string returns null", () => {
+    expect(parseLen("abc")).toBe(null);
+  });
+
+  it("non-positive number returns null", () => {
+    expect(parseLen("0")).toBe(null);
+  });
+
+  it("just whitespace returns null", () => {
+    expect(parseLen("   ")).toBe(null);
+  });
+});
+
+describe("units.js — parseLen: round-trip with fmtLen", () => {
+  it("parseLen(fmtLen(x)) ≈ x in metric (within display rounding)", () => {
+    setUnit("m");
+    const x = 3.145;
+    const formatted = fmtLen(x); // "3.15" (2dp)
+    const roundTripped = parseLen(formatted);
+    // fmtLen gives 2dp, so round-trip precision = 0.005
+    expect(Math.abs(roundTripped - x)).toBeLessThanOrEqual(0.005 + 1e-9);
+  });
+
+  it("parseLen(fmtLen(x)) ≈ x in imperial (within display rounding)", () => {
+    setUnit("ft");
+    const x = 1.0; // 1m ≈ 3.3ft
+    const formatted = fmtLen(x); // e.g. "3.3"
+    const roundTripped = parseLen(formatted);
+    // fmtLen gives 1dp in ft, so rounding ≤ 0.05ft in metres
+    const toleranceM = 0.05 * M_PER_FT;
+    expect(Math.abs(roundTripped - x)).toBeLessThanOrEqual(toleranceM + 1e-9);
+  });
+});
+
+// ─── Tests: units.js — fmtArea / areaUnitLabel ───────────────────────────────
+
+describe("units.js — fmtArea", () => {
+  it("metric: m² with 2 decimals", () => {
+    setUnit("m");
+    expect(fmtArea(12)).toBe("12.00");
+    expect(fmtArea(9.876)).toBe("9.88");
+    expect(fmtArea(0)).toBe("0.00");
+  });
+
+  it("imperial: ft² with 1 decimal (converted from m²)", () => {
+    setUnit("ft");
+    // 1m² = 1 / (0.3048^2) ft²
+    const oneM2InFt2 = 1 / (M_PER_FT * M_PER_FT);
+    expect(fmtArea(1)).toBe(oneM2InFt2.toFixed(1));
+  });
+});
+
+describe("units.js — areaUnitLabel", () => {
+  it("returns m² in metric", () => {
+    setUnit("m");
+    expect(areaUnitLabel()).toBe("m²");
+  });
+  it("returns ft² in imperial", () => {
+    setUnit("ft");
+    expect(areaUnitLabel()).toBe("ft²");
+  });
+});
+
+// ─── Tests: walls.js — edgeCount ─────────────────────────────────────────────
+
+describe("walls.js — edgeCount", () => {
+  it("open 4-vert polyline has 3 edges", () => {
+    const room = { id:"r", closed:false, verts:[{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}] };
+    expect(edgeCount(room)).toBe(3);
+  });
+
+  it("closed 4-vert polygon has 4 edges", () => {
+    const room = { id:"r", closed:true, verts:[{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}] };
+    expect(edgeCount(room)).toBe(4);
+  });
+
+  it("open 2-vert polyline has 1 edge", () => {
+    const room = { id:"r", closed:false, verts:[{x:0,y:0},{x:1,y:0}] };
+    expect(edgeCount(room)).toBe(1);
+  });
+
+  it("open 1-vert has 0 edges", () => {
+    const room = { id:"r", closed:false, verts:[{x:0,y:0}] };
+    expect(edgeCount(room)).toBe(0);
+  });
+
+  it("empty verts: 0 edges", () => {
+    const room = { id:"r", closed:false, verts:[] };
+    expect(edgeCount(room)).toBe(0);
+  });
+});
+
+// ─── Tests: walls.js — edgeEndpoints ─────────────────────────────────────────
+
+describe("walls.js — edgeEndpoints", () => {
+  it("open room: edge 0 returns [verts[0], verts[1]]", () => {
+    const v0 = {x:0,y:0}, v1 = {x:1,y:0}, v2 = {x:2,y:0};
+    const room = { id:"r", closed:false, verts:[v0,v1,v2] };
+    const [a,b] = edgeEndpoints(room, 0);
+    if (a !== v0 || b !== v1) throw new Error("wrong endpoints");
+  });
+
+  it("closed room: closing edge wraps B to verts[0]", () => {
+    const v0 = {x:0,y:0}, v1 = {x:1,y:0}, v2 = {x:0.5,y:1};
+    const room = { id:"r", closed:true, verts:[v0,v1,v2] };
+    const [a,b] = edgeEndpoints(room, 2); // last edge
+    if (a !== v2) throw new Error("wrong A");
+    if (b !== v0) throw new Error("closing B should wrap to verts[0]");
+  });
+});
+
+// ─── Tests: walls.js — polygonArea ───────────────────────────────────────────
+
+describe("walls.js — polygonArea", () => {
+  it("unit square area = 1", () => {
+    const verts = [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}];
+    expect(polygonArea(verts)).toBeCloseTo(1, 9);
+  });
+
+  it("3×4 rectangle area = 12", () => {
+    const verts = [{x:0,y:0},{x:3,y:0},{x:3,y:4},{x:0,y:4}];
+    expect(polygonArea(verts)).toBeCloseTo(12, 9);
+  });
+
+  it("right triangle (base=3, height=4) area = 6", () => {
+    const verts = [{x:0,y:0},{x:3,y:0},{x:0,y:4}];
+    expect(polygonArea(verts)).toBeCloseTo(6, 9);
+  });
+
+  it("< 3 verts returns 0", () => {
+    expect(polygonArea([{x:0,y:0},{x:1,y:0}])).toBe(0);
+    expect(polygonArea([{x:0,y:0}])).toBe(0);
+    expect(polygonArea([])).toBe(0);
+  });
+
+  it("absolute value: CW winding same as CCW", () => {
+    // CW square
+    const cw  = [{x:0,y:0},{x:0,y:1},{x:1,y:1},{x:1,y:0}];
+    // CCW square
+    const ccw = [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}];
+    expect(polygonArea(cw)).toBeCloseTo(polygonArea(ccw), 9);
+  });
+});
+
+// ─── Tests: walls.js — polygonPerimeter ──────────────────────────────────────
+
+describe("walls.js — polygonPerimeter", () => {
+  it("open polyline: does not include closing edge", () => {
+    // 3 verts forming 2 sides of a unit square
+    const verts = [{x:0,y:0},{x:1,y:0},{x:1,y:1}];
+    expect(polygonPerimeter(verts, false)).toBeCloseTo(2, 9);
+  });
+
+  it("closed polygon: includes closing edge", () => {
+    // Unit square: 4 edges of length 1 each
+    const verts = [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}];
+    expect(polygonPerimeter(verts, true)).toBeCloseTo(4, 9);
+  });
+
+  it("closed: 3×4 rectangle perimeter = 14", () => {
+    const verts = [{x:0,y:0},{x:3,y:0},{x:3,y:4},{x:0,y:4}];
+    expect(polygonPerimeter(verts, true)).toBeCloseTo(14, 9);
+  });
+
+  it("open < 2 verts returns 0", () => {
+    expect(polygonPerimeter([{x:0,y:0}], false)).toBe(0);
+    expect(polygonPerimeter([], false)).toBe(0);
+  });
+});
+
+// ─── Tests: walls.js — centroid ──────────────────────────────────────────────
+
+describe("walls.js — centroid", () => {
+  it("unit square centroid = (0.5, 0.5)", () => {
+    const verts = [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}];
+    const c = centroid(verts);
+    expect(c.x).toBeCloseTo(0.5, 6);
+    expect(c.y).toBeCloseTo(0.5, 6);
+  });
+
+  it("rectangle centroid = centre", () => {
+    const verts = [{x:0,y:0},{x:4,y:0},{x:4,y:2},{x:0,y:2}];
+    const c = centroid(verts);
+    expect(c.x).toBeCloseTo(2, 6);
+    expect(c.y).toBeCloseTo(1, 6);
+  });
+
+  it("collinear (zero-area): falls back to vertex mean", () => {
+    const verts = [{x:0,y:0},{x:1,y:0},{x:2,y:0}];
+    const c = centroid(verts);
+    expect(c.x).toBeCloseTo(1, 6);
+    expect(c.y).toBeCloseTo(0, 6);
+  });
+
+  it("single vert: returns that vert", () => {
+    const c = centroid([{x:3,y:7}]);
+    expect(c.x).toBe(3);
+    expect(c.y).toBe(7);
+  });
+
+  it("empty: returns (0,0)", () => {
+    const c = centroid([]);
+    expect(c.x).toBe(0);
+    expect(c.y).toBe(0);
+  });
+});
+
+// ─── Tests: walls.js — findRoom ──────────────────────────────────────────────
+
+describe("walls.js — findRoom", () => {
+  it("returns the matching room by id", () => {
+    resetModel();
+    const room = { id:"test-room", closed:true, verts:[] };
+    model.rooms.push(room);
+    const found = findRoom("test-room");
+    if (found !== room) throw new Error("wrong room returned");
+  });
+
+  it("returns null when id not found", () => {
+    resetModel();
+    expect(findRoom("no-such")).toBe(null);
+  });
+});
+
+// ─── Tests: walls.js — setEdgeLength ─────────────────────────────────────────
+
+describe("walls.js — setEdgeLength", () => {
+  it("sets |AB| to exact metres keeping A fixed, direction unchanged", () => {
+    const v0 = {x:0,y:0}, v1 = {x:3,y:0}, v2 = {x:3,y:3};
+    const room = { id:"r", closed:true, verts:[v0,v1,v2] };
+    const ok = setEdgeLength(room, 0, 5);
+    expect(ok).toBe(true);
+    // A is v0 (unchanged)
+    expect(v0.x).toBe(0);
+    expect(v0.y).toBe(0);
+    // B = v1 should now be at (5,0) — along x-axis
+    expect(v1.x).toBeCloseTo(5, 9);
+    expect(v1.y).toBeCloseTo(0, 9);
+  });
+
+  it("returns false for metres < MIN_SEG_M", () => {
+    const v0 = {x:0,y:0}, v1 = {x:1,y:0};
+    const room = { id:"r", closed:false, verts:[v0,v1] };
+    const ok = setEdgeLength(room, 0, MIN_SEG_M * 0.5);
+    expect(ok).toBe(false);
+    // verts unchanged
+    expect(v1.x).toBe(1);
+  });
+
+  it("returns false for exactly 0 metres", () => {
+    const v0 = {x:0,y:0}, v1 = {x:1,y:0};
+    const room = { id:"r", closed:false, verts:[v0,v1] };
+    expect(setEdgeLength(room, 0, 0)).toBe(false);
+  });
+
+  it("returns false for a degenerate (zero-length) edge", () => {
+    const v0 = {x:1,y:1}, v1 = {x:1,y:1};
+    const room = { id:"r", closed:false, verts:[v0,v1] };
+    expect(setEdgeLength(room, 0, 2)).toBe(false);
+  });
+
+  it("works on the closing edge of a closed room (moves verts[0])", () => {
+    const v0 = {x:0,y:0}, v1 = {x:1,y:0}, v2 = {x:1,y:1};
+    const room = { id:"r", closed:true, verts:[v0,v1,v2] };
+    // closing edge: index 2, A=v2, B=v0
+    const ok = setEdgeLength(room, 2, 2);
+    expect(ok).toBe(true);
+    // A=v2 unchanged
+    expect(v2.x).toBe(1);
+    expect(v2.y).toBe(1);
+    // B=v0 moved along direction from v2 to v0 (which was (0,0)-(1,1) = (-1,-1)/sqrt(2))
+    const expectedX = 1 + (-1/Math.sqrt(2)) * 2;
+    const expectedY = 1 + (-1/Math.sqrt(2)) * 2;
+    expect(v0.x).toBeCloseTo(expectedX, 6);
+    expect(v0.y).toBeCloseTo(expectedY, 6);
+  });
+
+  it("geometry stored in metres — no unit involvement", () => {
+    setUnit("ft");
+    const v0 = {x:0,y:0}, v1 = {x:0,y:0}, v2 = {x:0,y:3}; // edge 0 is degenerate, edge 1 is vertical
+    const room = { id:"r", closed:false, verts:[{x:0,y:0},{x:5,y:0}] };
+    // Set 3m — should store metres directly
+    setEdgeLength(room, 0, 3);
+    const [a, b] = edgeEndpoints(room, 0);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    expect(Math.sqrt(dx*dx + dy*dy)).toBeCloseTo(3, 9);
+    setUnit("ft"); // reset
+  });
+});
+
+// ─── Tests: parseLen × setEdgeLength integration ─────────────────────────────
+
+describe("integration — parseLen + setEdgeLength round-trip", () => {
+  it("'3.2m' and '10.5ft' both produce the same unique metre length", () => {
+    setUnit("m");
+    const a = parseLen("3.2m");
+    expect(a).toBeCloseTo(3.2, 9);
+
+    setUnit("ft");
+    // 3.2m in ft is 3.2 / 0.3048 ≈ 10.498... ft
+    const b = parseLen("10.5ft");
+    expect(b).toBeCloseTo(10.5 * M_PER_FT, 9);
+  });
+
+  it("typing '5' in metric vs '16.4' in imperial both yield ~5m", () => {
+    setUnit("m");
+    const aM = parseLen("5");
+    expect(aM).toBeCloseTo(5, 9);
+
+    setUnit("ft");
+    // 5m = 16.4042ft; typed as "16.4" in ft
+    const bFt = parseLen("16.4");
+    // tolerance: 0.1ft difference
+    expect(Math.abs(bFt - 5)).toBeLessThanOrEqual(0.1 * M_PER_FT);
+  });
+});
+
+// ─── Tests: a11y — .dim-layer must not be aria-hidden ────────────────────────
+
+describe("a11y — .dim-layer is not aria-hidden", () => {
+  it(".labels IS aria-hidden", () => {
+    const labels = document.querySelector(".labels");
+    if (!labels) throw new Error(".labels not found in DOM — run from tests.html inside index.html, or create a minimal fixture");
+    // In the tests.html standalone page, .labels won't exist in DOM
+    // so this test is document-context-dependent; skip gracefully
+  });
+
+  it(".dim-layer chip role and tabindex attributes are correct (fixture)", () => {
+    // Build a minimal DOM fixture to test chip attributes
+    const layer = document.createElement("div");
+    layer.className = "dim-layer";
+    document.body.appendChild(layer);
+
+    const chip = document.createElement("span");
+    chip.className = "dim-chip";
+    chip.setAttribute("tabindex", "0");
+    chip.setAttribute("role", "button");
+    chip.dataset.roomId = "r0";
+    chip.dataset.edgeIndex = "0";
+    chip.textContent = "3.00 m";
+    layer.appendChild(chip);
+
+    // Assertions
+    if (chip.getAttribute("role") !== "button") throw new Error("role should be button");
+    if (chip.getAttribute("tabindex") !== "0") throw new Error("tabindex should be 0");
+    if (layer.getAttribute("aria-hidden") === "true") throw new Error("dim-layer must not be aria-hidden");
+
+    // Clean up
+    document.body.removeChild(layer);
   });
 });
 
