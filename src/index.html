@@ -98,9 +98,10 @@
           );
       }
 
-      .stage.panning     { cursor: grabbing; }
-      .stage.space-ready { cursor: grab; }
+      /* draw-mode first so panning/space-ready can override it via cascade order */
       .stage.draw-mode   { cursor: crosshair; }
+      .stage.space-ready { cursor: grab; }
+      .stage.panning     { cursor: grabbing; }
 
       /* SVG fills the stage */
       #drawing {
@@ -422,10 +423,30 @@
         }
         .tool-key-hint { display: none; }
       }
+      /* In-rail collapse button: hidden by default, shown at ≤480px */
+      .tool-rail-collapse {
+        display: none;
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted);
+        font-size: 0.85rem;
+        line-height: 1;
+        width: 2.4rem;
+        height: 1.5rem;
+        border-radius: 6px;
+        cursor: pointer;
+        align-items: center;
+        justify-content: center;
+        margin-top: 0.1rem;
+      }
       @media (max-width: 480px) {
         .tool-rail { left: 0.5rem; }
-        /* toggle visible only when rail is collapsed; hidden in default expanded state */
-        .tool-rail.rail--collapsed ~ .tool-rail-toggle { display: flex; }
+        /* Collapse button visible inside the expanded rail */
+        .tool-rail-collapse { display: flex; }
+        /* Expand toggle visible outside when rail is collapsed */
+        .tool-rail-toggle { display: flex; }
+        /* When expanded, expand toggle must not show (it's for collapsed state only) */
+        .tool-rail:not(.rail--collapsed) ~ .tool-rail-toggle { display: none; }
       }
     </style>
   </head>
@@ -478,6 +499,8 @@
             <polyline points="2,8 6,12 14,4" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/>
           </svg>
         </button>
+        <!-- Collapse affordance: shown only at ≤480px; closes the rail -->
+        <button class="tool-rail-collapse" aria-label="Collapse tool rail">‹</button>
       </nav>
 
       <!-- Rail collapse toggle (mobile ≤480px); shown only when rail is collapsed -->

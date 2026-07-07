@@ -33,8 +33,9 @@ let _btnWall       = null;
 let _btnUndo       = null;
 let _btnFinish     = null;
 let _stage         = null;
-let _railEl        = null;
-let _railToggleEl  = null;
+let _railEl          = null;
+let _railToggleEl    = null;
+let _railCollapseEl  = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -42,18 +43,19 @@ let _railToggleEl  = null;
  * Bind DOM references and wire keyboard + rail.
  * @param {{ hudSnap:Element, snapTag:Element, btnSelect:Element, btnWall:Element,
  *            btnUndo:Element, btnFinish:Element, stage:Element,
- *            rail:Element, railToggle:Element }} refs
+ *            rail:Element, railToggle:Element, railCollapse:Element }} refs
  */
 export function init(refs) {
-  _hudSnapEl    = refs.hudSnap;
-  _snapTagEl    = refs.snapTag;
-  _btnSelect    = refs.btnSelect;
-  _btnWall      = refs.btnWall;
-  _btnUndo      = refs.btnUndo;
-  _btnFinish    = refs.btnFinish;
-  _stage        = refs.stage;
-  _railEl       = refs.rail;
-  _railToggleEl = refs.railToggle;
+  _hudSnapEl      = refs.hudSnap;
+  _snapTagEl      = refs.snapTag;
+  _btnSelect      = refs.btnSelect;
+  _btnWall        = refs.btnWall;
+  _btnUndo        = refs.btnUndo;
+  _btnFinish      = refs.btnFinish;
+  _stage          = refs.stage;
+  _railEl         = refs.rail;
+  _railToggleEl   = refs.railToggle;
+  _railCollapseEl = refs.railCollapse;
 
   // Rail buttons
   _btnSelect.addEventListener("click", () => setTool("select"));
@@ -61,10 +63,17 @@ export function init(refs) {
   _btnUndo.addEventListener("click",   () => { undoPoint(); _updateRail(); scheduleRender(); });
   _btnFinish.addEventListener("click", () => { finishChain(); _updateRail(); scheduleRender(); });
 
-  // Rail collapse toggle (mobile)
+  // Rail collapse button (inside rail, mobile ≤480px): collapses the rail
+  if (_railCollapseEl) {
+    _railCollapseEl.addEventListener("click", () => {
+      _railEl.classList.add("rail--collapsed");
+    });
+  }
+
+  // Rail expand toggle (outside rail, mobile ≤480px): expands the rail
   if (_railToggleEl) {
     _railToggleEl.addEventListener("click", () => {
-      _railEl.classList.toggle("rail--collapsed");
+      _railEl.classList.remove("rail--collapsed");
     });
   }
 
@@ -263,11 +272,9 @@ function _updateToggleIcon() {
 
 function _updateCursor() {
   if (!_stage) return;
-  if (_tool === "wall") {
-    _stage.style.cursor = "crosshair";
-  } else {
-    _stage.style.cursor = "";
-  }
+  // Use class-based cursor so interactions.js's .panning / .space-ready classes
+  // can override it via CSS cascade order (they are declared after .draw-mode).
+  _stage.classList.toggle("draw-mode", _tool === "wall");
 }
 
 const SNAP_LABELS = {

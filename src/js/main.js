@@ -45,8 +45,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnWall      = document.getElementById("tool-wall");
   const btnUndo      = document.getElementById("tool-undo");
   const btnFinish    = document.getElementById("tool-finish");
-  const railEl       = document.querySelector(".tool-rail");
-  const railToggleEl = document.querySelector(".tool-rail-toggle");
+  const railEl        = document.querySelector(".tool-rail");
+  const railToggleEl  = document.querySelector(".tool-rail-toggle");
+  const railCollapseEl = document.querySelector(".tool-rail-collapse");
 
   // ── Initialise modules ─────────────────────────────────────────────────────
   initSurface(stage, svg, gGrid, gWorld);
@@ -64,8 +65,9 @@ document.addEventListener("DOMContentLoaded", () => {
     btnUndo,
     btnFinish,
     stage,
-    rail:        railEl,
-    railToggle:  railToggleEl,
+    rail:         railEl,
+    railToggle:   railToggleEl,
+    railCollapse: railCollapseEl,
   });
 
   // Wire wall render into surface loop
