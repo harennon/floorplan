@@ -423,8 +423,11 @@
         }
         .tool-key-hint { display: none; }
       }
-      /* In-rail collapse button: hidden by default, shown at ≤480px */
-      .tool-rail-collapse {
+      /* In-rail collapse button: hidden by default, shown at ≤480px.
+         Selector is qualified with `button` so it outranks `.tool-rail button`
+         (which would otherwise force display:flex at every width and leak the
+         collapse affordance onto desktop, where no expand toggle exists). */
+      .tool-rail button.tool-rail-collapse {
         display: none;
         background: transparent;
         border: 1px solid transparent;
@@ -442,7 +445,7 @@
       @media (max-width: 480px) {
         .tool-rail { left: 0.5rem; }
         /* Collapse button visible inside the expanded rail */
-        .tool-rail-collapse { display: flex; }
+        .tool-rail button.tool-rail-collapse { display: flex; }
         /* Expand toggle visible outside when rail is collapsed */
         .tool-rail-toggle { display: flex; }
         /* When expanded, expand toggle must not show (it's for collapsed state only) */
