@@ -23,6 +23,9 @@ let _labelsEl = null;
 /** wallRender.render callback — injected after wallRender init. */
 let _wallRender = null;
 
+/** Post-render hooks registered via onRender(). */
+const _renderHooks = [];
+
 /** Current viewport dimensions. */
 export let W = 0;
 export let H = 0;
@@ -90,11 +93,21 @@ export function render() {
   _doRender();
 }
 
+/**
+ * Register a post-render hook. Called at end of _doRender, after wallRender
+ * and before hudUpdate. Used by measure.update and dimEntry.reposition.
+ * @param {()=>void} cb
+ */
+export function onRender(cb) {
+  _renderHooks.push(cb);
+}
+
 function _doRender() {
   _rafHandle = null;
   if (W <= 0 || H <= 0) return;
 
   drawGrid(_gGrid, W, H);
   if (_wallRender) _wallRender();
+  for (const cb of _renderHooks) cb();
   hudUpdate();
 }

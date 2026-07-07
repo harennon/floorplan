@@ -214,3 +214,109 @@ export function undoPoint() {
     model.chain.pop();
   }
 }
+
+// ── New geometry (LLD 9) ──────────────────────────────────────────────────────
+
+/**
+ * Length of a single edge, metres.
+ * @param {Vertex} a
+ * @param {Vertex} b
+ * @returns {number}
+ */
+export function edgeLength(a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Shoelace absolute area of the ring verts[0..n-1] (implicit close), metres².
+ * < 3 verts → 0.
+ * @param {Vertex[]} verts
+ * @returns {number}
+ */
+export function polygonArea(verts) {
+  const n = verts.length;
+  if (n < 3) return 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    sum += verts[i].x * verts[j].y;
+    sum -= verts[j].x * verts[i].y;
+  }
+  return Math.abs(sum) / 2;
+}
+
+/**
+ * Sum of edge lengths; when closed, adds the verts[n-1]→verts[0] edge. metres.
+ * @param {Vertex[]} verts
+ * @param {boolean} closed
+ * @returns {number}
+ */
+export function perimeter(verts, closed) {
+  const n = verts.length;
+  let total = 0;
+  for (let i = 0; i < n - 1; i++) {
+    total += edgeLength(verts[i], verts[i + 1]);
+  }
+  if (closed && n >= 2) {
+    total += edgeLength(verts[n - 1], verts[0]);
+  }
+  return total;
+}
+
+/**
+ * Convenience: { area, perimeter } for a room. area = 0 when !closed.
+ * @param {Room} room
+ * @returns {{ area:number, perimeter:number }}
+ */
+export function roomMetrics(room) {
+  return {
+    area: room.closed ? polygonArea(room.verts) : 0,
+    perimeter: perimeter(room.verts, room.closed),
+  };
+}
+
+/**
+ * Rescale room edge `edgeIndex` to exactly `targetLenM`, keeping verts[i] fixed
+ * and moving the far endpoint along the current edge direction. Mutates room.verts
+ * in place.
+ *
+ * For a closed room the edge index ranges 0..n-1 (edge n-1 is verts[n-1]→verts[0]).
+ * For an open room the edge index ranges 0..n-2.
+ *
+ * Returns false (no-op) on: targetLenM < MIN_SEG_M, edge length ~0 (no direction),
+ * or edgeIndex out of range. Returns true on success.
+ *
+ * @param {Room} room
+ * @param {number} edgeIndex
+ * @param {number} targetLenM
+ * @returns {boolean}
+ */
+export function rescaleEdge(room, edgeIndex, targetLenM) {
+  if (targetLenM < MIN_SEG_M) return false;
+
+  const verts = room.verts;
+  const n = verts.length;
+
+  // Validate edgeIndex
+  const maxIndex = room.closed ? n - 1 : n - 2;
+  if (edgeIndex < 0 || edgeIndex > maxIndex) return false;
+
+  const iA = edgeIndex;
+  const iB = room.closed ? (edgeIndex + 1) % n : edgeIndex + 1;
+
+  const a = verts[iA];
+  const b = verts[iB];
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < MIN_SEG_M) return false; // degenerate edge, no direction
+
+  const ux = dx / len;
+  const uy = dy / len;
+
+  // Move iB along the edge direction so the edge length equals targetLenM
+  verts[iB] = { x: a.x + ux * targetLenM, y: a.y + uy * targetLenM };
+  return true;
+}

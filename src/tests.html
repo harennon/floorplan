@@ -101,6 +101,7 @@ import {
 
 import {
   M_PER_FT, fmtLen, unitLabel, unit, setUnit,
+  M2_PER_FT2, parseLen, fmtArea, areaUnitLabel,
 } from "./js/units.js";
 
 import {
@@ -112,6 +113,7 @@ import {
   model,
   gridSnap, closestEndpoint, canClose, resolveSnap,
   allVertices, placeVertex, closeRoom, finishChain, undoPoint,
+  edgeLength, polygonArea, perimeter, roomMetrics, rescaleEdge,
 } from "./js/walls.js";
 
 // ─── Tests: view.js ───────────────────────────────────────────────────────────
@@ -769,6 +771,287 @@ describe("walls.js — allVertices", () => {
     const all = allVertices();
     const found = all.some(v => v.x === 3 && v.y === 3);
     if (!found) throw new Error("corner not in allVertices");
+  });
+});
+
+// ─── Tests: walls.js — LLD 9: edgeLength ────────────────────────────────────
+
+describe("walls.js — edgeLength", () => {
+  it("horizontal edge 3m → 3", () => {
+    expect(edgeLength({x:0,y:0},{x:3,y:0})).toBeCloseTo(3, 9);
+  });
+  it("vertical edge 4m → 4", () => {
+    expect(edgeLength({x:0,y:0},{x:0,y:4})).toBeCloseTo(4, 9);
+  });
+  it("diagonal 3-4-5 → 5", () => {
+    expect(edgeLength({x:0,y:0},{x:3,y:4})).toBeCloseTo(5, 9);
+  });
+  it("zero-length edge → 0", () => {
+    expect(edgeLength({x:1,y:1},{x:1,y:1})).toBe(0);
+  });
+});
+
+// ─── Tests: walls.js — LLD 9: polygonArea ────────────────────────────────────
+
+describe("walls.js — polygonArea", () => {
+  it("2m × 3m rectangle → area 6", () => {
+    const verts = [{x:0,y:0},{x:2,y:0},{x:2,y:3},{x:0,y:3}];
+    expect(polygonArea(verts)).toBeCloseTo(6, 9);
+  });
+  it("unit square → area 1", () => {
+    const verts = [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}];
+    expect(polygonArea(verts)).toBeCloseTo(1, 9);
+  });
+  it("right triangle with legs 3,4 → area 6", () => {
+    const verts = [{x:0,y:0},{x:3,y:0},{x:0,y:4}];
+    expect(polygonArea(verts)).toBeCloseTo(6, 9);
+  });
+  it("winding independent: CW and CCW give same absolute area", () => {
+    const ccw = [{x:0,y:0},{x:2,y:0},{x:2,y:3},{x:0,y:3}];
+    const cw  = [{x:0,y:0},{x:0,y:3},{x:2,y:3},{x:2,y:0}];
+    expect(polygonArea(ccw)).toBeCloseTo(polygonArea(cw), 9);
+  });
+  it("< 3 verts → area 0", () => {
+    expect(polygonArea([])).toBe(0);
+    expect(polygonArea([{x:0,y:0}])).toBe(0);
+    expect(polygonArea([{x:0,y:0},{x:1,y:0}])).toBe(0);
+  });
+});
+
+// ─── Tests: walls.js — LLD 9: perimeter ─────────────────────────────────────
+
+describe("walls.js — perimeter", () => {
+  it("2m × 3m rectangle (closed) → perimeter 10", () => {
+    const verts = [{x:0,y:0},{x:2,y:0},{x:2,y:3},{x:0,y:3}];
+    expect(perimeter(verts, true)).toBeCloseTo(10, 9);
+  });
+  it("2m × 3m rectangle open (3 edges, no close) → 8", () => {
+    const verts = [{x:0,y:0},{x:2,y:0},{x:2,y:3},{x:0,y:3}];
+    expect(perimeter(verts, false)).toBeCloseTo(8, 9);
+  });
+  it("right triangle closed → 3 + 4 + 5 = 12", () => {
+    const verts = [{x:0,y:0},{x:3,y:0},{x:0,y:4}];
+    expect(perimeter(verts, true)).toBeCloseTo(12, 9);
+  });
+  it("perimeter(verts, true) includes closing edge; (verts, false) does not", () => {
+    const verts = [{x:0,y:0},{x:5,y:0},{x:5,y:5}];
+    const open   = perimeter(verts, false);
+    const closed = perimeter(verts, true);
+    // open = 5 + 5 = 10 ; closed = 10 + sqrt(50)
+    expect(open).toBeCloseTo(10, 9);
+    expect(closed).toBeCloseTo(10 + Math.sqrt(50), 9);
+  });
+});
+
+// ─── Tests: walls.js — LLD 9: roomMetrics ────────────────────────────────────
+
+describe("walls.js — roomMetrics", () => {
+  it("2m × 3m closed room → area 6, perimeter 10", () => {
+    const room = { id:"r0", closed:true, verts:[{x:0,y:0},{x:2,y:0},{x:2,y:3},{x:0,y:3}] };
+    const m = roomMetrics(room);
+    expect(m.area).toBeCloseTo(6, 9);
+    expect(m.perimeter).toBeCloseTo(10, 9);
+  });
+  it("open room → area 0, perimeter = polyline length", () => {
+    const room = { id:"r0", closed:false, verts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}] };
+    const m = roomMetrics(room);
+    expect(m.area).toBe(0);
+    expect(m.perimeter).toBeCloseTo(7, 9); // 3 + 4
+  });
+});
+
+// ─── Tests: walls.js — LLD 9: rescaleEdge ────────────────────────────────────
+
+describe("walls.js — rescaleEdge", () => {
+  it("rescales horizontal edge to target length exactly", () => {
+    const room = { id:"r0", closed:false, verts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}] };
+    const ok = rescaleEdge(room, 0, 5);
+    expect(ok).toBe(true);
+    expect(edgeLength(room.verts[0], room.verts[1])).toBeCloseTo(5, 9);
+    // First endpoint unchanged
+    expect(room.verts[0].x).toBe(0);
+    expect(room.verts[0].y).toBe(0);
+  });
+  it("direction preserved: rescaled edge collinear with original", () => {
+    const room = { id:"r0", closed:false, verts:[{x:0,y:0},{x:3,y:4}] };
+    const origDx = 3; const origDy = 4;
+    const origLen = Math.sqrt(origDx*origDx+origDy*origDy);
+    rescaleEdge(room, 0, 10);
+    const newB = room.verts[1];
+    // Direction should match: newB / 10 ≈ [3/5, 4/5]
+    expect(newB.x / 10).toBeCloseTo(origDx / origLen, 8);
+    expect(newB.y / 10).toBeCloseTo(origDy / origLen, 8);
+  });
+  it("closing edge (edgeIndex n-1) of closed room moves verts[0], keeps verts[n-1] fixed", () => {
+    // Triangle
+    const v0 = {x:0,y:0}; const v1 = {x:3,y:0}; const v2 = {x:0,y:4};
+    const room = { id:"r0", closed:true, verts:[v0,v1,v2] };
+    // Edge index 2 = verts[2]→verts[0]
+    const origV2x = room.verts[2].x;
+    const origV2y = room.verts[2].y;
+    const ok = rescaleEdge(room, 2, 2);
+    expect(ok).toBe(true);
+    // verts[2] unchanged
+    expect(room.verts[2].x).toBe(origV2x);
+    expect(room.verts[2].y).toBe(origV2y);
+    // new closing edge length = 2
+    expect(edgeLength(room.verts[2], room.verts[0])).toBeCloseTo(2, 9);
+  });
+  it("no-op guard: targetLenM < MIN_SEG_M → returns false, geometry unchanged", () => {
+    const room = { id:"r0", closed:false, verts:[{x:0,y:0},{x:3,y:0}] };
+    const before = {x: room.verts[1].x, y: room.verts[1].y};
+    const ok = rescaleEdge(room, 0, MIN_SEG_M * 0.5);
+    expect(ok).toBe(false);
+    expect(room.verts[1].x).toBe(before.x);
+    expect(room.verts[1].y).toBe(before.y);
+  });
+  it("no-op guard: zero-length edge → returns false", () => {
+    const room = { id:"r0", closed:false, verts:[{x:0,y:0},{x:0,y:0}] };
+    const ok = rescaleEdge(room, 0, 2);
+    expect(ok).toBe(false);
+  });
+  it("no-op guard: out-of-range edgeIndex → returns false", () => {
+    const room = { id:"r0", closed:false, verts:[{x:0,y:0},{x:1,y:0},{x:2,y:0}] };
+    // max valid edgeIndex for open room with 3 verts = 1 (edges 0-1, 1-2)
+    expect(rescaleEdge(room, 2, 1)).toBe(false);
+    expect(rescaleEdge(room, -1, 1)).toBe(false);
+  });
+});
+
+// ─── Tests: units.js — LLD 9: M2_PER_FT2 ────────────────────────────────────
+
+describe("units.js — M2_PER_FT2", () => {
+  it("M2_PER_FT2 = M_PER_FT * M_PER_FT", () => {
+    expect(M2_PER_FT2).toBeCloseTo(M_PER_FT * M_PER_FT, 12);
+  });
+});
+
+// ─── Tests: units.js — LLD 9: parseLen ───────────────────────────────────────
+
+describe("units.js — parseLen in metric mode", () => {
+  it('"3.2" → 3.2 (metric)', () => {
+    setUnit("m");
+    expect(parseLen("3.2")).toBeCloseTo(3.2, 9);
+  });
+  it('"3.2m" → 3.2 (explicit suffix)', () => {
+    setUnit("m");
+    expect(parseLen("3.2m")).toBeCloseTo(3.2, 9);
+  });
+  it('"10ft" → 3.048 (suffix override in metric mode)', () => {
+    setUnit("m");
+    expect(parseLen("10ft")).toBeCloseTo(10 * M_PER_FT, 9);
+  });
+  it('"10\'" → 3.048 (foot-prime suffix override in metric mode)', () => {
+    setUnit("m");
+    expect(parseLen("10'")).toBeCloseTo(10 * M_PER_FT, 9);
+  });
+});
+
+describe("units.js — parseLen in imperial mode", () => {
+  it('"10" → 3.048 (imperial, no suffix)', () => {
+    setUnit("ft");
+    expect(parseLen("10")).toBeCloseTo(10 * M_PER_FT, 9);
+  });
+  it('"3.2m" → 3.2 (metric suffix override in imperial mode)', () => {
+    setUnit("ft");
+    expect(parseLen("3.2m")).toBeCloseTo(3.2, 9);
+  });
+  it('"5ft" → 5 * M_PER_FT (explicit suffix in imperial mode)', () => {
+    setUnit("ft");
+    expect(parseLen("5ft")).toBeCloseTo(5 * M_PER_FT, 9);
+  });
+});
+
+describe("units.js — parseLen rejections", () => {
+  it('empty string → null', () => {
+    setUnit("m");
+    expect(parseLen("")).toBe(null);
+  });
+  it('"abc" → null', () => {
+    setUnit("m");
+    expect(parseLen("abc")).toBe(null);
+  });
+  it('"0" → null (≤ 0)', () => {
+    setUnit("m");
+    expect(parseLen("0")).toBe(null);
+  });
+  it('"-2" → null (negative)', () => {
+    setUnit("m");
+    expect(parseLen("-2")).toBe(null);
+  });
+  it('"1,5" → null (locale comma)', () => {
+    setUnit("m");
+    expect(parseLen("1,5")).toBe(null);
+  });
+  it('"Infinity" → null (non-finite)', () => {
+    setUnit("m");
+    expect(parseLen("Infinity")).toBe(null);
+  });
+});
+
+// ─── Tests: units.js — LLD 9: fmtArea ────────────────────────────────────────
+
+describe("units.js — fmtArea", () => {
+  it("metric: 6 m² → '6.00'", () => {
+    setUnit("m");
+    expect(fmtArea(6)).toBe("6.00");
+  });
+  it("imperial: 6 m² → ft² to 1dp", () => {
+    setUnit("ft");
+    expect(fmtArea(6)).toBe((6 / M2_PER_FT2).toFixed(1));
+  });
+  it("metric: 0 → '0.00'", () => {
+    setUnit("m");
+    expect(fmtArea(0)).toBe("0.00");
+  });
+});
+
+// ─── Tests: units.js — LLD 9: areaUnitLabel ──────────────────────────────────
+
+describe("units.js — areaUnitLabel", () => {
+  it("returns 'm²' in metric", () => {
+    setUnit("m");
+    expect(areaUnitLabel()).toBe("m²");
+  });
+  it("returns 'ft²' in imperial", () => {
+    setUnit("ft");
+    expect(areaUnitLabel()).toBe("ft²");
+  });
+});
+
+// ─── Tests: units.js — LLD 9: lossless round-trip ────────────────────────────
+
+describe("units.js — lossless round-trip", () => {
+  it("parseLen(fmtLen(L) + 'm') in metric re-parses to L within display precision", () => {
+    setUnit("m");
+    const L = 3.14159;
+    const formatted = fmtLen(L); // "3.14"
+    const reparsed = parseLen(formatted + "m");
+    if (reparsed === null) throw new Error(`parseLen returned null for "${formatted}m"`);
+    // fmtLen gives 2dp in metric, so within 0.005 m
+    if (Math.abs(reparsed - L) > 0.005) {
+      throw new Error(`Round-trip failed: L=${L}, formatted="${formatted}", reparsed=${reparsed}`);
+    }
+  });
+  it("parseLen(fmtLen(L) + 'ft') in imperial re-parses to L within display precision", () => {
+    setUnit("ft");
+    const L = 3.048; // exactly 10 ft
+    const formatted = fmtLen(L); // "10.0"
+    const reparsed = parseLen(formatted + "ft");
+    if (reparsed === null) throw new Error(`parseLen returned null for "${formatted}ft"`);
+    // fmtLen gives 1dp in ft, so within ~0.03 m
+    if (Math.abs(reparsed - L) > 0.031) {
+      throw new Error(`Round-trip failed: L=${L}, formatted="${formatted}", reparsed=${reparsed}`);
+    }
+  });
+  it("unit toggle does not mutate geometry model", () => {
+    resetModel();
+    model.rooms.push({ id:"r0", closed:true, verts:[{x:0,y:0},{x:2,y:0},{x:2,y:3},{x:0,y:3}] });
+    const beforeX = model.rooms[0].verts[1].x;
+    setUnit("m");
+    setUnit("ft");
+    setUnit("m");
+    expect(model.rooms[0].verts[1].x).toBe(beforeX);
   });
 });
 
