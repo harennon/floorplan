@@ -17,6 +17,13 @@ import { scheduleRender } from "./surface.js";
 /** @type {string|null} */
 let _highlightRoomId = null;
 
+/**
+ * Last-rendered snapshot, used to dirty-check before rebuilding DOM rows.
+ * Each element: { id, areaText, perimText, label }
+ * @type {Array<{id:string, areaText:string, perimText:string, label:string}>}
+ */
+let _lastRows = [];
+
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
 let _panel  = null;
@@ -34,6 +41,10 @@ export function init(refs) {
   _list   = refs.list;
   _total  = refs.total;
   _toggle = refs.toggle;
+
+  // Reset dirty-check snapshot for new DOM context (supports multiple test rigs).
+  _lastRows = [];
+  _highlightRoomId = null;
 
   // Collapse/expand toggle
   _toggle.addEventListener("click", () => {
@@ -55,6 +66,11 @@ export function init(refs) {
 /**
  * Recompute from model.rooms and update the inspector DOM.
  * Registered via surface.onRender so it runs each frame.
+ *
+ * Uses a dirty-check: existing row DOM nodes are updated in place when the
+ * room set and values are unchanged, so keyboard focus on a row is preserved
+ * across render frames (e.g. when hover triggers scheduleRender). Rows are
+ * only torn down and rebuilt when the room list structure changes.
  */
 export function update() {
   if (!_panel) return;
@@ -71,10 +87,44 @@ export function update() {
   // Update total display
   _total.textContent = fmtArea(totalArea) + " " + areaUnitLabel();
 
-  // Rebuild the room list
-  while (_list.firstChild) _list.removeChild(_list.firstChild);
+  // Build the new row descriptors
+  /** @type {Array<{id:string, areaText:string, perimText:string, label:string}>} */
+  const newRows = closedRooms.map((room, idx) => {
+    const m = roomMetrics(room);
+    return {
+      id:       room.id,
+      label:    "Room " + (idx + 1),
+      areaText: fmtArea(m.area) + " " + areaUnitLabel(),
+      perimText: fmtLen(m.perimeter) + " " + unitLabel(),
+    };
+  });
 
-  if (closedRooms.length === 0) {
+  // Dirty-check: if the row structure and all text values match, update
+  // textContent in place so existing DOM nodes (and any keyboard focus) are
+  // preserved.  Only tear down when structure actually changes.
+  const structureUnchanged =
+    newRows.length === _lastRows.length &&
+    newRows.every((r, i) => r.id === _lastRows[i].id);
+
+  if (structureUnchanged) {
+    // Update text content in place.
+    const rowEls = _list.querySelectorAll(".measure-row");
+    newRows.forEach((r, i) => {
+      const row = rowEls[i];
+      if (!row) return;
+      row.querySelector(".measure-row-label").textContent  = r.label;
+      row.querySelector(".measure-row-area").textContent   = r.areaText;
+      row.querySelector(".measure-row-perim").textContent  = r.perimText;
+    });
+    _lastRows = newRows;
+    return;
+  }
+
+  // Structure changed — rebuild from scratch.
+  while (_list.firstChild) _list.removeChild(_list.firstChild);
+  _lastRows = [];
+
+  if (newRows.length === 0) {
     const hint = document.createElement("div");
     hint.className = "measure-empty";
     hint.textContent = "Draw a closed room to see its area";
@@ -82,32 +132,32 @@ export function update() {
     return;
   }
 
-  for (let idx = 0; idx < closedRooms.length; idx++) {
-    const room = closedRooms[idx];
-    const m = roomMetrics(room);
+  for (const r of newRows) {
     const row = document.createElement("div");
     row.className = "measure-row";
-    row.setAttribute("data-room-id", room.id);
+    row.setAttribute("data-room-id", r.id);
     row.setAttribute("tabindex", "0");
     row.setAttribute("role", "row");
 
-    const label = document.createElement("span");
-    label.className = "measure-row-label";
-    label.textContent = "Room " + (idx + 1);
+    const labelEl = document.createElement("span");
+    labelEl.className = "measure-row-label";
+    labelEl.textContent = r.label;
 
     const areaEl = document.createElement("span");
     areaEl.className = "measure-row-area";
-    areaEl.textContent = fmtArea(m.area) + " " + areaUnitLabel();
+    areaEl.textContent = r.areaText;
 
     const perimEl = document.createElement("span");
     perimEl.className = "measure-row-perim";
-    perimEl.textContent = fmtLen(m.perimeter) + " " + unitLabel();
+    perimEl.textContent = r.perimText;
 
-    row.appendChild(label);
+    row.appendChild(labelEl);
     row.appendChild(areaEl);
     row.appendChild(perimEl);
     _list.appendChild(row);
   }
+
+  _lastRows = newRows;
 }
 
 /** The room currently highlighted by hover/focus, or null. */

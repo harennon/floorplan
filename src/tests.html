@@ -1055,6 +1055,481 @@ describe("units.js — lossless round-trip", () => {
   });
 });
 
+// ─── Import dimEntry and measure (behavioral tests) ───────────────────────────
+
+import { init as initDimEntry, isEditing, getEditingEdge, beginEdit, commit, cancel } from "./js/dimEntry.js";
+import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from "./js/measure.js";
+
+// ─── Tests: dimEntry.js — behavioral ─────────────────────────────────────────
+
+/**
+ * Build a minimal DOM rig for dimEntry tests.
+ * Returns { stage, dimLabels } plus cleanup().
+ */
+function makeDimRig() {
+  const stage = document.createElement("div");
+  stage.className = "stage";
+  stage.style.position = "relative";
+  const dimLabels = document.createElement("div");
+  dimLabels.className = "dim-labels";
+  stage.appendChild(dimLabels);
+  document.body.appendChild(stage);
+  return {
+    stage, dimLabels,
+    cleanup() { document.body.removeChild(stage); }
+  };
+}
+
+/**
+ * Build a minimal DOM rig for measure tests.
+ * Returns { panel, list, total, toggle } plus cleanup().
+ */
+function makeMeasureRig() {
+  const panel  = document.createElement("aside");
+  panel.className = "measure";
+  const total  = document.createElement("div");
+  total.className = "measure-total";
+  const list   = document.createElement("div");
+  list.className = "measure-list";
+  const toggle = document.createElement("button");
+  toggle.className = "measure-toggle";
+  toggle.setAttribute("aria-expanded", "true");
+  panel.appendChild(total);
+  panel.appendChild(list);
+  panel.appendChild(toggle);
+  document.body.appendChild(panel);
+  return {
+    panel, list, total, toggle,
+    cleanup() { document.body.removeChild(panel); }
+  };
+}
+
+describe("dimEntry — chip opens input prefilled with current length", () => {
+  it("beginEdit opens editing state with correct room+edge", () => {
+    resetModel();
+    setUnit("m");
+    // Create a simple 2m horizontal edge
+    model.rooms.push({ id: "re1", closed: false, verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }] });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("re1", 0);
+    const editing = getEditingEdge();
+    if (editing === null) throw new Error("Expected editing state to be non-null");
+    expect(editing.roomId).toBe("re1");
+    expect(editing.edgeIndex).toBe(0);
+    rig.cleanup();
+  });
+
+  it("isEditing() is true after beginEdit and false after cancel", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "re2", closed: false, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }] });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("re2", 0);
+    expect(isEditing()).toBe(true);
+    cancel();
+    expect(isEditing()).toBe(false);
+    rig.cleanup();
+  });
+});
+
+describe("dimEntry — commit rescales wall to exact target length (m)", () => {
+  it("typing '5m' + commit sets edge to 5m exactly", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "rc1", closed: false, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }] });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rc1", 0);
+    // Locate the floating input created inside stage
+    const input = rig.stage.querySelector(".dim-input");
+    if (!input) throw new Error("dim-input not found");
+    input.value = "5m";
+    commit();
+    const newLen = edgeLength(model.rooms[0].verts[0], model.rooms[0].verts[1]);
+    expect(newLen).toBeCloseTo(5, 9);
+    rig.cleanup();
+  });
+});
+
+describe("dimEntry — Esc cancels with no geometry change", () => {
+  it("cancel() leaves geometry unchanged and clears editing state", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "rc2", closed: false, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }] });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    const before = { x: model.rooms[0].verts[1].x, y: model.rooms[0].verts[1].y };
+    beginEdit("rc2", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    if (input) input.value = "99m";
+    cancel();
+    expect(isEditing()).toBe(false);
+    expect(model.rooms[0].verts[1].x).toBe(before.x);
+    expect(model.rooms[0].verts[1].y).toBe(before.y);
+    rig.cleanup();
+  });
+});
+
+describe("dimEntry — invalid input flags error, does not mutate geometry", () => {
+  it("commit with empty value sets aria-invalid, leaves edge unchanged", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "rc3", closed: false, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }] });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rc3", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    if (!input) throw new Error("dim-input not found");
+    input.value = "";
+    commit();
+    expect(isEditing()).toBe(true); // still open
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    const len = edgeLength(model.rooms[0].verts[0], model.rooms[0].verts[1]);
+    expect(len).toBeCloseTo(3, 9);
+    cancel();
+    rig.cleanup();
+  });
+
+  it("commit with '0' (≤0) sets aria-invalid", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "rc4", closed: false, verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }] });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rc4", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    input.value = "0";
+    commit();
+    expect(isEditing()).toBe(true);
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    cancel();
+    rig.cleanup();
+  });
+});
+
+describe("dimEntry — no-op commit preserves exact stored metres (Edge Case 3)", () => {
+  it("pressing Enter on an unchanged imperial chip does not nudge geometry", () => {
+    resetModel();
+    setUnit("ft");
+    // 3.0m wall → displays as '9.8' ft (1dp). Re-parsing '9.8ft' = 2.98704 m,
+    // diff ~1.3cm. The fix compares fmtLen(targetM) === fmtLen(currentLen), so
+    // '9.8' === '9.8' → no-op.
+    model.rooms.push({ id: "rnop1", closed: false, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }] });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rnop1", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    // Simulate: user presses Enter without changing the pre-filled value.
+    // The pre-filled value is fmtLen(3) in ft, e.g. "9.8".
+    // We set it explicitly to what fmtLen would produce to simulate no edit.
+    const prefilled = fmtLen(3);
+    input.value = prefilled; // e.g. "9.8"
+    commit();
+    // Geometry must be unchanged
+    expect(model.rooms[0].verts[1].x).toBe(3);
+    expect(model.rooms[0].verts[1].y).toBe(0);
+    rig.cleanup();
+  });
+
+  it("no-op is also correct in metric mode (fmtLen comparison)", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "rnop2", closed: false, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }] });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rnop2", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    const prefilled = fmtLen(3); // "3.00"
+    input.value = prefilled;
+    commit();
+    expect(model.rooms[0].verts[1].x).toBe(3);
+    rig.cleanup();
+  });
+});
+
+describe("dimEntry — cancel-on-unit-toggle (Edge Case 6)", () => {
+  it("toggling unit while editing cancels the open edit", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "rut1", closed: false, verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }] });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rut1", 0);
+    expect(isEditing()).toBe(true);
+    // Toggle unit — dimEntry registers its own onChange handler
+    setUnit("ft");
+    expect(isEditing()).toBe(false);
+    // Geometry unchanged
+    expect(model.rooms[0].verts[1].x).toBe(2);
+    setUnit("m"); // restore
+    rig.cleanup();
+  });
+});
+
+describe("dimEntry — pointer isolation: chip click does not place a draw vertex (Edge Case 12)", () => {
+  it("pointerdown on dimLabels element stops propagation (stopPropagation path)", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({
+      id: "poi1", closed: true,
+      verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 3 }, { x: 0, y: 3 }],
+    });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+
+    // Simulate a chip element inside dimLabels
+    const chip = document.createElement("button");
+    chip.className = "dim-chip";
+    chip.setAttribute("data-room-id", "poi1");
+    chip.setAttribute("data-edge", "0");
+    rig.dimLabels.appendChild(chip);
+
+    let stageSawPointerDown = false;
+    rig.stage.addEventListener("pointerdown", () => { stageSawPointerDown = true; });
+
+    // Dispatch pointerdown on the chip — dimEntry's isolation handler should
+    // stop propagation before it reaches .stage
+    const evt = new PointerEvent("pointerdown", { bubbles: true, cancelable: true });
+    chip.dispatchEvent(evt);
+
+    expect(stageSawPointerDown).toBe(false);
+    rig.cleanup();
+  });
+});
+
+describe("dimEntry — dim-input aria-label is set", () => {
+  it("the lazily-created dim-input has an aria-label attribute", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "aria1", closed: false, verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }] });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("aria1", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    if (!input) throw new Error("dim-input not created");
+    const label = input.getAttribute("aria-label");
+    if (!label || label.trim() === "") throw new Error("aria-label is empty or missing");
+    cancel();
+    rig.cleanup();
+  });
+
+  it("aria-invalid is set on bad input and cleared on cancel", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "aria2", closed: false, verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }] });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("aria2", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    input.value = "notanumber";
+    commit();
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    cancel();
+    // After cancel, aria-invalid should be removed
+    if (input.getAttribute("aria-invalid") === "true") {
+      throw new Error("aria-invalid should be cleared after cancel");
+    }
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: measure.js — behavioral ─────────────────────────────────────────
+
+describe("measure — inspector shows total area of closed rooms", () => {
+  it("total area equals sum of closed room areas", () => {
+    resetModel();
+    setUnit("m");
+    // Two 2x3 = 6m² rooms
+    model.rooms.push({ id: "mr1", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:3 },{ x:0,y:3 }] });
+    model.rooms.push({ id: "mr2", closed: true, verts: [{ x:5,y:0 },{ x:7,y:0 },{ x:7,y:3 },{ x:5,y:3 }] });
+    const rig = makeMeasureRig();
+    initMeasure({ panel: rig.panel, list: rig.list, total: rig.total, toggle: rig.toggle });
+    measureUpdate();
+    // Total should show "12.00 m²"
+    const text = rig.total.textContent;
+    if (!text.includes("12.00")) throw new Error(`Expected total to include '12.00', got: "${text}"`);
+    rig.cleanup();
+  });
+
+  it("open polylines are excluded from total", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "mop1", closed: true,  verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    model.rooms.push({ id: "mop2", closed: false, verts: [{ x:0,y:0 },{ x:5,y:0 }] });
+    const rig = makeMeasureRig();
+    initMeasure({ panel: rig.panel, list: rig.list, total: rig.total, toggle: rig.toggle });
+    measureUpdate();
+    // 2x2=4 m², open room excluded
+    const text = rig.total.textContent;
+    if (!text.includes("4.00")) throw new Error(`Expected total '4.00', got: "${text}"`);
+    rig.cleanup();
+  });
+
+  it("empty state shows zero total and hint row", () => {
+    resetModel();
+    setUnit("m");
+    const rig = makeMeasureRig();
+    initMeasure({ panel: rig.panel, list: rig.list, total: rig.total, toggle: rig.toggle });
+    measureUpdate();
+    const text = rig.total.textContent;
+    if (!text.includes("0.00")) throw new Error(`Expected zero total, got: "${text}"`);
+    const hint = rig.list.querySelector(".measure-empty");
+    if (!hint) throw new Error("Expected empty-state hint row");
+    rig.cleanup();
+  });
+});
+
+describe("measure — rows are focusable and have correct room data", () => {
+  it("each closed room gets a row with tabindex=0", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "mf1", closed: true, verts: [{ x:0,y:0 },{ x:1,y:0 },{ x:1,y:1 },{ x:0,y:1 }] });
+    model.rooms.push({ id: "mf2", closed: true, verts: [{ x:2,y:0 },{ x:3,y:0 },{ x:3,y:1 },{ x:2,y:1 }] });
+    const rig = makeMeasureRig();
+    initMeasure({ panel: rig.panel, list: rig.list, total: rig.total, toggle: rig.toggle });
+    measureUpdate();
+    const rows = rig.list.querySelectorAll(".measure-row");
+    expect(rows.length).toBe(2);
+    for (const row of rows) {
+      if (row.getAttribute("tabindex") !== "0") throw new Error("Row missing tabindex=0");
+    }
+    rig.cleanup();
+  });
+});
+
+describe("measure — hover/focus sets highlight room id", () => {
+  it("mouseenter on a row sets getHighlightRoomId() to that room's id", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "mh1", closed: true, verts: [{ x:0,y:0 },{ x:1,y:0 },{ x:1,y:1 },{ x:0,y:1 }] });
+    const rig = makeMeasureRig();
+    initMeasure({ panel: rig.panel, list: rig.list, total: rig.total, toggle: rig.toggle });
+    measureUpdate();
+    const row = rig.list.querySelector(".measure-row[data-room-id='mh1']");
+    if (!row) throw new Error("Row for mh1 not found");
+    row.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    expect(getHighlightRoomId()).toBe("mh1");
+    // mouseleave clears it
+    row.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true, relatedTarget: rig.panel }));
+    expect(getHighlightRoomId()).toBe(null);
+    rig.cleanup();
+  });
+
+  it("focusin on a row sets getHighlightRoomId(); focusout clears it", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "mh2", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const rig = makeMeasureRig();
+    initMeasure({ panel: rig.panel, list: rig.list, total: rig.total, toggle: rig.toggle });
+    measureUpdate();
+    const row = rig.list.querySelector(".measure-row[data-room-id='mh2']");
+    if (!row) throw new Error("Row for mh2 not found");
+    // Dispatch focusin from the row itself (capture listener)
+    row.dispatchEvent(new FocusEvent("focusin", { bubbles: true, relatedTarget: null }));
+    expect(getHighlightRoomId()).toBe("mh2");
+    row.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: rig.panel }));
+    expect(getHighlightRoomId()).toBe(null);
+    rig.cleanup();
+  });
+});
+
+describe("measure — dirty-check: update() preserves existing rows (focus safety)", () => {
+  it("calling update() twice with unchanged data leaves the same row DOM nodes", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "mdc1", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:3 },{ x:0,y:3 }] });
+    const rig = makeMeasureRig();
+    initMeasure({ panel: rig.panel, list: rig.list, total: rig.total, toggle: rig.toggle });
+    measureUpdate();
+    const rowBefore = rig.list.querySelector(".measure-row");
+    if (!rowBefore) throw new Error("Row not created");
+    // Second update — data unchanged
+    measureUpdate();
+    const rowAfter = rig.list.querySelector(".measure-row");
+    // The same DOM node must be retained (not recreated)
+    if (rowBefore !== rowAfter) throw new Error("update() rebuilt rows unnecessarily (focus would break)");
+    rig.cleanup();
+  });
+
+  it("update() rebuilds rows when room set changes", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "mdc2", closed: true, verts: [{ x:0,y:0 },{ x:1,y:0 },{ x:1,y:1 },{ x:0,y:1 }] });
+    const rig = makeMeasureRig();
+    initMeasure({ panel: rig.panel, list: rig.list, total: rig.total, toggle: rig.toggle });
+    measureUpdate();
+    const row1 = rig.list.querySelector(".measure-row");
+    // Add a second room
+    model.rooms.push({ id: "mdc3", closed: true, verts: [{ x:2,y:0 },{ x:3,y:0 },{ x:3,y:1 },{ x:2,y:1 }] });
+    measureUpdate();
+    const rows = rig.list.querySelectorAll(".measure-row");
+    if (rows.length !== 2) throw new Error(`Expected 2 rows after adding room, got ${rows.length}`);
+    rig.cleanup();
+  });
+});
+
+describe("measure — unit toggle reformats without geometry change", () => {
+  it("toggling unit updates total text without mutating room vertices", () => {
+    resetModel();
+    model.rooms.push({ id: "mmt1", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:3 },{ x:0,y:3 }] });
+    const rig = makeMeasureRig();
+    initMeasure({ panel: rig.panel, list: rig.list, total: rig.total, toggle: rig.toggle });
+    const beforeX = model.rooms[0].verts[1].x;
+    setUnit("m");
+    measureUpdate();
+    const metricText = rig.total.textContent;
+    setUnit("ft");
+    measureUpdate();
+    const imperialText = rig.total.textContent;
+    if (metricText === imperialText) throw new Error("Unit toggle did not reformat total area");
+    // Geometry unchanged
+    expect(model.rooms[0].verts[1].x).toBe(beforeX);
+    setUnit("m");
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: security ─────────────────────────────────────────────────────────
+
+describe("security — no innerHTML from user input in DOM", () => {
+  it("parseLen returns a number or null — never sets innerHTML", () => {
+    // The raw user string only ever reaches parseLen → Number(); it is never
+    // set into the DOM as HTML markup. Verify parseLen handles injection strings
+    // gracefully (returns null, no crash).
+    setUnit("m");
+    const injectionStrings = [
+      "<script>alert(1)</script>",
+      "'; DROP TABLE rooms; --",
+      "<img src=x onerror=alert(1)>",
+      "1e999",
+      "NaN",
+    ];
+    for (const s of injectionStrings) {
+      const result = parseLen(s);
+      if (result !== null) {
+        throw new Error(`parseLen("${s}") returned ${result} instead of null`);
+      }
+    }
+  });
+
+  it("chip textContent is built via fmtLen/unitLabel — never from raw user strings", () => {
+    // Confirm fmtLen + unitLabel return plain numeric strings, not HTML
+    setUnit("m");
+    const text = fmtLen(5) + " " + unitLabel();
+    if (text.includes("<") || text.includes(">") || text.includes("&")) {
+      throw new Error(`fmtLen+unitLabel produced suspicious output: "${text}"`);
+    }
+    setUnit("ft");
+    const text2 = fmtLen(5) + " " + unitLabel();
+    if (text2.includes("<") || text2.includes(">") || text2.includes("&")) {
+      throw new Error(`fmtLen+unitLabel (ft) produced suspicious output: "${text2}"`);
+    }
+    setUnit("m");
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 
 render();

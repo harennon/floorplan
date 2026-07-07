@@ -12,7 +12,7 @@
  */
 
 import { fmtLen, parseLen, onChange as onUnitChange } from "./units.js";
-import { model, edgeLength, rescaleEdge, MIN_SEG_M } from "./walls.js";
+import { model, edgeLength, rescaleEdge } from "./walls.js";
 import { scheduleRender } from "./surface.js";
 import { worldToScreen } from "./view.js";
 
@@ -38,6 +38,14 @@ let _dimLabels = null;
 export function init(refs) {
   _stage = refs.stage;
   _dimLabels = refs.dimLabels;
+
+  // Reset the lazily-created input so it is recreated inside the new stage.
+  // (In production init is called once; in tests multiple rigs may be created.)
+  if (_input) {
+    _input.style.display = "none";
+    _input = null;
+  }
+  _editing = null;
 
   // Event delegation: click on any .dim-chip inside dimLabels
   _dimLabels.addEventListener("click", (e) => {
@@ -157,14 +165,19 @@ export function commit() {
   const room = model.rooms.find(r => r.id === _editing.roomId);
   if (!room) { cancel(); return; }
 
-  // No-op if the value is within display precision (lossless round-trip, Edge Case 3)
+  // No-op if the value is within display precision (lossless round-trip, Edge Case 3).
+  // Compare the re-formatted display strings rather than using a fixed geometric
+  // epsilon: if the user pressed Enter without changing the value, the displayed
+  // string will re-parse to the same display string, regardless of the active
+  // unit. This is the only way to make the check unit-agnostic: an imperial chip
+  // shows 1 decimal place (≈ 3 cm resolution), so a fixed epsilon of MIN_SEG_M
+  // (0.1 mm) would let rounding drift through.
   const n = room.verts.length;
   const iA = _editing.edgeIndex;
   const iB = room.closed ? (iA + 1) % n : iA + 1;
   const currentLen = edgeLength(room.verts[iA], room.verts[iB]);
-  const epsilon = MIN_SEG_M;
 
-  if (Math.abs(targetM - currentLen) < epsilon) {
+  if (fmtLen(targetM) === fmtLen(currentLen)) {
     // No meaningful change — just close the editor
     _closeInput();
     scheduleRender();
