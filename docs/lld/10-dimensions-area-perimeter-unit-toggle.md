@@ -57,21 +57,43 @@ Key decisions and rationale:
    with its own transient state, so it lives in a new small module `dimensions.js`,
    mirroring how `wallTool.js` is separate from `wallRender.js`.
 
-5. **Direction A ("Living Chips") — binding.** Dimension labels are pill chips sitting on
+5. **Accessibility container split — resolves the `aria-hidden` conflict.** The existing
+   `.labels` overlay is declared `aria-hidden="true"` (`index.html`). That is correct for
+   its current contents — the transient draft/rubber-band length chips are decorative
+   drawing aids — but a **focusable** element placed inside an `aria-hidden` subtree is
+   hidden from assistive tech while still being tab-reachable, which is a WCAG violation.
+   Since this LLD makes dimension chips keyboard-focusable interactive controls
+   (`tabindex="0"`, `role="button"`, Enter/Space), they **must not** live in `.labels`.
+   Resolution: add **one new persistent overlay** `.dim-layer` as a sibling of `.labels`
+   inside `.stage`, **not** `aria-hidden`, using the *identical* screen-space coordinate
+   scheme (`worldToScreen` → `left`/`top` px, `pointer-events: none` on the container,
+   children opt back in). Interactive dimension chips **and** the room tags (which carry
+   meaningful area/perimeter text AT should read) render into `.dim-layer`. The draft /
+   rubber-band length chips stay in the still-`aria-hidden` `.labels`. This keeps the
+   reused coordinate scheme intact while making the interactive/informational content
+   exposed to assistive tech. (Alternative considered: remove `aria-hidden` from `.labels`
+   and re-tag each draft chip — rejected because the transient draft chips would then spam
+   the a11y tree on every pointer move during drawing.)
+
+6. **Direction A ("Living Chips") — binding.** Dimension labels are pill chips sitting on
    each wall centerline; clicking one opens inline numeric editing in place. Area &
    perimeter are shown as an on-canvas tag stamped at the room centroid. There is **no**
-   docked "Measure" inspector panel (that was the dropped hybrid/B element). Reference
-   mockup: `dimensions-area-perimeter-unit-toggle.html` (the A mockup).
+   docked "Measure" inspector panel (that was the dropped hybrid/B element). The **binding
+   spec for this direction is the prose in the Frontend Design section below** — it is
+   self-sufficient. (No reference mockup file currently exists under `design-mockups/`;
+   earlier drafts named `dimensions-area-perimeter-unit-toggle.html`, but that artifact was
+   never committed. Do not chase it; if a mockup is desired later, route to
+   `frontend-architect`.)
    - *Known weakness:* centroid tags can collide/overflow on very small rooms. This LLD
      specifies a min-size gate (see Edge Cases). If QA finds the collision severe, flag it
      back to the CEO/design-reviewer — do **not** silently reintroduce the B inspector.
 
-6. **Rescale semantics: fix the edge's start vertex, move its end vertex.** Editing the
+7. **Rescale semantics: fix the edge's start vertex, move its end vertex.** Editing the
    chip for edge *i* (vertices `A = verts[i]`, `B = verts[(i+1) % n]`) keeps `A` fixed and
    repositions `B` along the current `A→B` unit direction so that `|AB|` equals the typed
    length exactly. Because `B` is shared with the next edge, the adjacent edge `(B,C)`
    changes length/angle as a side effect — this is the simplest honest model for "set this
-   wall to exactly X" and is what the mockup implies. (Alternative considered: rigidly
+   wall to exactly X" and matches Direction A's on-canvas edit model. (Alternative considered: rigidly
    translate the whole downstream vertex run to preserve other edges — rejected for v1 as
    more surprising and heavier; revisit if users complain.)
 
@@ -145,9 +167,9 @@ Constants reused: `MIN_SEG_M` (minimum accepted edge length).
 ```js
 /**
  * Bind the dimension-edit interaction.
- * @param {{ labels: HTMLElement, stage: HTMLElement,
+ * @param {{ dimLayer: HTMLElement, stage: HTMLElement,
  *           onCommit: () => void }} refs
- *   labels   - the .labels overlay that holds .dim-chip elements
+ *   dimLayer - the .dim-layer overlay (NOT aria-hidden) that holds .dim-chip elements
  *   stage    - stage element the floating edit <input> is appended to
  *   onCommit - called after a successful rescale (wired to scheduleRender)
  */
@@ -158,9 +180,10 @@ export function isEditing() { /* => boolean */ }
 ```
 
 Behavior:
-- One **delegated** `click` (and `keydown`→Enter/Space for a11y) listener on `labels`
+- One **delegated** `click` (and `keydown`→Enter/Space for a11y) listener on `dimLayer`
   catches `.dim-chip` activation. Chips are rebuilt every render, so delegation avoids
-  per-chip listener churn.
+  per-chip listener churn. Because `.dim-layer` is **not** `aria-hidden`, the focusable
+  chips are correctly exposed to assistive tech (see Approach #5).
 - On activate: read `data-room-id` and `data-edge-index` from the chip; open a floating
   `<input type="text" inputmode="decimal">` positioned at the chip's screen midpoint,
   pre-filled with the current length in the active unit (bare number, no unit suffix),
@@ -174,31 +197,45 @@ Behavior:
 ### `wallRender.js` (extend — render committed dimension chips + room tags)
 
 ```js
-// New private helpers (no signature change to render()):
+// init() signature gains one param: the .dim-layer overlay (interactive/AT-exposed).
+//   init(gWorld, gDraft, gSnap, labelsEl, dimLayerEl, getSnap)
+// New private helpers:
 //   _addDimChip(metres, sx, sy, roomId, edgeIndex)  -> interactive committed-edge chip
 //   _renderRoomTag(room, ppm)                        -> centroid area+perimeter tag
 ```
 
+- Committed dimension chips and room tags render into the new **`.dim-layer`** overlay
+  (not `.labels`), because they are interactive/informational and must be exposed to
+  assistive tech (Approach #5). `_clearLabels`-style clearing applies to both overlays
+  each render.
 - In `_renderRoom`, after drawing geometry, iterate edges and stamp `_addDimChip` at each
   edge midpoint (screen space). Chips carry `data-room-id` / `data-edge-index`.
 - For `room.closed && verts.length >= 3`, stamp one `_renderRoomTag` at `centroid(verts)`,
   showing `fmtArea(area) areaUnitLabel()` and `fmtLen(perimeter) unitLabel()`.
 - The existing draft/rubber-band length chips (`length-chip--live` / `--placed`) are
-  **unchanged** and remain non-interactive.
+  **unchanged**, remain non-interactive, and continue to render into the still-`aria-hidden`
+  `.labels` overlay.
 
 ### `main.js` (wire new module)
 
-Grab the `.labels` and `stage` refs (already available), call `dimensions.init({ labels,
-stage, onCommit: scheduleRender })`. No change to existing init order/contracts.
+Grab the `.labels`, new `.dim-layer`, and `stage` refs, pass `dimLayer` into
+`wallRender.init(...)`, and call `dimensions.init({ dimLayer, stage, onCommit:
+scheduleRender })`. No change to existing init order/contracts.
 
-### `index.html` (CSS + no new persistent DOM)
+### `index.html` (CSS + one new persistent overlay)
 
-New styles only (chips/tag/input are created dynamically):
+- **New DOM:** add `<div class="dim-layer"></div>` as a sibling of `.labels` inside
+  `.stage`. It is **not** `aria-hidden` (unlike `.labels`), so its interactive chips and
+  informational room tags are exposed to assistive tech.
+
+New styles:
+- `.dim-layer` — full-stage absolute overlay, same positioning as `.labels`,
+  `pointer-events: none` (children opt back in). Not aria-hidden.
 - `.dim-chip` — gold-outline pill on the wall centerline, `pointer-events: auto`,
-  `cursor: pointer`, `:hover`/`:focus` emphasis. (The `.labels` overlay stays
-  `pointer-events: none`; chips opt back in individually.)
+  `cursor: pointer`, `:hover`/`:focus`(-visible) emphasis. Rendered with `tabindex="0"`
+  and `role="button"` (set in JS).
 - `.dim-input` — floating inline editor matching chip typography (`--font-mono`), gold
-  border, appended to `.stage`, `z-index` above labels.
+  border, appended to `.stage`, `z-index` above the overlays.
 - `.room-tag` — centroid tag: two mono lines (area, perimeter), panel background,
   `pointer-events: none`, `transform: translate(-50%, -50%)`.
 
@@ -244,16 +281,27 @@ New styles only (chips/tag/input are created dynamically):
    Chips remain; tag reappears on zoom-in. Flag back if QA finds this insufficient.
 9. **Self-intersecting polygon** — shoelace still yields a finite absolute area; we display
    it without special-casing (v1 does not police non-simple polygons).
-10. **Unit toggled while an edit input is open** — close/cancel the open edit on
-    `units.onChange` (its pre-filled value was in the old unit; reinterpreting silently
-    would be lossy/confusing).
+10. **Unit toggled while an edit input is open** — resolved by commit-on-blur ordering,
+    not a cancel path. The `IMPERIAL`/`METRIC` buttons live in the top-right HUD, outside
+    `.stage`, and there is **no** keyboard shortcut for unit change. So activating a toggle
+    always blurs the open `<input>` **first**, which fires the normal commit-on-blur:
+    `parseLen(value)` is evaluated **in the old (still-active) unit** and applied, and the
+    input is torn down. Only *then* does `setUnit` fire `units.onChange` → `scheduleRender`,
+    which re-formats the now-committed chips/tag into the new unit. Net behavior: the typed
+    value commits in the unit it was typed in (never silently reinterpreted), and no edit
+    input is ever left open across a unit change. `dimensions.js` therefore needs **no**
+    explicit `units.onChange` handler for the open-input case; the blur handler already
+    guarantees the invariant. (If a future keyboard unit-toggle is added that could fire
+    without blurring, it must first call a `dimensions.commitOpen()` helper — noted for
+    that future work, not implemented in v1.)
 11. **Keyboard tool shortcuts vs. the input** — `wallTool._onKeyDown` already ignores keys
     when `document.activeElement` is an INPUT/TEXTAREA/SELECT, so typing `w`/`v`/Backspace
     in the dimension input won't switch tools or undo. The new input relies on this
     existing guard; Esc/Enter are handled locally in dimensions.js.
 12. **Pan/zoom while editing** — the floating input re-positions via `view.onChange`; a
     large pan that scrolls the edge off-screen still keeps the input reachable (it stays
-    within the stage). Edit is not auto-cancelled by view changes (only by unit change).
+    within the stage). Edit is not auto-cancelled by view changes; a unit toggle commits it
+    via blur first (Edge Case 10), never cancels it.
 13. **Room deleted/emptied mid-edit** — (no delete path in this phase, but) if the target
     room/edge is gone at commit time, `findRoom` returns null and commit is a no-op.
 14. **Very long edge / large area** — formatters use fixed decimals; no thousands grouping
@@ -263,16 +311,19 @@ New styles only (chips/tag/input are created dynamically):
 
 **Binding frontend decision: Direction A — "Living Chips."** (Issue #7 has two
 `Frontend decision:` comments; the human's later `Frontend decision: A` overrides the
-CEO's earlier "Hybrid". The human comment wins — so no docked Measure inspector.)
-Reference mockup: `dimensions-area-perimeter-unit-toggle.html`.
+CEO's earlier "Hybrid". The human comment wins — so no docked Measure inspector.) This
+prose is the self-sufficient binding spec; there is no committed reference mockup (see
+Approach #6).
 
 - **Dimension chips (`.dim-chip`).** A gold-outline pill centered on each committed wall
-  edge's midpoint (screen space), reading e.g. `10.5 ft`. Reuses the existing `.labels`
-  overlay coordinate scheme and `--font-mono` / gold palette tokens already in
-  `index.html`. Unlike the muted draft chips, these are *interactive*: `pointer-events:
-  auto`, `cursor: pointer`, with hover/focus emphasis and `tabindex="0"` +
-  `role="button"` for keyboard activation. They visually echo the draft `length-chip` so
-  the language is consistent (placed→interactive is the only jump).
+  edge's midpoint (screen space), reading e.g. `10.5 ft`. Rendered into the new
+  **`.dim-layer`** overlay (not the `aria-hidden` `.labels`), reusing the identical
+  `worldToScreen`→`left`/`top` px coordinate scheme and the `--font-mono` / gold palette
+  tokens already in `index.html`. Unlike the muted draft chips, these are *interactive*:
+  `pointer-events: auto`, `cursor: pointer`, with hover/focus emphasis and `tabindex="0"`
+  + `role="button"` for keyboard activation — which is why they live in the non-aria-hidden
+  layer (Approach #5). They visually echo the draft `length-chip` so the language is
+  consistent (placed→interactive is the only jump).
 - **Inline edit (`.dim-input`).** Clicking/activating a chip swaps it for a floating
   `<input type="text" inputmode="decimal">` in the same spot, gold border, chip
   typography, pre-filled with the current length as a bare number in the active unit and
@@ -331,7 +382,17 @@ No new third-party deps, no build step (static ES modules under `src/`).
   (assert `model.rooms` bytes unchanged across toggle) — lossless toggle criterion.
 - Chip click opens the input pre-filled in the active unit; Enter commits, Esc cancels,
   blur commits.
+- Toggling units while an input is open commits the typed value in the **old** unit (via
+  blur) then re-formats into the new unit; no input is left open and the value is not
+  silently reinterpreted (Edge Case 10).
 - Open polyline shows edge chips but no room tag; small/zoomed-out room suppresses the tag.
+
+**Accessibility**
+- Interactive `.dim-chip` elements are within a container that is **not** `aria-hidden`
+  (`.dim-layer`), and each exposes `role="button"` + `tabindex="0"`; assert they are both
+  focusable and present in the accessibility tree (regression guard for the resolved
+  `aria-hidden` conflict). Draft `length-chip`s in `.labels` remain aria-hidden.
+- Enter/Space on a focused chip opens the editor (keyboard parity with click).
 
 **Regression / non-goals**
 - Draft chain length chips remain non-interactive and visually unchanged.
