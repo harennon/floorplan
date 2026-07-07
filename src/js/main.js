@@ -53,7 +53,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initHud(elZoom, elScale, elCursor, elUnitImp, elUnitMet);
 
   // wallRender binds mount points + getSnap
-  initWallRender(gWorld, gDraft, gSnap, labelsEl, getSnap, null);
+  initWallRender(gWorld, gDraft, gSnap, labelsEl, getSnap);
 
   // wallTool binds rail, hud, keyboard
   initWallTool({

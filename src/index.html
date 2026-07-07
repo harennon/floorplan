@@ -423,8 +423,9 @@
         .tool-key-hint { display: none; }
       }
       @media (max-width: 480px) {
-        .tool-rail-toggle { display: flex; }
         .tool-rail { left: 0.5rem; }
+        /* toggle visible only when rail is collapsed; hidden in default expanded state */
+        .tool-rail.rail--collapsed ~ .tool-rail-toggle { display: flex; }
       }
     </style>
   </head>
@@ -479,8 +480,8 @@
         </button>
       </nav>
 
-      <!-- Rail collapse toggle (mobile ≤480px) -->
-      <button class="tool-rail-toggle" aria-label="Toggle tool rail" aria-hidden="true">≡</button>
+      <!-- Rail collapse toggle (mobile ≤480px); shown only when rail is collapsed -->
+      <button class="tool-rail-toggle" aria-label="Toggle tool rail">≡</button>
 
       <!-- Brand -->
       <div class="brand" aria-hidden="true">

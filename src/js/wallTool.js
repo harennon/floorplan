@@ -71,6 +71,8 @@ export function init(refs) {
   // Keyboard
   window.addEventListener("keydown", _onKeyDown);
   window.addEventListener("keyup",   _onKeyUp);
+  // Reset Alt free-draw when the window loses focus (Alt+Tab etc. miss the keyup)
+  window.addEventListener("blur", _onWindowBlur);
 
   // Set initial tool state
   setTool("wall");
@@ -134,6 +136,14 @@ export function onClick(sx, sy) {
   });
   _snap = snap;
   placeVertex(snap);
+  // If the tap closed the room (or the chain is now empty for any reason),
+  // clear the snap so the green ring / HUD 'close room' lingers are not
+  // displayed until the next pointer interaction.
+  if (model.chain.length === 0) {
+    _snap = null;
+    _hideSnapTag();
+    _updateHudSnap();
+  }
   _updateRail();
   scheduleRender();
 }
@@ -208,6 +218,13 @@ function _onKeyUp(e) {
   }
 }
 
+function _onWindowBlur() {
+  if (_altHeld) {
+    _altHeld = false;
+    scheduleRender();
+  }
+}
+
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 function _updateRail() {
@@ -219,6 +236,29 @@ function _updateRail() {
   _btnWall.setAttribute("aria-pressed",   drawing             ? "true" : "false");
   _btnUndo.disabled   = !hasChain;
   _btnFinish.disabled = !hasChain;
+
+  // Update toggle icon to match active tool (collapsed state shows active-tool button)
+  _updateToggleIcon();
+}
+
+/**
+ * Mirror the active tool's SVG icon into the rail toggle so collapsed state
+ * shows the active tool rather than a generic hamburger.
+ */
+function _updateToggleIcon() {
+  if (!_railToggleEl) return;
+  const activeBtn = _tool === "wall" ? _btnWall : _btnSelect;
+  if (!activeBtn) return;
+  const srcSvg = activeBtn.querySelector("svg");
+  if (!srcSvg) return;
+  // Replace toggle content with a clone of the active tool icon
+  _railToggleEl.innerHTML = "";
+  _railToggleEl.appendChild(srcSvg.cloneNode(true));
+  // Keep aria-label in sync
+  _railToggleEl.setAttribute(
+    "aria-label",
+    (_tool === "wall" ? "Draw wall tool — tap to expand tool rail" : "Select tool — tap to expand tool rail")
+  );
 }
 
 function _updateCursor() {

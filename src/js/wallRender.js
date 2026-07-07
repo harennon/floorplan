@@ -36,7 +36,6 @@ let _labelsEl = null;
 
 // Injected getter for current snap (set via init, populated by wallTool)
 let _getSnap = () => null;
-let _getCursorScreen = () => null; // for snap-tag positioning
 
 /**
  * Bind mount points. Called once from main.js.
@@ -45,15 +44,13 @@ let _getCursorScreen = () => null; // for snap-tag positioning
  * @param {SVGGElement} gSnap
  * @param {HTMLElement} labelsEl
  * @param {()=>import("./walls.js").Snap|null} getSnap
- * @param {()=>({x:number,y:number}|null)} getCursorScreen
  */
-export function init(gWorld, gDraft, gSnap, labelsEl, getSnap, getCursorScreen) {
+export function init(gWorld, gDraft, gSnap, labelsEl, getSnap) {
   _gWorld   = gWorld;
   _gDraft   = gDraft;
   _gSnap    = gSnap;
   _labelsEl = labelsEl;
   _getSnap  = getSnap;
-  _getCursorScreen = getCursorScreen;
 }
 
 /**
