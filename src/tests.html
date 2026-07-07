@@ -825,9 +825,9 @@ describe("walls.js — perimeter", () => {
     const verts = [{x:0,y:0},{x:2,y:0},{x:2,y:3},{x:0,y:3}];
     expect(perimeter(verts, true)).toBeCloseTo(10, 9);
   });
-  it("2m × 3m rectangle open (3 edges, no close) → 8", () => {
+  it("2m × 3m rectangle open (3 edges, no close) → 7", () => {
     const verts = [{x:0,y:0},{x:2,y:0},{x:2,y:3},{x:0,y:3}];
-    expect(perimeter(verts, false)).toBeCloseTo(8, 9);
+    expect(perimeter(verts, false)).toBeCloseTo(7, 9);
   });
   it("right triangle closed → 3 + 4 + 5 = 12", () => {
     const verts = [{x:0,y:0},{x:3,y:0},{x:0,y:4}];
