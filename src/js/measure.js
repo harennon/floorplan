@@ -141,14 +141,17 @@ export function update() {
 
     const labelEl = document.createElement("span");
     labelEl.className = "measure-row-label";
+    labelEl.setAttribute("role", "cell");
     labelEl.textContent = r.label;
 
     const areaEl = document.createElement("span");
     areaEl.className = "measure-row-area";
+    areaEl.setAttribute("role", "cell");
     areaEl.textContent = r.areaText;
 
     const perimEl = document.createElement("span");
     perimEl.className = "measure-row-perim";
+    perimEl.setAttribute("role", "cell");
     perimEl.textContent = r.perimText;
 
     row.appendChild(labelEl);
