@@ -1,0 +1,812 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>floorplan · wall drawing (mockup)</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      /* ── Design tokens (carried from src/index.html) ──────────────────── */
+      :root {
+        --bg:         #14140f;
+        --bg-deep:    #100f0b;
+        --ink:        #ece7d6;
+        --muted:      #8f8a78;
+        --gold:       #c9a84c;
+        --gold-soft:  rgba(201, 168, 76, 0.55);
+
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --grid-axis:  rgba(201, 168, 76, 0.34);
+
+        --panel:      rgba(20, 20, 15, 0.72);
+        --hairline:   rgba(201, 168, 76, 0.18);
+
+        /* Wall / drawing feedback */
+        --wall-body:   rgba(201, 168, 76, 0.30);
+        --wall-line:   #d9be6e;
+        --draft:       #d9be6e;
+        --snap-grid:   #7fd0c8;   /* teal — grid snap reads distinct from gold ink */
+        --snap-point:  #e0b64f;   /* gold — endpoint snap */
+        --snap-close:  #9cd67a;   /* green — room will close */
+        --room-fill:   rgba(201, 168, 76, 0.07);
+
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+      }
+
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .app {
+        position: fixed;
+        inset: 0;
+        font-family: var(--font-ui);
+        color: var(--ink);
+        background: var(--bg-deep);
+      }
+
+      /* ── Stage ────────────────────────────────────────────────────────── */
+      .stage {
+        position: absolute;
+        inset: 0;
+        touch-action: none;
+        cursor: crosshair;   /* draw mode */
+        background: radial-gradient(
+          ellipse 90% 80% at 50% 50%,
+          var(--bg) 0%, var(--bg-deep) 100%
+        );
+      }
+      #drawing { display: block; width: 100%; height: 100%; }
+
+      #drawing .grid-fine  { stroke: var(--grid-fine);  stroke-width: 1;   shape-rendering: crispEdges; }
+      #drawing .grid-major { stroke: var(--grid-major); stroke-width: 1;   shape-rendering: crispEdges; }
+      #drawing .grid-axis  { stroke: var(--grid-axis);  stroke-width: 1.5; shape-rendering: crispEdges; }
+
+      /* Committed rooms / walls */
+      #drawing .room-fill  { fill: var(--room-fill); stroke: none; }
+      #drawing .wall-body  { fill: none; stroke: var(--wall-body); stroke-linejoin: round; stroke-linecap: round; }
+      #drawing .wall-line  { fill: none; stroke: var(--wall-line); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+      #drawing .vertex     { fill: var(--bg-deep); stroke: var(--wall-line); stroke-width: 1.5; }
+
+      /* Rubber-band draft segment */
+      #drawing .draft-body { fill: none; stroke: var(--wall-body); stroke-linejoin: round; stroke-linecap: round; }
+      #drawing .draft-line {
+        fill: none; stroke: var(--draft); stroke-width: 1.5;
+        stroke-dasharray: 7 5; stroke-linecap: round;
+        opacity: 0.9;
+      }
+      #drawing .draft-fill { fill: var(--room-fill); stroke: none; }
+
+      /* Snap indicator glyphs */
+      #drawing .snap-grid  { stroke: var(--snap-grid);  fill: none; stroke-width: 1.5; }
+      #drawing .snap-grid-dot { fill: var(--snap-grid); }
+      #drawing .snap-point { stroke: var(--snap-point); fill: none; stroke-width: 2; }
+      #drawing .snap-close { stroke: var(--snap-close); fill: rgba(156,214,122,0.14); stroke-width: 2.5; }
+      #drawing .snap-free  { stroke: var(--muted); fill: none; stroke-width: 1.25; }
+      .pulse { animation: pulse 1.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      @keyframes pulse {
+        0%,100% { opacity: 0.45; }
+        50%     { opacity: 1; }
+      }
+
+      /* Length labels (rendered as HTML, positioned over the SVG) */
+      .labels { position: absolute; inset: 0; pointer-events: none; }
+      .len-label {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        font-family: var(--font-mono);
+        font-size: 0.66rem;
+        letter-spacing: 0.02em;
+        color: var(--ink);
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        padding: 0.05rem 0.35rem;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+      .len-label.draft {
+        color: var(--bg-deep);
+        background: var(--draft);
+        border-color: var(--draft);
+        font-weight: 500;
+      }
+      .len-label.muted { color: var(--muted); background: rgba(20,20,15,0.55); }
+
+      /* ── Grain ────────────────────────────────────────────────────────── */
+      .grain {
+        position: absolute; inset: 0; pointer-events: none;
+        mix-blend-mode: overlay; opacity: 0.035;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+        background-size: 200px 200px;
+      }
+
+      /* ── Shared floating chrome ───────────────────────────────────────── */
+      .brand { position: absolute; top: 1.25rem; left: 1.25rem; pointer-events: none; user-select: none; }
+      .brand-name { font-family: var(--font-display); font-size: 1.1rem; font-weight: 700; color: var(--gold); line-height: 1.2; }
+      .brand-sub  { font-family: var(--font-mono); font-size: 0.65rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+
+      .unit-toggle { position: absolute; top: 1.25rem; right: 1.25rem; display: flex; gap: 0.25rem; }
+      .unit-toggle button {
+        background: var(--panel); border: 1px solid var(--hairline); color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.06em;
+        padding: 0.3rem 0.7rem; border-radius: 100px; cursor: pointer;
+        transition: color 0.15s, border-color 0.15s;
+      }
+      .unit-toggle button[aria-pressed="true"] { color: var(--gold); border-color: var(--gold-soft); }
+      .unit-toggle button:hover:not([aria-pressed="true"]) { color: var(--ink); }
+
+      .zoom-cluster { position: absolute; bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); left: 1.25rem; display: flex; flex-direction: column; gap: 0.2rem; }
+      .zoom-cluster button {
+        background: var(--panel); border: 1px solid var(--hairline); color: var(--ink);
+        font-family: var(--font-mono); font-size: 0.85rem; width: 2.2rem; height: 2.2rem;
+        border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+        transition: color 0.15s, border-color 0.15s;
+      }
+      .zoom-cluster button:hover { border-color: var(--gold-soft); color: var(--gold); }
+      .zoom-cluster .reset-btn { font-size: 0.6rem; letter-spacing: 0.05em; }
+
+      .hud { position: absolute; bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); right: 1.25rem; display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem; pointer-events: none; }
+      .hud-cell { background: var(--panel); border: 1px solid var(--hairline); padding: 0.2rem 0.55rem; border-radius: 4px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+      .hud-cell span { color: var(--ink); }
+      .hud-cell.snap-readout span { color: var(--snap-grid); }
+      @media (max-width: 560px) { .hud-cursor { display: none; } }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         DIRECTION A — "Draft Dock": a persistent left tool rail.
+         ═══════════════════════════════════════════════════════════════════ */
+      .tool-rail {
+        position: absolute;
+        top: 50%; left: 1.25rem; transform: translateY(-50%);
+        display: flex; flex-direction: column; gap: 0.3rem;
+        padding: 0.4rem; border-radius: 14px;
+        background: var(--panel); border: 1px solid var(--hairline);
+        backdrop-filter: blur(6px);
+      }
+      .tool-rail button {
+        width: 2.6rem; height: 2.6rem; border-radius: 10px;
+        background: transparent; border: 1px solid transparent; color: var(--muted);
+        cursor: pointer; display: flex; align-items: center; justify-content: center;
+        transition: color 0.15s, background 0.15s, border-color 0.15s;
+      }
+      .tool-rail button svg { width: 20px; height: 20px; }
+      .tool-rail button:hover { color: var(--ink); background: rgba(201,168,76,0.06); }
+      .tool-rail button[aria-pressed="true"] {
+        color: var(--gold); border-color: var(--gold-soft); background: rgba(201,168,76,0.10);
+      }
+      .tool-rail .rail-sep { height: 1px; margin: 0.15rem 0.4rem; background: var(--hairline); }
+      .tool-rail button:disabled { opacity: 0.35; cursor: default; }
+      .tool-rail .tool-key {
+        position: absolute; right: -0.35rem; bottom: -0.35rem;
+        font-family: var(--font-mono); font-size: 0.5rem; color: var(--muted);
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+         DIRECTION B — "Minimal": no rail; a contextual action bar that
+         only appears while a wall chain is in progress.
+         ═══════════════════════════════════════════════════════════════════ */
+      .action-bar {
+        position: absolute;
+        bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+        left: 50%; transform: translateX(-50%) translateY(0.4rem);
+        display: flex; align-items: center; gap: 0.55rem;
+        padding: 0.4rem 0.5rem 0.4rem 0.75rem; border-radius: 100px;
+        background: var(--panel); border: 1px solid var(--hairline);
+        backdrop-filter: blur(6px);
+        opacity: 0; pointer-events: none;
+        transition: opacity 0.22s ease, transform 0.22s ease;
+      }
+      .action-bar.live { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+      .action-bar .snap-chip {
+        font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em;
+        text-transform: uppercase; padding: 0.25rem 0.55rem; border-radius: 100px;
+        border: 1px solid var(--hairline); color: var(--muted); min-width: 4.7rem; text-align: center;
+      }
+      .action-bar .snap-chip[data-type="grid"]  { color: var(--snap-grid);  border-color: var(--snap-grid); }
+      .action-bar .snap-chip[data-type="point"] { color: var(--snap-point); border-color: var(--snap-point); }
+      .action-bar .snap-chip[data-type="close"] { color: var(--snap-close); border-color: var(--snap-close); }
+      .action-bar .bar-len { font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink); }
+      .action-bar .bar-len b { color: var(--gold); font-weight: 500; }
+      .action-bar .bar-sep { width: 1px; height: 1.3rem; background: var(--hairline); }
+      .action-bar button {
+        background: transparent; border: 1px solid var(--hairline); color: var(--ink);
+        font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.04em;
+        padding: 0.3rem 0.6rem; border-radius: 100px; cursor: pointer;
+        transition: color 0.15s, border-color 0.15s;
+      }
+      .action-bar button:hover { color: var(--gold); border-color: var(--gold-soft); }
+
+      /* Contextual snap-type label that floats near the cursor (dir B accent) */
+      .snap-tag {
+        position: absolute; pointer-events: none;
+        transform: translate(0.9rem, -1.6rem);
+        font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.12em;
+        text-transform: uppercase; padding: 0.08rem 0.35rem; border-radius: 3px;
+        opacity: 0; transition: opacity 0.12s;
+      }
+      .snap-tag[data-type="grid"]  { color: var(--snap-grid);  background: rgba(127,208,200,0.10); }
+      .snap-tag[data-type="point"] { color: var(--snap-point); background: rgba(224,182,79,0.12); }
+      .snap-tag[data-type="close"] { color: var(--snap-close); background: rgba(156,214,122,0.14); }
+      body.dir-b .snap-tag.show { opacity: 1; }
+
+      /* Hint */
+      .hint {
+        position: absolute; bottom: 30%; left: 50%; transform: translateX(-50%);
+        background: var(--panel); border: 1px solid var(--hairline);
+        padding: 0.5rem 1rem; border-radius: 8px;
+        font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+        white-space: nowrap; pointer-events: none; transition: opacity 0.4s;
+      }
+      .hint.dismissed { opacity: 0; }
+
+      /* Visibility switches driven by body direction class */
+      .tool-rail  { display: none; }
+      .action-bar { display: none; }
+      body.dir-a .tool-rail  { display: flex; }
+      body.dir-a .hud-snap   { display: none; }   /* dir A shows snap on the label + rail only */
+      body.dir-b .action-bar { display: flex; }
+
+      /* ── Direction switcher (mockup-only meta control) ────────────────── */
+      .dir-switch {
+        position: absolute; top: 1.25rem; left: 50%; transform: translateX(-50%);
+        display: flex; align-items: center; gap: 0.5rem; z-index: 50;
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 100px; padding: 0.3rem 0.4rem 0.3rem 0.85rem;
+        backdrop-filter: blur(6px);
+      }
+      .dir-switch .ds-lead { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+      .dir-switch button {
+        background: transparent; border: 1px solid transparent; color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.05em;
+        padding: 0.3rem 0.7rem; border-radius: 100px; cursor: pointer;
+        transition: color 0.15s, background 0.15s, border-color 0.15s;
+      }
+      .dir-switch button[aria-pressed="true"] { color: var(--gold); border-color: var(--gold-soft); background: rgba(201,168,76,0.10); }
+      .dir-switch button:hover:not([aria-pressed="true"]) { color: var(--ink); }
+
+      @media (max-width: 640px) {
+        .brand { top: auto; bottom: 4.3rem; }
+        .dir-switch { top: 0.7rem; }
+      }
+    </style>
+  </head>
+  <body class="dir-a">
+    <div class="app">
+      <!-- Drawing stage -->
+      <div class="stage" id="stage">
+        <svg id="drawing" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <g id="grid"></g>
+          <g id="world"></g>
+          <g id="draft"></g>
+          <g id="snap"></g>
+        </svg>
+      </div>
+
+      <!-- Length labels layer (HTML over SVG) -->
+      <div class="labels" id="labels"></div>
+
+      <!-- Grain -->
+      <div class="grain" aria-hidden="true"></div>
+
+      <!-- Brand -->
+      <div class="brand" aria-hidden="true">
+        <div class="brand-name">floorplan</div>
+        <div class="brand-sub">warm blueprint</div>
+      </div>
+
+      <!-- Direction switcher (mockup meta) -->
+      <div class="dir-switch" role="group" aria-label="Mockup direction">
+        <span class="ds-lead">chrome</span>
+        <button id="dir-a-btn" aria-pressed="true">A · Draft Dock</button>
+        <button id="dir-b-btn" aria-pressed="false">B · Minimal</button>
+      </div>
+
+      <!-- Unit toggle -->
+      <div class="unit-toggle" role="group" aria-label="Unit system">
+        <button id="unit-imperial" aria-pressed="true">IMPERIAL</button>
+        <button id="unit-metric"   aria-pressed="false">METRIC</button>
+      </div>
+
+      <!-- DIRECTION A: tool rail -->
+      <div class="tool-rail" role="toolbar" aria-label="Tools">
+        <button id="tool-select" aria-pressed="false" title="Select (V)" aria-label="Select">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l6 17 2.5-6.5L20 11z"/></svg>
+        </button>
+        <button id="tool-wall" aria-pressed="true" title="Draw wall (W)" aria-label="Draw wall">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18h18"/><path d="M6 18V9l6-4 6 4v9"/></svg>
+        </button>
+        <div class="rail-sep"></div>
+        <button id="tool-undo" title="Undo point (⌫)" aria-label="Undo point">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10H9"/></svg>
+        </button>
+        <button id="tool-done" title="Finish (Esc / Enter)" aria-label="Finish chain">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+      </div>
+
+      <!-- Zoom cluster -->
+      <div class="zoom-cluster" aria-label="Zoom controls">
+        <button id="btn-zoom-in"    aria-label="Zoom in">+</button>
+        <button id="btn-zoom-out"   aria-label="Zoom out">−</button>
+        <button id="btn-zoom-reset" class="reset-btn" aria-label="Reset zoom">RESET</button>
+      </div>
+
+      <!-- HUD -->
+      <div class="hud" aria-live="off">
+        <div class="hud-cell hud-snap snap-readout">Snap&nbsp;<span id="hud-snap">grid</span></div>
+        <div class="hud-cell">Zoom&nbsp;<span id="hud-zoom">140%</span></div>
+        <div class="hud-cell hud-cursor">Cursor&nbsp;<span id="hud-cursor">—</span></div>
+      </div>
+
+      <!-- DIRECTION B: contextual action bar -->
+      <div class="action-bar" id="action-bar" role="toolbar" aria-label="Wall drawing">
+        <span class="snap-chip" id="bar-snap" data-type="grid">GRID</span>
+        <span class="bar-len" id="bar-len">seg <b>—</b></span>
+        <span class="bar-sep"></span>
+        <button id="bar-undo" aria-label="Undo last point">⌫ point</button>
+        <button id="bar-done" aria-label="Finish wall chain">Esc finish</button>
+      </div>
+
+      <!-- Contextual snap tag (dir B) -->
+      <div class="snap-tag" id="snap-tag" data-type="grid">grid</div>
+
+      <!-- Hint -->
+      <div class="hint" id="hint" role="status">
+        Click to place wall points · snaps to grid &amp; existing corners · click the first point to close the room
+      </div>
+    </div>
+
+    <script>
+      // ══════════════════════════════════════════════════════════════════
+      //  Mockup wall-drawing engine (self-contained; not production code).
+      //  Fixed view (no pan/zoom) so the demo stays focused on wall drawing.
+      // ══════════════════════════════════════════════════════════════════
+      const NS = "http://www.w3.org/2000/svg";
+
+      // ── View (fixed) ─────────────────────────────────────────────────
+      const PX_PER_M = 56;            // demo scale: 1m = 56px (≈ chooseGridStep target)
+      const STEP_M   = 1;             // fine grid step in metres (snap grid)
+      const view = { scale: PX_PER_M, panX: 90, panY: 90 };
+
+      const WALL_M      = 0.12;       // wall thickness in metres (blueprint body)
+      const SNAP_PT_PX  = 15;         // endpoint snap tolerance (screen px)
+      const CLOSE_PX    = 16;         // room-close snap tolerance (screen px)
+
+      function w2s(p) { return { x: p.x * view.scale + view.panX, y: p.y * view.scale + view.panY }; }
+      function s2w(x, y) { return { x: (x - view.panX) / view.scale, y: (y - view.panY) / view.scale }; }
+
+      // ── Units ────────────────────────────────────────────────────────
+      const M_PER_FT = 0.3048;
+      let unit = "ft";
+      function fmtLen(m) { return unit === "ft" ? (m / M_PER_FT).toFixed(1) : m.toFixed(2); }
+      function unitLabel() { return unit; }
+
+      // ── State ────────────────────────────────────────────────────────
+      // A pre-drawn closed room so committed walls + fill read immediately.
+      const rooms = [
+        { closed: true, verts: [ {x:1,y:1}, {x:6,y:1}, {x:6,y:4}, {x:1,y:4} ] }
+      ];
+      // In-progress open chain (L-shape half-drawn) the reviewer can continue.
+      let chain = [ {x:8,y:2}, {x:12,y:2}, {x:12,y:5} ];
+      let pointer = { x: 12, y: 5 };        // last known world pointer
+      let snap = { x: 12, y: 5, type: "grid" };
+      let altHeld = false;
+      let hasPointer = true;
+
+      // ── DOM refs ─────────────────────────────────────────────────────
+      const stage   = document.getElementById("stage");
+      const svg     = document.getElementById("drawing");
+      const gGrid   = document.getElementById("grid");
+      const gWorld  = document.getElementById("world");
+      const gDraft  = document.getElementById("draft");
+      const gSnap   = document.getElementById("snap");
+      const labels  = document.getElementById("labels");
+      const hint    = document.getElementById("hint");
+
+      let W = 0, H = 0;
+      function resize() {
+        const r = stage.getBoundingClientRect();
+        W = r.width; H = r.height;
+        svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      }
+
+      // ── Geometry helpers ─────────────────────────────────────────────
+      function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+      function allVerts() {
+        const vs = [];
+        rooms.forEach(r => r.verts.forEach(v => vs.push(v)));
+        chain.forEach(v => vs.push(v));
+        return vs;
+      }
+
+      // Compute the snapped world point + type for a raw screen position.
+      function computeSnap(sx, sy) {
+        const raw = s2w(sx, sy);
+
+        // 1) Room close: near the chain's first vertex with >= 3 points placed.
+        if (chain.length >= 3) {
+          const start = chain[0];
+          const startS = w2s(start);
+          if (Math.hypot(sx - startS.x, sy - startS.y) <= CLOSE_PX) {
+            return { x: start.x, y: start.y, type: "close" };
+          }
+        }
+
+        // 2) Endpoint snap: nearest existing vertex within tolerance.
+        //    (Skip the chain's own last point — that's where the rubber band starts.)
+        let best = null, bestD = SNAP_PT_PX;
+        const skip = chain.length ? chain[chain.length - 1] : null;
+        for (const v of allVerts()) {
+          if (v === skip) continue;
+          const vs = w2s(v);
+          const d = Math.hypot(sx - vs.x, sy - vs.y);
+          if (d <= bestD) { bestD = d; best = v; }
+        }
+        if (best) return { x: best.x, y: best.y, type: "point" };
+
+        // 3) Free draw (hold Alt): raw point, no snap.
+        if (altHeld) return { x: raw.x, y: raw.y, type: "free" };
+
+        // 4) Grid snap (default): nearest fine-grid intersection.
+        return {
+          x: Math.round(raw.x / STEP_M) * STEP_M,
+          y: Math.round(raw.y / STEP_M) * STEP_M,
+          type: "grid",
+        };
+      }
+
+      // ── Render ───────────────────────────────────────────────────────
+      function clear(g) { while (g.firstChild) g.removeChild(g.firstChild); }
+
+      function drawGrid() {
+        clear(gGrid);
+        if (W <= 0 || H <= 0) return;
+        const frag = document.createDocumentFragment();
+        const tl = s2w(0, 0), br = s2w(W, H);
+        const iXMin = Math.floor(tl.x) - 1, iXMax = Math.ceil(br.x) + 1;
+        const iYMin = Math.floor(tl.y) - 1, iYMax = Math.ceil(br.y) + 1;
+        const tier = i => (i === 0 ? "axis" : i % 5 === 0 ? "major" : "fine");
+        for (let ix = iXMin; ix <= iXMax; ix++) {
+          const sx = ix * view.scale + view.panX;
+          frag.appendChild(line(sx, 0, sx, H, `grid-${tier(ix)}`));
+        }
+        for (let iy = iYMin; iy <= iYMax; iy++) {
+          const sy = iy * view.scale + view.panY;
+          frag.appendChild(line(0, sy, W, sy, `grid-${tier(iy)}`));
+        }
+        gGrid.appendChild(frag);
+      }
+
+      function pathFromVerts(verts, close) {
+        let d = "";
+        verts.forEach((v, i) => { const p = w2s(v); d += (i === 0 ? "M" : "L") + p.x + " " + p.y + " "; });
+        if (close) d += "Z";
+        return d.trim();
+      }
+
+      function drawWorld() {
+        clear(gWorld);
+        const bodyW = Math.max(6, WALL_M * view.scale);
+        rooms.forEach(room => {
+          // fill
+          const fill = document.createElementNS(NS, "path");
+          fill.setAttribute("class", "room-fill");
+          fill.setAttribute("d", pathFromVerts(room.verts, true));
+          gWorld.appendChild(fill);
+          // wall body + centerline
+          const body = document.createElementNS(NS, "path");
+          body.setAttribute("class", "wall-body");
+          body.setAttribute("stroke-width", bodyW);
+          body.setAttribute("d", pathFromVerts(room.verts, room.closed));
+          gWorld.appendChild(body);
+          const ln = document.createElementNS(NS, "path");
+          ln.setAttribute("class", "wall-line");
+          ln.setAttribute("d", pathFromVerts(room.verts, room.closed));
+          gWorld.appendChild(ln);
+          room.verts.forEach(v => gWorld.appendChild(vertexDot(v)));
+        });
+      }
+
+      function drawChainAndDraft() {
+        clear(gDraft);
+        clear(gSnap);
+        const bodyW = Math.max(6, WALL_M * view.scale);
+
+        // Committed part of the in-progress chain.
+        if (chain.length >= 1) {
+          if (chain.length >= 2) {
+            const body = document.createElementNS(NS, "path");
+            body.setAttribute("class", "wall-body");
+            body.setAttribute("stroke-width", bodyW);
+            body.setAttribute("d", pathFromVerts(chain, false));
+            gDraft.appendChild(body);
+            const ln = document.createElementNS(NS, "path");
+            ln.setAttribute("class", "wall-line");
+            ln.setAttribute("d", pathFromVerts(chain, false));
+            gDraft.appendChild(ln);
+          }
+          chain.forEach(v => gDraft.appendChild(vertexDot(v)));
+        }
+
+        // Rubber-band draft segment from last chain point to the snapped cursor.
+        if (chain.length >= 1 && hasPointer) {
+          const from = chain[chain.length - 1];
+          const to = { x: snap.x, y: snap.y };
+          const a = w2s(from), b = w2s(to);
+
+          // Room-close preview fill.
+          if (snap.type === "close" && chain.length >= 3) {
+            const fill = document.createElementNS(NS, "path");
+            fill.setAttribute("class", "draft-fill");
+            fill.setAttribute("d", pathFromVerts(chain, true));
+            gDraft.insertBefore(fill, gDraft.firstChild);
+          }
+
+          const draftLine = line(a.x, a.y, b.x, b.y, "draft-line");
+          gDraft.appendChild(draftLine);
+        }
+
+        // Snap indicator glyph at the snapped point.
+        if (hasPointer) drawSnapGlyph(snap);
+      }
+
+      function drawSnapGlyph(s) {
+        const p = w2s(s);
+        if (s.type === "grid") {
+          // Teal diamond + centre dot on the grid intersection.
+          const dm = diamond(p.x, p.y, 7, "snap-grid");
+          gSnap.appendChild(dm);
+          const dot = document.createElementNS(NS, "circle");
+          dot.setAttribute("cx", p.x); dot.setAttribute("cy", p.y);
+          dot.setAttribute("r", 2); dot.setAttribute("class", "snap-grid-dot");
+          gSnap.appendChild(dot);
+        } else if (s.type === "point") {
+          // Gold pulsing ring — locking onto an existing endpoint.
+          const ring = circle(p.x, p.y, 9, "snap-point pulse");
+          gSnap.appendChild(ring);
+          gSnap.appendChild(circle(p.x, p.y, 2.5, "snap-point"));
+        } else if (s.type === "close") {
+          // Green ring + inner dot — this click closes the room.
+          gSnap.appendChild(circle(p.x, p.y, 12, "snap-close pulse"));
+          gSnap.appendChild(circle(p.x, p.y, 4, "snap-close"));
+        } else {
+          // Free: faint crosshair.
+          gSnap.appendChild(line(p.x - 7, p.y, p.x + 7, p.y, "snap-free"));
+          gSnap.appendChild(line(p.x, p.y - 7, p.x, p.y + 7, "snap-free"));
+        }
+      }
+
+      // ── Length labels (HTML overlay) ─────────────────────────────────
+      function drawLabels() {
+        labels.innerHTML = "";
+        const mk = (mx, my, text, cls) => {
+          const el = document.createElement("div");
+          el.className = "len-label " + (cls || "");
+          el.style.left = mx + "px";
+          el.style.top = my + "px";
+          el.textContent = text;
+          labels.appendChild(el);
+        };
+        const segLabel = (a, b, cls) => {
+          const pa = w2s(a), pb = w2s(b);
+          const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
+          const len = dist(a, b);
+          if (len < 0.05) return;
+          mk(mx, my, fmtLen(len) + " " + unitLabel(), cls);
+        };
+        rooms.forEach(room => {
+          const vs = room.verts;
+          for (let i = 0; i < vs.length; i++) {
+            const a = vs[i], b = vs[(i + 1) % vs.length];
+            if (!room.closed && i === vs.length - 1) break;
+            segLabel(a, b, "muted");
+          }
+        });
+        for (let i = 0; i < chain.length - 1; i++) segLabel(chain[i], chain[i + 1], "muted");
+        // Live draft label.
+        if (chain.length >= 1 && hasPointer) {
+          segLabel(chain[chain.length - 1], { x: snap.x, y: snap.y }, "draft");
+        }
+      }
+
+      // ── SVG element helpers ──────────────────────────────────────────
+      function line(x1, y1, x2, y2, cls) {
+        const l = document.createElementNS(NS, "line");
+        l.setAttribute("x1", x1); l.setAttribute("y1", y1);
+        l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+        l.setAttribute("class", cls);
+        return l;
+      }
+      function circle(cx, cy, r, cls) {
+        const c = document.createElementNS(NS, "circle");
+        c.setAttribute("cx", cx); c.setAttribute("cy", cy);
+        c.setAttribute("r", r); c.setAttribute("class", cls);
+        return c;
+      }
+      function diamond(cx, cy, r, cls) {
+        const p = document.createElementNS(NS, "path");
+        p.setAttribute("d", `M${cx} ${cy - r}L${cx + r} ${cy}L${cx} ${cy + r}L${cx - r} ${cy}Z`);
+        p.setAttribute("class", cls);
+        return p;
+      }
+      function vertexDot(v) {
+        const p = w2s(v);
+        return circle(p.x, p.y, 3.2, "vertex");
+      }
+
+      // ── Full render + chrome sync ────────────────────────────────────
+      function render() {
+        drawGrid();
+        drawWorld();
+        drawChainAndDraft();
+        drawLabels();
+        syncChrome();
+      }
+
+      const barEl   = document.getElementById("action-bar");
+      const barSnap = document.getElementById("bar-snap");
+      const barLen  = document.getElementById("bar-len");
+      const hudSnap = document.getElementById("hud-snap");
+      const hudCur  = document.getElementById("hud-cursor");
+      const snapTag = document.getElementById("snap-tag");
+      const toolUndo = document.getElementById("tool-undo");
+      const toolDone = document.getElementById("tool-done");
+
+      const SNAP_TEXT = { grid: "GRID", point: "POINT", close: "CLOSE ROOM", free: "FREE" };
+
+      function syncChrome() {
+        const drawing = chain.length >= 1;
+
+        // HUD
+        hudSnap.textContent = snap.type;
+        hudCur.textContent = `${fmtLen(pointer.x)}, ${fmtLen(pointer.y)} ${unitLabel()}`;
+
+        // Direction A rail buttons enablement
+        toolUndo.disabled = !drawing;
+        toolDone.disabled = !drawing;
+
+        // Direction B action bar
+        barEl.classList.toggle("live", drawing);
+        barSnap.dataset.type = snap.type === "free" ? "grid" : snap.type;
+        barSnap.textContent = SNAP_TEXT[snap.type] || "GRID";
+        if (drawing && hasPointer) {
+          const segLen = dist(chain[chain.length - 1], { x: snap.x, y: snap.y });
+          barLen.innerHTML = `seg <b>${fmtLen(segLen)} ${unitLabel()}</b>`;
+        } else {
+          barLen.innerHTML = `seg <b>—</b>`;
+        }
+
+        // Direction B floating snap tag (near cursor)
+        if (document.body.classList.contains("dir-b") && drawing && hasPointer) {
+          const p = w2s(snap);
+          snapTag.style.left = p.x + "px";
+          snapTag.style.top = p.y + "px";
+          snapTag.dataset.type = snap.type === "free" ? "grid" : snap.type;
+          snapTag.textContent = snap.type;
+          snapTag.classList.add("show");
+        } else {
+          snapTag.classList.remove("show");
+        }
+      }
+
+      // ── Interaction ──────────────────────────────────────────────────
+      function updateFromEvent(e) {
+        hasPointer = true;
+        snap = computeSnap(e.clientX, e.clientY);
+        pointer = s2w(e.clientX, e.clientY);
+        dismissHint();
+      }
+
+      stage.addEventListener("pointermove", e => { updateFromEvent(e); render(); });
+      stage.addEventListener("pointerdown", e => {
+        updateFromEvent(e);
+        placePoint();
+        render();
+      });
+      stage.addEventListener("pointerleave", () => { hasPointer = false; render(); });
+
+      function placePoint() {
+        if (snap.type === "close") { closeRoom(); return; }
+        chain.push({ x: snap.x, y: snap.y });
+      }
+
+      function closeRoom() {
+        if (chain.length < 3) return;
+        rooms.push({ closed: true, verts: chain.slice() });
+        chain = [];
+      }
+
+      function finishChain() {
+        // Commit an open polyline (no close) or just clear a 1-point chain.
+        if (chain.length >= 2) rooms.push({ closed: false, verts: chain.slice() });
+        chain = [];
+        render();
+      }
+
+      function undoPoint() {
+        if (chain.length) chain.pop();
+        render();
+      }
+
+      window.addEventListener("keydown", e => {
+        if (e.key === "Escape" || e.key === "Enter") { finishChain(); }
+        else if (e.key === "Backspace") { e.preventDefault(); undoPoint(); }
+        else if (e.key === "Alt") { altHeld = true; }
+        else if (e.key === "v" || e.key === "V") { setTool("select"); }
+        else if (e.key === "w" || e.key === "W") { setTool("wall"); }
+      });
+      window.addEventListener("keyup", e => { if (e.key === "Alt") { altHeld = false; render(); } });
+
+      // ── Chrome wiring ────────────────────────────────────────────────
+      document.getElementById("bar-undo").addEventListener("click", undoPoint);
+      document.getElementById("bar-done").addEventListener("click", finishChain);
+      toolUndo.addEventListener("click", undoPoint);
+      toolDone.addEventListener("click", finishChain);
+
+      const toolSelect = document.getElementById("tool-select");
+      const toolWall = document.getElementById("tool-wall");
+      function setTool(t) {
+        toolWall.setAttribute("aria-pressed", t === "wall" ? "true" : "false");
+        toolSelect.setAttribute("aria-pressed", t === "select" ? "true" : "false");
+        stage.style.cursor = t === "wall" ? "crosshair" : "default";
+      }
+      toolSelect.addEventListener("click", () => setTool("select"));
+      toolWall.addEventListener("click", () => setTool("wall"));
+
+      // Unit toggle
+      const uImp = document.getElementById("unit-imperial");
+      const uMet = document.getElementById("unit-metric");
+      function setUnit(u) {
+        unit = u;
+        uImp.setAttribute("aria-pressed", u === "ft" ? "true" : "false");
+        uMet.setAttribute("aria-pressed", u === "m" ? "true" : "false");
+        render();
+      }
+      uImp.addEventListener("click", () => setUnit("ft"));
+      uMet.addEventListener("click", () => setUnit("m"));
+
+      // Direction switch
+      const dirA = document.getElementById("dir-a-btn");
+      const dirB = document.getElementById("dir-b-btn");
+      function setDir(d) {
+        document.body.classList.toggle("dir-a", d === "a");
+        document.body.classList.toggle("dir-b", d === "b");
+        dirA.setAttribute("aria-pressed", d === "a" ? "true" : "false");
+        dirB.setAttribute("aria-pressed", d === "b" ? "true" : "false");
+        render();
+      }
+      dirA.addEventListener("click", () => setDir("a"));
+      dirB.addEventListener("click", () => setDir("b"));
+
+      // Hint
+      let hintGone = false;
+      function dismissHint() { if (!hintGone) { hintGone = true; hint.classList.add("dismissed"); } }
+
+      // Zoom buttons are inert in this mockup (pan/zoom belongs to MVP-1).
+      ["btn-zoom-in", "btn-zoom-out", "btn-zoom-reset"].forEach(id =>
+        document.getElementById(id).addEventListener("click", () => {}));
+
+      // Boot
+      window.addEventListener("resize", () => { resize(); render(); });
+      resize();
+      render();
+    </script>
+  </body>
+</html>
