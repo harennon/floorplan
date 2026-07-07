@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>floorplan · MVP-3 dimensions — Direction A "Living Chips"</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ── Design tokens (carried from src/index.html) ──────────────────── */
+      :root {
+        --bg:         #14140f;
+        --bg-deep:    #100f0b;
+        --ink:        #ece7d6;
+        --muted:      #8f8a78;
+        --gold:       #c9a84c;
+        --gold-soft:  rgba(201, 168, 76, 0.55);
+
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --grid-axis:  rgba(201, 168, 76, 0.34);
+
+        --panel:      rgba(20, 20, 15, 0.72);
+        --hairline:   rgba(201, 168, 76, 0.18);
+
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+
+        --wall-body:   rgba(201,168,76,0.30);
+        --wall-line:   #d9be6e;
+        --draft:       #d9be6e;
+        --room-fill:   rgba(201,168,76,0.07);
+        --snap-grid:   #7fd0c8;
+        --snap-point:  #e0b64f;
+        --snap-close:  #9cd67a;
+
+        /* MVP-3 additions */
+        --dim-ink:     #cdbf95;   /* persistent committed dimension text */
+        --dim-edit:    #d9be6e;   /* active edit accent */
+      }
+
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body {
+        height: 100%; margin: 0; overflow: hidden;
+        overscroll-behavior: none; -webkit-tap-highlight-color: transparent;
+      }
+      .app {
+        position: fixed; inset: 0;
+        font-family: var(--font-ui); color: var(--ink);
+        background: var(--bg-deep);
+      }
+      .stage {
+        position: absolute; inset: 0; cursor: crosshair;
+        background: radial-gradient(ellipse 90% 80% at 50% 50%, var(--bg) 0%, var(--bg-deep) 100%);
+      }
+      #drawing { display: block; width: 100%; height: 100%; }
+      #drawing .grid-fine  { stroke: var(--grid-fine);  stroke-width: 1; shape-rendering: crispEdges; }
+      #drawing .grid-major { stroke: var(--grid-major); stroke-width: 1; shape-rendering: crispEdges; }
+      #drawing .grid-axis  { stroke: var(--grid-axis);  stroke-width: 1.5; shape-rendering: crispEdges; }
+
+      .grain {
+        position: absolute; inset: 0; pointer-events: none;
+        mix-blend-mode: overlay; opacity: 0.035;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+        background-size: 200px 200px;
+      }
+
+      /* ── Floating chrome (brand / unit toggle) ────────────────────────── */
+      .brand { position: absolute; top: 1.25rem; left: 1.25rem; pointer-events: none; user-select: none; }
+      .brand-name { font-family: var(--font-display); font-size: 1.1rem; font-weight: 700; color: var(--gold); line-height: 1.2; }
+      .brand-sub  { font-family: var(--font-mono); font-size: 0.65rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+
+      .unit-toggle { position: absolute; top: 1.25rem; right: 1.25rem; display: flex; gap: 0.25rem; z-index: 8; }
+      .unit-toggle button {
+        background: var(--panel); border: 1px solid var(--hairline); color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.06em;
+        padding: 0.3rem 0.7rem; border-radius: 100px; cursor: pointer;
+        transition: color 0.15s, border-color 0.15s, background 0.15s;
+      }
+      .unit-toggle button[aria-pressed="true"] { color: var(--gold); border-color: var(--gold-soft); background: rgba(201,168,76,0.1); }
+      .unit-toggle button:hover:not([aria-pressed="true"]) { color: var(--ink); }
+
+      /* ── Labels overlay ───────────────────────────────────────────────── */
+      .labels { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+
+      /* Persistent dimension chip on committed walls (Direction A: pill sitting
+         on the wall centerline, click-to-edit). */
+      .dim-chip {
+        position: absolute; transform: translate(-50%, -50%);
+        font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.01em;
+        padding: 0.12rem 0.44rem; border-radius: 100px;
+        white-space: nowrap; color: var(--dim-ink);
+        background: rgba(20, 20, 15, 0.82);
+        border: 1px solid var(--hairline);
+        pointer-events: auto; cursor: text;
+        transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .dim-chip:hover { color: var(--ink); border-color: var(--gold-soft); }
+      .dim-chip .dim-unit { color: var(--muted); margin-left: 0.15em; }
+      .dim-chip:hover .dim-unit { color: var(--gold-soft); }
+
+      /* Live (rubber-band) chip — gold solid, carried from MVP-2 */
+      .length-chip--live {
+        position: absolute; transform: translate(-50%, -50%);
+        font-family: var(--font-mono); font-size: 0.65rem;
+        padding: 0.1rem 0.35rem; border-radius: 3px; white-space: nowrap;
+        background: rgba(217, 190, 110, 0.9); color: #14140f; pointer-events: none;
+      }
+
+      /* Inline numeric-entry field (replaces a chip while editing) */
+      .dim-editor {
+        position: absolute; transform: translate(-50%, -50%);
+        display: flex; align-items: center; gap: 0.15rem;
+        background: #14140f; border: 1px solid var(--dim-edit);
+        box-shadow: 0 0 0 3px rgba(217,190,110,0.14);
+        border-radius: 5px; padding: 0.1rem 0.3rem; pointer-events: auto; z-index: 12;
+      }
+      .dim-editor input {
+        width: 3.4rem; background: transparent; border: none; outline: none;
+        color: var(--ink); font-family: var(--font-mono); font-size: 0.72rem; text-align: right;
+      }
+      .dim-editor .dim-unit { color: var(--muted); font-family: var(--font-mono); font-size: 0.66rem; }
+
+      /* Room area/perimeter tag — Direction A: it lives ON the room, at the
+         polygon centroid, feeling like part of the drawing (a stamped label). */
+      .room-tag {
+        position: absolute; transform: translate(-50%, -50%);
+        text-align: center; pointer-events: none; user-select: none;
+        animation: room-tag-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+      }
+      @keyframes room-tag-in {
+        from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+        to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      }
+      @media (prefers-reduced-motion: reduce) { .room-tag { animation: none; } }
+      .room-tag .room-name {
+        font-family: var(--font-display); font-size: 0.7rem; font-style: italic;
+        color: var(--muted); letter-spacing: 0.02em; margin-bottom: 0.1rem;
+      }
+      .room-tag .room-area {
+        font-family: var(--font-mono); font-size: 1.35rem; color: var(--ink);
+        line-height: 1; font-weight: 500;
+      }
+      .room-tag .room-area .u { font-size: 0.7rem; color: var(--gold); vertical-align: super; margin-left: 0.1em; }
+      .room-tag .room-peri {
+        font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted);
+        margin-top: 0.2rem; letter-spacing: 0.04em;
+      }
+
+      /* ── Tool rail (left-center, from src) ────────────────────────────── */
+      .tool-rail {
+        position: absolute; left: 1.25rem; top: 50%; transform: translateY(-50%);
+        display: flex; flex-direction: column; gap: 0.15rem;
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 8px; padding: 0.4rem 0.3rem;
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 5;
+      }
+      .tool-rail button {
+        background: transparent; border: 1px solid transparent; color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.7rem;
+        width: 2.4rem; height: 2.4rem; border-radius: 6px; cursor: pointer;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 0.1rem; transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .tool-rail button:hover { color: var(--ink); border-color: var(--hairline); }
+      .tool-rail button[aria-pressed="true"] { color: var(--gold); background: rgba(201,168,76,0.1); border-color: var(--gold-soft); }
+      .tool-rail .tool-key-hint { font-size: 0.5rem; color: var(--muted); opacity: 0.7; }
+      .tool-rail-sep { width: 100%; height: 1px; background: var(--hairline); margin: 0.1rem 0; }
+
+      /* ── HUD (bottom-right, from src) ─────────────────────────────────── */
+      .hud {
+        position: absolute; bottom: 1.25rem; right: 1.25rem;
+        display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem; pointer-events: none;
+      }
+      .hud-cell {
+        background: var(--panel); border: 1px solid var(--hairline);
+        padding: 0.2rem 0.55rem; border-radius: 4px;
+        font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); white-space: nowrap;
+      }
+      .hud-cell span { color: var(--ink); }
+
+      /* Small teaching callout (mock only) */
+      .note {
+        position: absolute; bottom: 1.25rem; left: 50%; transform: translateX(-50%);
+        max-width: min(90vw, 640px); text-align: center;
+        font-family: var(--font-mono); font-size: 0.66rem; color: var(--muted);
+        background: var(--panel); border: 1px solid var(--hairline);
+        padding: 0.4rem 0.9rem; border-radius: 8px; line-height: 1.5;
+      }
+      .note b { color: var(--gold); font-weight: 500; }
+      .note kbd {
+        font-family: var(--font-mono); color: var(--ink);
+        border: 1px solid var(--hairline); border-radius: 3px;
+        padding: 0 0.28rem; font-size: 0.62rem;
+      }
+      @media (max-width: 560px) { .hud-cursor { display: none; } .note { bottom: 4.5rem; } }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="stage" id="stage">
+        <svg id="drawing" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <g id="grid"></g>
+          <g id="world"></g>
+          <g id="draft"></g>
+          <g id="snap"></g>
+        </svg>
+        <div class="labels" id="labels"></div>
+      </div>
+
+      <div class="grain" aria-hidden="true"></div>
+
+      <div class="brand" aria-hidden="true">
+        <div class="brand-name">floorplan</div>
+        <div class="brand-sub">warm blueprint</div>
+      </div>
+
+      <div class="unit-toggle" role="group" aria-label="Unit system">
+        <button id="unit-imperial" aria-pressed="false">IMPERIAL</button>
+        <button id="unit-metric"   aria-pressed="true">METRIC</button>
+      </div>
+
+      <nav class="tool-rail" aria-label="Drawing tools">
+        <button aria-label="Select tool (V)" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 2 L4 13 L7 10 L9 14 L11 13 L9 9 L13 9 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg><span class="tool-key-hint">V</span>
+        </button>
+        <button aria-label="Draw wall tool (W)" aria-pressed="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg><span class="tool-key-hint">W</span>
+        </button>
+        <div class="tool-rail-sep" aria-hidden="true"></div>
+        <button aria-label="Undo last point (Backspace)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M6 4 L2 8 L6 12 M2 8 H12 Q15 8 15 5 Q15 2 12 2 H9" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button aria-label="Finish chain (Enter)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <polyline points="2,8 6,12 14,4" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </nav>
+
+      <div class="hud">
+        <div class="hud-cell">Scale&nbsp;<span id="hud-scale">—</span></div>
+        <div class="hud-cell">Zoom&nbsp;<span>100%</span></div>
+      </div>
+
+      <div class="note">
+        Click a wall dimension to type an exact length (try <b>4.00</b>). Area &amp; perimeter update live · toggle
+        <b>IMPERIAL / METRIC</b> top-right — everything converts, no data loss.
+      </div>
+    </div>
+
+    <script>
+      "use strict";
+      // ── Units (world storage always metres; display only) ──────────────
+      const M_PER_FT = 0.3048;
+      let unit = "m"; // "m" | "ft"  (mock defaults metric to show 2-dp area)
+      const fmtLen  = (m) => unit === "ft" ? (m / M_PER_FT).toFixed(1) : m.toFixed(2);
+      // Area stored in m²; ft toggle → ft²
+      const fmtArea = (m2) => unit === "ft"
+        ? Math.round(m2 / (M_PER_FT * M_PER_FT)).toLocaleString()
+        : m2.toFixed(2);
+      const lenUnit  = () => unit;
+      const areaUnit = () => unit === "ft" ? "ft²" : "m²";
+      // Parse a typed length (in current display unit) → metres
+      const parseLen = (str) => {
+        const v = parseFloat(String(str).replace(/[^0-9.]/g, ""));
+        if (!isFinite(v) || v <= 0) return null;
+        return unit === "ft" ? v * M_PER_FT : v;
+      };
+
+      // ── Fixed demo view (no pan/zoom — matches MVP-2 mockup convention) ─
+      const PX_PER_M = 46;
+      const pan = { x: 0, y: 0 };
+      const w2s = (x, y) => ({ x: x * PX_PER_M + pan.x, y: y * PX_PER_M + pan.y });
+
+      // ── Model: closed rooms in world metres ────────────────────────────
+      const model = {
+        rooms: [
+          { id: "r0", name: "Living", closed: true,
+            verts: [ {x:0,y:0}, {x:5,y:0}, {x:5,y:4}, {x:0,y:4} ] },
+          { id: "r1", name: "Bath", closed: true,
+            verts: [ {x:5.6,y:1.6}, {x:7.8,y:1.6}, {x:7.8,y:4}, {x:5.6,y:4} ] },
+        ],
+      };
+
+      // ── Geometry ───────────────────────────────────────────────────────
+      const dist = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+      function perimeter(v) { let p = 0; for (let i = 0; i < v.length; i++) p += dist(v[i], v[(i+1)%v.length]); return p; }
+      function area(v) { // shoelace, metres²
+        let s = 0; for (let i = 0; i < v.length; i++) { const a=v[i], b=v[(i+1)%v.length]; s += a.x*b.y - b.x*a.y; }
+        return Math.abs(s) / 2;
+      }
+      function centroid(v) {
+        let cx=0, cy=0, a=0;
+        for (let i=0;i<v.length;i++){ const p=v[i],q=v[(i+1)%v.length]; const cr=p.x*q.y-q.x*p.y; a+=cr; cx+=(p.x+q.x)*cr; cy+=(p.y+q.y)*cr; }
+        a*=0.5; if (Math.abs(a) < 1e-9) return v[0];
+        return { x: cx/(6*a), y: cy/(6*a) };
+      }
+
+      // ── DOM refs ────────────────────────────────────────────────────────
+      const NS = "http://www.w3.org/2000/svg";
+      const svg    = document.getElementById("drawing");
+      const gGrid  = document.getElementById("grid");
+      const gWorld = document.getElementById("world");
+      const labels = document.getElementById("labels");
+      const stage  = document.getElementById("stage");
+      let editing = null; // { roomId, edgeIndex } while inline editor is open
+
+      function centerView() {
+        const r = stage.getBoundingClientRect();
+        // center the two rooms roughly in view
+        pan.x = r.width * 0.5 - (3.9 * PX_PER_M);
+        pan.y = r.height * 0.5 - (2.0 * PX_PER_M);
+      }
+
+      function drawGrid(W, H) {
+        gGrid.innerHTML = "";
+        const step = PX_PER_M; // 1m cells
+        const frag = document.createDocumentFragment();
+        for (let sx = pan.x % step; sx < W; sx += step) frag.appendChild(gline(sx,0,sx,H,"grid-fine"));
+        for (let sy = pan.y % step; sy < H; sy += step) frag.appendChild(gline(0,sy,W,sy,"grid-fine"));
+        // major every 5m + axis at origin
+        for (let sx = pan.x % (step*5); sx < W; sx += step*5) frag.appendChild(gline(sx,0,sx,H,"grid-major"));
+        for (let sy = pan.y % (step*5); sy < H; sy += step*5) frag.appendChild(gline(0,sy,W,sy,"grid-major"));
+        gGrid.appendChild(frag);
+      }
+      function gline(x1,y1,x2,y2,cls){ const l=document.createElementNS(NS,"line");
+        l.setAttribute("x1",x1);l.setAttribute("y1",y1);l.setAttribute("x2",x2);l.setAttribute("y2",y2);
+        l.setAttribute("class",cls); return l; }
+
+      function poly(verts, ppm) {
+        return verts.map(v => { const s = w2s(v.x, v.y); return `${s.x},${s.y}`; }).join(" ");
+      }
+
+      function renderRooms() {
+        gWorld.innerHTML = "";
+        const WALL_PX = Math.max(6, 0.12 * PX_PER_M);
+        for (const room of model.rooms) {
+          const pts = poly(room.verts);
+          // fill
+          const fill = document.createElementNS(NS, "polygon");
+          fill.setAttribute("points", pts);
+          fill.setAttribute("fill", "var(--room-fill)"); fill.setAttribute("stroke", "none");
+          gWorld.appendChild(fill);
+          // wall body
+          const body = document.createElementNS(NS, "polygon");
+          body.setAttribute("points", pts); body.setAttribute("fill", "none");
+          body.setAttribute("stroke", "var(--wall-body)"); body.setAttribute("stroke-width", WALL_PX);
+          body.setAttribute("stroke-linejoin", "round"); gWorld.appendChild(body);
+          // centerline
+          const cl = document.createElementNS(NS, "polygon");
+          cl.setAttribute("points", pts); cl.setAttribute("fill", "none");
+          cl.setAttribute("stroke", "var(--wall-line)"); cl.setAttribute("stroke-width", "1.5");
+          cl.setAttribute("stroke-linejoin", "round"); gWorld.appendChild(cl);
+          // vertex dots
+          for (const v of room.verts) { const s = w2s(v.x, v.y);
+            const d = document.createElementNS(NS, "circle");
+            d.setAttribute("cx", s.x); d.setAttribute("cy", s.y); d.setAttribute("r", "3");
+            d.setAttribute("fill", "var(--wall-line)"); gWorld.appendChild(d);
+          }
+        }
+      }
+
+      // Offset a chip slightly outward from the polygon (away from centroid)
+      function edgeChipPos(room, i) {
+        const a = room.verts[i], b = room.verts[(i+1) % room.verts.length];
+        const mid = { x: (a.x+b.x)/2, y: (a.y+b.y)/2 };
+        const c = centroid(room.verts);
+        let nx = mid.x - c.x, ny = mid.y - c.y; const nl = Math.hypot(nx,ny) || 1;
+        nx/=nl; ny/=nl;
+        const s = w2s(mid.x + nx*0.0, mid.y + ny*0.0);
+        return { x: s.x + nx*16, y: s.y + ny*16 };
+      }
+
+      function renderLabels() {
+        labels.innerHTML = "";
+        for (const room of model.rooms) {
+          const v = room.verts;
+          // Persistent dimension chips (one per edge)
+          for (let i = 0; i < v.length; i++) {
+            if (editing && editing.roomId === room.id && editing.edgeIndex === i) {
+              labels.appendChild(makeEditor(room, i)); continue;
+            }
+            const p = edgeChipPos(room, i);
+            const chip = document.createElement("span");
+            chip.className = "dim-chip";
+            chip.innerHTML = `${fmtLen(dist(v[i], v[(i+1)%v.length]))}<span class="dim-unit">${lenUnit()}</span>`;
+            chip.style.left = p.x + "px"; chip.style.top = p.y + "px";
+            chip.title = "Click to type exact length";
+            chip.addEventListener("click", () => { editing = { roomId: room.id, edgeIndex: i }; render(); });
+            labels.appendChild(chip);
+          }
+          // Room area/perimeter tag at centroid
+          const c = w2s(...Object.values(centroid(v)));
+          const tag = document.createElement("div");
+          tag.className = "room-tag"; tag.style.left = c.x + "px"; tag.style.top = c.y + "px";
+          tag.innerHTML =
+            `<div class="room-name">${room.name}</div>` +
+            `<div class="room-area">${fmtArea(area(v))}<span class="u">${areaUnit()}</span></div>` +
+            `<div class="room-peri">↔ ${fmtLen(perimeter(v))} ${lenUnit()} perimeter</div>`;
+          labels.appendChild(tag);
+        }
+      }
+
+      // Inline numeric-entry editor: rescales the edge's far endpoint so the
+      // wall becomes exactly the typed length (direction preserved).
+      function makeEditor(room, i) {
+        const p = edgeChipPos(room, i);
+        const cur = dist(room.verts[i], room.verts[(i+1)%room.verts.length]);
+        const wrap = document.createElement("div");
+        wrap.className = "dim-editor"; wrap.style.left = p.x + "px"; wrap.style.top = p.y + "px";
+        const input = document.createElement("input");
+        input.type = "text"; input.value = fmtLen(cur);
+        const u = document.createElement("span"); u.className = "dim-unit"; u.textContent = lenUnit();
+        wrap.appendChild(input); wrap.appendChild(u);
+        const commit = () => {
+          const m = parseLen(input.value);
+          if (m) setEdgeLength(room, i, m);
+          editing = null; render();
+        };
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") commit();
+          else if (e.key === "Escape") { editing = null; render(); }
+        });
+        input.addEventListener("blur", commit);
+        setTimeout(() => { input.focus(); input.select(); }, 0);
+        return wrap;
+      }
+
+      // Move endpoint b along the a→b direction so |ab| == metres.
+      function setEdgeLength(room, i, metres) {
+        const a = room.verts[i], b = room.verts[(i+1)%room.verts.length];
+        let dx = b.x - a.x, dy = b.y - a.y; const d = Math.hypot(dx,dy) || 1;
+        const j = (i+1)%room.verts.length;
+        room.verts[j] = { x: a.x + dx/d*metres, y: a.y + dy/d*metres };
+      }
+
+      // ── Render + wiring ─────────────────────────────────────────────────
+      function render() {
+        const r = stage.getBoundingClientRect();
+        svg.setAttribute("viewBox", `0 0 ${r.width} ${r.height}`);
+        drawGrid(r.width, r.height);
+        renderRooms();
+        renderLabels();
+        document.getElementById("hud-scale").textContent = `${fmtLen(1)} ${lenUnit()}/cell`;
+      }
+
+      function setUnit(u) {
+        unit = u;
+        document.getElementById("unit-imperial").setAttribute("aria-pressed", u === "ft");
+        document.getElementById("unit-metric").setAttribute("aria-pressed", u === "m");
+        render();
+      }
+      document.getElementById("unit-imperial").addEventListener("click", () => setUnit("ft"));
+      document.getElementById("unit-metric").addEventListener("click", () => setUnit("m"));
+
+      window.addEventListener("resize", () => { centerView(); render(); });
+      centerView(); render();
+    </script>
+  </body>
+</html>
