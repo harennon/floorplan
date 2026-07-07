@@ -106,7 +106,7 @@ export function update() {
     newRows.length === _lastRows.length &&
     newRows.every((r, i) => r.id === _lastRows[i].id);
 
-  if (structureUnchanged) {
+  if (structureUnchanged && newRows.length > 0) {
     // Update text content in place.
     const rowEls = _list.querySelectorAll(".measure-row");
     newRows.forEach((r, i) => {
