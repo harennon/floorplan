@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>floorplan · snap precision — mockup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg:         #14140f;
+        --bg-deep:    #100f0b;
+        --ink:        #ece7d6;
+        --muted:      #8f8a78;
+        --gold:       #c9a84c;
+        --gold-soft:  rgba(201, 168, 76, 0.55);
+
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --grid-axis:  rgba(201, 168, 76, 0.34);
+
+        --panel:      rgba(20, 20, 15, 0.72);
+        --hairline:   rgba(201, 168, 76, 0.18);
+
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+
+        --wall-line:   #d9be6e;
+        --snap-grid:   #7fd0c8;
+        --snap-point:  #e0b64f;
+        --snap-close:  #9cd67a;
+        --snap-free:   #c58fd6;
+      }
+
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        font-family: var(--font-ui);
+        color: var(--ink);
+        background: var(--bg-deep);
+        padding: 2rem 1.5rem 4rem;
+      }
+
+      /* ── Explainer header (mockup-only chrome) ────────────────────────── */
+      .doc-head {
+        max-width: 1180px;
+        margin: 0 auto 1.75rem;
+      }
+      .doc-head h1 {
+        font-family: var(--font-display);
+        color: var(--gold);
+        font-size: 1.5rem;
+        margin: 0 0 0.35rem;
+      }
+      .doc-head p {
+        color: var(--muted);
+        font-size: 0.85rem;
+        line-height: 1.5;
+        max-width: 70ch;
+        margin: 0.25rem 0;
+      }
+      .doc-head code {
+        font-family: var(--font-mono);
+        color: var(--ink);
+        background: rgba(201,168,76,0.08);
+        padding: 0.05rem 0.3rem;
+        border-radius: 3px;
+        font-size: 0.8em;
+      }
+
+      /* ── Option grid ──────────────────────────────────────────────────── */
+      .options {
+        max-width: 1180px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+        gap: 1.5rem;
+      }
+      .option {
+        border: 1px solid var(--hairline);
+        border-radius: 12px;
+        background: var(--bg);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .option-head {
+        padding: 0.9rem 1.1rem 0.75rem;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .option-tag {
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--gold);
+      }
+      .option-head h2 {
+        font-family: var(--font-display);
+        font-size: 1.05rem;
+        margin: 0.25rem 0 0.4rem;
+        color: var(--ink);
+      }
+      .option-head p {
+        margin: 0;
+        font-size: 0.78rem;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+
+      /* ── Mini stage (reproduces the real canvas chrome) ───────────────── */
+      .stage {
+        position: relative;
+        height: 340px;
+        background:
+          radial-gradient(ellipse 90% 80% at 50% 50%, var(--bg) 0%, var(--bg-deep) 100%);
+        overflow: hidden;
+      }
+      .stage svg { display: block; width: 100%; height: 100%; }
+      .grid-fine  { stroke: var(--grid-fine);  stroke-width: 1; shape-rendering: crispEdges; }
+      .grid-major { stroke: var(--grid-major); stroke-width: 1; shape-rendering: crispEdges; }
+      .grid-axis  { stroke: var(--grid-axis);  stroke-width: 1.5; shape-rendering: crispEdges; }
+
+      /* Bottom-right HUD, matching production layout */
+      .hud {
+        position: absolute;
+        bottom: 0.7rem; right: 0.7rem;
+        display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem;
+        pointer-events: none;
+      }
+      .hud-cell {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        padding: 0.18rem 0.5rem;
+        border-radius: 4px;
+        font-family: var(--font-mono);
+        font-size: 0.64rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .hud-cell span { color: var(--ink); }
+      .hud-cell b { font-weight: 500; }
+
+      /* Zoom cluster, bottom-left */
+      .zoom-cluster {
+        position: absolute;
+        bottom: 0.7rem; left: 0.7rem;
+        display: flex; flex-direction: column; gap: 0.2rem;
+      }
+      .zoom-cluster button {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        width: 2rem; height: 2rem;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: color 0.15s, border-color 0.15s;
+      }
+      .zoom-cluster button:hover { border-color: var(--gold-soft); color: var(--gold); }
+      .zoom-cluster .reset-btn { font-size: 0.55rem; letter-spacing: 0.05em; }
+      .zoom-cluster button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+      /* ── Snap-precision control (the new affordance) ──────────────────── */
+      /* Trigger chip lives in the HUD stack (bottom-right) and is clickable. */
+      .hud-cell.snap-trigger {
+        pointer-events: auto;
+        cursor: pointer;
+        display: flex; align-items: center; gap: 0.35rem;
+        transition: border-color 0.15s, color 0.15s;
+      }
+      .hud-cell.snap-trigger:hover { border-color: var(--gold-soft); }
+      .hud-cell.snap-trigger .caret { color: var(--muted); font-size: 0.55rem; }
+      .hud-cell.snap-trigger .val { color: var(--gold); }
+      .hud-cell.snap-trigger[data-off="true"] .val { color: var(--snap-free); }
+
+      /* Popover with precision presets */
+      .snap-pop {
+        position: absolute;
+        bottom: 0.7rem; right: 0.7rem;
+        width: 210px;
+        background: var(--panel);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        padding: 0.55rem;
+        display: none;
+        flex-direction: column;
+        gap: 0.15rem;
+        z-index: 20;
+      }
+      .snap-pop.open { display: flex; }
+      .snap-pop-title {
+        font-family: var(--font-mono);
+        font-size: 0.58rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--muted);
+        padding: 0.15rem 0.4rem 0.35rem;
+      }
+      .snap-opt {
+        display: flex; align-items: center; justify-content: space-between;
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        padding: 0.4rem 0.5rem;
+        border-radius: 6px;
+        cursor: pointer;
+        text-align: left;
+        transition: background 0.12s, border-color 0.12s;
+      }
+      .snap-opt:hover { background: rgba(201,168,76,0.08); }
+      .snap-opt[aria-checked="true"] {
+        border-color: var(--gold-soft);
+        background: rgba(201,168,76,0.1);
+        color: var(--gold);
+      }
+      .snap-opt .sub { color: var(--muted); font-size: 0.62rem; }
+      .snap-opt[aria-checked="true"] .sub { color: var(--gold-soft); }
+      .snap-opt .check { opacity: 0; color: var(--gold); }
+      .snap-opt[aria-checked="true"] .check { opacity: 1; }
+      .snap-opt.auto-row { position: relative; }
+      .snap-pop-sep { height: 1px; background: var(--hairline); margin: 0.3rem 0.2rem; }
+      .snap-off .sub { color: var(--snap-free); }
+      .snap-off[aria-checked="true"] {
+        border-color: rgba(197,143,214,0.55);
+        background: rgba(197,143,214,0.12);
+        color: var(--snap-free);
+      }
+      .snap-hint {
+        font-family: var(--font-mono);
+        font-size: 0.55rem;
+        color: var(--muted);
+        line-height: 1.4;
+        padding: 0.3rem 0.45rem 0.1rem;
+      }
+      .snap-hint kbd {
+        border: 1px solid var(--hairline);
+        border-radius: 3px;
+        padding: 0 0.25rem;
+        color: var(--ink);
+      }
+
+      /* Callout badge for the annotated pill */
+      .note {
+        max-width: 1180px;
+        margin: 1.5rem auto 0;
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--muted);
+        line-height: 1.6;
+        border-top: 1px solid var(--hairline);
+        padding-top: 1rem;
+      }
+      .note strong { color: var(--gold); }
+    </style>
+  </head>
+  <body>
+    <header class="doc-head">
+      <h1>Finer snap for in-room placement</h1>
+      <p>
+        Today the smallest positional step is ~0.25&nbsp;m (~0.8&nbsp;ft): the grid
+        step is chosen adaptively from zoom (finest <code>NICE_STEP</code> whose
+        on-screen spacing ≥ 56&nbsp;px), and the <code>MAX_ZOOM = 8</code> cap makes
+        the 0.1&nbsp;m grid unreachable. Placement snaps to that same grid, so you
+        can't nudge furniture by an inch.
+      </p>
+      <p>
+        Three directions below, each shown on a live mini-canvas using the real
+        chrome. Toggle the controls to feel the difference. The recommended
+        direction is <strong style="color:var(--gold)">Option&nbsp;C</strong>.
+      </p>
+    </header>
+
+    <main class="options" id="options"></main>
+
+    <p class="note" id="foot"></p>
+
+    <script>
+      const NS = "http://www.w3.org/2000/svg";
+      const BASE_PX_PER_M = 40;
+      const NICE_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100];
+      const M_PER_FT = 0.3048;
+
+      // Adaptive grid step (mirrors chooseGridStep).
+      function chooseGridStep(pxPerM, targetPx = 56) {
+        for (const s of NICE_STEPS) if (s * pxPerM >= targetPx) return s;
+        return NICE_STEPS[NICE_STEPS.length - 1];
+      }
+      function fmtFt(m) { return (m / M_PER_FT); }
+      // Nice imperial label for a metric step.
+      function stepLabel(m) {
+        const inches = m / M_PER_FT * 12;
+        if (m >= 0.3) return `${fmtFt(m).toFixed(1)} ft`;
+        return `${Math.round(inches)} in`;
+      }
+
+      // Draw grid + room + furniture into an SVG for a given view state.
+      // state: { zoom, snapStep|null (null=off), pan:{x,y}, couch:{x,y} in world m }
+      function makeStage(state) {
+        const W = 520, H = 340;
+        const wrap = document.createElement("div");
+        wrap.className = "stage";
+        const svg = document.createElementNS(NS, "svg");
+        svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+        svg.setAttribute("preserveAspectRatio", "xMidYMid slice");
+        const gGrid = document.createElementNS(NS, "g");
+        const gWorld = document.createElementNS(NS, "g");
+        const gGhost = document.createElementNS(NS, "g");
+        svg.append(gGrid, gWorld, gGhost);
+        wrap.appendChild(svg);
+        state._svg = svg; state._W = W; state._H = H;
+        state._gGrid = gGrid; state._gWorld = gWorld; state._gGhost = gGhost;
+        return wrap;
+      }
+
+      function line(x1, y1, x2, y2, cls) {
+        const l = document.createElementNS(NS, "line");
+        l.setAttribute("x1", x1); l.setAttribute("y1", y1);
+        l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+        l.setAttribute("class", cls);
+        return l;
+      }
+
+      function render(state) {
+        const { _W: W, _H: H, _gGrid: gGrid, _gWorld: gWorld, _gGhost: gGhost } = state;
+        const ppm = state.zoom * BASE_PX_PER_M;
+        const pan = state.pan;
+        const w2s = (wx, wy) => ({ x: wx * ppm + pan.x, y: wy * ppm + pan.y });
+
+        // Grid — render step follows zoom (the adaptive step).
+        gGrid.textContent = "";
+        const renderStep = chooseGridStep(ppm);
+        const step = renderStep * ppm;
+        const iXMin = Math.floor(-pan.x / step) - 1;
+        const iXMax = Math.ceil((W - pan.x) / step) + 1;
+        const iYMin = Math.floor(-pan.y / step) - 1;
+        const iYMax = Math.ceil((H - pan.y) / step) + 1;
+        const frag = document.createDocumentFragment();
+        for (let i = iXMin; i <= iXMax; i++) {
+          const sx = i * step + pan.x;
+          const cls = i === 0 ? "grid-axis" : (i % 5 === 0 ? "grid-major" : "grid-fine");
+          frag.appendChild(line(sx, 0, sx, H, cls));
+        }
+        for (let j = iYMin; j <= iYMax; j++) {
+          const sy = j * step + pan.y;
+          const cls = j === 0 ? "grid-axis" : (j % 5 === 0 ? "grid-major" : "grid-fine");
+          frag.appendChild(line(0, sy, W, sy, cls));
+        }
+        gGrid.appendChild(frag);
+
+        // Room walls (a 4x3 m room around origin-ish).
+        gWorld.textContent = "";
+        const rm = { x: 0, y: 0, w: 4, h: 3 };
+        const a = w2s(rm.x, rm.y), b = w2s(rm.x + rm.w, rm.y + rm.h);
+        const rect = document.createElementNS(NS, "rect");
+        rect.setAttribute("x", a.x); rect.setAttribute("y", a.y);
+        rect.setAttribute("width", b.x - a.x); rect.setAttribute("height", b.y - a.y);
+        rect.setAttribute("fill", "rgba(201,168,76,0.07)");
+        rect.setAttribute("stroke", "var(--wall-line)");
+        rect.setAttribute("stroke-width", "3");
+        gWorld.appendChild(rect);
+
+        renderCouch(state, w2s, ppm);
+      }
+
+      // Effective snap step in metres for a state, or null when snapping is off.
+      // Option A: step follows zoom (adaptive), capped by MAX_ZOOM.
+      // Option C: step is an explicit choice, decoupled from render zoom.
+      function effectiveStep(state) {
+        if (state.snapMode === "off") return null;
+        if (state.snapMode === "auto") return chooseGridStep(state.zoom * BASE_PX_PER_M);
+        return state.snapStep; // explicit metres
+      }
+
+      function renderCouch(state, w2s, ppm) {
+        const g = state._gGhost;
+        g.textContent = "";
+        const cw = 2.0, ch = 0.9; // 2.0m x 0.9m couch
+        const step = effectiveStep(state);
+        let cx = state.couch.x, cy = state.couch.y;
+        if (step != null) {
+          cx = Math.round(cx / step) * step;
+          cy = Math.round(cy / step) * step;
+        }
+        const p = w2s(cx, cy);
+        const gr = document.createElementNS(NS, "g");
+        gr.setAttribute("transform", `translate(${p.x} ${p.y})`);
+        gr.style.cursor = "grab";
+        // couch body
+        const body = document.createElementNS(NS, "rect");
+        body.setAttribute("x", 0); body.setAttribute("y", 0);
+        body.setAttribute("width", cw * ppm); body.setAttribute("height", ch * ppm);
+        body.setAttribute("rx", 4);
+        body.setAttribute("fill", state.snapMode === "off" ? "rgba(197,143,214,0.18)" : "rgba(127,208,200,0.16)");
+        body.setAttribute("stroke", state.snapMode === "off" ? "var(--snap-free)" : "var(--snap-grid)");
+        body.setAttribute("stroke-width", "1.5");
+        gr.appendChild(body);
+        // back cushion line
+        const back = document.createElementNS(NS, "rect");
+        back.setAttribute("x", 0); back.setAttribute("y", 0);
+        back.setAttribute("width", cw * ppm); back.setAttribute("height", Math.max(4, ch * ppm * 0.28));
+        back.setAttribute("fill", state.snapMode === "off" ? "rgba(197,143,214,0.3)" : "rgba(127,208,200,0.28)");
+        gr.appendChild(back);
+        g.appendChild(gr);
+        state._dragTarget = gr;
+        // stash for hit-testing
+        state._couchScreen = { x: p.x, y: p.y, w: cw * ppm, h: ch * ppm };
+      }
+
+      const MAX_ZOOM_A = 20;   // Option A raises the cap
+      const MAX_ZOOM_DEFAULT = 8;
+
+      // Build the HUD stack for a state; returns the container element.
+      function makeHud(state, opt) {
+        const hud = document.createElement("div");
+        hud.className = "hud";
+
+        // Snap cell — plain readout for A/B, interactive trigger for C.
+        const snapCell = document.createElement("div");
+        snapCell.className = "hud-cell";
+        state._snapCell = snapCell;
+
+        const scaleCell = document.createElement("div");
+        scaleCell.className = "hud-cell";
+        state._scaleCell = scaleCell;
+
+        const zoomCell = document.createElement("div");
+        zoomCell.className = "hud-cell";
+        state._zoomCell = zoomCell;
+
+        if (opt === "C") {
+          snapCell.classList.add("snap-trigger");
+          snapCell.setAttribute("role", "button");
+          snapCell.setAttribute("tabindex", "0");
+          snapCell.addEventListener("click", () => toggleSnapPop(state));
+          hud.append(snapCell, scaleCell, zoomCell);
+        } else {
+          hud.append(snapCell, scaleCell, zoomCell);
+        }
+        return hud;
+      }
+
+      function updateHud(state) {
+        const ppm = state.zoom * BASE_PX_PER_M;
+        const gridStep = chooseGridStep(ppm);
+        state._zoomCell.innerHTML = `Zoom&nbsp;<span>${Math.round(state.zoom * 100)}%</span>`;
+        state._scaleCell.innerHTML = `Grid&nbsp;<span>${stepLabel(gridStep)}/cell</span>`;
+        const eff = effectiveStep(state);
+        if (state._snapCell.classList.contains("snap-trigger")) {
+          const off = eff == null;
+          state._snapCell.dataset.off = off ? "true" : "false";
+          const label = off ? "Off" : stepLabel(eff);
+          state._snapCell.innerHTML =
+            `Snap&nbsp;<b class="val">${label}</b><span class="caret">▾</span>`;
+        } else {
+          const label = eff == null ? "Off" : stepLabel(eff);
+          state._snapCell.innerHTML = `Snap&nbsp;<span>${label}</span>`;
+        }
+      }
+
+      function makeZoom(state) {
+        const z = document.createElement("div");
+        z.className = "zoom-cluster";
+        const zin = btn("+"), zout = btn("−"), reset = btn("RESET");
+        reset.classList.add("reset-btn");
+        state._zin = zin; state._zout = zout;
+        zin.addEventListener("click", () => setZoom(state, state.zoom * 1.5));
+        zout.addEventListener("click", () => setZoom(state, state.zoom / 1.5));
+        reset.addEventListener("click", () => setZoom(state, 1));
+        z.append(zin, zout, reset);
+        return z;
+        function btn(t) { const b = document.createElement("button"); b.textContent = t; return b; }
+      }
+
+      function setZoom(state, z) {
+        state.zoom = Math.min(state.maxZoom, Math.max(0.15, z));
+        refresh(state);
+      }
+
+      // ── Snap-precision popover (Option C) ────────────────────────────────
+      const PRESETS = [
+        { mode: "explicit", step: 1,     label: "1 ft-ish",  metric: "0.3 m" },
+        { mode: "explicit", step: 0.25,  label: "0.25 m",    metric: "≈ 10 in" },
+        { mode: "explicit", step: 0.1,   label: "0.1 m",     metric: "≈ 4 in" },
+        { mode: "explicit", step: 0.025, label: "0.025 m",   metric: "≈ 1 in" },
+      ];
+
+      function makeSnapPop(state) {
+        const pop = document.createElement("div");
+        pop.className = "snap-pop";
+        state._pop = pop;
+        const t = document.createElement("div");
+        t.className = "snap-pop-title";
+        t.textContent = "Snap precision";
+        pop.appendChild(t);
+
+        const auto = snapOpt("Auto (follows zoom)", "adaptive", () => setSnap(state, { snapMode: "auto" }));
+        auto.classList.add("auto-row");
+        state._autoOpt = auto;
+        pop.appendChild(auto);
+        pop.appendChild(sep());
+
+        state._presetOpts = PRESETS.map((p) => {
+          const o = snapOpt(p.label, p.metric, () =>
+            setSnap(state, { snapMode: "explicit", snapStep: p.step }));
+          o.dataset.step = p.step;
+          pop.appendChild(o);
+          return o;
+        });
+
+        pop.appendChild(sep());
+        const off = snapOpt("Off — free placement", "align guides only", () =>
+          setSnap(state, { snapMode: "off" }));
+        off.classList.add("snap-off");
+        state._offOpt = off;
+        pop.appendChild(off);
+
+        const hint = document.createElement("div");
+        hint.className = "snap-hint";
+        hint.innerHTML = `Hold <kbd>Alt</kbd> anytime for momentary free placement.`;
+        pop.appendChild(hint);
+        return pop;
+
+        function sep() { const s = document.createElement("div"); s.className = "snap-pop-sep"; return s; }
+      }
+
+      function snapOpt(label, sub, onClick) {
+        const b = document.createElement("button");
+        b.className = "snap-opt";
+        b.setAttribute("role", "menuitemradio");
+        b.setAttribute("aria-checked", "false");
+        b.innerHTML =
+          `<span>${label} <span class="sub">${sub}</span></span><span class="check">✓</span>`;
+        b.addEventListener("click", onClick);
+        return b;
+      }
+
+      function toggleSnapPop(state) {
+        state._pop.classList.toggle("open");
+        // Hide the trigger's own HUD visual clutter is unnecessary; keep it.
+      }
+
+      function setSnap(state, patch) {
+        Object.assign(state, patch);
+        state._pop.classList.remove("open");
+        refresh(state);
+      }
+
+      // Full re-render: draw, hud, control state, zoom-button disable.
+      function refresh(state) {
+        render(state);
+        updateHud(state);
+        if (state._pop) refreshPop(state);
+        if (state._zin) {
+          state._zin.disabled = state.zoom >= state.maxZoom - 1e-6;
+          state._zout.disabled = state.zoom <= 0.15 + 1e-6;
+        }
+      }
+
+      function refreshPop(state) {
+        state._autoOpt.setAttribute("aria-checked", state.snapMode === "auto" ? "true" : "false");
+        state._offOpt.setAttribute("aria-checked", state.snapMode === "off" ? "true" : "false");
+        state._presetOpts.forEach((o) => {
+          const on = state.snapMode === "explicit" &&
+            Math.abs(parseFloat(o.dataset.step) - state.snapStep) < 1e-9;
+          o.setAttribute("aria-checked", on ? "true" : "false");
+        });
+      }
+
+      // Drag the couch: pointer moves change couch world pos; snap applied in render.
+      function wireDrag(state) {
+        const svg = state._svg;
+        let dragging = false;
+        svg.addEventListener("pointerdown", (e) => {
+          const pt = localPt(svg, e);
+          const c = state._couchScreen;
+          if (pt.x >= c.x && pt.x <= c.x + c.w && pt.y >= c.y && pt.y <= c.y + c.h) {
+            dragging = true;
+            svg.setPointerCapture(e.pointerId);
+          }
+        });
+        svg.addEventListener("pointermove", (e) => {
+          if (!dragging) return;
+          const pt = localPt(svg, e);
+          const ppm = state.zoom * BASE_PX_PER_M;
+          // move couch so cursor stays near its center-ish
+          state.couch.x = (pt.x - state.pan.x) / ppm - 1.0;
+          state.couch.y = (pt.y - state.pan.y) / ppm - 0.45;
+          render(state);
+        });
+        const end = (e) => { dragging = false; };
+        svg.addEventListener("pointerup", end);
+        svg.addEventListener("pointercancel", end);
+      }
+
+      function localPt(svg, e) {
+        const r = svg.getBoundingClientRect();
+        return {
+          x: (e.clientX - r.left) / r.width * state_W,
+          y: (e.clientY - r.top) / r.height * state_H,
+        };
+      }
+      const state_W = 520, state_H = 340;
+
+      const OPTIONS = [
+        {
+          id: "A",
+          tag: "Option A · smallest change",
+          title: "Raise the zoom cap to 20×",
+          desc: "MAX_ZOOM 8 → 20 (800% → 2000%). Zoom in far enough and the adaptive grid unlocks 0.1 m, then 0.025 m cells. No new UI. Trade-off: fine placement requires extreme zoom, and you lose room context while nudging.",
+          init: { zoom: 8, maxZoom: MAX_ZOOM_A, snapMode: "auto", snapStep: null },
+        },
+        {
+          id: "B",
+          tag: "Option B · behavioural",
+          title: "Decouple snap from grid render",
+          desc: "Keep the 8× cap, but always snap to a fixed fine step (e.g. 0.05 m) regardless of the rendered grid. Placement gets precise immediately with no zooming. Trade-off: the visible grid no longer matches the snap step, which can confuse.",
+          init: { zoom: 3, maxZoom: MAX_ZOOM_DEFAULT, snapMode: "explicit", snapStep: 0.05, fixedHud: true },
+        },
+        {
+          id: "C",
+          tag: "Option C · recommended",
+          title: "Explicit snap-precision control",
+          desc: "A snap chip in the HUD opens presets: Auto (today's behaviour), 0.25 m, 0.1 m, 0.025 m, or Off (free placement + Alt momentary). Snap is decoupled from zoom and render, and the choice is visible and reversible. Also raises the cap modestly (16×) so Auto can still reach fine cells.",
+          init: { zoom: 3, maxZoom: 16, snapMode: "explicit", snapStep: 0.1, snapStep_default: 0.1 },
+        },
+      ];
+
+      function makeCard(def) {
+        const card = document.createElement("section");
+        card.className = "option";
+        const head = document.createElement("div");
+        head.className = "option-head";
+        head.innerHTML =
+          `<div class="option-tag">${def.tag}</div><h2>${def.title}</h2><p>${def.desc}</p>`;
+        card.appendChild(head);
+
+        const state = Object.assign({
+          pan: { x: 150, y: 90 },
+          couch: { x: 0.9, y: 0.7 },
+        }, def.init);
+
+        const stage = makeStage(state);
+        stage.appendChild(makeZoom(state));
+        stage.appendChild(makeHud(state, def.id));
+        if (def.id === "C") stage.appendChild(makeSnapPop(state));
+        card.appendChild(stage);
+
+        // For B, the snap cell is a read-only fixed value.
+        wireDrag(state);
+        refresh(state);
+        return card;
+      }
+
+      document.getElementById("options").append(...OPTIONS.map(makeCard));
+
+      document.getElementById("foot").innerHTML =
+        `<strong>How to read these:</strong> grab the couch and drag it inside each room. ` +
+        `In A the step only gets fine after you zoom way in; in B it's always fine but the grid ` +
+        `disagrees; in C you pick the precision from the Snap chip and it holds at any zoom. ` +
+        `All three preserve the existing Alt-to-free-place behaviour and the warm-blueprint chrome.`;
+    </script>
+  </body>
+</html>
