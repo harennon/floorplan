@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>floorplan · persistence & share — mockup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ── Design tokens (mirrors src/index.html) ─────────────────────── */
+      :root {
+        --bg:         #14140f;
+        --bg-deep:    #100f0b;
+        --ink:        #ece7d6;
+        --muted:      #8f8a78;
+        --gold:       #c9a84c;
+        --gold-soft:  rgba(201, 168, 76, 0.55);
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --panel:      rgba(20, 20, 15, 0.72);
+        --panel-solid:rgba(23, 22, 16, 0.96);
+        --hairline:   rgba(201, 168, 76, 0.18);
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+        --ok:    #9cd67a;
+        --error: #e57373;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body {
+        height: 100%; margin: 0;
+        background: var(--bg-deep);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        -webkit-font-smoothing: antialiased;
+      }
+      body { overflow-y: auto; }
+
+      /* ── Faux canvas backdrop so chrome reads in context ────────────── */
+      .stage-bg {
+        position: fixed; inset: 0; z-index: 0;
+        background:
+          radial-gradient(ellipse 90% 80% at 50% 45%, var(--bg) 0%, var(--bg-deep) 100%);
+        background-image:
+          linear-gradient(var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(var(--grid-major) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+          radial-gradient(ellipse 90% 80% at 50% 45%, var(--bg) 0%, var(--bg-deep) 100%);
+        background-size: 24px 24px, 24px 24px, 120px 120px, 120px 120px, cover;
+      }
+      .grain {
+        position: fixed; inset: 0; z-index: 1; pointer-events: none;
+        mix-blend-mode: overlay; opacity: 0.035;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+        background-size: 200px 200px;
+      }
+
+      /* ── Mockup scaffold (annotations + state gallery) ──────────────── */
+      .doc { position: relative; z-index: 2; max-width: 1080px; margin: 0 auto; padding: 3.5rem 1.5rem 6rem; }
+      .doc-head { margin-bottom: 2.5rem; }
+      .doc-eyebrow {
+        font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.18em;
+        text-transform: uppercase; color: var(--gold); opacity: 0.9;
+      }
+      .doc-title {
+        font-family: var(--font-display); font-weight: 700; font-size: 1.9rem;
+        margin: 0.4rem 0 0.5rem; color: var(--ink);
+      }
+      .doc-sub { font-size: 0.9rem; color: var(--muted); max-width: 46rem; line-height: 1.55; }
+      .doc-note { font-size: 0.78rem; color: var(--muted); line-height: 1.5; margin: 0.5rem 0 0; }
+      .doc-note code {
+        font-family: var(--font-mono); font-size: 0.72rem; color: var(--gold);
+        background: rgba(201,168,76,0.08); padding: 0.05rem 0.3rem; border-radius: 3px;
+      }
+      .section { margin-top: 3rem; }
+      .section-label {
+        font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.14em;
+        text-transform: uppercase; color: var(--gold); margin-bottom: 0.35rem;
+      }
+      .section-desc { font-size: 0.82rem; color: var(--muted); line-height: 1.55; margin-bottom: 1.25rem; max-width: 44rem; }
+      .frame {
+        position: relative; border: 1px dashed rgba(201,168,76,0.22);
+        border-radius: 12px; padding: 2.25rem; min-height: 8rem;
+        display: flex; flex-wrap: wrap; gap: 2.5rem; align-items: flex-start;
+        background: rgba(0,0,0,0.15);
+      }
+      .frame--center { justify-content: center; align-items: center; }
+      .cap {
+        font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.06em;
+        color: var(--muted); text-transform: uppercase; margin-bottom: 0.6rem;
+      }
+      .stack { display: flex; flex-direction: column; gap: 0.6rem; }
+
+      /* ══ COMPONENT: Save-status pill (lives top-right, left of unit toggle) ══ */
+      .save-status {
+        display: inline-flex; align-items: center; gap: 0.4rem;
+        background: var(--panel); border: 1px solid var(--hairline);
+        padding: 0.3rem 0.7rem; border-radius: 100px;
+        font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.04em;
+        color: var(--muted); white-space: nowrap;
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+        user-select: none;
+      }
+      .save-dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--muted); flex-shrink: 0;
+        transition: background 0.25s;
+      }
+      .save-status[data-state="saving"] .save-dot { background: var(--gold); animation: pulse 1s ease-in-out infinite; }
+      .save-status[data-state="saved"]  .save-dot { background: var(--ok); }
+      .save-status[data-state="saving"] { color: var(--gold); }
+      .save-status[data-state="saved"]  { color: var(--muted); }
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+      @media (prefers-reduced-motion: reduce) {
+        .save-status[data-state="saving"] .save-dot { animation: none; }
+      }
+
+      /* ══ COMPONENT: top-right action cluster (Share + overflow) ══ */
+      .action-cluster { display: inline-flex; gap: 0.4rem; align-items: center; }
+      .btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+        background: var(--panel); border: 1px solid var(--hairline);
+        color: var(--ink); font-family: var(--font-mono); font-size: 0.72rem;
+        letter-spacing: 0.04em; padding: 0.4rem 0.85rem; border-radius: 100px;
+        cursor: pointer; white-space: nowrap;
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+        transition: color 0.15s, border-color 0.15s, background 0.15s;
+      }
+      .btn svg { flex-shrink: 0; }
+      .btn:hover { border-color: var(--gold-soft); color: var(--gold); }
+      .btn--primary {
+        background: var(--gold); color: #14140f; border-color: var(--gold);
+        font-weight: 500;
+      }
+      .btn--primary:hover { background: #d9be6e; border-color: #d9be6e; color: #14140f; }
+      .btn--icon { width: 2rem; height: 2rem; padding: 0; border-radius: 8px; }
+      .btn--ghost { background: transparent; border-color: transparent; }
+      .btn--ghost:hover { border-color: var(--hairline); }
+      .btn--block { width: 100%; padding: 0.6rem 0.85rem; }
+      .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+      /* ══ COMPONENT: Modal scrim + sheet (Share sheet, Import confirm) ══ */
+      .scrim {
+        position: fixed; inset: 0; z-index: 40;
+        background: rgba(8, 8, 5, 0.6);
+        backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+        display: flex; align-items: center; justify-content: center; padding: 1.25rem;
+      }
+      /* For gallery: modals shown inline, not fixed */
+      .frame .scrim { position: relative; inset: auto; z-index: auto; background: transparent; backdrop-filter: none; padding: 0; }
+
+      .sheet {
+        width: 100%; max-width: 25rem;
+        background: var(--panel-solid);
+        border: 1px solid var(--hairline);
+        border-radius: 14px;
+        box-shadow: 0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.4);
+        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+        overflow: hidden;
+      }
+      .sheet-head {
+        display: flex; align-items: baseline; justify-content: space-between;
+        padding: 1.1rem 1.25rem 0.5rem;
+      }
+      .sheet-title {
+        font-family: var(--font-display); font-weight: 700; font-size: 1.05rem;
+        color: var(--ink); margin: 0;
+      }
+      .sheet-close {
+        background: transparent; border: none; color: var(--muted);
+        font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0.2rem;
+        transition: color 0.12s;
+      }
+      .sheet-close:hover { color: var(--ink); }
+      .sheet-sub {
+        padding: 0 1.25rem; font-size: 0.76rem; color: var(--muted);
+        line-height: 1.5; margin: 0 0 1rem;
+      }
+      .sheet-body { padding: 0 1.25rem 1.25rem; }
+
+      /* Copy-link row */
+      .link-row {
+        display: flex; align-items: stretch; gap: 0;
+        border: 1px solid var(--hairline); border-radius: 8px; overflow: hidden;
+        background: rgba(0,0,0,0.25);
+      }
+      .link-url {
+        flex: 1; min-width: 0; border: none; background: transparent;
+        color: var(--ink); font-family: var(--font-mono); font-size: 0.72rem;
+        padding: 0.6rem 0.7rem; outline: none;
+        text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
+      }
+      .link-copy {
+        border: none; border-left: 1px solid var(--hairline);
+        background: rgba(201,168,76,0.1); color: var(--gold);
+        font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.05em;
+        padding: 0 0.9rem; cursor: pointer; white-space: nowrap;
+        transition: background 0.15s, color 0.15s;
+      }
+      .link-copy:hover { background: rgba(201,168,76,0.2); }
+      .link-copy[data-copied="true"] { color: var(--ok); }
+      .link-meta {
+        display: flex; align-items: center; justify-content: space-between;
+        font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted);
+        margin-top: 0.45rem; padding: 0 0.15rem;
+      }
+      .link-meta .warn { color: var(--gold); }
+
+      /* Divider inside sheet */
+      .sheet-divider {
+        display: flex; align-items: center; gap: 0.6rem;
+        margin: 1.15rem 0; color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      .sheet-divider::before, .sheet-divider::after {
+        content: ""; flex: 1; height: 1px; background: var(--hairline);
+      }
+
+      /* Export grid */
+      .export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+      .export-tile {
+        display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+        padding: 0.85rem 0.5rem; border: 1px solid var(--hairline);
+        border-radius: 9px; background: rgba(0,0,0,0.2); cursor: pointer;
+        color: var(--muted); transition: color 0.15s, border-color 0.15s, background 0.15s;
+      }
+      .export-tile:hover { color: var(--gold); border-color: var(--gold-soft); background: rgba(201,168,76,0.06); }
+      .export-tile-name { font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink); }
+      .export-tile:hover .export-tile-name { color: var(--gold); }
+      .export-tile-ext { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.08em; }
+
+      /* Import row (JSON in) */
+      .import-row {
+        display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+        font-size: 0.74rem; color: var(--muted); line-height: 1.4;
+      }
+
+      /* QR block (progressive-enhance: only when link short enough) */
+      .qr-block { display: flex; align-items: center; gap: 0.85rem; margin-top: 0.15rem; }
+      .qr-swatch {
+        width: 5.5rem; height: 5.5rem; flex-shrink: 0; border-radius: 8px;
+        background:
+          conic-gradient(from 0deg at 50% 50%, #14140f 0 25%, #ece7d6 0 50%, #14140f 0 75%, #ece7d6 0);
+        background-color: #ece7d6;
+        padding: 0.4rem;
+        /* Fake QR texture */
+        background-image:
+          repeating-linear-gradient(0deg, #14140f 0 4px, transparent 4px 8px),
+          repeating-linear-gradient(90deg, #14140f 0 4px, transparent 4px 8px);
+        background-size: 8px 8px, 8px 8px;
+        border: 3px solid #ece7d6;
+      }
+      .qr-cap { font-size: 0.72rem; color: var(--muted); line-height: 1.5; }
+
+      /* ══ COMPONENT: Restore banner (top-center, on load from #hash) ══ */
+      .restore-banner {
+        display: flex; align-items: center; gap: 0.85rem;
+        max-width: 34rem; padding: 0.65rem 0.75rem 0.65rem 1rem;
+        background: var(--panel-solid); border: 1px solid var(--gold-soft);
+        border-radius: 100px;
+        box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        font-size: 0.78rem; color: var(--ink);
+      }
+      .restore-banner .rb-icon { color: var(--gold); flex-shrink: 0; display: flex; }
+      .restore-banner .rb-text { flex: 1; line-height: 1.4; }
+      .restore-banner .rb-text b { font-weight: 700; }
+      .restore-banner .rb-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
+
+      /* ══ COMPONENT: Toast (transient confirmations) ══ */
+      .toast {
+        display: inline-flex; align-items: center; gap: 0.5rem;
+        background: var(--panel-solid); border: 1px solid var(--hairline);
+        border-left: 3px solid var(--ok);
+        padding: 0.55rem 0.9rem; border-radius: 8px;
+        font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      }
+      .toast--warn { border-left-color: var(--gold); }
+      .toast--error { border-left-color: var(--error); }
+      .toast .t-icon { display: flex; }
+      .toast--warn .t-icon { color: var(--gold); }
+      .toast .t-icon.ok { color: var(--ok); }
+
+      /* ══ COMPONENT: overflow popover menu ══ */
+      .menu {
+        min-width: 12rem; padding: 0.35rem;
+        background: var(--panel-solid); border: 1px solid var(--hairline);
+        border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        display: flex; flex-direction: column;
+      }
+      .menu-item {
+        text-align: left; background: transparent; border: none;
+        color: var(--ink); font-family: var(--font-mono); font-size: 0.74rem;
+        padding: 0.5rem 0.65rem; border-radius: 6px; cursor: pointer;
+        transition: background 0.12s, color 0.12s;
+      }
+      .menu-item:hover { background: rgba(201,168,76,0.1); color: var(--gold); }
+      .menu-item--danger { color: var(--error); }
+      .menu-item--danger:hover { background: rgba(229,115,115,0.12); color: var(--error); }
+      .menu-sep { height: 1px; background: var(--hairline); margin: 0.25rem 0.3rem; }
+
+      /* ══ Live toast host (fixed, top-center) ══ */
+      .toast-host {
+        position: fixed; top: 1.1rem; left: 50%; transform: translateX(-50%);
+        z-index: 60; display: flex; flex-direction: column; gap: 0.5rem;
+        align-items: center; pointer-events: none;
+      }
+      .toast-host .toast { animation: toastIn 0.25s ease both; }
+      @keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+      /* Live modal host */
+      .modal-host { display: none; }
+      .modal-host.open { display: flex; }
+      .modal-host .sheet { animation: sheetIn 0.2s ease both; }
+      @keyframes sheetIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+      @media (prefers-reduced-motion: reduce) {
+        .toast-host .toast, .modal-host .sheet { animation: none; }
+      }
+
+      /* Responsive: sheet becomes a bottom sheet on narrow screens */
+      @media (max-width: 520px) {
+        .modal-host { align-items: flex-end; padding: 0; }
+        .modal-host .sheet {
+          max-width: 100%; border-radius: 16px 16px 0 0;
+          border-bottom: none;
+        }
+        .export-grid { grid-template-columns: repeat(3, 1fr); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage-bg" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+
+    <div class="doc">
+      <header class="doc-head">
+        <div class="doc-eyebrow">floorplan · MVP-6</div>
+        <h1 class="doc-title">Persistence &amp; Share</h1>
+        <p class="doc-sub">
+          The plan is always safe (localStorage autosave) and always sendable
+          (share link · PNG · SVG · JSON). All chrome reuses the existing warm-blueprint
+          language: floating panels, hairline gold borders, backdrop blur, DM Mono labels.
+          Nothing hits a server — the share link encodes the whole plan in the URL <code>#hash</code>.
+        </p>
+        <p class="doc-note">
+          Two new pieces of floating chrome, plus banners/toasts. Everything else is existing app furniture,
+          shown here for context. Click the buttons below — the share sheet, copy, export menu, and toasts are live.
+        </p>
+      </header>
+
+      <!-- ══ SECTION 1: top-right chrome in context ══ -->
+      <section class="section">
+        <div class="section-label">1 · Top-right chrome (in situ)</div>
+        <p class="section-desc">
+          The unit toggle already lives top-right. We add — from left — the <b>save-status pill</b>
+          (quiet, ambient) and a <b>Share</b> button that opens the sheet, plus a small overflow
+          <b>⋯</b> menu holding Export / Import / Reset. This keeps the primary artifact action ("Share")
+          one tap away without crowding the canvas.
+        </p>
+        <div class="frame" style="justify-content:flex-end; align-items:flex-start; gap:0;">
+          <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.6rem;">
+            <div class="action-cluster">
+              <div class="save-status" data-state="saved" id="ctxSave">
+                <span class="save-dot"></span><span class="save-label">Saved</span>
+              </div>
+              <button class="btn btn--primary" id="ctxShareBtn">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <circle cx="12" cy="3.5" r="2" stroke="currentColor" stroke-width="1.4"/>
+                  <circle cx="4" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/>
+                  <circle cx="12" cy="12.5" r="2" stroke="currentColor" stroke-width="1.4"/>
+                  <path d="M10.2 4.6 5.8 6.9M5.8 9.1l4.4 2.3" stroke="currentColor" stroke-width="1.4"/>
+                </svg>
+                Share
+              </button>
+              <button class="btn btn--icon" id="ctxMoreBtn" aria-label="More actions">⋯</button>
+            </div>
+            <div style="display:flex; gap:0.4rem;">
+              <button class="btn" style="padding:0.3rem 0.7rem; font-size:0.7rem; opacity:0.85;" aria-pressed="true">IMPERIAL</button>
+              <button class="btn" style="padding:0.3rem 0.7rem; font-size:0.7rem; opacity:0.6;">METRIC</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ SECTION 2: save-status states ══ -->
+      <section class="section">
+        <div class="section-label">2 · Autosave status pill — states</div>
+        <p class="section-desc">
+          Debounced autosave to <code>localStorage</code> (write ~500ms after the last edit).
+          The pill is ambient, never blocking. It flips to <b>Saving…</b> during the write and
+          settles to <b>Saved</b>. On a private-mode / quota failure it shows a non-alarming
+          <b>Not saved</b> so a user knows to export manually.
+        </p>
+        <div class="frame">
+          <div>
+            <div class="cap">Idle / clean</div>
+            <div class="save-status" data-state="saved"><span class="save-dot"></span><span>Saved</span></div>
+          </div>
+          <div>
+            <div class="cap">During write</div>
+            <div class="save-status" data-state="saving"><span class="save-dot"></span><span>Saving…</span></div>
+          </div>
+          <div>
+            <div class="cap">Fresh edit (dirty)</div>
+            <div class="save-status" data-state="dirty"><span class="save-dot"></span><span>Unsaved changes</span></div>
+          </div>
+          <div>
+            <div class="cap">Storage unavailable</div>
+            <div class="save-status" data-state="error" style="color:var(--error); border-color:rgba(229,115,115,0.4);">
+              <span class="save-dot" style="background:var(--error);"></span><span>Not saved — export to keep</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ SECTION 3: the Share sheet (inline preview of the modal) ══ -->
+      <section class="section">
+        <div class="section-label">3 · Share sheet — the hub</div>
+        <p class="section-desc">
+          One modal collects every artifact. Top: the <b>share link</b> (plan → compressed → base64
+          in the <code>#hash</code>), one-tap copy, and a QR for phone hand-off. Below a divider:
+          <b>export</b> tiles (PNG / SVG / JSON) and a quiet <b>import</b> affordance. This is the
+          full sheet, rendered inline for review.
+        </p>
+        <div class="frame frame--center">
+          <div class="scrim">
+            <div class="sheet" role="dialog" aria-label="Share plan">
+              <div class="sheet-head">
+                <h2 class="sheet-title">Share this plan</h2>
+                <button class="sheet-close" aria-label="Close">✕</button>
+              </div>
+              <p class="sheet-sub">Anyone with the link opens the exact plan — no account, no server.</p>
+              <div class="sheet-body">
+                <div class="link-row">
+                  <input class="link-url" readonly
+                    value="floorplan.danbing.app/#p=N4IgdghgtgpiBcIQBoQ..." />
+                  <button class="link-copy">COPY</button>
+                </div>
+                <div class="link-meta">
+                  <span>~1.4&nbsp;KB · 6 rooms · 4 items</span>
+                  <span class="warn">QR ready</span>
+                </div>
+
+                <div class="qr-block">
+                  <div class="qr-swatch" aria-hidden="true"></div>
+                  <div class="qr-cap">Scan to open on a phone.<br />Shown when the link fits a QR (~2&nbsp;KB).</div>
+                </div>
+
+                <div class="sheet-divider">or export a file</div>
+
+                <div class="export-grid">
+                  <button class="export-tile">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="7" cy="8" r="1.4" stroke="currentColor" stroke-width="1.1"/><path d="M3 14l4-3 3 2 3.5-3.5L17 13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+                    <span class="export-tile-name">PNG</span>
+                    <span class="export-tile-ext">image</span>
+                  </button>
+                  <button class="export-tile">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 16V4l6 6 6-6v12" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+                    <span class="export-tile-name">SVG</span>
+                    <span class="export-tile-ext">vector</span>
+                  </button>
+                  <button class="export-tile">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M7 3.5C4.5 3.5 5 8 3 10c2 2 1.5 6.5 4 6.5M13 3.5c2.5 0 2 4.5 4 6.5-2 2-1.5 6.5-4 6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                    <span class="export-tile-name">JSON</span>
+                    <span class="export-tile-ext">data</span>
+                  </button>
+                </div>
+
+                <div class="sheet-divider">or open a file</div>
+                <div class="import-row">
+                  <span>Have a <code>.floorplan.json</code>? Restore it.</span>
+                  <button class="btn" style="font-size:0.7rem;">Import…</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ SECTION 4: restore banner + toasts ══ -->
+      <section class="section">
+        <div class="section-label">4 · Banners &amp; toasts</div>
+        <p class="section-desc">
+          When someone opens a <b>share link</b>, we parse the <code>#hash</code> and, if a local plan
+          also exists, show a top-center <b>restore banner</b> so they choose rather than silently
+          clobbering their own work. Routine confirmations (copied, exported, imported) use quiet
+          auto-dismissing <b>toasts</b>.
+        </p>
+        <div class="frame" style="flex-direction:column; align-items:stretch; gap:1.4rem;">
+          <div class="stack">
+            <div class="cap">Opened a shared link, local plan also present</div>
+            <div class="restore-banner">
+              <span class="rb-icon">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 5v4l3 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.4"/></svg>
+              </span>
+              <span class="rb-text">This link contains a shared plan. Open it, or keep your current sketch?</span>
+              <span class="rb-actions">
+                <button class="btn btn--primary" style="padding:0.35rem 0.75rem;">Open shared</button>
+                <button class="btn" style="padding:0.35rem 0.75rem;">Keep mine</button>
+              </span>
+            </div>
+          </div>
+
+          <div class="stack">
+            <div class="cap">Reload restored autosave (auto-dismiss ~4s)</div>
+            <div class="restore-banner" style="border-color:var(--hairline);">
+              <span class="rb-icon" style="color:var(--ok);">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 9.5l3.5 3.5L14 5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="rb-text">Restored your last plan.</span>
+              <span class="rb-actions">
+                <button class="btn btn--ghost" style="padding:0.35rem 0.7rem; font-size:0.68rem;">Start fresh</button>
+              </span>
+            </div>
+          </div>
+
+          <div class="stack">
+            <div class="cap">Toasts</div>
+            <div style="display:flex; flex-wrap:wrap; gap:0.75rem;">
+              <div class="toast"><span class="t-icon ok"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3 3L13 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Link copied</div>
+              <div class="toast"><span class="t-icon ok"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 2v8m0 0L5 7m3 3l3-3M3 13h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>PNG exported</div>
+              <div class="toast toast--warn"><span class="t-icon"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 5v4m0 2.5h.01M8 1.5l6.5 11.5H1.5L8 1.5z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Link is long — QR unavailable</div>
+              <div class="toast toast--error"><span class="t-icon" style="color:var(--error);"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 5l6 6M11 5l-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>Couldn't read that file</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ SECTION 5: overflow menu + import confirm ══ -->
+      <section class="section">
+        <div class="section-label">5 · Overflow menu &amp; import-confirm</div>
+        <p class="section-desc">
+          The <b>⋯</b> button opens a small popover for the less-common actions. Importing (from file
+          or a foreign link) prompts before it replaces the current sketch.
+        </p>
+        <div class="frame" style="gap:3rem; align-items:flex-start;">
+          <div class="stack">
+            <div class="cap">⋯ popover</div>
+            <div class="menu" role="menu">
+              <button class="menu-item">Export PNG</button>
+              <button class="menu-item">Export SVG</button>
+              <button class="menu-item">Export JSON</button>
+              <div class="menu-sep"></div>
+              <button class="menu-item">Import from file…</button>
+              <div class="menu-sep"></div>
+              <button class="menu-item menu-item--danger">Reset plan</button>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="cap">Replace-plan confirm</div>
+            <div class="scrim">
+              <div class="sheet" style="max-width:20rem;">
+                <div class="sheet-head"><h2 class="sheet-title">Replace current plan?</h2></div>
+                <p class="sheet-sub">This will replace your current sketch (6 rooms, 4 items). It's not automatically kept.</p>
+                <div class="sheet-body" style="display:flex; gap:0.5rem;">
+                  <button class="btn btn--block" style="flex:1;">Cancel</button>
+                  <button class="btn btn--primary btn--block" style="flex:1;">Replace</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Live hosts (used by interactive buttons at top of doc) -->
+    <div class="toast-host" id="toastHost" aria-live="polite"></div>
+
+    <div class="modal-host scrim" id="shareModal" style="position:fixed;">
+      <div class="sheet" role="dialog" aria-label="Share plan" aria-modal="true">
+        <div class="sheet-head">
+          <h2 class="sheet-title">Share this plan</h2>
+          <button class="sheet-close" data-close aria-label="Close">✕</button>
+        </div>
+        <p class="sheet-sub">Anyone with the link opens the exact plan — no account, no server.</p>
+        <div class="sheet-body">
+          <div class="link-row">
+            <input class="link-url" id="mLink" readonly value="floorplan.danbing.app/#p=N4IgdghgtgpiBcIQBoQ..." />
+            <button class="link-copy" id="mCopy">COPY</button>
+          </div>
+          <div class="link-meta">
+            <span>~1.4&nbsp;KB · 6 rooms · 4 items</span>
+            <span class="warn">QR ready</span>
+          </div>
+          <div class="qr-block">
+            <div class="qr-swatch" aria-hidden="true"></div>
+            <div class="qr-cap">Scan to open on a phone.<br />Shown when the link fits a QR (~2&nbsp;KB).</div>
+          </div>
+          <div class="sheet-divider">or export a file</div>
+          <div class="export-grid">
+            <button class="export-tile" data-export="PNG"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="7" cy="8" r="1.4" stroke="currentColor" stroke-width="1.1"/><path d="M3 14l4-3 3 2 3.5-3.5L17 13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span class="export-tile-name">PNG</span><span class="export-tile-ext">image</span></button>
+            <button class="export-tile" data-export="SVG"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 16V4l6 6 6-6v12" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span class="export-tile-name">SVG</span><span class="export-tile-ext">vector</span></button>
+            <button class="export-tile" data-export="JSON"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M7 3.5C4.5 3.5 5 8 3 10c2 2 1.5 6.5 4 6.5M13 3.5c2.5 0 2 4.5 4 6.5-2 2-1.5 6.5-4 6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><span class="export-tile-name">JSON</span><span class="export-tile-ext">data</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const $ = (s, r = document) => r.querySelector(s);
+
+      function toast(msg, kind = "") {
+        const host = $("#toastHost");
+        const el = document.createElement("div");
+        el.className = "toast" + (kind ? " toast--" + kind : "");
+        const icon = kind === "error"
+          ? '<span class="t-icon" style="color:var(--error)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 5l6 6M11 5l-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>'
+          : kind === "warn"
+          ? '<span class="t-icon"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 5v4m0 2.5h.01M8 1.5l6.5 11.5H1.5L8 1.5z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>'
+          : '<span class="t-icon ok"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3 3L13 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+        el.innerHTML = icon + msg;
+        host.appendChild(el);
+        setTimeout(() => el.remove(), 3200);
+      }
+
+      // Share modal open/close
+      const modal = $("#shareModal");
+      const openModal = () => modal.classList.add("open");
+      const closeModal = () => modal.classList.remove("open");
+      $("#ctxShareBtn").addEventListener("click", openModal);
+      modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+      modal.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", closeModal));
+      window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+
+      // Copy link (both the inline demo copy and the modal copy)
+      function wireCopy(btn, input) {
+        btn.addEventListener("click", async () => {
+          try { await navigator.clipboard.writeText(input.value); } catch (_) {}
+          const prev = btn.textContent;
+          btn.textContent = "COPIED"; btn.dataset.copied = "true";
+          toast("Link copied");
+          setTimeout(() => { btn.textContent = prev; btn.dataset.copied = "false"; }, 1400);
+        });
+      }
+      wireCopy($("#mCopy"), $("#mLink"));
+      document.querySelectorAll(".frame .link-copy").forEach((b) => {
+        wireCopy(b, b.previousElementSibling);
+      });
+
+      // Export tiles → toast
+      modal.querySelectorAll("[data-export]").forEach((t) => {
+        t.addEventListener("click", () => toast(t.dataset.export + " exported"));
+      });
+      document.querySelectorAll(".frame .export-tile").forEach((t) => {
+        t.addEventListener("click", () => {
+          const name = t.querySelector(".export-tile-name")?.textContent || "File";
+          toast(name + " exported");
+        });
+      });
+
+      // Overflow ⋯ demo
+      $("#ctxMoreBtn").addEventListener("click", () => toast("Overflow menu — see section 5", "warn"));
+
+      // Save-status pill demo cycle on the in-situ pill
+      const ctxSave = $("#ctxSave");
+      const label = ctxSave.querySelector(".save-label");
+      let cycle = 0;
+      ctxSave.style.cursor = "pointer";
+      ctxSave.title = "Click to cycle states (demo)";
+      const states = [
+        ["saved", "Saved"], ["dirty", "Unsaved changes"],
+        ["saving", "Saving…"], ["saved", "Saved"],
+      ];
+      ctxSave.addEventListener("click", () => {
+        cycle = (cycle + 1) % states.length;
+        ctxSave.dataset.state = states[cycle][0];
+        label.textContent = states[cycle][1];
+      });
+    </script>
+  </body>
+</html>
