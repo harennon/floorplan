@@ -141,6 +141,7 @@ export function showToast(msg, action) {
       action.onClick();
       // Dismiss immediately on tap
       _toastEl.classList.remove("toast--visible");
+      _toastEl.style.pointerEvents = "";
       if (_toastTimer) clearTimeout(_toastTimer);
     });
     _toastEl.appendChild(textNode);
@@ -154,7 +155,10 @@ export function showToast(msg, action) {
   _toastEl.classList.add("toast--visible");
   if (_toastTimer) clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => {
-    if (_toastEl) _toastEl.classList.remove("toast--visible");
+    if (_toastEl) {
+      _toastEl.classList.remove("toast--visible");
+      _toastEl.style.pointerEvents = "";
+    }
   }, TOAST_DURATION_MS);
 }
 
