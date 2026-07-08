@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Editing UX — undo/redo · delete · duplicate · shortcuts · floorplan</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Design tokens — mirrored from src/index.html (warm blueprint) */
+      :root {
+        --bg: #14140f;
+        --bg-deep: #100f0b;
+        --ink: #ece7d6;
+        --muted: #8f8a78;
+        --gold: #c9a84c;
+        --gold-soft: rgba(201, 168, 76, 0.55);
+        --grid-fine: rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --grid-axis: rgba(201, 168, 76, 0.34);
+        --panel: rgba(20, 20, 15, 0.72);
+        --hairline: rgba(201, 168, 76, 0.18);
+        --font-ui: "DM Sans", system-ui, sans-serif;
+        --font-mono: "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+        --wall-line: #d9be6e;
+        --room-fill: rgba(201, 168, 76, 0.07);
+        --sel: #7fd0c8;
+        --error: #e57373;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; overflow: hidden; }
+      body {
+        font-family: var(--font-ui);
+        color: var(--ink);
+        background: var(--bg-deep);
+      }
+      .app { position: fixed; inset: 0; }
+      .stage {
+        position: absolute; inset: 0;
+        background: radial-gradient(ellipse 90% 80% at 50% 50%, var(--bg) 0%, var(--bg-deep) 100%);
+      }
+      #drawing { display: block; width: 100%; height: 100%; }
+      #drawing .grid-fine { stroke: var(--grid-fine); stroke-width: 1; }
+      #drawing .grid-major { stroke: var(--grid-major); stroke-width: 1; }
+      #drawing .grid-axis { stroke: var(--grid-axis); stroke-width: 1.5; }
+
+      /* ── Brand ─────────────────────────────────────────────── */
+      .brand { position: absolute; top: 1.25rem; left: 1.25rem; pointer-events: none; user-select: none; }
+      .brand-name { font-family: var(--font-display); font-size: 1.1rem; font-weight: 700; color: var(--gold); }
+      .brand-sub { font-family: var(--font-mono); font-size: 0.65rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+
+      /* ── Tool rail (left-center) — extended with a global history cluster ── */
+      .tool-rail {
+        position: absolute; left: 1.25rem; top: 50%; transform: translateY(-50%);
+        display: flex; flex-direction: column; gap: 0.15rem;
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 8px; padding: 0.4rem 0.3rem;
+        backdrop-filter: blur(8px); z-index: 5;
+      }
+      .tool-rail button {
+        background: transparent; border: 1px solid transparent; color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.7rem;
+        width: 2.4rem; height: 2.4rem; border-radius: 6px; cursor: pointer;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1rem;
+        position: relative; transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .tool-rail button:hover:not(:disabled) { color: var(--ink); border-color: var(--hairline); }
+      .tool-rail button[aria-pressed="true"] { color: var(--gold); background: rgba(201,168,76,0.1); border-color: var(--gold-soft); }
+      .tool-rail button:disabled { opacity: 0.32; cursor: not-allowed; }
+      .tool-rail .tool-key-hint { font-size: 0.5rem; color: var(--muted); opacity: 0.7; }
+      .tool-rail-sep { width: 100%; height: 1px; background: var(--hairline); margin: 0.1rem 0; }
+
+      /* Tooltip flyout on rail buttons */
+      .tool-rail button[data-tip]::after {
+        content: attr(data-tip);
+        position: absolute; left: calc(100% + 0.6rem); top: 50%; transform: translateY(-50%);
+        background: var(--bg-deep); border: 1px solid var(--hairline); color: var(--ink);
+        font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.03em;
+        padding: 0.25rem 0.5rem; border-radius: 5px; white-space: nowrap;
+        opacity: 0; pointer-events: none; transition: opacity 0.12s; z-index: 40;
+      }
+      .tool-rail button[data-tip]:hover::after { opacity: 1; }
+      .tool-rail button[data-tip] .kbd-inline { color: var(--gold); }
+
+      /* ── Selection inspector (floating near selected element) ── */
+      .inspector {
+        position: absolute; display: flex; align-items: center; gap: 0.2rem;
+        background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px;
+        padding: 0.3rem 0.4rem; backdrop-filter: blur(10px); z-index: 9;
+      }
+      .insp-btn {
+        background: transparent; border: 1px solid transparent; color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.7rem;
+        width: 2rem; height: 2rem; border-radius: 5px; cursor: pointer;
+        display: flex; align-items: center; justify-content: center; position: relative;
+        transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .insp-btn:hover { color: var(--gold); border-color: var(--gold-soft); }
+      .insp-btn.insp-danger:hover { color: var(--error); border-color: rgba(229,115,115,0.55); background: rgba(229,115,115,0.08); }
+      .insp-sep { width: 1px; height: 1.4rem; background: var(--hairline); }
+      /* Micro key hint under inspector icons */
+      .insp-btn[data-tip]::after {
+        content: attr(data-tip);
+        position: absolute; bottom: calc(100% + 0.4rem); left: 50%; transform: translateX(-50%);
+        background: var(--bg-deep); border: 1px solid var(--hairline); color: var(--ink);
+        font-family: var(--font-mono); font-size: 0.58rem; padding: 0.2rem 0.4rem;
+        border-radius: 4px; white-space: nowrap; opacity: 0; pointer-events: none;
+        transition: opacity 0.12s; z-index: 40;
+      }
+      .insp-btn[data-tip]:hover::after { opacity: 1; }
+
+      /* ── Toast (transient confirmation) ── */
+      .toast {
+        position: fixed; bottom: 5rem; left: 50%;
+        transform: translateX(-50%) translateY(0.5rem);
+        background: var(--panel); border: 1px solid var(--hairline); border-radius: 100px;
+        padding: 0.45rem 1.1rem; font-family: var(--font-mono); font-size: 0.72rem;
+        color: var(--ink); opacity: 0; transition: opacity 0.2s, transform 0.2s;
+        z-index: 30; white-space: nowrap; backdrop-filter: blur(8px);
+        display: flex; align-items: center; gap: 0.6rem;
+      }
+      .toast.toast--visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+      .toast .toast-undo {
+        background: transparent; border: none; color: var(--gold); cursor: pointer;
+        font-family: var(--font-mono); font-size: 0.72rem; padding: 0;
+        border-bottom: 1px solid var(--gold-soft);
+      }
+
+      /* ── Shortcuts cheat-sheet overlay (press ?) ── */
+      .cheat-scrim {
+        position: fixed; inset: 0; background: rgba(16,15,11,0.6);
+        backdrop-filter: blur(3px); z-index: 50; display: none;
+        align-items: center; justify-content: center; padding: 1.5rem;
+      }
+      .cheat-scrim.open { display: flex; }
+      .cheat {
+        width: min(34rem, 100%); max-height: 84vh; overflow-y: auto;
+        background: var(--panel); border: 1px solid var(--hairline); border-radius: 12px;
+        backdrop-filter: blur(14px); box-shadow: 0 12px 48px rgba(0,0,0,0.55);
+      }
+      .cheat-head {
+        display: flex; align-items: baseline; justify-content: space-between;
+        padding: 1.1rem 1.3rem 0.6rem; border-bottom: 1px solid var(--hairline);
+      }
+      .cheat-title { font-family: var(--font-display); font-size: 1.05rem; color: var(--gold); }
+      .cheat-close {
+        background: transparent; border: 1px solid var(--hairline); color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.7rem; cursor: pointer;
+        border-radius: 5px; padding: 0.2rem 0.5rem;
+      }
+      .cheat-close:hover { color: var(--gold); border-color: var(--gold-soft); }
+      .cheat-body { padding: 0.8rem 1.3rem 1.2rem; }
+      .cheat-group-label {
+        font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.1em;
+        text-transform: uppercase; color: var(--muted); margin: 0.9rem 0 0.4rem;
+      }
+      .cheat-group-label:first-child { margin-top: 0; }
+      .cheat-row {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0.32rem 0; border-bottom: 1px solid rgba(201,168,76,0.07);
+      }
+      .cheat-row-desc { font-size: 0.82rem; color: var(--ink); }
+      .cheat-keys { display: flex; gap: 0.25rem; align-items: center; }
+      kbd {
+        font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink);
+        background: rgba(201,168,76,0.08); border: 1px solid var(--hairline);
+        border-radius: 4px; padding: 0.12rem 0.42rem; min-width: 1.4rem; text-align: center;
+        box-shadow: 0 1px 0 rgba(0,0,0,0.4);
+      }
+      .cheat-keys .plus { color: var(--muted); font-family: var(--font-mono); font-size: 0.66rem; }
+
+      /* ── Help affordance (bottom-left, near zoom) ── */
+      .help-btn {
+        position: absolute; bottom: 1.25rem; left: 1.25rem;
+        width: 2.2rem; height: 2.2rem; border-radius: 6px;
+        background: var(--panel); border: 1px solid var(--hairline); color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.9rem; cursor: pointer; z-index: 5;
+        backdrop-filter: blur(8px);
+      }
+      .help-btn:hover { color: var(--gold); border-color: var(--gold-soft); }
+
+      /* Selected wall/room highlight in SVG */
+      #drawing .sel-outline { stroke: var(--sel); stroke-width: 2.5; fill: none; stroke-dasharray: 6 4; }
+      #drawing .sel-fill { fill: rgba(127,208,200,0.10); }
+
+      /* ── Mockup-only annotation caption (not part of product) ── */
+      .mk-caption {
+        position: fixed; top: 1.1rem; left: 50%; transform: translateX(-50%);
+        font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted);
+        background: rgba(16,15,11,0.7); border: 1px solid var(--hairline);
+        padding: 0.3rem 0.8rem; border-radius: 100px; z-index: 45; text-align: center;
+        letter-spacing: 0.03em; pointer-events: none;
+      }
+      .mk-caption b { color: var(--gold); font-weight: 500; }
+      /* mockup state switcher (dev-only, bottom-center) */
+      .mk-scenes {
+        position: fixed; bottom: 0.9rem; left: 50%; transform: translateX(-50%);
+        display: flex; gap: 0.3rem; z-index: 46;
+        background: rgba(16,15,11,0.82); border: 1px solid var(--hairline);
+        border-radius: 100px; padding: 0.3rem 0.4rem; backdrop-filter: blur(8px);
+      }
+      .mk-scenes button {
+        background: transparent; border: 1px solid transparent; color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.04em;
+        padding: 0.25rem 0.6rem; border-radius: 100px; cursor: pointer;
+      }
+      .mk-scenes button.active { color: var(--gold); border-color: var(--gold-soft); background: rgba(201,168,76,0.1); }
+      .mk-scenes button:hover:not(.active) { color: var(--ink); }
+    </style>
+  </head>
+  <body>
+    <div class="mk-caption" id="mk-caption"></div>
+
+    <div class="app">
+      <!-- Drawing stage -->
+      <div class="stage">
+        <svg id="drawing" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <g id="grid"></g>
+          <g id="world"></g>
+          <g id="overlay"></g>
+        </svg>
+      </div>
+
+      <!-- Brand -->
+      <div class="brand" aria-hidden="true">
+        <div class="brand-name">floorplan</div>
+        <div class="brand-sub">warm blueprint</div>
+      </div>
+
+      <!-- Tool rail: tools + global history cluster -->
+      <nav class="tool-rail" aria-label="Drawing tools">
+        <button data-tip="Select &nbsp;<span class='kbd-inline'>V</span>" aria-pressed="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 2 L4 13 L7 10 L9 14 L11 13 L9 9 L13 9 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+          <span class="tool-key-hint">V</span>
+        </button>
+        <button data-tip="Draw wall &nbsp;<span class='kbd-inline'>W</span>" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+          <span class="tool-key-hint">W</span>
+        </button>
+
+        <div class="tool-rail-sep" aria-hidden="true"></div>
+
+        <!-- NEW: global undo/redo (distinct from draw-mode point undo) -->
+        <button id="btn-undo" data-tip="Undo &nbsp;<span class='kbd-inline'>⌘Z</span>">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M6 4 L2 8 L6 12 M2 8 H11 Q15 8 15 11.5 Q15 15 11 15 H7" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+        <button id="btn-redo" data-tip="Redo &nbsp;<span class='kbd-inline'>⌘⇧Z</span>" disabled>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="transform:scaleX(-1)">
+            <path d="M6 4 L2 8 L6 12 M2 8 H11 Q15 8 15 11.5 Q15 15 11 15 H7" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+      </nav>
+
+      <!-- Help / cheat-sheet trigger -->
+      <button class="help-btn" id="btn-help" aria-label="Keyboard shortcuts (?)">?</button>
+
+      <!-- Selection inspector (floating; shown for a selected symbol OR wall/room) -->
+      <div class="inspector" id="inspector" role="toolbar" aria-label="Selection actions" style="display:none;">
+        <button class="insp-btn" data-action="rotate" data-tip="Rotate  R" aria-label="Rotate 90°">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8 A5 5 0 1 1 8 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <polyline points="3,5 3,8 6,8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button class="insp-btn" data-action="duplicate" data-tip="Duplicate  ⌘D" aria-label="Duplicate">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="5" y="2" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+            <rect x="2" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="var(--bg-deep)"/>
+          </svg>
+        </button>
+        <button class="insp-btn insp-danger" data-action="delete" data-tip="Delete  ⌫" aria-label="Delete">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <polyline points="2,4 14,4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <path d="M5 4 V13 H11 V4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            <polyline points="6,4 6,2 10,2 10,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Toast with inline undo affordance -->
+      <div class="toast" id="toast" role="status" aria-live="polite">
+        <span id="toast-text">Deleted sofa</span>
+        <button class="toast-undo" id="toast-undo">Undo</button>
+      </div>
+    </div>
+
+    <!-- Shortcuts cheat sheet -->
+    <div class="cheat-scrim" id="cheat-scrim">
+      <div class="cheat" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+        <div class="cheat-head">
+          <span class="cheat-title">Keyboard shortcuts</span>
+          <button class="cheat-close" id="cheat-close">Esc</button>
+        </div>
+        <div class="cheat-body" id="cheat-body"></div>
+      </div>
+    </div>
+
+    <!-- Mockup-only scene switcher -->
+    <div class="mk-scenes" id="mk-scenes">
+      <button data-scene="idle">Idle</button>
+      <button data-scene="symbol" class="active">Symbol selected</button>
+      <button data-scene="wall">Wall selected</button>
+      <button data-scene="toast">Undo toast</button>
+      <button data-scene="cheat">Cheat sheet</button>
+    </div>
+
+    <script>
+      // ── Draw grid + a demo room and a sofa ──────────────────────────
+      const svg = document.getElementById("drawing");
+      const W = window.innerWidth, H = window.innerHeight;
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      const gGrid = document.getElementById("grid");
+      const gWorld = document.getElementById("world");
+      const gOverlay = document.getElementById("overlay");
+      const NS = "http://www.w3.org/2000/svg";
+
+      function line(x1, y1, x2, y2, cls) {
+        const l = document.createElementNS(NS, "line");
+        l.setAttribute("x1", x1); l.setAttribute("y1", y1);
+        l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+        l.setAttribute("class", cls);
+        return l;
+      }
+      const STEP = 32;
+      for (let x = (W / 2) % STEP; x < W; x += STEP) {
+        const major = Math.abs(x - W / 2) % (STEP * 5) < 1;
+        gGrid.appendChild(line(x, 0, x, H, major ? "grid-major" : "grid-fine"));
+      }
+      for (let y = (H / 2) % STEP; y < H; y += STEP) {
+        const major = Math.abs(y - H / 2) % (STEP * 5) < 1;
+        gGrid.appendChild(line(0, y, W, y, major ? "grid-major" : "grid-fine"));
+      }
+      gGrid.appendChild(line(W / 2, 0, W / 2, H, "grid-axis"));
+      gGrid.appendChild(line(0, H / 2, W, H / 2, "grid-axis"));
+
+      // Demo room polygon (centered-ish)
+      const cx = W / 2, cy = H / 2;
+      const room = [
+        [cx - 200, cy - 130], [cx + 210, cy - 130],
+        [cx + 210, cy + 150], [cx - 200, cy + 150],
+      ];
+      const poly = document.createElementNS(NS, "polygon");
+      poly.setAttribute("points", room.map(p => p.join(",")).join(" "));
+      poly.setAttribute("fill", "var(--room-fill)");
+      poly.setAttribute("stroke", "var(--wall-line)");
+      poly.setAttribute("stroke-width", "5");
+      poly.setAttribute("stroke-linejoin", "round");
+      gWorld.appendChild(poly);
+
+      // Demo sofa symbol
+      const sofa = document.createElementNS(NS, "g");
+      sofa.setAttribute("transform", `translate(${cx - 40}, ${cy + 20})`);
+      sofa.innerHTML = `
+        <rect x="0" y="0" width="120" height="60" rx="6" fill="rgba(201,168,76,0.10)" stroke="var(--wall-line)" stroke-width="2"/>
+        <rect x="0" y="0" width="120" height="18" rx="6" fill="rgba(201,168,76,0.16)" stroke="var(--wall-line)" stroke-width="1.5"/>
+        <rect x="0" y="16" width="16" height="44" rx="4" fill="rgba(201,168,76,0.10)" stroke="var(--wall-line)" stroke-width="1.5"/>
+        <rect x="104" y="16" width="16" height="44" rx="4" fill="rgba(201,168,76,0.10)" stroke="var(--wall-line)" stroke-width="1.5"/>`;
+      gWorld.appendChild(sofa);
+
+      // ── Cheat-sheet content (mirrors the shortcut map) ──────────────
+      const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+      const MOD = isMac ? "⌘" : "Ctrl";
+      const SHORTCUTS = [
+        ["Editing", [
+          ["Undo", [MOD, "Z"]],
+          ["Redo", [MOD, "⇧", "Z"]],
+          ["Redo (alt)", [MOD, "Y"]],
+          ["Delete selection", ["Delete"], ["⌫"]],
+          ["Duplicate selection", [MOD, "D"]],
+        ]],
+        ["Selection & tools", [
+          ["Select tool", ["V"]],
+          ["Draw-wall tool", ["W"]],
+          ["Rotate symbol 90°", ["R"]],
+          ["Clear selection / cancel", ["Esc"]],
+        ]],
+        ["Drawing (wall mode)", [
+          ["Remove last wall point", ["⌫"]],
+          ["Finish current chain", ["Enter"]],
+          ["Free placement (skip grid)", ["Alt"], ["hold"]],
+        ]],
+        ["Help", [
+          ["This cheat sheet", ["?"]],
+        ]],
+      ];
+
+      // Render cheat sheet
+      const cheatBody = document.getElementById("cheat-body");
+      SHORTCUTS.forEach(([group, rows]) => {
+        const gl = document.createElement("div");
+        gl.className = "cheat-group-label";
+        gl.textContent = group;
+        cheatBody.appendChild(gl);
+        rows.forEach(([desc, ...keyGroups]) => {
+          const row = document.createElement("div");
+          row.className = "cheat-row";
+          const d = document.createElement("span");
+          d.className = "cheat-row-desc";
+          d.textContent = desc;
+          const keys = document.createElement("span");
+          keys.className = "cheat-keys";
+          keyGroups.forEach((grp, gi) => {
+            if (gi > 0) {
+              const or = document.createElement("span");
+              or.className = "plus"; or.textContent = "or";
+              keys.appendChild(or);
+            }
+            grp.forEach((k, ki) => {
+              if (ki > 0 && !/hold/.test(k)) {
+                const p = document.createElement("span");
+                p.className = "plus"; p.textContent = "+";
+                keys.appendChild(p);
+              }
+              const kb = document.createElement("kbd");
+              kb.textContent = k;
+              keys.appendChild(kb);
+            });
+          });
+          row.appendChild(d); row.appendChild(keys);
+          cheatBody.appendChild(row);
+        });
+      });
+
+      // ── Scene state machine (mockup-only) ───────────────────────────
+      const inspector = document.getElementById("inspector");
+      const toast = document.getElementById("toast");
+      const scrim = document.getElementById("cheat-scrim");
+      const caption = document.getElementById("mk-caption");
+      const btnUndo = document.getElementById("btn-undo");
+      const btnRedo = document.getElementById("btn-redo");
+
+      // Selection highlight nodes (built lazily)
+      function clearOverlay() { gOverlay.innerHTML = ""; }
+
+      function placeInspectorAbove(x, y) {
+        inspector.style.display = "flex";
+        // Position centered above a screen point, clamped
+        const w = inspector.offsetWidth || 120;
+        let lx = x - w / 2;
+        lx = Math.max(12, Math.min(lx, W - w - 12));
+        inspector.style.left = lx + "px";
+        inspector.style.top = (y - inspector.offsetHeight - 14) + "px";
+      }
+
+      function showSymbolSelected() {
+        clearOverlay();
+        const sx = cx - 40, sy = cy + 20, sw = 120, sh = 60;
+        const box = document.createElementNS(NS, "rect");
+        box.setAttribute("x", sx - 4); box.setAttribute("y", sy - 4);
+        box.setAttribute("width", sw + 8); box.setAttribute("height", sh + 8);
+        box.setAttribute("rx", 4);
+        box.setAttribute("class", "sel-outline");
+        gOverlay.appendChild(box);
+        // corner handles
+        [[sx-4,sy-4],[sx+sw+4,sy-4],[sx+sw+4,sy+sh+4],[sx-4,sy+sh+4]].forEach(([hx,hy]) => {
+          const h = document.createElementNS(NS, "rect");
+          h.setAttribute("x", hx-4); h.setAttribute("y", hy-4);
+          h.setAttribute("width", 8); h.setAttribute("height", 8);
+          h.setAttribute("fill", "var(--bg-deep)");
+          h.setAttribute("stroke", "var(--sel)"); h.setAttribute("stroke-width", 2);
+          gOverlay.appendChild(h);
+        });
+        placeInspectorAbove(sx + sw / 2, sy - 4);
+      }
+
+      function showWallSelected() {
+        clearOverlay();
+        const fill = document.createElementNS(NS, "polygon");
+        fill.setAttribute("points", room.map(p => p.join(",")).join(" "));
+        fill.setAttribute("class", "sel-fill");
+        gOverlay.appendChild(fill);
+        const out = document.createElementNS(NS, "polygon");
+        out.setAttribute("points", room.map(p => p.join(",")).join(" "));
+        out.setAttribute("class", "sel-outline");
+        gOverlay.appendChild(out);
+        placeInspectorAbove(cx + 5, cy - 130);
+      }
+
+      const CAPTIONS = {
+        idle: "Idle — nothing selected. <b>⌘Z</b> / <b>⌘⇧Z</b> in the rail step through history. Press <b>?</b> for shortcuts.",
+        symbol: "Symbol selected — inspector floats above with <b>Rotate</b> · <b>Duplicate (⌘D)</b> · <b>Delete (⌫)</b>. History has 1 undoable step.",
+        wall: "Wall / room selected — same inspector contract as symbols. <b>⌫</b> deletes the whole room; <b>⌘Z</b> restores it.",
+        toast: "After a delete, a toast confirms and offers a one-tap <b>Undo</b> — the safety net for the destructive action.",
+        cheat: "Press <b>?</b> anytime for the full shortcut map. Core editing keys are grouped at the top.",
+      };
+
+      function setScene(name) {
+        // reset
+        inspector.style.display = "none";
+        toast.classList.remove("toast--visible");
+        scrim.classList.remove("open");
+        clearOverlay();
+        document.querySelectorAll("[data-pressed]").forEach(b => {});
+        caption.innerHTML = CAPTIONS[name] || "";
+        // rail pressed state + history availability per scene
+        const railBtns = document.querySelectorAll(".tool-rail [aria-pressed]");
+        railBtns[0].setAttribute("aria-pressed", "true");
+        railBtns[1].setAttribute("aria-pressed", "false");
+
+        if (name === "idle") {
+          btnUndo.disabled = true; btnRedo.disabled = true;
+        } else {
+          btnUndo.disabled = false; btnRedo.disabled = true;
+        }
+
+        if (name === "symbol") showSymbolSelected();
+        else if (name === "wall") showWallSelected();
+        else if (name === "toast") {
+          btnUndo.disabled = false;
+          document.getElementById("toast-text").textContent = "Deleted sofa";
+          toast.classList.add("toast--visible");
+        }
+        else if (name === "cheat") scrim.classList.add("open");
+
+        document.querySelectorAll("#mk-scenes button").forEach(b =>
+          b.classList.toggle("active", b.dataset.scene === name));
+      }
+
+      document.getElementById("mk-scenes").addEventListener("click", e => {
+        const b = e.target.closest("button");
+        if (b) setScene(b.dataset.scene);
+      });
+
+      // ── Live affordance wiring (functional in the mockup) ───────────
+      document.getElementById("btn-help").addEventListener("click", () => setScene("cheat"));
+      document.getElementById("cheat-close").addEventListener("click", () => setScene("idle"));
+      scrim.addEventListener("click", e => { if (e.target === scrim) setScene("idle"); });
+
+      // Inspector delete → confirmation toast with undo
+      inspector.querySelector("[data-action='delete']").addEventListener("click", () => setScene("toast"));
+      inspector.querySelector("[data-action='duplicate']").addEventListener("click", () => {
+        document.getElementById("toast-text").textContent = "Duplicated";
+        document.getElementById("toast-undo").style.display = "none";
+        toast.classList.add("toast--visible");
+        setTimeout(() => {
+          toast.classList.remove("toast--visible");
+          document.getElementById("toast-undo").style.display = "";
+        }, 1800);
+      });
+      document.getElementById("toast-undo").addEventListener("click", () => setScene("symbol"));
+
+      // Keyboard: ? opens cheat, Esc closes / clears
+      window.addEventListener("keydown", e => {
+        if (e.key === "?" ) { e.preventDefault(); setScene("cheat"); }
+        else if (e.key === "Escape") setScene("idle");
+      });
+
+      // Boot
+      setScene("symbol");
+    </script>
+  </body>
+</html>
