@@ -13,13 +13,18 @@ import { clearLocal, saveNow } from "./store.js";
 import { hydrate as hydrateWalls } from "./walls.js";
 import { hydrate as hydrateSymbols } from "./symbols.js";
 import { resetView } from "./view.js";
-import { render } from "./surface.js";
+import { render, onRender } from "./surface.js";
 import * as surface from "./surface.js";
 
 /** Cached encoded hash for synchronous clipboard copy (Safari user-activation). */
 let _cachedHashUrl = null;
-let _hashCacheTimer = null;
-const HASH_CACHE_MS = 2000; // refresh hash lazily after this interval
+
+/**
+ * Whether the cache is known stale (set on every render, cleared when cache is rebuilt).
+ * We use this to avoid the 100ms warmup timer approach — instead we hook into onRender
+ * and invalidate immediately so the cache always reflects the latest plan.
+ */
+let _cacheStale = true;
 
 /** DOM refs, set by init(). */
 let _btnShare        = null;
@@ -59,6 +64,11 @@ export function init(els) {
   // Give exportJson our toast callback
   setToastCallback(showToast);
 
+  // Invalidate hash cache on every render so Share always reflects the current plan.
+  // The cache is rebuilt asynchronously in the background after each invalidation
+  // so that the next Share click is usually served synchronously (Safari activation-safe).
+  onRender(_onRenderInvalidateCache);
+
   // ── Share button ────────────────────────────────────────────────────────────
   _btnShare?.addEventListener("click", _onShare);
 
@@ -92,8 +102,8 @@ export function init(els) {
     _overflowMenuEl?.classList.remove("menu--open");
   });
 
-  // Pre-warm the hash cache on idle
-  _scheduleHashRefresh();
+  // Pre-warm the hash cache immediately (async, non-blocking)
+  _rebuildCacheAsync();
 }
 
 /**
@@ -149,11 +159,14 @@ export function showConflictBanner(hashPlan, localPlan, onChoice) {
 // ── Private: share ────────────────────────────────────────────────────────────
 
 async function _onShare() {
-  // Prefer synchronous path: use pre-computed cached URL if available
-  if (_cachedHashUrl) {
+  // Prefer synchronous path: use pre-computed cached URL if it is fresh.
+  // The cache is invalidated on every render (via the onRender hook) and
+  // rebuilt asynchronously in the background, so _cachedHashUrl is current
+  // as long as the plan has not changed since the last background rebuild.
+  if (_cachedHashUrl && !_cacheStale) {
     _copyUrl(_cachedHashUrl);
   } else {
-    // Async path: compute now
+    // Async path: compute now (cache was stale or not yet built)
     try {
       const url = await _buildAndCacheUrl();
       _copyUrl(url);
@@ -161,8 +174,6 @@ async function _onShare() {
       showToast("Couldn't build share link");
     }
   }
-  // Refresh cache for next time
-  _scheduleHashRefresh();
 }
 
 function _copyUrl(url) {
@@ -208,15 +219,32 @@ async function _buildAndCacheUrl() {
   const hash = await encodePlanToHash(plan);
   const url = location.origin + location.pathname + "#" + hash;
   _cachedHashUrl = url;
+  _cacheStale = false;
   return url;
 }
 
-function _scheduleHashRefresh() {
-  if (_hashCacheTimer) clearTimeout(_hashCacheTimer);
-  _hashCacheTimer = setTimeout(() => {
-    _hashCacheTimer = null;
-    _buildAndCacheUrl().catch(() => {});
-  }, 100);
+/**
+ * Called on every render: mark cache stale, then kick off an async rebuild so
+ * the next Share click can use the synchronous path (Safari user-activation safe).
+ */
+function _onRenderInvalidateCache() {
+  _cacheStale = true;
+  _cachedHashUrl = null;
+  _rebuildCacheAsync();
+}
+
+/**
+ * Non-blocking background rebuild. If another render fires before this
+ * completes, _onRenderInvalidateCache will clear _cachedHashUrl again
+ * and restart, which is fine — the last one to complete wins.
+ */
+function _rebuildCacheAsync() {
+  _buildAndCacheUrl().catch(() => {
+    // Compression failure is non-fatal; _cacheStale stays true so
+    // _onShare will fall through to the async path.
+    _cacheStale = true;
+    _cachedHashUrl = null;
+  });
 }
 
 // ── Private: export actions ───────────────────────────────────────────────────
@@ -261,11 +289,12 @@ function _confirmReset() {
   hydrateWalls({ rooms: [], chain: [] });
   hydrateSymbols({ symbols: [] });
   clearLocal();
+  // Invalidate hash cache before render (render will also fire _onRenderInvalidateCache)
+  _cachedHashUrl = null;
+  _cacheStale = true;
   // Edge Case 16: Reset is the one deliberate view reset
   resetView(surface.W, surface.H);
   render();
-  // Invalidate hash cache
-  _cachedHashUrl = null;
 }
 
 // ── Private: menu helpers ─────────────────────────────────────────────────────

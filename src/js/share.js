@@ -79,8 +79,13 @@ export async function buildShareUrl() {
 }
 
 /**
- * Read location.hash on boot; returns decoded Plan|null.
- * Strips the hash after reading so subsequent reloads don't re-trigger the share path.
+ * Read location.hash on boot; returns decoded Plan or null.
+ * - Returns null when no hash is present.
+ * - Returns the decoded Plan when the hash is valid.
+ * - Throws an error when a hash IS present but cannot be decoded (malformed/truncated).
+ *   Callers should catch this to show a "couldn't be opened" toast.
+ * Strips the hash after reading in all cases so a later reload does not
+ * re-trigger the share path.
  * @returns {Promise<import("./plan.js").Plan|null>}
  */
 export async function readBootHash() {
@@ -97,7 +102,12 @@ export async function readBootHash() {
     // ignore (some environments don't support history API)
   }
 
-  return decodeHashToPlan(hash);
+  const plan = await decodeHashToPlan(hash);
+  if (plan === null) {
+    // Hash was present but undecodable — signal to caller to show a toast
+    throw new Error("share-hash-decode-failed");
+  }
+  return plan;
 }
 
 // ── Private: CompressionStream helpers ───────────────────────────────────────

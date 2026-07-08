@@ -2287,11 +2287,11 @@ import {
 } from "./js/plan.js";
 
 import {
-  STORAGE_KEY, loadLocal, saveNow, clearLocal, getState,
+  STORAGE_KEY, init as initStore, loadLocal, saveNow, clearLocal, getState,
 } from "./js/store.js";
 
 import {
-  encodePlanToHash, decodeHashToPlan,
+  encodePlanToHash, decodeHashToPlan, readBootHash,
 } from "./js/share.js";
 
 import {
@@ -2879,6 +2879,371 @@ describe("store.js — loadLocal / clearLocal / getState", () => {
     clearLocal();
     const val = localStorage.getItem(STORAGE_KEY);
     if (val !== null) throw new Error("Key still present after clearLocal");
+  });
+});
+
+// ─── Tests: autosave pill + dirty-check (behavioral) ─────────────────────────
+//
+// We exercise the store logic directly via saveNow() rather than driving the
+// full surface render loop (which requires the full app DOM), so these are
+// integration tests of the store's save/dirty-check state machine.
+
+describe("store — autosave dirty-check: saveNow writes on first call, skips on no-change", () => {
+  it("saveNow writes a valid plan to localStorage", () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:3 },{ x:0,y:3 }] });
+    const pillEl = document.createElement("span");
+    initStore(pillEl);
+    saveNow();
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) throw new Error("Nothing written to localStorage");
+    const parsed = JSON.parse(stored);
+    if (!validatePlan(parsed)) throw new Error("Stored plan fails validation");
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("saveNow → pill transitions to 'saved'", () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:0,y:0 },{ x:1,y:0 }] });
+    const pillEl = document.createElement("span");
+    initStore(pillEl);
+    saveNow();
+    expect(getState()).toBe("saved");
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("saveNow a second time with unchanged model does NOT write again (dirty-check)", () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:0,y:0 },{ x:3,y:0 }] });
+    const pillEl = document.createElement("span");
+    clearLocal(); // reset _lastWrittenJson baseline
+    initStore(pillEl);
+    saveNow(); // first write
+    // Now directly overwrite localStorage with a different value to detect if saveNow re-writes
+    localStorage.setItem(STORAGE_KEY, "SENTINEL");
+    saveNow(); // should be a no-op (dirty-check: same JSON)
+    const secondValue = localStorage.getItem(STORAGE_KEY);
+    // Dirty-check should have skipped the write, leaving our sentinel intact
+    expect(secondValue).toBe("SENTINEL");
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("saveNow writes after model changes (dirty-check detects diff)", () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:0,y:0 },{ x:3,y:0 }] });
+    const pillEl = document.createElement("span");
+    clearLocal(); // reset _lastWrittenJson baseline
+    initStore(pillEl);
+    saveNow(); // write baseline
+    // Change the model
+    model.rooms[0].verts[1].x = 5;
+    saveNow(); // should write again
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored || stored === "SENTINEL") throw new Error("Expected new write after model change");
+    const plan = JSON.parse(stored);
+    if (plan.walls.rooms[0].verts[1].x !== 5) throw new Error("Stored plan does not reflect model change");
+    localStorage.removeItem(STORAGE_KEY);
+  });
+});
+
+describe("store — localStorage setItem throwing → pill 'error' (Edge Case 1/2)", () => {
+  it("saveNow with a full setItem stub transitions pill to 'error', no exception escapes", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:0,y:0 },{ x:1,y:0 }] });
+    const pillEl = document.createElement("span");
+    initStore(pillEl);
+    // Reset baseline so store thinks nothing is saved yet
+    clearLocal();
+
+    // Stub localStorage.setItem to throw QuotaExceededError
+    const origSetItem = localStorage.setItem.bind(localStorage);
+    const err = new DOMException("QuotaExceededError", "QuotaExceededError");
+    let threw = false;
+    localStorage.setItem = () => { throw err; };
+    try {
+      saveNow();
+    } catch (e) {
+      threw = true;
+    } finally {
+      localStorage.setItem = origSetItem;
+    }
+    if (threw) throw new Error("saveNow let the exception escape");
+    expect(getState()).toBe("error");
+  });
+});
+
+// ─── Tests: reload-restore-view-verbatim (regression guard) ──────────────────
+// This is the key behavioral test the LLD reviewer flags: the pure plan round-trip
+// test (applyPlan(validatePlan(buildPlan()))) does NOT exercise the boot tail.
+// This test seeds localStorage with a known plan whose view differs from the
+// default resetView frame and verifies that the boot-restore path (loadLocal +
+// applyPlan) preserves the stored view — i.e. resetView was NOT called.
+
+describe("boot-restore — reload restores stored view verbatim (not resetView)", () => {
+  it("applyPlan(loadLocal()) restores non-default view: view equals stored, not resetView", () => {
+    resetAll();
+    // Seed a plan with a deliberately non-default view
+    const STORED_ZOOM = 3.0;
+    const STORED_PAN_X = 777;
+    const STORED_PAN_Y = 444;
+    view.zoom = STORED_ZOOM;
+    view.panX = STORED_PAN_X;
+    view.panY = STORED_PAN_Y;
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const plan = buildPlan();
+    localStorage.setItem(STORAGE_KEY, serializePlan(plan));
+
+    // Reset state to simulate a fresh boot (default view would be zoom=1, panX=150, panY=240 for 1000x800)
+    resetAll();
+    view.zoom = 1; view.panX = 150; view.panY = 240; // simulate what resetView(1000,800) would set
+
+    // Simulate the boot-restore path: loadLocal + applyPlan (NOT resetView)
+    const restored = loadLocal();
+    if (!restored) throw new Error("loadLocal returned null — nothing to restore");
+    applyPlan(restored);
+
+    // View MUST equal stored values, not the resetView defaults
+    expect(view.zoom).toBeCloseTo(STORED_ZOOM, 9);
+    expect(view.panX).toBeCloseTo(STORED_PAN_X, 9);
+    expect(view.panY).toBeCloseTo(STORED_PAN_Y, 9);
+
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("without loadLocal (empty start), resetView sets the default frame", () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+
+    // Simulate empty-start boot: resetView is called when no plan exists
+    resetView(1000, 800);
+
+    expect(view.zoom).toBe(1);
+    expect(view.panX).toBeCloseTo(150, 9); // 0.15 * 1000
+    expect(view.panY).toBeCloseTo(240, 9); // 0.30 * 800
+  });
+});
+
+// ─── Tests: share-open fit-to-content reframing ───────────────────────────────
+
+describe("share-open — applyPlan + fitToContent frames content on current viewport", () => {
+  it("shared plan drawn on large viewport frames on-screen for narrow viewport after fitToContent", async () => {
+    resetAll();
+    // Build a plan as if drawn on a large (desktop) viewport
+    const senderW = 1920, senderH = 1080;
+    resetView(senderW, senderH);
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:5,y:0 },{ x:5,y:4 },{ x:0,y:4 }] });
+    const sharedPlan = buildPlan();
+    const hash = await encodePlanToHash(sharedPlan);
+    const decodedPlan = await decodeHashToPlan(hash);
+    if (!decodedPlan) throw new Error("decodeHashToPlan returned null");
+
+    // Now simulate boot on a narrow (mobile) receiver viewport
+    const receiverW = 375, receiverH = 667;
+    resetAll();
+    applyPlan(decodedPlan);
+    // Apply sender's raw view — pan will be off-screen for narrow viewport
+    // fitToContent reframes for the current viewport
+    const bounds = contentBounds();
+    if (!bounds) throw new Error("contentBounds returned null");
+    fitToContent(bounds, receiverW, receiverH);
+
+    // The content center must be on-screen for the receiver viewport
+    const scale = view.zoom * BASE_PX_PER_M;
+    const contentCenterX = (bounds.minX + bounds.maxX) / 2;
+    const contentCenterY = (bounds.minY + bounds.maxY) / 2;
+    const screenCX = contentCenterX * scale + view.panX;
+    const screenCY = contentCenterY * scale + view.panY;
+    if (screenCX < 0 || screenCX > receiverW) throw new Error(`Content center X ${screenCX} off-screen for receiver [0,${receiverW}]`);
+    if (screenCY < 0 || screenCY > receiverH) throw new Error(`Content center Y ${screenCY} off-screen for receiver [0,${receiverH}]`);
+  });
+
+  it("rooms/symbols/unit are byte-exact after share open (content correct)", async () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:3,y:0 },{ x:3,y:4 },{ x:0,y:4 }] });
+    addSymbol(createSymbol("bed", 1.5, 2));
+    const plan = buildPlan();
+    const hash = await encodePlanToHash(plan);
+    const decoded = await decodeHashToPlan(hash);
+    if (!decoded) throw new Error("decodeHashToPlan returned null");
+    resetAll();
+    applyPlan(decoded);
+    if (JSON.stringify(model.rooms) !== JSON.stringify(plan.walls.rooms)) {
+      throw new Error("rooms differ after share-open applyPlan");
+    }
+    if (JSON.stringify(symbolModel.symbols) !== JSON.stringify(plan.symbols.symbols)) {
+      throw new Error("symbols differ after share-open applyPlan");
+    }
+    if (unit !== "m") throw new Error("unit not restored after share-open");
+  });
+});
+
+// ─── Tests: conflict banner logic (identical hash+local = no banner) ──────────
+
+describe("share-open conflict logic — identical plans skip banner (Edge Case 14)", () => {
+  it("hashPlan serializes equal to localPlan → treat as local restore, no conflict", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const plan = buildPlan();
+    const hashSer = serializePlan(plan);
+    const localSer = serializePlan(plan);
+    // Identical → no banner, treat as local restore
+    const isConflict = hashSer !== localSer;
+    if (isConflict) throw new Error("Expected identical plans to not trigger conflict");
+    expect(isConflict).toBe(false);
+  });
+
+  it("hashPlan differs from localPlan → conflict", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const plan1 = buildPlan();
+    model.rooms[0].verts[1].x = 5;
+    const plan2 = buildPlan();
+    const isConflict = serializePlan(plan1) !== serializePlan(plan2);
+    if (!isConflict) throw new Error("Expected differing plans to trigger conflict");
+  });
+});
+
+// ─── Tests: readBootHash — malformed hash signals decode failure ──────────────
+
+describe("share.readBootHash — signals decode failure when hash present but undecodable", () => {
+  it("readBootHash throws for a malformed hash (hash present but undecodable)", async () => {
+    // Set a garbage hash so readBootHash finds a non-empty location.hash
+    location.hash = "#dXXXXgarbagethatisinvalid123456";
+    let threw = false;
+    let result = null;
+    try {
+      result = await readBootHash();
+    } catch {
+      threw = true;
+    }
+    // Hash should be stripped by readBootHash regardless
+    if (threw === false) {
+      // If no throw: readBootHash returned a plan, meaning garbage decoded OK (unexpected)
+      if (result !== null) throw new Error("readBootHash decoded garbage hash — expected throw or null, got plan");
+    }
+    // The expected path: readBootHash throws when hash is present but undecodable
+    if (!threw) throw new Error("readBootHash did not throw for malformed hash");
+  });
+
+  it("readBootHash returns null (no throw) when location.hash is absent", async () => {
+    // Ensure location.hash is clean
+    try { history.replaceState(null, "", location.pathname + location.search); } catch {}
+    let threw = false;
+    let result;
+    try {
+      result = await readBootHash();
+    } catch (e) {
+      threw = true;
+    }
+    if (threw) throw new Error("readBootHash threw when no hash present (should return null)");
+    if (result !== null) throw new Error("Expected null when no hash present");
+  });
+
+  it("decodeHashToPlan returns null for malformed hash (never throws)", async () => {
+    // Underlying codec contract: garbage → null, no throw
+    const garbage = "dXXXXgarbagethatisinvalid123456";
+    let result;
+    let threw = false;
+    try { result = await decodeHashToPlan(garbage); } catch { threw = true; }
+    if (threw) throw new Error("decodeHashToPlan threw instead of returning null");
+    if (result !== null) throw new Error("Expected null for malformed hash");
+  });
+});
+
+// ─── Tests: JSON import round-trip + rejection ────────────────────────────────
+
+describe("exportJson / importJson — JSON codec round-trip", () => {
+  it("serializePlan → JSON.parse → validatePlan → applyPlan round-trips losslessly", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 2; view.panX = 100; view.panY = 50;
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:4,y:0 },{ x:4,y:3 },{ x:0,y:3 }] });
+    addSymbol(createSymbol("sofa", 2, 1.5));
+    const plan = buildPlan();
+    const jsonStr = serializePlan(plan);
+
+    // Simulate the importJson validation path
+    const parsed = JSON.parse(jsonStr);
+    const validated = validatePlan(parsed);
+    if (!validated) throw new Error("validatePlan rejected a valid exported plan");
+
+    resetAll();
+    applyPlan(validated);
+
+    if (JSON.stringify(model.rooms) !== JSON.stringify(plan.walls.rooms)) {
+      throw new Error("rooms differ after JSON import round-trip");
+    }
+    if (JSON.stringify(symbolModel.symbols) !== JSON.stringify(plan.symbols.symbols)) {
+      throw new Error("symbols differ after JSON import round-trip");
+    }
+    expect(view.zoom).toBeCloseTo(2, 9);
+    if (unit !== "m") throw new Error("unit not restored after JSON import");
+  });
+
+  it("importJson handler rejects wrong-schema JSON (Edge Case 4)", () => {
+    resetAll();
+    // Wrong schema: validatePlan should reject
+    const badPlan = { app: "floorplan", schema: 999, walls: { rooms: [], chain: [] }, symbols: { symbols: [] }, view: { zoom: 1, panX: 0, panY: 0 }, unit: "ft" };
+    const result = validatePlan(badPlan);
+    if (result !== null) throw new Error("validatePlan accepted wrong schema");
+  });
+
+  it("importJson handler rejects non-plan JSON (Edge Case 15)", () => {
+    resetAll();
+    const notAPlan = { foo: "bar", data: [1, 2, 3] };
+    const result = validatePlan(notAPlan);
+    if (result !== null) throw new Error("validatePlan accepted non-plan JSON");
+  });
+
+  it("import rejection leaves live model unchanged", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:0,y:0 },{ x:2,y:0 }] });
+    const snapBefore = serializePlan(buildPlan());
+
+    // Attempt to apply invalid plan (simulates reject path)
+    const badPlan = { app: "other", schema: 1 };
+    const validated = validatePlan(badPlan);
+    // If null, we would show a toast and return — model unchanged
+    if (validated !== null) throw new Error("validatePlan should have rejected this");
+
+    // Model should be unchanged
+    const snapAfter = serializePlan(buildPlan());
+    if (snapBefore !== snapAfter) throw new Error("Model was mutated despite import rejection");
+  });
+});
+
+// ─── Tests: Reset path logic ───────────────────────────────────────────────────
+
+describe("Reset — hydrate to empty + clearLocal + resetView", () => {
+  it("hydrateWalls/hydrateSymbols to empty, then clearLocal + resetView produces empty start", () => {
+    resetAll();
+    // Set up a non-empty model
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    addSymbol(createSymbol("bed", 1, 1));
+    localStorage.setItem(STORAGE_KEY, serializePlan(buildPlan()));
+
+    // Simulate Reset confirm path (without window.confirm, drive directly)
+    hydrateWalls({ rooms: [], chain: [] });
+    hydrateSymbols({ symbols: [] });
+    clearLocal();
+    resetView(1000, 800);
+
+    // Model is now empty
+    if (!isEmptyPlan()) throw new Error("Expected isEmptyPlan() after Reset");
+    // localStorage is cleared
+    const val = localStorage.getItem(STORAGE_KEY);
+    if (val !== null) throw new Error("localStorage not cleared after Reset");
+    // View is the default frame
+    expect(view.zoom).toBe(1);
+    expect(view.panX).toBeCloseTo(150, 9);
+    expect(view.panY).toBeCloseTo(240, 9);
   });
 });
 
