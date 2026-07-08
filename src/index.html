@@ -642,6 +642,154 @@
       @media (prefers-reduced-motion: reduce) {
         .dim-chip, .measure-row, .measure-toggle { transition: none; }
       }
+
+      /* ── Symbol dock (bottom-center) ─────────────────────────────────────── */
+      .symbol-dock {
+        position: fixed;
+        bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 0;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        padding: 0.35rem 0.5rem;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        z-index: 8;
+        overflow-x: auto;
+        max-width: calc(100vw - 2rem);
+        /* Prevent horizontal scroll snap */
+        scrollbar-width: none;
+        user-select: none;
+        touch-action: none;
+      }
+      .symbol-dock::-webkit-scrollbar { display: none; }
+
+      /* Group label */
+      .dock-group-label {
+        font-family: var(--font-mono);
+        font-size: 0.52rem;
+        color: var(--muted);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 0 0.3rem;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      /* Divider between groups */
+      .dock-sep {
+        width: 1px;
+        height: 2.4rem;
+        background: var(--hairline);
+        flex-shrink: 0;
+        margin: 0 0.35rem;
+      }
+
+      /* Each dock button */
+      .dock-item {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.55rem;
+        letter-spacing: 0.04em;
+        width: 2.6rem;
+        height: 2.6rem;
+        border-radius: 7px;
+        cursor: grab;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.15rem;
+        padding: 0.2rem 0;
+        flex-shrink: 0;
+        transition: color 0.12s, border-color 0.12s, background 0.12s;
+        touch-action: none; /* pointer events */
+      }
+      .dock-item svg { pointer-events: none; }
+      .dock-item:hover {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+        background: rgba(201,168,76,0.07);
+      }
+      .dock-item--active,
+      .dock-item:active {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+        background: rgba(201,168,76,0.13);
+        cursor: grabbing;
+      }
+
+      /* Disable dock in draw mode */
+      .stage.draw-mode ~ .symbol-dock .dock-item {
+        opacity: 0.38;
+        pointer-events: none;
+        cursor: not-allowed;
+      }
+
+      /* ── Symbol inspector (floating near selected symbol) ─────────────────── */
+      .symbol-inspector {
+        position: fixed;
+        display: none; /* hidden by default; .visible adds display:flex */
+        align-items: center;
+        gap: 0.2rem;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        padding: 0.3rem 0.4rem;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        z-index: 9;
+        top: 0; left: 0; /* default; overridden by JS */
+      }
+      .symbol-inspector.visible {
+        display: flex;
+      }
+      .insp-btn {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 5px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: color 0.12s, border-color 0.12s, background 0.12s;
+        flex-shrink: 0;
+      }
+      .insp-btn:hover {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+      }
+      .insp-btn[aria-pressed="true"] {
+        color: var(--gold);
+        background: rgba(201,168,76,0.12);
+        border-color: var(--gold-soft);
+      }
+      .insp-sep {
+        width: 1px;
+        height: 1.4rem;
+        background: var(--hairline);
+        flex-shrink: 0;
+      }
+
+      /* ── Ghost / selection animation (reduced motion) ─────────────────────── */
+      @media (prefers-reduced-motion: reduce) {
+        .dock-item,
+        .insp-btn,
+        .dim-chip,
+        .measure-row,
+        .measure-toggle { transition: none; }
+      }
     </style>
   </head>
   <body>
@@ -657,6 +805,10 @@
           <g id="draft"></g>
           <!-- Snap indicator glyph -->
           <g id="snap"></g>
+          <!-- Symbol bodies (above walls) -->
+          <g id="symbols"></g>
+          <!-- Symbol selection overlay, handles, ghost -->
+          <g id="symbol-overlay"></g>
         </svg>
         <!-- Length chip HTML overlay (pointer-events:none) -->
         <div class="labels" aria-hidden="true"></div>
@@ -753,6 +905,114 @@
       <div class="hint" id="hint" role="status" aria-live="polite">
         Click to place wall points · snaps to grid &amp; existing corners · click the first point to close the room
       </div>
+
+      <!-- Symbol inspector (floating, hidden until a symbol is selected) -->
+      <div class="symbol-inspector" id="symbol-inspector" role="toolbar" aria-label="Symbol inspector">
+        <button class="insp-btn" data-action="rotate90" aria-label="Rotate 90 degrees">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8 A5 5 0 1 1 8 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+            <polyline points="3,5 3,8 6,8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+        <button class="insp-btn" data-action="duplicate" aria-label="Duplicate symbol">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="5" y="2" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+            <rect x="2" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="var(--bg-deep,#100f0b)"/>
+          </svg>
+        </button>
+        <button class="insp-btn" data-action="delete" aria-label="Delete symbol">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <polyline points="2,4 14,4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <path d="M5 4 V13 H11 V4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+            <polyline points="6,4 6,2 10,2 10,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+        <div class="insp-sep" aria-hidden="true"></div>
+        <button class="insp-btn" data-action="lock-aspect" aria-label="Lock aspect ratio" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="4" y="7" width="8" height="7" rx="1.2" stroke="currentColor" stroke-width="1.4"/>
+            <path d="M5.5 7 V5 A2.5 2.5 0 0 1 10.5 5 V7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Symbol dock (bottom-center, always visible in select mode) -->
+      <nav class="symbol-dock" id="symbol-dock" aria-label="Symbol palette">
+        <span class="dock-group-label" aria-hidden="true">Openings</span>
+
+        <button class="dock-item" data-type="door" aria-label="Add door">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="3" y="3" width="12" height="13" rx="1" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M3 7 A10 10 0 0 0 13 7" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2" fill="none" opacity="0.6"/>
+            <line x1="12" y1="9.5" x2="14" y2="9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+          <span>Door</span>
+        </button>
+
+        <button class="dock-item" data-type="window" aria-label="Add window">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="2" y="7" width="14" height="4" rx="0.8" stroke="currentColor" stroke-width="1.3"/>
+            <line x1="9" y1="7" x2="9" y2="11" stroke="currentColor" stroke-width="1" opacity="0.6"/>
+          </svg>
+          <span>Window</span>
+        </button>
+
+        <div class="dock-sep" aria-hidden="true"></div>
+        <span class="dock-group-label" aria-hidden="true">Furniture</span>
+
+        <button class="dock-item" data-type="bed" aria-label="Add bed">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="3" y="3" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/>
+            <rect x="4" y="4" width="10" height="3.5" rx="0.8" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity="0.15"/>
+            <line x1="9" y1="7.5" x2="9" y2="15" stroke="currentColor" stroke-width="0.8" opacity="0.5"/>
+          </svg>
+          <span>Bed</span>
+        </button>
+
+        <button class="dock-item" data-type="sofa" aria-label="Add sofa">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="3" y="5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/>
+            <rect x="3" y="5" width="12" height="3" rx="1" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity="0.15"/>
+            <rect x="3" y="8" width="2.5" height="6" rx="0.6" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
+            <rect x="12.5" y="8" width="2.5" height="6" rx="0.6" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
+          </svg>
+          <span>Sofa</span>
+        </button>
+
+        <button class="dock-item" data-type="table" aria-label="Add table">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="3" y="5" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.3"/>
+            <line x1="3" y1="5" x2="15" y2="13" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
+            <line x1="15" y1="5" x2="3" y2="13" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
+          </svg>
+          <span>Table</span>
+        </button>
+
+        <button class="dock-item" data-type="chair" aria-label="Add chair">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.3"/>
+            <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="0.8" opacity="0.5"/>
+          </svg>
+          <span>Chair</span>
+        </button>
+
+        <button class="dock-item" data-type="desk" aria-label="Add desk">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="3" y="4" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.3"/>
+            <polyline points="3,4 3,14 15,14" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
+          </svg>
+          <span>Desk</span>
+        </button>
+
+        <button class="dock-item" data-type="fridge" aria-label="Add fridge">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="4" y="2" width="10" height="14" rx="1" stroke="currentColor" stroke-width="1.3"/>
+            <line x1="4" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1" opacity="0.7"/>
+            <line x1="12" y1="4.5" x2="12" y2="6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+          <span>Fridge</span>
+        </button>
+      </nav>
     </div>
 
     <script type="module" src="./js/main.js"></script>
