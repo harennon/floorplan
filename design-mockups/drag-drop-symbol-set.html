@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>floorplan · symbols — Direction A (bottom dock)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ── Design tokens (mirrors src/index.html) ─────────────────────────── */
+      :root {
+        --bg:         #14140f;
+        --bg-deep:    #100f0b;
+        --ink:        #ece7d6;
+        --muted:      #8f8a78;
+        --gold:       #c9a84c;
+        --gold-soft:  rgba(201, 168, 76, 0.55);
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --panel:      rgba(20, 20, 15, 0.72);
+        --panel-solid: rgba(24, 23, 17, 0.94);
+        --hairline:   rgba(201, 168, 76, 0.18);
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+        --wall-line:     #d9be6e;
+        --snap-grid:     #7fd0c8;
+        --snap-point:    #e0b64f;
+        /* Symbol palette */
+        --sym-line:      #d9be6e;
+        --sym-fill:      rgba(201,168,76,0.07);
+        --sym-sel:       #e8cf7a;
+        --sym-handle:    #7fd0c8;
+        --error: #e57373;
+      }
+
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body {
+        height: 100%; margin: 0; overflow: hidden;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .app {
+        position: fixed; inset: 0;
+        font-family: var(--font-ui);
+        color: var(--ink);
+        background: var(--bg-deep);
+      }
+
+      /* ── Stage + grid backdrop ──────────────────────────────────────────── */
+      .stage {
+        position: absolute; inset: 0;
+        background:
+          radial-gradient(ellipse 90% 80% at 50% 42%, var(--bg) 0%, var(--bg-deep) 100%);
+        background-image:
+          radial-gradient(ellipse 90% 80% at 50% 42%, var(--bg) 0%, var(--bg-deep) 100%),
+          linear-gradient(var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(var(--grid-major) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+        background-size: 100% 100%, 20px 20px, 20px 20px, 100px 100px, 100px 100px;
+      }
+      .grain {
+        position: absolute; inset: 0; pointer-events: none;
+        mix-blend-mode: overlay; opacity: 0.035;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+        background-size: 200px 200px;
+      }
+
+      /* ── Brand + minimal chrome ─────────────────────────────────────────── */
+      .brand { position: absolute; top: 1.25rem; left: 1.25rem; pointer-events: none; user-select: none; }
+      .brand-name { font-family: var(--font-display); font-size: 1.1rem; font-weight: 700; color: var(--gold); line-height: 1.2; }
+      .brand-sub { font-family: var(--font-mono); font-size: 0.65rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+
+      /* Tool rail (left) — mirrors existing, adds a Symbol tool */
+      .tool-rail {
+        position: absolute; left: 1.25rem; top: 50%; transform: translateY(-50%);
+        display: flex; flex-direction: column; gap: 0.15rem;
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 8px; padding: 0.4rem 0.3rem;
+        backdrop-filter: blur(8px); z-index: 5;
+      }
+      .tool-rail button {
+        background: transparent; border: 1px solid transparent; color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.7rem;
+        width: 2.4rem; height: 2.4rem; border-radius: 6px; cursor: pointer;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1rem;
+        transition: color .12s, border-color .12s, background .12s;
+      }
+      .tool-rail button:hover { color: var(--ink); border-color: var(--hairline); }
+      .tool-rail button[aria-pressed="true"] { color: var(--gold); background: rgba(201,168,76,0.1); border-color: var(--gold-soft); }
+      .tool-key-hint { font-size: 0.5rem; color: var(--muted); opacity: 0.7; }
+      .tool-rail-sep { width: 100%; height: 1px; background: var(--hairline); margin: 0.1rem 0; }
+
+      /* ── Symbol palette: bottom-center dock ─────────────────────────────── */
+      .palette {
+        position: absolute; left: 50%; bottom: 1.25rem; transform: translateX(-50%);
+        display: flex; align-items: stretch; gap: 0.25rem;
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 12px; padding: 0.5rem;
+        backdrop-filter: blur(10px); z-index: 6;
+        max-width: min(92vw, 720px);
+      }
+      .palette-group { display: flex; flex-direction: column; gap: 0.3rem; }
+      .palette-group-label {
+        font-family: var(--font-mono); font-size: 0.55rem; letter-spacing: 0.1em;
+        text-transform: uppercase; color: var(--muted); padding: 0 0.2rem;
+      }
+      .palette-items { display: flex; gap: 0.25rem; }
+      .palette-sep { width: 1px; background: var(--hairline); margin: 0.2rem 0.35rem; align-self: stretch; }
+
+      /* Draggable symbol chip */
+      .sym {
+        width: 3.4rem; height: 3.4rem; border-radius: 8px;
+        border: 1px solid var(--hairline); background: rgba(201,168,76,0.04);
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.15rem;
+        cursor: grab; color: var(--sym-line); position: relative;
+        transition: transform .12s ease, border-color .12s, background .12s, box-shadow .12s;
+        user-select: none; -webkit-user-drag: element;
+      }
+      .sym:hover { border-color: var(--gold-soft); background: rgba(201,168,76,0.1); transform: translateY(-3px); box-shadow: 0 6px 16px rgba(0,0,0,0.35); }
+      .sym:active { cursor: grabbing; }
+      .sym svg { display: block; }
+      .sym-name { font-family: var(--font-mono); font-size: 0.5rem; letter-spacing: 0.03em; color: var(--muted); }
+      .sym:hover .sym-name { color: var(--ink); }
+      .sym.dragging { opacity: 0.4; }
+
+      /* Palette scroll affordance for furniture group on narrow screens */
+      .palette-items.scroll { overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
+
+      /* ── Placed symbols on canvas (SVG) ─────────────────────────────────── */
+      #symbols .sym-node { cursor: move; }
+      #symbols .sym-body { fill: var(--sym-fill); stroke: var(--sym-line); stroke-width: 1.5; }
+      #symbols .sym-detail { fill: none; stroke: var(--sym-line); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+      #symbols .sym-node.selected .sym-body { stroke: var(--sym-sel); stroke-width: 2; }
+      #symbols .sym-node.selected .sym-detail { stroke: var(--sym-sel); }
+
+      /* Selection bounding box + handles */
+      #symbols .sel-box { fill: none; stroke: var(--sym-handle); stroke-width: 1; stroke-dasharray: 5 4; opacity: 0.9; }
+      #symbols .handle { fill: var(--bg-deep); stroke: var(--sym-handle); stroke-width: 1.5; cursor: nwse-resize; }
+      #symbols .handle.rotate { cursor: grab; fill: var(--sym-handle); }
+      #symbols .rotate-stem { stroke: var(--sym-handle); stroke-width: 1; opacity: 0.8; }
+
+      /* Dimension tags on selection edges */
+      .sym-dims { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+      .sym-dim-chip {
+        position: absolute; transform: translate(-50%, -50%);
+        font-family: var(--font-mono); font-size: 0.62rem; padding: 0.08rem 0.32rem;
+        border-radius: 3px; white-space: nowrap; pointer-events: auto; cursor: pointer;
+        background: var(--panel); border: 1px solid var(--hairline); color: var(--sym-handle);
+        transition: border-color .12s, color .12s;
+      }
+      .sym-dim-chip:hover { border-color: var(--sym-handle); color: var(--ink); }
+
+      /* ── Symbol inspector (floating popover near selection) ─────────────── */
+      .inspector {
+        position: absolute; width: 13rem;
+        background: var(--panel-solid); border: 1px solid var(--hairline);
+        border-radius: 10px; padding: 0.7rem 0.8rem;
+        backdrop-filter: blur(10px); box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        font-family: var(--font-mono); font-size: 0.7rem; z-index: 8;
+      }
+      .inspector-title {
+        display: flex; align-items: center; justify-content: space-between;
+        font-family: var(--font-display); font-size: 0.82rem; color: var(--gold);
+        margin-bottom: 0.55rem;
+      }
+      .inspector-title button {
+        background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.9rem; line-height: 1;
+      }
+      .inspector-title button:hover { color: var(--ink); }
+      .field { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.45rem; }
+      .field label { color: var(--muted); font-size: 0.6rem; letter-spacing: 0.06em; text-transform: uppercase; }
+      .field .input-wrap { display: flex; align-items: center; gap: 0.3rem; }
+      .field input {
+        width: 4rem; background: rgba(0,0,0,0.25); border: 1px solid var(--hairline);
+        color: var(--ink); font-family: var(--font-mono); font-size: 0.72rem;
+        padding: 0.22rem 0.4rem; border-radius: 5px; text-align: right; outline: none;
+      }
+      .field input:focus { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(201,168,76,0.25); }
+      .field input[aria-invalid="true"] { border-color: var(--error); box-shadow: 0 0 0 2px rgba(229,115,115,0.25); }
+      .field .unit { color: var(--muted); font-size: 0.62rem; width: 1.4rem; }
+      .inspector-actions { display: flex; gap: 0.4rem; margin-top: 0.6rem; }
+      .inspector-actions button {
+        flex: 1; background: rgba(201,168,76,0.08); border: 1px solid var(--hairline);
+        color: var(--ink); font-family: var(--font-mono); font-size: 0.62rem;
+        padding: 0.35rem; border-radius: 6px; cursor: pointer;
+        display: flex; align-items: center; justify-content: center; gap: 0.3rem;
+        transition: border-color .12s, background .12s, color .12s;
+      }
+      .inspector-actions button:hover { border-color: var(--gold-soft); color: var(--gold); }
+      .inspector-actions button.danger:hover { border-color: var(--error); color: var(--error); }
+      .lock-row { display: flex; align-items: center; gap: 0.4rem; margin: 0.2rem 0 0.1rem; color: var(--muted); font-size: 0.6rem; }
+      .lock-row input { accent-color: var(--gold); }
+
+      /* ── Ghost preview while dragging from palette ──────────────────────── */
+      .drag-ghost {
+        position: fixed; pointer-events: none; z-index: 30;
+        transform: translate(-50%, -50%); opacity: 0.85;
+        filter: drop-shadow(0 4px 10px rgba(0,0,0,0.5));
+      }
+      .drag-ghost.snapping svg .sym-body { stroke: var(--snap-grid); }
+
+      /* Hint toast */
+      .hint {
+        position: absolute; bottom: 7.5rem; left: 50%; transform: translateX(-50%);
+        background: var(--panel); border: 1px solid var(--hairline);
+        padding: 0.5rem 1rem; border-radius: 8px;
+        font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+        white-space: nowrap; pointer-events: none;
+      }
+
+      /* Responsive: tuck palette to a scrollable strip on phones */
+      @media (max-width: 640px) {
+        .palette { left: 0.5rem; right: 0.5rem; transform: none; max-width: none; bottom: 0.75rem; }
+        .palette-group-label { display: none; }
+        .inspector { width: 11rem; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="stage" id="stage">
+        <svg id="drawing" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <g id="world"></g>
+          <g id="symbols"></g>
+        </svg>
+        <div class="sym-dims" id="sym-dims"></div>
+      </div>
+      <div class="grain" aria-hidden="true"></div>
+
+      <!-- Brand -->
+      <div class="brand" aria-hidden="true">
+        <div class="brand-name">floorplan</div>
+        <div class="brand-sub">warm blueprint · symbols</div>
+      </div>
+
+      <!-- Tool rail with new Symbol tool -->
+      <nav class="tool-rail" aria-label="Drawing tools">
+        <button aria-label="Select tool (V)" aria-pressed="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2 L4 13 L7 10 L9 14 L11 13 L9 9 L13 9 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          <span class="tool-key-hint">V</span>
+        </button>
+        <button aria-label="Draw wall tool (W)" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          <span class="tool-key-hint">W</span>
+        </button>
+        <button aria-label="Symbols (S)" aria-pressed="false" title="Toggles the symbol palette">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.4"/><rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M9 11.5h5M11.5 9v5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span class="tool-key-hint">S</span>
+        </button>
+      </nav>
+
+      <div class="hint" id="hint">Drag a symbol onto the plan · it snaps to the grid at true scale · click to select &amp; edit</div>
+
+      <!-- Symbol palette dock -->
+      <div class="palette" id="palette" aria-label="Symbol palette">
+        <div class="palette-group">
+          <span class="palette-group-label">Openings</span>
+          <div class="palette-items" id="grp-openings"></div>
+        </div>
+        <div class="palette-sep" aria-hidden="true"></div>
+        <div class="palette-group" style="min-width:0;">
+          <span class="palette-group-label">Furniture</span>
+          <div class="palette-items scroll" id="grp-furniture"></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      // ── Scale contract (mirrors view.js) ────────────────────────────────
+      const BASE_PX_PER_M = 40;           // 40px = 1m at zoom 1
+      const M_PER_FT = 0.3048;
+      let zoom = 1;                        // mockup uses fixed zoom
+      const ppm = () => zoom * BASE_PX_PER_M;
+      const NS = "http://www.w3.org/2000/svg";
+      const fmtFt = (m) => (m / M_PER_FT).toFixed(1);
+
+      // ── Symbol catalog: dimensions in METRES (default real-world sizes) ──
+      // draw(w,h) returns an SVG glyph group string sized to a UNIT box (1x1),
+      // scaled by the node transform. Openings render a wall-arc / sash.
+      const CATALOG = {
+        door:   { kind:"opening", name:"Door",   w:0.9,  h:0.15, min:0.5, max:2.0 },
+        window: { kind:"opening", name:"Window", w:1.2,  h:0.15, min:0.4, max:3.0 },
+        bed:    { kind:"furn", name:"Bed",     w:1.5,  h:2.0,  min:0.6, max:3.0 },
+        sofa:   { kind:"furn", name:"Sofa",    w:2.0,  h:0.9,  min:0.6, max:3.5 },
+        table:  { kind:"furn", name:"Table",   w:1.2,  h:0.8,  min:0.4, max:3.0 },
+        chair:  { kind:"furn", name:"Chair",   w:0.5,  h:0.5,  min:0.3, max:1.2 },
+        desk:   { kind:"furn", name:"Desk",    w:1.4,  h:0.7,  min:0.5, max:3.0 },
+        fridge: { kind:"furn", name:"Fridge",  w:0.7,  h:0.7,  min:0.4, max:1.2 },
+      };
+      const ORDER_OPEN = ["door","window"];
+      const ORDER_FURN = ["bed","sofa","table","chair","desk","fridge"];
+
+      // ── Glyph geometry, drawn in a local box (px), origin at box center ──
+      // Returns array of SVG element strings. wpx/hpx = box size in pixels.
+      function glyph(type, wpx, hpx) {
+        const x = -wpx/2, y = -hpx/2, w = wpx, h = hpx;
+        const box = `<rect class="sym-body" x="${x}" y="${y}" width="${w}" height="${h}" rx="2"/>`;
+        const els = [];
+        if (type === "door") {
+          // Jamb line + swing arc (quarter circle) — classic architectural door
+          const r = Math.min(w, h*6, w);
+          els.push(`<line class="sym-detail" x1="${x}" y1="${y}" x2="${x}" y2="${y+Math.min(h*4,w)}"/>`);
+          els.push(`<path class="sym-detail" d="M ${x} ${y} L ${x+w} ${y} A ${w} ${w} 0 0 1 ${x} ${y+w}" fill="none"/>`);
+          els.push(`<rect class="sym-body" x="${x}" y="${y-2}" width="${w}" height="3" rx="1"/>`);
+        } else if (type === "window") {
+          els.push(box);
+          els.push(`<line class="sym-detail" x1="${x}" y1="0" x2="${x+w}" y2="0"/>`);
+        } else if (type === "bed") {
+          els.push(box);
+          els.push(`<rect class="sym-detail" x="${x+w*0.12}" y="${y+h*0.06}" width="${w*0.76}" height="${h*0.28}" rx="2"/>`); // pillows band
+          els.push(`<line class="sym-detail" x1="${x+w*0.32}" y1="${y+h*0.06}" x2="${x+w*0.32}" y2="${y+h*0.34}"/>`);
+          els.push(`<line class="sym-detail" x1="${x+w*0.68}" y1="${y+h*0.06}" x2="${x+w*0.68}" y2="${y+h*0.34}"/>`);
+        } else if (type === "sofa") {
+          els.push(box);
+          els.push(`<rect class="sym-detail" x="${x+w*0.06}" y="${y+h*0.28}" width="${w*0.88}" height="${h*0.5}" rx="3"/>`);
+          els.push(`<line class="sym-detail" x1="${x+w/2}" y1="${y+h*0.28}" x2="${x+w/2}" y2="${y+h*0.78}"/>`);
+        } else if (type === "table") {
+          els.push(box);
+          els.push(`<line class="sym-detail" x1="${x+w*0.15}" y1="${y+h*0.15}" x2="${x+w*0.85}" y2="${y+h*0.85}"/>`);
+          els.push(`<line class="sym-detail" x1="${x+w*0.85}" y1="${y+h*0.15}" x2="${x+w*0.15}" y2="${y+h*0.85}"/>`);
+        } else if (type === "chair") {
+          els.push(box);
+          els.push(`<path class="sym-detail" d="M ${x+w*0.2} ${y+h*0.85} L ${x+w*0.2} ${y+h*0.3} L ${x+w*0.8} ${y+h*0.3} L ${x+w*0.8} ${y+h*0.85}"/>`);
+        } else if (type === "desk") {
+          els.push(box);
+          els.push(`<rect class="sym-detail" x="${x+w*0.58}" y="${y+h*0.18}" width="${w*0.34}" height="${h*0.64}" rx="1"/>`);
+        } else if (type === "fridge") {
+          els.push(box);
+          els.push(`<line class="sym-detail" x1="${x}" y1="${y+h*0.42}" x2="${x+w}" y2="${y+h*0.42}"/>`);
+          els.push(`<line class="sym-detail" x1="${x+w*0.78}" y1="${y+h*0.12}" x2="${x+w*0.78}" y2="${y+h*0.32}"/>`);
+          els.push(`<line class="sym-detail" x1="${x+w*0.78}" y1="${y+h*0.55}" x2="${x+w*0.78}" y2="${y+h*0.85}"/>`);
+        } else {
+          els.push(box);
+        }
+        return els.join("");
+      }
+
+      // Small fixed-size preview glyph for palette chips (fit into ~30px box)
+      function previewSvg(type) {
+        const def = CATALOG[type];
+        const maxDim = Math.max(def.w, def.h);
+        const s = 30 / maxDim; // px per metre for the preview
+        const wpx = def.w * s, hpx = def.h * s;
+        return `<svg width="34" height="34" viewBox="-17 -17 34 34" fill="none">${glyph(type, wpx, hpx)}</svg>`;
+      }
+
+      // ── Placed-symbol model (serializable, mirrors walls.model shape) ────
+      // { id, type, x, y (world metres, center), w, h (metres), rot (deg) }
+      let symCounter = 0;
+      const model = { symbols: [] };
+      let selectedId = null;
+
+      function addSymbol(type, wx, wy) {
+        const def = CATALOG[type];
+        const sym = { id: "s" + (symCounter++), type, x: wx, y: wy, w: def.w, h: def.h, rot: 0 };
+        model.symbols.push(sym);
+        return sym;
+      }
+      const findSym = (id) => model.symbols.find(s => s.id === id);
+
+      // Fixed view origin for the mockup (pan). Keeps a plan visible.
+      const pan = { x: 220, y: 140 };
+      const worldToScreen = (wx, wy) => ({ x: wx * ppm() + pan.x, y: wy * ppm() + pan.y });
+      const screenToWorld = (sx, sy) => ({ x: (sx - pan.x) / ppm(), y: (sy - pan.y) / ppm() });
+
+      const svg = document.getElementById("drawing");
+      const gWorld = document.getElementById("world");
+      const gSymbols = document.getElementById("symbols");
+      const dimsLayer = document.getElementById("sym-dims");
+      const stage = document.getElementById("stage");
+
+      function sizeSvg() {
+        const r = stage.getBoundingClientRect();
+        svg.setAttribute("viewBox", `0 0 ${r.width} ${r.height}`);
+        svg.style.width = "100%"; svg.style.height = "100%";
+      }
+
+      // Draw a couple of demo walls so scale reads as "relative to walls"
+      function renderWalls() {
+        const pts = [[0,0],[6,0],[6,4.5],[0,4.5]].map(([x,y]) => worldToScreen(x,y));
+        const d = pts.map(p => `${p.x},${p.y}`).join(" ");
+        gWorld.innerHTML =
+          `<polygon points="${d}" fill="rgba(201,168,76,0.05)" stroke="none"/>` +
+          `<polygon points="${d}" fill="none" stroke="rgba(201,168,76,0.30)" stroke-width="${Math.max(6,0.12*ppm())}" stroke-linejoin="round"/>` +
+          `<polygon points="${d}" fill="none" stroke="#d9be6e" stroke-width="1.5" stroke-linejoin="round"/>`;
+      }
+
+      function render() {
+        gSymbols.innerHTML = "";
+        dimsLayer.innerHTML = "";
+        for (const s of model.symbols) renderSymbol(s);
+        if (selectedId) renderSelection(findSym(selectedId));
+      }
+
+      function renderSymbol(s) {
+        const c = worldToScreen(s.x, s.y);
+        const wpx = s.w * ppm(), hpx = s.h * ppm();
+        const g = document.createElementNS(NS, "g");
+        g.setAttribute("class", "sym-node" + (s.id === selectedId ? " selected" : ""));
+        g.setAttribute("transform", `translate(${c.x} ${c.y}) rotate(${s.rot})`);
+        g.setAttribute("data-id", s.id);
+        g.innerHTML = glyph(s.type, wpx, hpx);
+        gSymbols.appendChild(g);
+      }
+
+      function renderSelection(s) {
+        if (!s) return;
+        const c = worldToScreen(s.x, s.y);
+        const wpx = s.w * ppm(), hpx = s.h * ppm();
+        const pad = 4;
+        const g = document.createElementNS(NS, "g");
+        g.setAttribute("transform", `translate(${c.x} ${c.y}) rotate(${s.rot})`);
+        const bw = wpx + pad*2, bh = hpx + pad*2;
+        const parts = [
+          `<rect class="sel-box" x="${-bw/2}" y="${-bh/2}" width="${bw}" height="${bh}"/>`,
+          `<line class="rotate-stem" x1="0" y1="${-bh/2}" x2="0" y2="${-bh/2 - 22}"/>`,
+          `<circle class="handle rotate" cx="0" cy="${-bh/2 - 22}" r="6"/>`,
+        ];
+        // Corner resize handles
+        for (const [hx,hy] of [[-1,-1],[1,-1],[1,1],[-1,1]]) {
+          parts.push(`<rect class="handle" x="${hx*bw/2 - 4}" y="${hy*bh/2 - 4}" width="8" height="8" rx="1"/>`);
+        }
+        g.innerHTML = parts.join("");
+        gSymbols.appendChild(g);
+
+        // Dimension chips (axis-aligned midpoints of the unrotated box, projected)
+        addDimChip(s, "w", s.w, 0, hpx/2 + pad + 12);
+        addDimChip(s, "h", s.h, wpx/2 + pad + 20, 0);
+      }
+
+      // Places an HTML dim chip at a local offset (dxLocalPx, dyLocalPx) rotated with symbol
+      function addDimChip(s, dim, meters, dxLocalPx, dyLocalPx) {
+        const c = worldToScreen(s.x, s.y);
+        const a = s.rot * Math.PI / 180;
+        const px = c.x + dxLocalPx * Math.cos(a) - dyLocalPx * Math.sin(a);
+        const py = c.y + dxLocalPx * Math.sin(a) + dyLocalPx * Math.cos(a);
+        const chip = document.createElement("button");
+        chip.className = "sym-dim-chip";
+        chip.textContent = fmtFt(meters) + " ft";
+        chip.style.left = px + "px";
+        chip.style.top = py + "px";
+        chip.dataset.dim = dim;
+        chip.dataset.id = s.id;
+        dimsLayer.appendChild(chip);
+      }
+
+      // ── Build palette chips ─────────────────────────────────────────────
+      function buildPalette() {
+        const fill = (elId, order) => {
+          const host = document.getElementById(elId);
+          host.innerHTML = order.map(type => {
+            const def = CATALOG[type];
+            return `<div class="sym" draggable="true" data-type="${type}"
+                       role="button" tabindex="0"
+                       aria-label="${def.name} — drag onto the plan">
+                      ${previewSvg(type)}
+                      <span class="sym-name">${def.name}</span>
+                    </div>`;
+          }).join("");
+        };
+        fill("grp-openings", ORDER_OPEN);
+        fill("grp-furniture", ORDER_FURN);
+      }
+
+      // ── Drag from palette → drop on stage ───────────────────────────────
+      let ghost = null, dragType = null;
+
+      function startPaletteDrag(type, clientX, clientY) {
+        dragType = type;
+        ghost = document.createElement("div");
+        ghost.className = "drag-ghost";
+        const def = CATALOG[type];
+        const wpx = def.w * ppm(), hpx = def.h * ppm();
+        const pad = Math.max(wpx, hpx);
+        ghost.innerHTML =
+          `<svg width="${wpx+8}" height="${hpx+8}" viewBox="${-(wpx+8)/2} ${-(hpx+8)/2} ${wpx+8} ${hpx+8}">${glyph(type, wpx, hpx)}</svg>`;
+        document.body.appendChild(ghost);
+        moveGhost(clientX, clientY);
+      }
+      function moveGhost(clientX, clientY) {
+        if (!ghost) return;
+        // snap ghost center to grid (0.1m steps like fine grid ≈ 0.5ft; use 0.5m demo)
+        const w = screenToWorld(clientX, clientY);
+        const step = 0.5;
+        const sx = Math.round(w.x / step) * step;
+        const sy = Math.round(w.y / step) * step;
+        const c = worldToScreen(sx, sy);
+        ghost.style.left = c.x + "px";
+        ghost.style.top = c.y + "px";
+        ghost.classList.add("snapping");
+        ghost._wx = sx; ghost._wy = sy;
+      }
+      function endPaletteDrag(clientX, clientY) {
+        if (!ghost) return;
+        const rect = stage.getBoundingClientRect();
+        const inside = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+        if (inside) {
+          const s = addSymbol(dragType, ghost._wx, ghost._wy);
+          selectedId = s.id;
+          render();
+          openInspector(s);
+          dismissHint();
+        }
+        ghost.remove(); ghost = null; dragType = null;
+      }
+
+      // ── Inspector popover ───────────────────────────────────────────────
+      let inspectorEl = null;
+      function openInspector(s) {
+        closeInspector();
+        const def = CATALOG[s.type];
+        inspectorEl = document.createElement("div");
+        inspectorEl.className = "inspector";
+        const dims = def.kind === "opening"
+          ? `<div class="field"><label>Width</label><div class="input-wrap"><input id="f-w" value="${fmtFt(s.w)}"><span class="unit">ft</span></div></div>`
+          : `<div class="field"><label>Width</label><div class="input-wrap"><input id="f-w" value="${fmtFt(s.w)}"><span class="unit">ft</span></div></div>
+             <div class="field"><label>Depth</label><div class="input-wrap"><input id="f-h" value="${fmtFt(s.h)}"><span class="unit">ft</span></div></div>`;
+        inspectorEl.innerHTML = `
+          <div class="inspector-title">${def.name}<button aria-label="Deselect" data-act="close">✕</button></div>
+          ${dims}
+          <div class="field"><label>Rotate</label><div class="input-wrap"><input id="f-rot" value="${s.rot}"><span class="unit">°</span></div></div>
+          <label class="lock-row"><input type="checkbox" id="f-lock"> lock aspect ratio</label>
+          <div class="inspector-actions">
+            <button data-act="rot90">↻ 90°</button>
+            <button data-act="dup">⧉ Duplicate</button>
+            <button class="danger" data-act="del">🗑 Delete</button>
+          </div>`;
+        document.querySelector(".app").appendChild(inspectorEl);
+        positionInspector(s);
+        wireInspector(s);
+      }
+      function positionInspector(s) {
+        if (!inspectorEl) return;
+        const c = worldToScreen(s.x, s.y);
+        const wpx = s.w * ppm();
+        let left = c.x + wpx/2 + 28;
+        let top = c.y - 40;
+        const r = inspectorEl.getBoundingClientRect();
+        if (left + r.width > window.innerWidth - 12) left = c.x - wpx/2 - r.width - 28;
+        if (left < 12) left = 12;
+        top = Math.max(12, Math.min(top, window.innerHeight - r.height - 12));
+        inspectorEl.style.left = left + "px";
+        inspectorEl.style.top = top + "px";
+      }
+      function closeInspector() { if (inspectorEl) { inspectorEl.remove(); inspectorEl = null; } }
+
+      function parseFt(str, def) {
+        const s = String(str).trim().replace(/(ft|')$/i, "").trim();
+        const n = Number(s);
+        if (!Number.isFinite(n) || n <= 0) return null;
+        const m = n * M_PER_FT;
+        if (m < def.min || m > def.max) return null;
+        return m;
+      }
+
+      function wireInspector(s) {
+        const def = CATALOG[s.type];
+        const fw = inspectorEl.querySelector("#f-w");
+        const fh = inspectorEl.querySelector("#f-h");
+        const frot = inspectorEl.querySelector("#f-rot");
+        const lock = inspectorEl.querySelector("#f-lock");
+
+        const applyDim = (input, which) => {
+          const m = parseFt(input.value, def);
+          if (m === null) { input.setAttribute("aria-invalid", "true"); return; }
+          input.removeAttribute("aria-invalid");
+          if (lock && lock.checked && def.kind === "furn") {
+            const ratio = which === "w" ? s.h / s.w : s.w / s.h;
+            if (which === "w") { s.w = m; s.h = m * ratio; if (fh) fh.value = fmtFt(s.h); }
+            else { s.h = m; s.w = m * ratio; if (fw) fw.value = fmtFt(s.w); }
+          } else {
+            if (which === "w") s.w = m; else s.h = m;
+          }
+          render();
+        };
+        fw.addEventListener("input", () => applyDim(fw, "w"));
+        if (fh) fh.addEventListener("input", () => applyDim(fh, "h"));
+        frot.addEventListener("input", () => {
+          const n = Number(frot.value);
+          if (Number.isFinite(n)) { s.rot = ((n % 360) + 360) % 360; render(); }
+        });
+
+        inspectorEl.addEventListener("click", (e) => {
+          const act = e.target.closest("[data-act]")?.dataset.act;
+          if (!act) return;
+          if (act === "close") { selectedId = null; closeInspector(); render(); }
+          else if (act === "rot90") { s.rot = (s.rot + 90) % 360; frot.value = s.rot; render(); }
+          else if (act === "dup") {
+            const n = addSymbol(s.type, s.x + 0.5, s.y + 0.5);
+            n.w = s.w; n.h = s.h; n.rot = s.rot; selectedId = n.id; render(); openInspector(n);
+          }
+          else if (act === "del") {
+            model.symbols = model.symbols.filter(x => x.id !== s.id);
+            selectedId = null; closeInspector(); render();
+          }
+        });
+      }
+
+      // ── On-canvas selection + move ──────────────────────────────────────
+      let moving = null; // { id, offX, offY (world) }
+      stage.addEventListener("pointerdown", (e) => {
+        const node = e.target.closest(".sym-node");
+        if (node) {
+          const id = node.dataset.id;
+          selectedId = id;
+          const s = findSym(id);
+          const w = screenToWorld(e.clientX, e.clientY);
+          moving = { id, offX: w.x - s.x, offY: w.y - s.y };
+          stage.setPointerCapture(e.pointerId);
+          render(); openInspector(s);
+          e.preventDefault();
+        } else {
+          // Empty stage click → deselect
+          selectedId = null; closeInspector(); render();
+        }
+      });
+      stage.addEventListener("pointermove", (e) => {
+        if (!moving) return;
+        const s = findSym(moving.id);
+        const w = screenToWorld(e.clientX, e.clientY);
+        const step = 0.5;
+        s.x = Math.round((w.x - moving.offX) / step) * step;
+        s.y = Math.round((w.y - moving.offY) / step) * step;
+        render(); positionInspector(s);
+      });
+      stage.addEventListener("pointerup", () => { moving = null; });
+
+      // Dim-chip click → focus matching inspector field (demo)
+      dimsLayer.addEventListener("click", (e) => {
+        const chip = e.target.closest(".sym-dim-chip");
+        if (!chip) return;
+        const s = findSym(chip.dataset.id);
+        if (s && inspectorEl) {
+          const f = inspectorEl.querySelector(chip.dataset.dim === "w" ? "#f-w" : "#f-h");
+          if (f) { f.focus(); f.select(); }
+        }
+      });
+
+      // ── Palette drag wiring (pointer-based, works on touch + mouse) ─────
+      function wirePalette() {
+        document.getElementById("palette").addEventListener("pointerdown", (e) => {
+          const chip = e.target.closest(".sym");
+          if (!chip) return;
+          e.preventDefault();
+          startPaletteDrag(chip.dataset.type, e.clientX, e.clientY);
+          chip.classList.add("dragging");
+          const move = (ev) => moveGhost(ev.clientX, ev.clientY);
+          const up = (ev) => {
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+            chip.classList.remove("dragging");
+            endPaletteDrag(ev.clientX, ev.clientY);
+          };
+          window.addEventListener("pointermove", move);
+          window.addEventListener("pointerup", up);
+        });
+      }
+
+      function dismissHint() { const h = document.getElementById("hint"); if (h) h.style.opacity = "0"; }
+
+      // ── Boot ────────────────────────────────────────────────────────────
+      buildPalette();
+      wirePalette();
+      sizeSvg();
+      renderWalls();
+      // Seed a couple of placed symbols so the plan reads immediately
+      addSymbol("bed", 1.5, 1.3);
+      const sofa = addSymbol("sofa", 3.6, 3.4); sofa.rot = 0;
+      addSymbol("door", 0, 2.2);
+      render();
+      window.addEventListener("resize", () => { sizeSvg(); renderWalls(); render(); if (selectedId) positionInspector(findSym(selectedId)); });
+    </script>
+  </body>
+</html>
