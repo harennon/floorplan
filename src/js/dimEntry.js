@@ -16,6 +16,17 @@ import { model, edgeLength, rescaleEdge } from "./walls.js";
 import { scheduleRender } from "./surface.js";
 import { worldToScreen } from "./view.js";
 
+// history.commit injected from main.js to avoid circular imports
+let _historyCommit = null;
+
+/**
+ * Inject history.commit. Called from main.js after both modules are initialised.
+ * @param {()=>void} fn
+ */
+export function setHistoryCommit(fn) {
+  _historyCommit = fn;
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 /** @type {{ roomId:string, edgeIndex:number }|null} */
@@ -193,6 +204,8 @@ export function commit() {
   }
 
   _closeInput();
+  // Commit the wall-edge resize to history so it can be individually undone
+  if (_historyCommit) _historyCommit();
   scheduleRender();
 }
 

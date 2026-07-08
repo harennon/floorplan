@@ -21,6 +21,17 @@ import { model as symbolModel, getSymbol, resizeSymbol, CATALOG, corners } from 
 import { scheduleRender } from "./surface.js";
 import { worldToScreen } from "./view.js";
 
+// history.commit injected from main.js to avoid circular imports
+let _historyCommit = null;
+
+/**
+ * Inject history.commit. Called from main.js after both modules are initialised.
+ * @param {()=>void} fn
+ */
+export function setHistoryCommit(fn) {
+  _historyCommit = fn;
+}
+
 // ── State ──────────────────────────────────────────────────────────────────────
 
 /** @type {{ symbolId:string, dim:"w"|"h" }|null} */
@@ -171,6 +182,8 @@ export function commit() {
 
   resizeSymbol(sym, _editing.dim, targetM, _getLockAspect());
   _closeInput();
+  // Commit resize gesture to history
+  if (_historyCommit) _historyCommit();
   scheduleRender();
 }
 

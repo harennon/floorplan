@@ -13,6 +13,18 @@ import { screenToWorld } from "./view.js";
 import { chooseGridStep } from "./grid.js";
 import { model, resolveSnap, placeVertex, closeRoom, finishChain, undoPoint } from "./walls.js";
 import { scheduleRender } from "./surface.js";
+import { isOpen as isHelpOpen } from "./help.js";
+
+// history.commit is injected from main.js to avoid circular imports
+let _historyCommit = null;
+
+/**
+ * Inject history.commit. Called from main.js after both modules are initialised.
+ * @param {()=>void} fn
+ */
+export function setHistoryCommit(fn) {
+  _historyCommit = fn;
+}
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -61,7 +73,12 @@ export function init(refs) {
   _btnSelect.addEventListener("click", () => setTool("select"));
   _btnWall.addEventListener("click",   () => setTool("wall"));
   _btnUndo.addEventListener("click",   () => { undoPoint(); _updateRail(); scheduleRender(); });
-  _btnFinish.addEventListener("click", () => { finishChain(); _updateRail(); scheduleRender(); });
+  _btnFinish.addEventListener("click", () => {
+    finishChain();
+    if (_historyCommit) _historyCommit();
+    _updateRail();
+    scheduleRender();
+  });
 
   // Rail collapse button (inside rail, mobile ≤480px): collapses the rail
   if (_railCollapseEl) {
@@ -104,6 +121,8 @@ export function setTool(t) {
   if (_tool === "wall" && t !== "wall") {
     // Auto-finish open chain on tool switch (edge case 8)
     finishChain();
+    // Commit to history (dirty-check handles <2-vert discard)
+    if (_historyCommit) _historyCommit();
   }
   _tool = t;
   _snap = null;
@@ -152,6 +171,8 @@ export function onClick(sx, sy) {
     _snap = null;
     _hideSnapTag();
     _updateHudSnap();
+    // Commit the closed room to history
+    if (_historyCommit) _historyCommit();
   }
   _updateRail();
   scheduleRender();
@@ -190,8 +211,13 @@ function _onKeyDown(e) {
       setTool("wall");
       break;
     case "Escape":
+      // Belt-and-suspenders guard: if help overlay is open, let help.js
+      // capture-phase listener handle it (Edge Case 15 / GAP-3).
+      if (isHelpOpen()) return;
       if (_tool === "wall" && model.chain.length > 0) {
         finishChain();
+        // Commit to history (dirty-check handles <2-vert discard)
+        if (_historyCommit) _historyCommit();
         _snap = null;
         _hideSnapTag();
         _updateHudSnap();
@@ -202,6 +228,8 @@ function _onKeyDown(e) {
     case "Enter":
       if (_tool === "wall" && model.chain.length > 0) {
         finishChain();
+        // Commit to history (dirty-check handles <2-vert discard)
+        if (_historyCommit) _historyCommit();
         _snap = null;
         _hideSnapTag();
         _updateHudSnap();

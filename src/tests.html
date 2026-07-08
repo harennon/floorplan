@@ -3247,6 +3247,320 @@ describe("Reset — hydrate to empty + clearLocal + resetView", () => {
   });
 });
 
+// ─── Import history.js (LLD-21) ──────────────────────────────────────────────
+
+import {
+  init as initHistory, reset as resetHistory,
+  commit as historyCommit, undo as historyUndo, redo as historyRedo,
+  canUndo, canRedo, depth as historyDepth, onChange as historyOnChange,
+} from "./js/history.js";
+
+// ─── Tests: history.js — core unit tests ─────────────────────────────────────
+
+/** Reset walls + symbols + history to a clean state for history tests. */
+function resetForHistory() {
+  // Reset walls model
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  // Reset symbols model
+  symbolModel.symbols.length = 0;
+  // Re-seed view
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  // Re-seed hydrate counters via hydrate calls (avoids id collisions)
+  hydrateWalls({ rooms: [], chain: [] });
+  hydrateSymbols({ symbols: [] });
+  // Re-seed history baseline
+  resetHistory();
+}
+
+describe("history.js — commit() on unchanged geometry is no-op", () => {
+  it("canUndo() stays false when geometry has not changed since init", () => {
+    resetForHistory();
+    initHistory();
+    historyCommit(); // nothing changed
+    expect(canUndo()).toBe(false);
+  });
+
+  it("canUndo() stays false after multiple no-op commits", () => {
+    resetForHistory();
+    initHistory();
+    historyCommit();
+    historyCommit();
+    historyCommit();
+    expect(canUndo()).toBe(false);
+  });
+});
+
+describe("history.js — commit() after real change", () => {
+  it("commit() after adding a room makes canUndo() true", () => {
+    resetForHistory();
+    initHistory();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:1,y:0 },{ x:0.5,y:1 }] });
+    historyCommit();
+    expect(canUndo()).toBe(true);
+  });
+
+  it("undo() restores prior rooms and returns true", () => {
+    resetForHistory();
+    initHistory();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:1,y:0 },{ x:0.5,y:1 }] });
+    historyCommit();
+    expect(model.rooms.length).toBe(1);
+    const applied = historyUndo();
+    expect(applied).toBe(true);
+    expect(model.rooms.length).toBe(0);
+    expect(canUndo()).toBe(false);
+  });
+
+  it("redo() re-applies the reverted state and returns true", () => {
+    resetForHistory();
+    initHistory();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:1,y:0 },{ x:0.5,y:1 }] });
+    historyCommit();
+    historyUndo();
+    expect(model.rooms.length).toBe(0);
+    const applied = historyRedo();
+    expect(applied).toBe(true);
+    expect(model.rooms.length).toBe(1);
+    expect(model.rooms[0].id).toBe("w0");
+  });
+});
+
+describe("history.js — undo/redo no-op when stacks empty", () => {
+  it("undo() returns false when no history", () => {
+    resetForHistory();
+    initHistory();
+    expect(historyUndo()).toBe(false);
+  });
+
+  it("redo() returns false when future stack is empty", () => {
+    resetForHistory();
+    initHistory();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:0,y:0 },{ x:1,y:0 }] });
+    historyCommit();
+    expect(historyRedo()).toBe(false);
+  });
+
+  it("canUndo() is false initially; canRedo() is false initially", () => {
+    resetForHistory();
+    initHistory();
+    expect(canUndo()).toBe(false);
+    expect(canRedo()).toBe(false);
+  });
+});
+
+describe("history.js — new commit after undo clears redo stack", () => {
+  it("commit after undo makes canRedo() false", () => {
+    resetForHistory();
+    initHistory();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:0,y:0 },{ x:1,y:0 }] });
+    historyCommit();
+    historyUndo();
+    expect(canRedo()).toBe(true);
+    // New edit
+    model.rooms.push({ id: "w1", closed: false, verts: [{ x:2,y:0 },{ x:3,y:0 }] });
+    historyCommit();
+    expect(canRedo()).toBe(false);
+  });
+});
+
+describe("history.js — _apply preserves live chain (Edge Case 1)", () => {
+  it("undo does not destroy the in-progress chain", () => {
+    resetForHistory();
+    initHistory();
+    // Commit a room
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:1,y:0 },{ x:0.5,y:1 }] });
+    historyCommit();
+    // Then start a new chain
+    model.chain.push({ x: 5, y: 5 });
+    model.chain.push({ x: 6, y: 5 });
+    expect(model.chain.length).toBe(2);
+    // Undo the committed room
+    historyUndo();
+    // Chain must still be intact
+    expect(model.chain.length).toBe(2);
+    expect(model.chain[0].x).toBe(5);
+    expect(model.chain[1].x).toBe(6);
+    // Rooms are empty after undo
+    expect(model.rooms.length).toBe(0);
+  });
+});
+
+describe("history.js — reset() empties past/future and reseeds baseline", () => {
+  it("after reset, canUndo() and canRedo() are both false", () => {
+    resetForHistory();
+    initHistory();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:0,y:0 },{ x:1,y:0 }] });
+    historyCommit();
+    historyUndo();
+    // Future now has one entry
+    expect(canRedo()).toBe(true);
+    resetHistory();
+    expect(canUndo()).toBe(false);
+    expect(canRedo()).toBe(false);
+  });
+
+  it("after reset, undo cannot revert past the reset point", () => {
+    resetForHistory();
+    initHistory();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:0,y:0 },{ x:1,y:0 }] });
+    historyCommit();
+    // Reset with current rooms in place (simulates boot-restore)
+    resetHistory();
+    // No undo should be possible
+    expect(canUndo()).toBe(false);
+    expect(historyUndo()).toBe(false);
+    expect(model.rooms.length).toBe(1); // rooms remain, history can't go before this
+  });
+});
+
+describe("history.js — stack cap at MAX_DEPTH (100)", () => {
+  it("committing >100 unique states keeps only the newest 100 in past", () => {
+    resetForHistory();
+    initHistory();
+    // Push 102 distinct committed states
+    for (let i = 0; i < 102; i++) {
+      model.rooms.push({ id: `w${i}`, closed: false, verts: [{ x: i, y: 0 }, { x: i+1, y: 0 }] });
+      historyCommit();
+    }
+    // depth() = _past.length; after cap the max is 100
+    // We've committed 102 times after init, so past has at most 100 entries
+    if (historyDepth() > 100) throw new Error(`depth ${historyDepth()} exceeds MAX_DEPTH`);
+    expect(historyDepth()).toBeLessThanOrEqual(100);
+  });
+});
+
+describe("history.js — round-trip: delete symbol → undo restores, redo re-deletes", () => {
+  it("undo restores deleted symbol with its original id; redo re-deletes it", () => {
+    resetForHistory();
+    initHistory();
+    const s = createSymbol("chair", 1, 1);
+    addSymbol(s);
+    const originalId = s.id;
+    historyCommit(); // baseline = [chair s0]
+    // Delete
+    removeSymbol(s.id);
+    historyCommit(); // baseline = []
+    expect(symbolModel.symbols.length).toBe(0);
+    // Undo → symbol restored
+    historyUndo();
+    expect(symbolModel.symbols.length).toBe(1);
+    expect(symbolModel.symbols[0].id).toBe(originalId);
+    // Redo → symbol deleted again
+    historyRedo();
+    expect(symbolModel.symbols.length).toBe(0);
+  });
+});
+
+describe("history.js — room commit → undo removes room; redo restores verts intact", () => {
+  it("undo/redo for a committed room preserves vertex data", () => {
+    resetForHistory();
+    initHistory();
+    const verts = [{ x:0,y:0 }, { x:3,y:0 }, { x:3,y:4 }, { x:0,y:4 }];
+    model.rooms.push({ id: "w0", closed: true, verts: JSON.parse(JSON.stringify(verts)) });
+    historyCommit();
+    historyUndo();
+    expect(model.rooms.length).toBe(0);
+    historyRedo();
+    expect(model.rooms.length).toBe(1);
+    expect(model.rooms[0].verts.length).toBe(4);
+    expect(model.rooms[0].verts[2].x).toBeCloseTo(3, 9);
+    expect(model.rooms[0].verts[2].y).toBeCloseTo(4, 9);
+  });
+});
+
+describe("history.js — dirty-check: stable stringify equal → no push", () => {
+  it("two captures of identical geometry stringify equal → canUndo stays false", () => {
+    resetForHistory();
+    initHistory();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:1,y:2 }, { x:3,y:4 }] });
+    historyCommit(); // first real commit
+    const depthBefore = historyDepth();
+    historyCommit(); // geometry unchanged → no push
+    expect(historyDepth()).toBe(depthBefore); // same depth
+  });
+});
+
+describe("history.js — onChange listener fires on stack changes", () => {
+  it("onChange fires on commit, undo, redo, and reset", () => {
+    resetForHistory();
+    let callCount = 0;
+    historyOnChange(() => { callCount++; });
+    const before = callCount;
+    // commit with change
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:0,y:0 },{ x:1,y:0 }] });
+    historyCommit();
+    const afterCommit = callCount;
+    expect(afterCommit).toBeGreaterThanOrEqual(before + 1);
+    historyUndo();
+    expect(callCount).toBeGreaterThanOrEqual(afterCommit + 1);
+    const afterUndo = callCount;
+    historyRedo();
+    expect(callCount).toBeGreaterThanOrEqual(afterUndo + 1);
+    const afterRedo = callCount;
+    resetHistory();
+    expect(callCount).toBeGreaterThanOrEqual(afterRedo + 1);
+  });
+});
+
+describe("history.js — _apply deep-clones snapshot (no aliasing)", () => {
+  it("in-place mutation of live object after undo is detected by commit() and clears redo", () => {
+    // Reproduces the BLOCKING QA issue: if _apply splices snapshot refs directly
+    // into the live model (no deep-clone), an in-place mutation of a live element
+    // also mutates _present, so commit() dirty-check treats it as a no-op, the
+    // edit is not recorded, and _future is not cleared — silent data loss on redo.
+    resetForHistory();
+    initHistory();
+
+    // State A: one symbol at x=0
+    const s = createSymbol("chair", 0, 0);
+    addSymbol(s);
+    historyCommit(); // past=[], present=A
+
+    // State B: symbol moved to x=5
+    symbolModel.symbols[0].x = 5;
+    historyCommit(); // past=[A], present=B
+
+    // Undo → revert to A (symbol at x=0)
+    historyUndo(); // past=[], present=A, future=[B]
+    expect(symbolModel.symbols[0].x).toBeCloseTo(0, 9);
+
+    // In-place mutation of live object (simulates a move/rotate/resize)
+    symbolModel.symbols[0].x = 9;
+
+    // commit() must detect the change (x=9 ≠ x=0 in A)
+    historyCommit(); // past=[A], present=C(x=9), future=[] ← _future must be cleared
+
+    // If _apply leaked refs: _present would have been mutated to x=9 by the
+    // in-place assignment above, commit() dirty-check would see no change, and
+    // canRedo() would still be true — that is the bug.
+    expect(canRedo()).toBe(false); // _future was cleared by commit()
+    expect(historyDepth()).toBe(1); // one undo step (A → C recorded)
+
+    // Undo should restore x=0 (state A), not x=9
+    historyUndo();
+    expect(symbolModel.symbols[0].x).toBeCloseTo(0, 9);
+  });
+});
+
+describe("history.js — depth() reflects _past.length", () => {
+  it("depth() increases with each real commit and decreases with undo", () => {
+    resetForHistory();
+    initHistory();
+    expect(historyDepth()).toBe(0);
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x:0,y:0 },{ x:1,y:0 }] });
+    historyCommit();
+    expect(historyDepth()).toBe(1);
+    model.rooms.push({ id: "w1", closed: false, verts: [{ x:2,y:0 },{ x:3,y:0 }] });
+    historyCommit();
+    expect(historyDepth()).toBe(2);
+    historyUndo();
+    expect(historyDepth()).toBe(1);
+    historyUndo();
+    expect(historyDepth()).toBe(0);
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 

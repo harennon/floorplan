@@ -5,8 +5,11 @@
  *  - Dock drag-placement (self-contained pointer capture from the dock)
  *  - Select-mode hooks: onSelectDown / onSelectMove / onSelectUp / onTapEmpty
  *  - Inspector actions: rotate 90°, duplicate, delete, lock-aspect
- *  - Keyboard: Delete/Backspace for selected symbol
  *  - Integrates with wallTool.setTool to switch to select mode on dock drag
+ *
+ * NOTE (LLD-21): Delete/Backspace keyboard handling has been removed from this
+ * module. Symbol delete via keyboard is now owned solely by the main.js global
+ * editing-shortcut handler, which calls the committing deleteSelected().
  */
 
 import { screenToWorld, worldToScreen, pxPerM } from "./view.js";
@@ -20,6 +23,24 @@ import {
 import { scheduleRender } from "./surface.js";
 import { getRotateHandleScreen } from "./symbolRender.js";
 import { beginEdit as beginDimEdit, cancel as cancelDimEdit, isEditing as isDimEditing } from "./symbolDimEntry.js";
+
+// history and showToast are injected to avoid circular dependencies at init time
+let _historyCommit = null;
+let _showToastFn   = null;
+let _historyUndo   = null;
+let _historyDepth  = null;
+
+/**
+ * Inject history / toast functions from main.js.
+ * @param {{ commit:()=>void, undo:()=>boolean, depth:()=>number }} history
+ * @param {(msg:string, action?:{label:string,onClick:()=>void})=>void} showToast
+ */
+export function setHistoryAndToast(history, showToast) {
+  _historyCommit = history.commit;
+  _historyUndo   = history.undo;
+  _historyDepth  = history.depth;
+  _showToastFn   = showToast;
+}
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -105,8 +126,8 @@ export function init(refs) {
     if (btnLock)      btnLock.addEventListener("click",      _onToggleLockAspect);
   }
 
-  // Keyboard: Delete/Backspace for selected symbol
-  window.addEventListener("keydown", _onKeyDown);
+  // NOTE (LLD-21): _onKeyDown (Delete/Backspace) is NOT registered here.
+  // Symbol delete via keyboard is now owned solely by the main.js global handler.
   // Alt held for free snap
   window.addEventListener("keydown", _onAltDown);
   window.addEventListener("keyup",   _onAltUp);
@@ -202,10 +223,14 @@ export function onSelectMove(sx, sy) {
 }
 
 /**
- * Finalize drag.
+ * Finalize drag (move or rotate).
+ * Commits to history; dirty-check in history.commit() handles the no-op case
+ * (e.g. zero-distance drag or rotate returning to the same angle).
  */
 export function onSelectUp(sx, sy) {
   _dragMode = null;
+  // Commit move/rotate to history (dirty-check handles no-op)
+  if (_historyCommit) _historyCommit();
 }
 
 /**
@@ -324,6 +349,8 @@ function _onDockPointerDown(e) {
     const sym = createSymbol(typeWas, wp2.x, wp2.y);
     addSymbol(sym);
     selectSymbol(sym.id);
+    // Commit gesture to history
+    if (_historyCommit) _historyCommit();
     scheduleRender();
   };
 
@@ -355,21 +382,16 @@ function _onRotate90() {
   const sym = getSymbol(_selectedId);
   if (!sym) return;
   rotateSymbol(sym, sym.rot + 90);
+  if (_historyCommit) _historyCommit();
   scheduleRender();
 }
 
 function _onDuplicate() {
-  if (!_selectedId) return;
-  const dup = duplicateSymbol(_selectedId);
-  if (dup) {
-    selectSymbol(dup.id);
-  }
-  scheduleRender();
+  duplicateSelected();
 }
 
 function _onDelete() {
-  if (!_selectedId) return;
-  _deleteSelected();
+  deleteSelected();
 }
 
 function _onToggleLockAspect() {
@@ -395,6 +417,56 @@ export function repositionInspector() {
   if (sym) _positionInspector(sym);
 }
 
+/** @returns {boolean} true when a symbol is currently selected */
+export function hasSelection() {
+  return _selectedId !== null;
+}
+
+/**
+ * Delete the currently selected symbol. Shows "Deleted" toast with one-tap
+ * Undo (scoped to the depth at delete time per Edge Case 14).
+ * Called by the inspector Delete button and by the main.js global shortcut handler.
+ */
+export function deleteSelected() {
+  if (!_selectedId) return;
+  if (isDimEditing()) cancelDimEdit();
+  removeSymbol(_selectedId);
+  _clearSelection();
+  if (_historyCommit) _historyCommit();
+  // Show Undo-affordance toast scoped to this delete step (Edge Case 14)
+  if (_showToastFn && _historyDepth && _historyUndo) {
+    const atDepth = _historyDepth();
+    _showToastFn("Deleted", {
+      label: "Undo",
+      onClick() {
+        // Only undo if the delete is still the top of the undo stack
+        if (_historyDepth() === atDepth) {
+          _historyUndo();
+          scheduleRender();
+        }
+      },
+    });
+  }
+  scheduleRender();
+}
+
+/**
+ * Duplicate the currently selected symbol. Shows "Duplicated" toast.
+ * Called by the inspector Duplicate button and by the main.js global shortcut handler.
+ */
+export function duplicateSelected() {
+  if (!_selectedId) return;
+  const dup = duplicateSymbol(_selectedId);
+  if (dup) {
+    selectSymbol(dup.id);
+    if (_historyCommit) _historyCommit();
+    if (_showToastFn) _showToastFn("Duplicated");
+  }
+  scheduleRender();
+}
+
+/** Internal: raw delete without commit/toast (kept for legacy call sites that
+ *  have been migrated to deleteSelected; now unused but retained for clarity). */
 function _deleteSelected() {
   if (!_selectedId) return;
   if (isDimEditing()) cancelDimEdit();
@@ -454,19 +526,10 @@ function _clearSelection() {
 }
 
 // ── Keyboard ───────────────────────────────────────────────────────────────────
-
-function _onKeyDown(e) {
-  if (e.ctrlKey || e.metaKey) return;
-  const tag = document.activeElement && document.activeElement.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-
-  if ((e.key === "Delete" || e.key === "Backspace") && _selectedId) {
-    // Only delete symbol if not in wall draw mode
-    if (_isDrawModeFn && _isDrawModeFn()) return;
-    e.preventDefault();
-    _deleteSelected();
-  }
-}
+// NOTE (LLD-21): _onKeyDown (Delete/Backspace) has been removed.
+// Symbol delete via keyboard is now owned solely by the main.js global
+// editing-shortcut handler, which calls the committing deleteSelected().
+// The _onAltDown / _onAltUp / _onWindowBlur listeners remain unchanged.
 
 function _onAltDown(e) {
   if (e.code === "AltLeft" || e.code === "AltRight") {

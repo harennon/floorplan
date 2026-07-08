@@ -998,6 +998,100 @@
         .toast { transition: none; }
         .conflict-banner { transition: none; }
       }
+
+      /* ── Toast action button (LLD-21) ────────────────────────────────────── */
+      .toast {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+      }
+      .toast-action-btn {
+        background: rgba(201,168,76,0.18);
+        border: 1px solid var(--gold-soft);
+        color: var(--gold);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        padding: 0.15rem 0.55rem;
+        border-radius: 100px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background 0.12s;
+        flex-shrink: 0;
+      }
+      .toast-action-btn:hover {
+        background: rgba(201,168,76,0.28);
+      }
+
+      /* ── Help overlay (LLD-21) ───────────────────────────────────────────── */
+      .help-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(16,15,11,0.62);
+        z-index: 40;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(3px);
+        -webkit-backdrop-filter: blur(3px);
+      }
+      .help-overlay.help-overlay--visible {
+        display: flex;
+      }
+      .help-overlay-panel {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        padding: 1.25rem 1.5rem;
+        min-width: 22rem;
+        max-width: calc(100vw - 2rem);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 6px 32px rgba(0,0,0,0.6);
+      }
+      .help-overlay-title {
+        font-family: var(--font-display);
+        font-size: 1rem;
+        color: var(--gold);
+        margin-bottom: 0.9rem;
+        font-weight: 700;
+      }
+      .help-table {
+        border-collapse: collapse;
+        width: 100%;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+      }
+      .help-table tr {
+        border-bottom: 1px solid rgba(201,168,76,0.08);
+      }
+      .help-table tr:last-child { border-bottom: none; }
+      .help-table td {
+        padding: 0.35rem 0.3rem;
+        color: var(--ink);
+        vertical-align: middle;
+      }
+      .help-key {
+        white-space: nowrap;
+        color: var(--muted);
+        padding-right: 1rem !important;
+      }
+      .help-table kbd {
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        background: rgba(201,168,76,0.12);
+        border: 1px solid var(--hairline);
+        border-radius: 4px;
+        padding: 0.05rem 0.35rem;
+        color: var(--gold);
+        font-style: normal;
+      }
+      @media (max-width: 480px) {
+        .help-overlay-panel {
+          min-width: unset;
+          padding: 1rem 1.1rem;
+        }
+        .help-table { font-size: 0.65rem; }
+      }
     </style>
   </head>
   <body>
@@ -1057,6 +1151,18 @@
         </button>
         <!-- Collapse affordance: shown only at ≤480px; closes the rail -->
         <button class="tool-rail-collapse" aria-label="Collapse tool rail">‹</button>
+        <!-- History undo/redo cluster (LLD-21): separated by a hairline from draw controls -->
+        <div class="tool-rail-sep" aria-hidden="true"></div>
+        <button id="history-undo" aria-label="Undo" disabled>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M5 4 L1 8 L5 12 M1 8 H10 Q14 8 14 5 Q14 2 10 2 H7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+        <button id="history-redo" aria-label="Redo" disabled>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M11 4 L15 8 L11 12 M15 8 H6 Q2 8 2 5 Q2 2 6 2 H9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
       </nav>
 
       <!-- Rail collapse toggle (mobile ≤480px); shown only when rail is collapsed -->
@@ -1141,6 +1247,8 @@
         <button id="btn-zoom-in"    aria-label="Zoom in">+</button>
         <button id="btn-zoom-out"   aria-label="Zoom out">−</button>
         <button id="btn-zoom-reset" class="reset-btn" aria-label="Reset zoom">RESET</button>
+        <!-- Help / keyboard shortcuts button (LLD-21) -->
+        <button id="btn-help" class="reset-btn" aria-label="Keyboard shortcuts (?)" aria-pressed="false">?</button>
       </div>
 
       <!-- HUD -->
@@ -1202,6 +1310,34 @@
         <span class="banner-text">Opened a shared plan — open it or keep your current work?</span>
         <button data-banner-action="open-shared" aria-label="Open shared plan">Open shared</button>
         <button data-banner-action="keep-mine" aria-label="Keep my current plan">Keep mine</button>
+      </div>
+
+      <!-- Shortcuts cheat sheet overlay (LLD-21) -->
+      <div
+        id="help-overlay"
+        class="help-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard shortcuts"
+      >
+        <div class="help-overlay-panel">
+          <div class="help-overlay-title">Keyboard Shortcuts</div>
+          <table class="help-table">
+            <tbody>
+              <tr><td class="help-key"><kbd>⌘Z</kbd> / <kbd>Ctrl+Z</kbd></td><td>Undo</td></tr>
+              <tr><td class="help-key"><kbd>⇧⌘Z</kbd> / <kbd>Ctrl+Shift+Z</kbd></td><td>Redo</td></tr>
+              <tr><td class="help-key"><kbd>Del</kbd> / <kbd>Backspace</kbd></td><td>Delete selected</td></tr>
+              <tr><td class="help-key"><kbd>⌘D</kbd> / <kbd>Ctrl+D</kbd></td><td>Duplicate selected</td></tr>
+              <tr><td class="help-key"><kbd>W</kbd></td><td>Draw wall</td></tr>
+              <tr><td class="help-key"><kbd>V</kbd></td><td>Select</td></tr>
+              <tr><td class="help-key"><kbd>Enter</kbd></td><td>Finish chain</td></tr>
+              <tr><td class="help-key"><kbd>Backspace</kbd></td><td>Remove last point (drawing)</td></tr>
+              <tr><td class="help-key"><kbd>Alt</kbd></td><td>Free snap</td></tr>
+              <tr><td class="help-key"><kbd>?</kbd></td><td>Toggle this help</td></tr>
+              <tr><td class="help-key"><kbd>Esc</kbd></td><td>Close / finish</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <!-- Symbol dock (bottom-center, always visible in select mode) -->

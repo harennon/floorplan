@@ -16,6 +16,18 @@ import { resetView } from "./view.js";
 import { render, onRender } from "./surface.js";
 import * as surface from "./surface.js";
 
+// history is wired in after init() via setHistoryReset()
+let _historyReset = null;
+
+/**
+ * Inject the history.reset function from main.js so _confirmReset can call
+ * it without creating a circular import.
+ * @param {()=>void} fn
+ */
+export function setHistoryReset(fn) {
+  _historyReset = fn;
+}
+
 /** Cached encoded hash for synchronous clipboard copy (Safari user-activation). */
 let _cachedHashUrl = null;
 
@@ -107,16 +119,46 @@ export function init(els) {
 }
 
 /**
- * Show a transient toast message.
+ * Show a transient toast message with an optional one-tap action button.
+ * Backward compatible — existing single-arg callers continue to work.
  * @param {string} msg
+ * @param {{ label:string, onClick:()=>void }} [action]  optional one-tap button
  */
-export function showToast(msg) {
+export function showToast(msg, action) {
   if (!_toastEl) return;
-  _toastEl.textContent = msg;
+  // Build content: always pointer-events:none on the toast itself, but we
+  // need it to accept clicks when an action button is present. We toggle
+  // pointer-events inline so the base CSS rule still hides the resting toast.
+  if (action) {
+    // Render a text span + an action button
+    _toastEl.innerHTML = "";
+    const textNode = document.createElement("span");
+    textNode.textContent = msg;
+    const btn = document.createElement("button");
+    btn.className = "toast-action-btn";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => {
+      action.onClick();
+      // Dismiss immediately on tap
+      _toastEl.classList.remove("toast--visible");
+      _toastEl.style.pointerEvents = "";
+      if (_toastTimer) clearTimeout(_toastTimer);
+    });
+    _toastEl.appendChild(textNode);
+    _toastEl.appendChild(btn);
+    _toastEl.style.pointerEvents = "auto";
+  } else {
+    _toastEl.innerHTML = "";
+    _toastEl.textContent = msg;
+    _toastEl.style.pointerEvents = "";
+  }
   _toastEl.classList.add("toast--visible");
   if (_toastTimer) clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => {
-    if (_toastEl) _toastEl.classList.remove("toast--visible");
+    if (_toastEl) {
+      _toastEl.classList.remove("toast--visible");
+      _toastEl.style.pointerEvents = "";
+    }
   }, TOAST_DURATION_MS);
 }
 
@@ -289,6 +331,8 @@ function _confirmReset() {
   hydrateWalls({ rooms: [], chain: [] });
   hydrateSymbols({ symbols: [] });
   clearLocal();
+  // Reset history so undo cannot resurrect the wiped plan (Edge Case 11)
+  if (_historyReset) _historyReset();
   // Invalidate hash cache before render (render will also fire _onRenderInvalidateCache)
   _cachedHashUrl = null;
   _cacheStale = true;

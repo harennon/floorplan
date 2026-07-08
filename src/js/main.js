@@ -11,18 +11,24 @@ import { init as initSurface, initWallLayer, onRender, resize, render, scheduleR
 import { init as initHud } from "./hud.js";
 import { init as initInteractions, setDrawHooks, setSelectHooks } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
-import { init as initWallTool, isDrawMode, getSnap, onHover, onClick, onLeave, setTool } from "./wallTool.js";
+import { init as initWallTool, isDrawMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit } from "./wallTool.js";
 import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from "./measure.js";
-import { init as initDimEntry, reposition as dimReposition, getEditingEdge } from "./dimEntry.js";
+import { init as initDimEntry, reposition as dimReposition, getEditingEdge, setHistoryCommit as dimSetHistoryCommit } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
-import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim } from "./symbolDimEntry.js";
-import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector } from "./symbolTool.js";
+import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim, setHistoryCommit as symDimSetHistoryCommit } from "./symbolDimEntry.js";
+import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast } from "./symbolTool.js";
 import { init as initStore, loadLocal } from "./store.js";
 import { readBootHash } from "./share.js";
 import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
 import { contentBounds } from "./exportImg.js";
 import { fitToContent } from "./view.js";
-import { init as initActions, showToast, showConflictBanner } from "./actions.js";
+import { init as initActions, showToast, showConflictBanner, setHistoryReset } from "./actions.js";
+import { model as wallsModel } from "./walls.js";
+import { init as initHistory, reset as historyReset, commit as historyCommit, undo as historyUndo, redo as historyRedo, canUndo, canRedo, depth as historyDepth, onChange as historyOnChange } from "./history.js";
+import { init as initHelp } from "./help.js";
+
+/** Detect macOS for platform-correct tooltip chords. */
+const _isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
@@ -80,6 +86,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const overflowMenuEl = document.getElementById("overflow-menu");
   const toastEl        = document.getElementById("toast");
   const bannerEl       = document.getElementById("conflict-banner");
+
+  // History undo/redo rail buttons + help button (LLD-21)
+  const btnHistoryUndo = document.getElementById("history-undo");
+  const btnHistoryRedo = document.getElementById("history-redo");
+  const btnHelp        = document.getElementById("btn-help");
+  const helpOverlayEl  = document.getElementById("help-overlay");
 
   // ── Initialise modules ─────────────────────────────────────────────────────
   initSurface(stage, svg, gGrid, gWorld);
@@ -169,6 +181,115 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // ── History (LLD-21) ──────────────────────────────────────────────────────
+  // Wire history.reset into actions.js so _confirmReset can call it
+  setHistoryReset(historyReset);
+
+  // Wire history.commit into tool modules (injection to avoid circular imports)
+  wallSetHistoryCommit(historyCommit);
+  symDimSetHistoryCommit(historyCommit);
+  dimSetHistoryCommit(historyCommit); // wall-edge resize (dimEntry.js)
+
+  // Wire history + showToast into symbolTool
+  setHistoryAndToast(
+    { commit: historyCommit, undo: historyUndo, depth: historyDepth },
+    showToast,
+  );
+
+  // Seed history baseline (must run before first render)
+  initHistory();
+
+  // Rail undo/redo buttons
+  if (btnHistoryUndo) {
+    btnHistoryUndo.addEventListener("click", () => {
+      if (historyUndo()) scheduleRender();
+    });
+  }
+  if (btnHistoryRedo) {
+    btnHistoryRedo.addEventListener("click", () => {
+      if (historyRedo()) scheduleRender();
+    });
+  }
+
+  /** Refresh rail button disabled state after any history stack change. */
+  function _updateHistoryButtons() {
+    if (btnHistoryUndo) btnHistoryUndo.disabled = !canUndo();
+    if (btnHistoryRedo) btnHistoryRedo.disabled = !canRedo();
+  }
+  historyOnChange(_updateHistoryButtons);
+  _updateHistoryButtons();
+
+  // Set platform-correct tooltips for undo/redo buttons + symbol inspector
+  const _mod = _isMac ? "⌘" : "Ctrl+";
+  const _shift = _isMac ? "⇧" : "Shift+";
+  if (btnHistoryUndo) btnHistoryUndo.title = `Undo (${_mod}Z)`;
+  if (btnHistoryRedo) btnHistoryRedo.title = `Redo (${_shift}${_mod}Z)`;
+  // Add tooltips to inspector duplicate/delete buttons
+  const inspDuplicate = document.querySelector("#symbol-inspector [data-action='duplicate']");
+  const inspDelete    = document.querySelector("#symbol-inspector [data-action='delete']");
+  if (inspDuplicate) inspDuplicate.title = `Duplicate (${_mod}D)`;
+  if (inspDelete)    inspDelete.title    = "Delete (Del)";
+
+  // ── Global editing keyboard shortcuts (LLD-21) ────────────────────────────
+  window.addEventListener("keydown", (e) => {
+    // Guard: ignore when focus is in an editable element
+    const tag = document.activeElement?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+    const meta  = e.ctrlKey || e.metaKey;
+
+    // Undo: Ctrl/Cmd+Z (without Shift) — accept both cases so Caps Lock doesn't break it
+    if (meta && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
+      e.preventDefault();
+      if (historyUndo()) scheduleRender();
+      return;
+    }
+
+    // Redo: Ctrl/Cmd+Shift+Z or Ctrl+Y — accept both cases so Caps Lock doesn't break it
+    if (meta && e.shiftKey && (e.key === "z" || e.key === "Z")) {
+      e.preventDefault();
+      if (historyRedo()) scheduleRender();
+      return;
+    }
+    if (meta && !e.shiftKey && (e.key === "y" || e.key === "Y")) {
+      e.preventDefault();
+      if (historyRedo()) scheduleRender();
+      return;
+    }
+
+    // Duplicate: Ctrl/Cmd+D — only when a symbol is selected (Edge Case 6)
+    if (meta && (e.key === "d" || e.key === "D")) {
+      if (hasSelection()) {
+        e.preventDefault();
+        duplicateSelected();
+      }
+      // If nothing selected: do NOT preventDefault → browser bookmark allowed
+      return;
+    }
+
+    // Delete/Backspace — single owner (GAP-1 resolution, Edge Case 5)
+    // If in draw mode with an active chain: do nothing here; the event bubbles
+    // to wallTool._onKeyDown which removes the last chain vertex (undoPoint).
+    // If in select mode (or draw mode with no chain) and a symbol is selected:
+    // consume the event and delegate to the committing deleteSelected().
+    if (e.key === "Delete" || e.key === "Backspace") {
+      if (isDrawMode() && wallsModel.chain.length > 0) {
+        // Let wallTool bubble-phase listener handle vertex removal
+        return;
+      }
+      if (hasSelection()) {
+        e.preventDefault();
+        deleteSelected();
+      }
+      return;
+    }
+  });
+
+  // ── Help overlay (LLD-21) ─────────────────────────────────────────────────
+  if (btnHelp && helpOverlayEl) {
+    initHelp({ button: btnHelp, overlay: helpOverlayEl });
+  }
+
   // Default measure inspector to collapsed on narrow screens (Edge Case 13)
   if (window.matchMedia("(max-width: 640px)").matches) {
     measurePanel.classList.add("measure--collapsed");
@@ -205,6 +326,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (hashSer === localSer) {
         // Identical: treat as local restore (no banner)
         applyPlan(localPlan);
+        historyReset(); // reseed baseline after restore (Edge Case 12)
         if (toastEl) showToast("Restored your last plan");
         render();
       } else {
@@ -212,6 +334,7 @@ document.addEventListener("DOMContentLoaded", () => {
         showConflictBanner(hashPlan, localPlan, (choice) => {
           if (choice === "shared") {
             applyPlan(hashPlan);
+            historyReset(); // reseed baseline after restore (Edge Case 12)
             const bounds = contentBounds();
             if (bounds) {
               fitToContent(bounds, vW, vH);
@@ -221,6 +344,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (toastEl) showToast("Opened shared plan");
           } else {
             applyPlan(localPlan);
+            historyReset(); // reseed baseline after restore (Edge Case 12)
           }
           render();
         });
@@ -230,6 +354,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (hashPlan) {
       // Only hash plan: apply with fit-to-content
       applyPlan(hashPlan);
+      historyReset(); // reseed baseline after restore (Edge Case 12)
       const bounds = contentBounds();
       if (bounds) {
         fitToContent(bounds, vW, vH);
@@ -241,6 +366,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (localPlan) {
       // Only local plan: restore verbatim (view included)
       applyPlan(localPlan);
+      historyReset(); // reseed baseline after restore (Edge Case 12)
       if (toastEl) showToast("Restored your last plan");
       render();
     } else {
