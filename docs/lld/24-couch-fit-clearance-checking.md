@@ -32,7 +32,9 @@ existing editor** — not a new tool/mode. Everything stays client-side.
 - No door-swing arc collision (flagging a gap that blocks a door from opening) — deferred;
   v1 threshold covers "walk through," not "swing a door."
 - No persistence of clearance settings to the plan JSON or share hash (threshold/density/
-  on-off are session UI state only — mirrors `units.unit` which is not persisted).
+  on-off are session UI state only). This is a deliberate choice: clearance is a transient
+  inspection overlay, not part of the drawn plan, and keeping it out of the schema means
+  share links / exports stay byte-identical to today (clearance adds zero fields).
 - No new export rendering (PNG/SVG exports do not include clearance overlays in v1).
 - No backend, no build step.
 
@@ -85,6 +87,24 @@ are ignored in v1 (documented limitation — keeps it lightweight and avoids ann
 gaps to walls on the far side of the plan). If the symbol is inside no closed room, only
 furniture-to-furniture gaps are shown (wall rows omitted; the panel still works).
 
+**Wall thickness — measure to the inner wall FACE, not the centerline (decision).**
+`room.verts` are the wall **centerlines**: `wallRender.js` draws each room as a stroke of
+width `WALL_M` (0.12 m, from `walls.js`) *centered* on `verts`, so the true inner face of
+the wall sits `WALL_M / 2 = 0.06 m` *inside* each `verts` edge (toward the room interior).
+A naive ray-to-`verts`-edge gap therefore over-reports walkable clearance by ~0.06 m per
+wall — the **unsafe** direction for a "does it fit?" check, and enough to flip a `tight`
+gap to `ok` at the 0.60 m default (~10% error). This contradicts the AABB decision's
+"err conservative/smaller" stance, so v1 **corrects for it**: after finding the nearest
+axis-ray hit distance `d` to a `verts` edge, subtract the wall half-thickness to get the
+gap to the inner face: `wallGap = d - WALL_M / 2` (clamped to `>= 0`). `clearance.js`
+imports `WALL_M` from `walls.js` so the constant stays single-sourced. Rationale for
+subtracting a flat `WALL_M / 2` rather than geometrically insetting each polygon edge:
+for the axis-aligned rays used here the perpendicular offset of a wall face from its
+centerline is `WALL_M / 2` regardless of edge orientation *for the axis-facing component*;
+a flat subtraction is exact for walls perpendicular to the ray (the common rectangular
+case) and remains conservative for oblique walls (it never over-reports). Full per-edge
+polygon inset is deferred as unnecessary complexity for v1's axis-aligned readout.
+
 **Wiring.** `clearanceRender.render` is registered via `onRender` **after**
 `symbolRenderFn` so leaders sit above symbol bodies but the selection overlay/handles
 (drawn into `#symbol-overlay`, which is later in the SVG) stay on top. The panel updater
@@ -104,14 +124,14 @@ the "readout on top of the editor" constraint.
 
 /**
  * One computed gap from the selected symbol to a neighbour (wall or symbol).
- * from/to are world-metre endpoints of the leader; gap is metres (0 = overlap).
+ * a/b are the world-metre endpoints of the leader line; gap is metres (0 = overlap).
  * @typedef {{
- *   to:    string,       // label: "left wall" | "Sofa" | "Table"…
+ *   label: string,       // "left wall" | "Sofa" | "Table"…
  *   kind:  "wall"|"symbol",
  *   gap:   number,       // metres; 0 when overlapping
  *   status: ClrStatus,
- *   from:  { x:number, y:number },
- *   to2:   { x:number, y:number },
+ *   a:     { x:number, y:number },   // leader endpoint on the selected symbol's edge
+ *   b:     { x:number, y:number },   // leader endpoint on the neighbour (wall face / edge)
  *   neighbourId?: string // symbol id when kind==="symbol" (for future hover-link)
  * }} Clearance
  */
@@ -147,7 +167,8 @@ export function pointInRoom(room, x, y);
 /**
  * Compute all clearances FROM the selected symbol.
  * - Walls: for each closed room containing sym's centre, gap from each AABB side
- *   to nearest room edge along that axis.
+ *   to nearest room edge along that axis, minus WALL_M/2 so the gap is to the
+ *   inner wall FACE (verts are centerlines), clamped >= 0.
  * - Symbols: AABB axis-separated gap to every other symbol (skip openings).
  * Returns [] when sym is null/opening or enabled===false.
  * @param {Sym|null} sym
@@ -205,8 +226,9 @@ export function update();
 
 **Persisted (localStorage / share hash): nothing new.** Clearance adds no fields to the
 plan JSON. This preserves the existing `plan.js` serialization contract and keeps share
-links byte-identical to today — a deliberate mirror of `units.unit`, which is also
-session-only.
+links byte-identical to today. (Note: unlike `units.unit` — which `plan.js` *does*
+serialize and restore — clearance settings are deliberately transient inspection state
+and stay session-only.)
 
 **Session UI state (in `clearance.js` module scope, resets on reload):**
 - `threshold` — metres, default `0.60`. Written by the panel slider.
@@ -370,7 +392,8 @@ collapsible (Clearance defaults collapsed on `max-width: 640px`, matching Measur
 - `symbols.js` — `model.symbols`, `getSymbol(id)`, `corners(sym)`, `CATALOG` (for the
   `openings` flag). *(present)*
 - `symbolTool.js` — `getSelectedId()` selection state. *(present)*
-- `walls.js` — `model.rooms` (closed polygons with `verts`). *(present)*
+- `walls.js` — `model.rooms` (closed polygons with `verts`), `WALL_M` (wall thickness
+  constant, 0.12 m, needed to convert centerline-edge gaps to inner-face gaps). *(present)*
 - `units.js` — `fmtLen`, `unitLabel`, `onChange` (re-render on unit switch). *(present)*
 - `surface.js` — `onRender(cb)` hook registration + `scheduleRender`. *(present)*
 - `view.js` — `worldToScreen`, `pxPerM` for screen-space drawing. *(present)*
@@ -403,6 +426,9 @@ integration coverage.
   - Vertical gap vs horizontal gap selection (`dy>dx`) picks the correct axis.
   - Symbol inside a rectangular room → four wall gaps with correct distances; symbol
     inside no room → zero wall rows.
+  - Wall gap is measured to the inner wall **face**, not the centerline: for a symbol a
+    known distance `d` from a `verts` edge, the returned wall gap equals `d - WALL_M/2`
+    (not `d`); a symbol whose face is within `WALL_M/2` of the centerline clamps to `0`.
   - Symbol partly outside room (straddling a wall) → that side's gap ≤ 0 / `bad`.
 - `worstStatus`: `[ok,ok]`→`ok`; `[ok,tight]`→`tight`; `[tight,bad]`→`bad`; `[]`→`ok`.
 - Threshold clamping in `setThreshold` to `[0.30,1.20]`; `onChange` fires for each setter.
