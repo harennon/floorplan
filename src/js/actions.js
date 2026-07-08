@@ -181,6 +181,18 @@ export function showToastAction(msg, actionLabel, onAction) {
   }, TOAST_DURATION_MS);
 }
 
+/**
+ * Dismiss the active toast immediately (and clear any action button).
+ * Called by history.js when undo/redo fires so a stale delete-toast can no
+ * longer be tapped after the document has already been restored by ⌘Z.
+ */
+export function dismissToast() {
+  if (!_toastEl) return;
+  if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+  _toastEl.classList.remove("toast--visible");
+  _clearToastAction();
+}
+
 /** Remove and detach the current action button from the toast. */
 function _clearToastAction() {
   if (_toastActionBtn) {

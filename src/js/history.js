@@ -12,6 +12,7 @@
 import { model as wallsModel, hydrate as hydrateWalls } from "./walls.js";
 import { model as symbolsModel, hydrate as hydrateSymbols } from "./symbols.js";
 import { scheduleRender } from "./surface.js";
+import { dismissToast } from "./actions.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -147,6 +148,9 @@ export function commit() {
  */
 export function undo() {
   if (_undo.length <= 1) return false;
+  // Dismiss any stale delete toast so its restore closure can no longer fire
+  // after the document has been restored here (prevents duplicate-id corruption).
+  dismissToast();
   const current = _undo.pop();
   _redo.push(current);
   const prev = _undo[_undo.length - 1];
@@ -163,6 +167,8 @@ export function undo() {
  */
 export function redo() {
   if (_redo.length === 0) return false;
+  // Dismiss any stale delete toast (mirrors undo() — redo also restores state).
+  dismissToast();
   const next = _redo.pop();
   _undo.push(next);
   if (_undo.length > HISTORY_CAP) _undo.shift();
@@ -290,9 +296,12 @@ function _closeSheet() {
   _sheetOpen = false;
   _sheet.setAttribute("aria-hidden", "true");
   _sheet.classList.remove("sheet--open");
-  // Return focus to the button that opened the sheet
-  if (_sheetTrigger) {
-    _sheetTrigger.focus();
-    _sheetTrigger = null;
+  // Return focus to the button that opened the sheet.
+  // When opened via the '?' key, _sheetTrigger is null; fall back to _btnHelp
+  // so focus always returns to a known interactive element (LLD Accessibility).
+  const focusTarget = _sheetTrigger || _btnHelp;
+  if (focusTarget) {
+    focusTarget.focus();
   }
+  _sheetTrigger = null;
 }

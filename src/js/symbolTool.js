@@ -459,8 +459,11 @@ function _deleteSelected() {
   _clearSelection();
   commit();
 
-  // Scoped restore closure: re-inserts THIS symbol regardless of intervening commits
+  // Scoped restore closure: re-inserts THIS symbol regardless of intervening commits.
+  // Guard: if a symbol with this id already exists (e.g. the user already pressed ⌘Z),
+  // no-op to avoid a duplicate-id corruption (Edge Case 7).
   const restoreClosure = () => {
+    if (getSymbol(savedSym.id)) return;
     addSymbol(savedSym);
     commit();
     selectSymbol(savedSym.id);
