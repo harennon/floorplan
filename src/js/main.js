@@ -7,7 +7,7 @@
 
 import { onChange as onViewChange, resetView } from "./view.js";
 import { onChange as onUnitChange } from "./units.js";
-import { init as initSurface, initWallLayer, onRender, resize, render, scheduleRender } from "./surface.js";
+import { init as initSurface, initWallLayer, onRender, resize, render, scheduleRender, W, H } from "./surface.js";
 import { init as initHud } from "./hud.js";
 import { init as initInteractions, setDrawHooks, setSelectHooks } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
@@ -17,6 +17,12 @@ import { init as initDimEntry, reposition as dimReposition, getEditingEdge } fro
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim } from "./symbolDimEntry.js";
 import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector } from "./symbolTool.js";
+import { init as initStore, loadLocal } from "./store.js";
+import { readBootHash } from "./share.js";
+import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
+import { contentBounds } from "./exportImg.js";
+import { fitToContent } from "./view.js";
+import { init as initActions, showToast, showConflictBanner } from "./actions.js";
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
@@ -64,6 +70,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const measureList   = document.querySelector(".measure-list");
   const measureTotal  = document.querySelector(".measure-total-val");
   const measureToggle = document.querySelector(".measure-toggle");
+
+  // Persistence / share DOM refs
+  const savePillEl     = document.getElementById("save-pill");
+  const btnShare       = document.getElementById("btn-share");
+  const btnExport      = document.getElementById("btn-export");
+  const btnOverflow    = document.getElementById("btn-overflow");
+  const exportMenuEl   = document.getElementById("export-menu");
+  const overflowMenuEl = document.getElementById("overflow-menu");
+  const toastEl        = document.getElementById("toast");
+  const bannerEl       = document.getElementById("conflict-banner");
 
   // ── Initialise modules ─────────────────────────────────────────────────────
   initSurface(stage, svg, gGrid, gWorld);
@@ -119,13 +135,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setSelectHooks({ onDown: onSelectDown, onMove: onSelectMove, onUp: onSelectUp, onTapEmpty });
 
   // When switching to draw mode, clear symbol selection
-  // Wire this by patching setTool: wallTool.setTool is already wired to rail buttons.
-  // We intercept mode changes by monitoring the draw-mode toggle via onUnitChange-style hook.
-  // The cleanest way: wallTool exports setTool; we wrap onDrawModeEnter there.
-  // For now, wallTool.setTool already dispatches to scheduleRender; we hook via a unit-like
-  // observer. Instead, main.js re-exports a wrapped version (no cycle since main drives both).
-  // The approach: interactions.js now notifies select hooks; but wall mode is driven by wallTool.
-  // Simplest: listen to the rail button clicks too.
   document.getElementById("tool-wall")?.addEventListener("click", onDrawModeEnter);
   window.addEventListener("keydown", (e) => {
     if (e.ctrlKey || e.metaKey) return;
@@ -142,6 +151,24 @@ document.addEventListener("DOMContentLoaded", () => {
   onRender(measureUpdate);
   onRender(dimReposition);
 
+  // Initialise store (save pill + autosave hook)
+  if (savePillEl) {
+    initStore(savePillEl);
+  }
+
+  // Initialise actions cluster
+  if (btnShare) {
+    initActions({
+      btnShare,
+      btnExport,
+      btnOverflow,
+      exportMenu:   exportMenuEl,
+      overflowMenu: overflowMenuEl,
+      toast:        toastEl,
+      banner:       bannerEl,
+    });
+  }
+
   // Default measure inspector to collapsed on narrow screens (Edge Case 13)
   if (window.matchMedia("(max-width: 640px)").matches) {
     measurePanel.classList.add("measure--collapsed");
@@ -153,16 +180,79 @@ document.addEventListener("DOMContentLoaded", () => {
   onViewChange(scheduleRender);
   onUnitChange(scheduleRender);
 
-  // ── Initial size + view ────────────────────────────────────────────────────
-  const { W, H } = resize();
-  resetView(W, H);
+  // ── Initial size (always) ──────────────────────────────────────────────────
+  // CRITICAL: resize() must always run first (measures viewport).
+  // resetView() must NOT run unconditionally — it would clobber any restored view.
+  const { W: vW, H: vH } = resize();
+
+  // ── Boot restore (LLD 16) ──────────────────────────────────────────────────
+  // readBootHash() is async, so we do all boot-restore work in an async IIFE.
+  (async () => {
+    let hashPlan = null;
+    try {
+      hashPlan = await readBootHash();
+    } catch {
+      showToast("That share link couldn't be opened.");
+    }
+
+    const localPlan = loadLocal();
+
+    if (hashPlan && localPlan) {
+      // Both present: check if they differ
+      const hashSer = serializePlan(hashPlan);
+      const localSer = serializePlan(localPlan);
+
+      if (hashSer === localSer) {
+        // Identical: treat as local restore (no banner)
+        applyPlan(localPlan);
+        if (toastEl) showToast("Restored your last plan");
+        render();
+      } else {
+        // Conflict: show banner-with-choice; apply nothing yet
+        showConflictBanner(hashPlan, localPlan, (choice) => {
+          if (choice === "shared") {
+            applyPlan(hashPlan);
+            const bounds = contentBounds();
+            if (bounds) {
+              fitToContent(bounds, vW, vH);
+            } else {
+              resetView(vW, vH);
+            }
+            if (toastEl) showToast("Opened shared plan");
+          } else {
+            applyPlan(localPlan);
+          }
+          render();
+        });
+        // Don't call render yet — banner choice will trigger it
+        return;
+      }
+    } else if (hashPlan) {
+      // Only hash plan: apply with fit-to-content
+      applyPlan(hashPlan);
+      const bounds = contentBounds();
+      if (bounds) {
+        fitToContent(bounds, vW, vH);
+      } else {
+        resetView(vW, vH);
+      }
+      if (toastEl) showToast("Opened shared plan");
+      render();
+    } else if (localPlan) {
+      // Only local plan: restore verbatim (view included)
+      applyPlan(localPlan);
+      if (toastEl) showToast("Restored your last plan");
+      render();
+    } else {
+      // Empty start: use default frame
+      resetView(vW, vH);
+      render();
+    }
+  })();
 
   // ── Window resize ──────────────────────────────────────────────────────────
   window.addEventListener("resize", () => {
     resize();
     render();
   });
-
-  // ── First render ───────────────────────────────────────────────────────────
-  render();
 });

@@ -85,6 +85,56 @@ export function onChange(cb) {
   _listeners.push(cb);
 }
 
+/**
+ * Set zoom/panX/panY directly (zoom clamped) and fire onChange.
+ * Used by applyPlan for same-device localStorage restore.
+ * @param {{ zoom:number, panX:number, panY:number }} v
+ */
+export function setView(v) {
+  view.zoom = clampZoom(v.zoom);
+  view.panX = v.panX;
+  view.panY = v.panY;
+  _notify();
+}
+
+/**
+ * Compute and apply a zoom/pan that fits `bounds` (world-space) centered within
+ * a W×H viewport with a fixed 10% margin, then fire onChange.
+ * Zoom is clamped to [MIN_ZOOM, MAX_ZOOM].
+ * @param {{ minX:number, minY:number, maxX:number, maxY:number }} bounds
+ * @param {number} W  viewport width in pixels
+ * @param {number} H  viewport height in pixels
+ */
+export function fitToContent(bounds, W, H) {
+  const MARGIN = 0.10; // 10% margin
+  const contentW = bounds.maxX - bounds.minX;
+  const contentH = bounds.maxY - bounds.minY;
+
+  if (contentW <= 0 || contentH <= 0) {
+    resetView(W, H);
+    return;
+  }
+
+  const availW = W * (1 - 2 * MARGIN);
+  const availH = H * (1 - 2 * MARGIN);
+
+  // Scale that fits content in available area
+  const scaleX = availW / contentW;
+  const scaleY = availH / contentH;
+  const fitScale = Math.min(scaleX, scaleY);
+
+  const newZoom = clampZoom(fitScale / BASE_PX_PER_M);
+  const newScale = newZoom * BASE_PX_PER_M;
+
+  // Center content in viewport
+  const contentCenterX = (bounds.minX + bounds.maxX) / 2;
+  const contentCenterY = (bounds.minY + bounds.maxY) / 2;
+  view.zoom = newZoom;
+  view.panX = W / 2 - contentCenterX * newScale;
+  view.panY = H / 2 - contentCenterY * newScale;
+  _notify();
+}
+
 function _notify() {
   for (const cb of _listeners) cb();
 }

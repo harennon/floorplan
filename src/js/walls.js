@@ -277,6 +277,26 @@ export function roomMetrics(room) {
   };
 }
 
+// ── Hydrate (LLD 16) ─────────────────────────────────────────────────────────
+
+/**
+ * Replace rooms+chain arrays IN PLACE (same array identity) and re-sync
+ * _roomCounter past the max w<n> id so the next closeRoom/finishChain
+ * doesn't collide with a loaded room id.
+ * @param {{ rooms: Room[], chain: Vertex[] }} next
+ */
+export function hydrate(next) {
+  model.rooms.splice(0, model.rooms.length, ...next.rooms);
+  model.chain.splice(0, model.chain.length, ...next.chain);
+
+  let maxId = -1;
+  for (const r of model.rooms) {
+    const m = typeof r.id === "string" ? r.id.match(/^w(\d+)$/) : null;
+    if (m) maxId = Math.max(maxId, parseInt(m[1], 10));
+  }
+  _roomCounter = maxId + 1;
+}
+
 /**
  * Rescale room edge `edgeIndex` to exactly `targetLenM`, keeping verts[i] fixed
  * and moving the far endpoint along the current edge direction. Mutates room.verts
