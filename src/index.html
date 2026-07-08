@@ -253,6 +253,31 @@
       .hud-cell span {
         color: var(--ink);
       }
+      /* Snap-precision chip — interactive HUD cell */
+      button.hud-snap-mode {
+        cursor: pointer;
+        pointer-events: auto;
+        border: 1px solid var(--hairline);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--muted);
+        background: var(--panel);
+        padding: 0.2rem 0.55rem;
+        border-radius: 4px;
+        white-space: nowrap;
+        text-align: left;
+        min-height: 1.75rem; /* touch target */
+        user-select: none;
+        transition: border-color 0.15s;
+      }
+      button.hud-snap-mode:hover,
+      button.hud-snap-mode:focus-visible {
+        border-color: var(--ink);
+        outline: none;
+      }
+      button.hud-snap-mode #hud-snap-mode-val {
+        color: var(--ink);
+      }
 
       /* Hide cursor cell on narrow screens */
       @media (max-width: 560px) {
@@ -1253,6 +1278,8 @@
 
       <!-- HUD -->
       <div class="hud" aria-live="off" aria-atomic="true">
+        <button class="hud-cell hud-snap-mode" id="hud-snap-mode"
+                aria-label="Snap precision (click to cycle)">Grid&nbsp;<span id="hud-snap-mode-val" aria-live="polite">Auto</span></button>
         <div class="hud-cell">
           Snap&nbsp;<span id="hud-snap-val">—</span>
         </div>
@@ -1332,7 +1359,8 @@
               <tr><td class="help-key"><kbd>V</kbd></td><td>Select</td></tr>
               <tr><td class="help-key"><kbd>Enter</kbd></td><td>Finish chain</td></tr>
               <tr><td class="help-key"><kbd>Backspace</kbd></td><td>Remove last point (drawing)</td></tr>
-              <tr><td class="help-key"><kbd>Alt</kbd></td><td>Free snap</td></tr>
+              <tr><td class="help-key"><kbd>Alt</kbd></td><td>Free snap (momentary)</td></tr>
+              <tr><td class="help-key">Grid chip</td><td>Cycle snap precision (Auto / 0.25m / 0.1m / 0.025m / Off)</td></tr>
               <tr><td class="help-key"><kbd>?</kbd></td><td>Toggle this help</td></tr>
               <tr><td class="help-key"><kbd>Esc</kbd></td><td>Close / finish</td></tr>
             </tbody>

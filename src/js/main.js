@@ -26,6 +26,7 @@ import { init as initActions, showToast, showConflictBanner, setHistoryReset } f
 import { model as wallsModel } from "./walls.js";
 import { init as initHistory, reset as historyReset, commit as historyCommit, undo as historyUndo, redo as historyRedo, canUndo, canRedo, depth as historyDepth, onChange as historyOnChange } from "./history.js";
 import { init as initHelp } from "./help.js";
+import { onSnapModeChange } from "./grid.js";
 
 /** Detect macOS for platform-correct tooltip chords. */
 const _isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
@@ -49,12 +50,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const inspectorEl = document.getElementById("symbol-inspector");
 
   // HUD
-  const elZoom    = document.getElementById("hud-zoom");
-  const elScale   = document.getElementById("hud-scale");
-  const elCursor  = document.getElementById("hud-cursor");
-  const elUnitImp = document.getElementById("unit-imperial");
-  const elUnitMet = document.getElementById("unit-metric");
-  const elHudSnap = document.getElementById("hud-snap-val");
+  const elZoom         = document.getElementById("hud-zoom");
+  const elScale        = document.getElementById("hud-scale");
+  const elCursor       = document.getElementById("hud-cursor");
+  const elUnitImp      = document.getElementById("unit-imperial");
+  const elUnitMet      = document.getElementById("unit-metric");
+  const elHudSnap      = document.getElementById("hud-snap-val");
+  const elSnapModeBtn  = document.getElementById("hud-snap-mode");
 
   // Zoom buttons
   const btnZoomIn  = document.getElementById("btn-zoom-in");
@@ -95,7 +97,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ── Initialise modules ─────────────────────────────────────────────────────
   initSurface(stage, svg, gGrid, gWorld);
-  initHud(elZoom, elScale, elCursor, elUnitImp, elUnitMet);
+  initHud(elZoom, elScale, elCursor, elUnitImp, elUnitMet, elSnapModeBtn);
 
   // wallRender binds mount points + injected getters
   initWallRender(gWorld, gDraft, gSnap, labelsEl, dimLabelsEl, getSnap, getHighlightRoomId, getEditingEdge);
@@ -297,9 +299,11 @@ document.addEventListener("DOMContentLoaded", () => {
     measureToggle.setAttribute("aria-expanded", "false");
   }
 
-  // ── Wire re-render on view / unit changes ──────────────────────────────────
+  // ── Wire re-render on view / unit / snap-mode changes ─────────────────────
   onViewChange(scheduleRender);
   onUnitChange(scheduleRender);
+  // Snap mode change: reschedule render so live placement ghosts re-snap on next move
+  onSnapModeChange(scheduleRender);
 
   // ── Initial size (always) ──────────────────────────────────────────────────
   // CRITICAL: resize() must always run first (measures viewport).
