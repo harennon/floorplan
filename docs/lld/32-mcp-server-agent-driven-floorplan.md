@@ -31,9 +31,10 @@ my couch fit?"), unlike a generic CRUD-over-JSON MCP server.
   catalog min/max size clamps, world-metre coordinates) rather than hand-authoring JSON.
 - **Evaluator (feedback) tools** — the heart of the loop — that run `roomMetrics` /
   `polygonArea` / `perimeter` and, above all, `clearance.js`'s `computeClearances`, and
-  return the result in a **shape an agent can converge on** (per-neighbour gap in cm +
-  status + a natural-language violation summary + a single `satisfied` boolean), rather
-  than a raw geometry dump.
+  return the result in a **shape an agent can converge on**: per-neighbour gap in cm +
+  status + the **direction/axis to move** (a vector, not just a magnitude) + a **resolved
+  per-symbol displacement** that reconciles multiple gaps + a natural-language instruction +
+  a single `satisfied` boolean — not a raw geometry dump.
 - **A stateful in-memory session**: the server holds one live plan across tool calls (the
   agent iterates: add room → check → nudge → re-check), implemented as a load/edit/dump
   discipline over the core's module-level singletons (see State model).
@@ -103,10 +104,13 @@ mcp/
 
 - **`session.js`** owns the single in-memory plan and the concurrency discipline. Because
   `walls.js`/`symbols.js` mutate **module-level singletons in place**, a stdio server (one
-  process, one client, requests handled one at a time over the event loop) treats the
-  singletons as *the* working plan. Each tool handler runs to completion synchronously
-  around any `await`-free core mutation, so no interleaving corrupts the singletons (see
-  State model for the exact contract and the multi-session guard).
+  process, one client) treats the singletons as *the* working plan. The safety invariant is
+  **"no mutator awaits"**: every mutator handler performs its core mutation with **no `await`
+  before or during it**, so it is a single synchronous run of the JS event loop and cannot
+  interleave with another handler's mutation. The only `await`s in the whole server are at
+  the I/O edges of `save_plan`/`get_share_url`, which snapshot via `buildPlan()` *before*
+  awaiting and never mutate (see State model for the exact contract + the single-session
+  guard).
 - **`tools.js`** is the only place that calls core mutators. Handlers are small: validate
   args → call the core fn → return a compact result (usually the affected id + a fresh
   metrics/clearance readout so the agent sees the effect of its action immediately).
@@ -238,7 +242,7 @@ additionally echo centimetres because briefs are usually phrased in cm ("60 cm w
 | Tool | Args | Core call | Notes |
 |---|---|---|---|
 | `add_room` | `{ verts: [{x,y}, …] }` or `{ rect: {x,y,w,h} }` | `placeVertex`×n → `closeRoom` | `rect` convenience builds 4 verts and closes; polygon path closes automatically (≥3 verts). Returns room id + `roomMetrics`. |
-| `set_edge_length` | `{ roomId, edgeIndex, lengthM }` | `rescaleEdge` | Exact edge length; returns `{ ok, newMetrics }` or `{ ok:false, reason }` (out-of-range index / degenerate). |
+| `set_edge_length` | `{ roomId, edgeIndex, lengthM }` | `rescaleEdge` | Exact edge length; returns `{ ok, newMetrics }` or `{ ok:false, reason }` (out-of-range index / degenerate). **Footgun (documented):** moves the far endpoint along the edge, so on a rectangle it *deforms* the shape (drags a shared corner) rather than resizing — it is fine geometry, NOT a room resizer. Get room dims right at `add_room` time (see M2). |
 | `place_symbol` | `{ type, x, y, w?, h?, rot? }` | `createSymbol`→`resizeSymbol`(clampDim)→`rotateSymbol`→`addSymbol` | Dims routed through `clampDim`; returns symbol id + a clearance readout for that symbol. |
 | `move_symbol` | `{ id, x, y }` | `moveSymbol` | Returns fresh clearance for the moved symbol. |
 | `resize_symbol` | `{ id, dim, metres, lockAspect? }` | `resizeSymbol` | Clamped; returns whether it changed + new dims + clearance. |
@@ -260,28 +264,56 @@ furniture symbol. `minWalkwayM` overrides the session threshold for this call (d
 the brief's `minWalkwayM`, else `clearance.js` `DEFAULT_THRESHOLD` = 0.60 m). It calls
 `setThreshold(minWalkway)` then `computeClearances(sym, {rooms, symbols})` per subject.
 
+**M1 — the `setThreshold` clamp must not silently corrupt the objective.** `setThreshold`
+clamps to `[THRESH_MIN, THRESH_MAX] = [0.30, 1.20] m` (clearance.js:78-80). A brief asking for
+a walkway **outside** that range would otherwise be evaluated at the clamp — the oracle could
+never satisfy the true target, or satisfy too early — a silent, undebuggable loop failure.
+The server **rejects out-of-range `minWalkwayM` at the boundary**: `set_brief` and
+`check_clearance` return `{ ok:false, reason:"walkway must be 0.30–1.20 m" }` for a value
+outside `[THRESH_MIN, THRESH_MAX]` rather than passing it to `setThreshold`. Additionally, the
+`thresholdM` echoed in every `ClearanceReport` is the **effective, post-`setThreshold` value
+actually used** (read back from `clearance.js`), so `deficitCm` and `satisfied` are always
+computed against the same number the report advertises — no drift between the requested and
+the applied threshold.
+
 The **return shape is engineered for convergence** (this is the answer to "boolean vs
-per-edge cm vs NL summary" — it is *all three, layered*, so the agent gets a fast
-pass/fail, a precise number to act on, and a plain-language instruction):
+per-edge cm vs NL summary" — it is *all four, layered*: a fast pass/fail, a precise number,
+a **direction vector**, and a plain-language instruction). The critical design point the
+first draft missed: a scalar `gapCm` is **not** a self-contained instruction — it discards
+*which* way to move and *which* symbol moves. `clearance.js` already computes directional
+leader endpoints `a`/`b` per gap (clearance.js:283-513); the report **carries that
+direction** so each instruction is a **vector, not a magnitude**, and it aggregates the
+per-gap vectors on a symbol into **one resolved displacement** (with an explicit conflict
+signal when no single move can satisfy).
+
+**Axis convention (stated once, echoed in the payload):** world is screen-coordinates,
+y-down. `+x` = right, `−x` = left, `+y` = down, `−y` = up. All lengths metres.
 
 ```jsonc
 {
-  "thresholdM": 0.60,
+  "thresholdM": 0.60,                 // EFFECTIVE (post-clamp) threshold — see M1 note below
   "satisfied": false,                 // fast top-level pass/fail against threshold
   "worstStatus": "tight",             // from clearance.js worstStatus()
+  "axisConvention": "+x=right, +y=down (screen coords); metres",
   "items": [                          // one per subject furniture symbol
     {
       "id": "s3", "label": "Sofa",
       "worstStatus": "tight",
+      "center": { "x": 1.10, "y": 3.40 },   // current subject center (metres)
       "gaps": [                        // one per neighbour (wall or symbol)
-        { "to": "left wall",  "kind": "wall",   "gapCm": 42, "gapM": 0.42, "status": "tight" },
-        { "to": "Desk",       "kind": "symbol", "neighbourId": "s5", "gapCm": 18, "gapM": 0.18, "status": "bad" }
-      ]
+        { "to": "Desk", "kind": "symbol", "neighbourId": "s5",
+          "axis": "x", "openDir": "-x",      // move SUBJECT −x (left) to open this gap
+          "gapCm": 18, "gapM": 0.18, "deficitCm": 42, "status": "tight", "diagonal": false },
+        { "to": "bottom wall", "kind": "wall",
+          "axis": "y", "openDir": "-y",      // move SUBJECT −y (up) to open this gap
+          "gapCm": 40, "gapM": 0.40, "deficitCm": 20, "status": "tight", "diagonal": false }
+      ],
+      "suggestedMove": { "toX": 0.68, "toY": 3.20 },  // resolved target center (see reconciliation)
+      "boxedInAxes": []                // axes with opposing pushes that a single move can't fix
     }
   ],
-  "violations": [                      // NL, actionable, ONLY the sub-threshold gaps
-    "Sofa is 18 cm from Desk — needs 60 cm; move them 42 cm further apart.",
-    "Sofa is 42 cm from the left wall — needs 60 cm; shift it 18 cm right."
+  "violations": [                      // NL, actionable, ONLY sub-threshold gaps; ends with the move
+    "Sofa: 18 cm from Desk (needs 60) and 40 cm from the bottom wall (needs 60). Move Sofa to ~(0.68, 3.20) m — left 42 cm and up 20 cm."
   ]
 }
 ```
@@ -289,28 +321,96 @@ pass/fail, a precise number to act on, and a plain-language instruction):
 Rationale for each layer:
 - `satisfied` + `worstStatus` — the agent's **stopping condition**; the loop ends when
   `satisfied === true` across all subjects and the brief's furniture is all placed.
-- `gaps[].gapCm` (integer cm) — the **precise, monotone signal** the agent optimises against;
-  centimetre integers avoid the agent chasing sub-millimetre float noise, and the *delta to
-  threshold* is directly computable, so the agent can compute exactly how far to move.
-- `violations[]` — the **actionable instruction** ("move them 42 cm further apart"),
-  computed as `round((thresholdM − gapM) * 100)` cm; this is what makes a weaker agent
-  converge instead of guessing. Overlap (`gapM ≤ 0`) reads as "overlapping — separate them".
+  `satisfied === (worstStatus !== "bad" && no gap is "tight")`, i.e. every gap `>= thresholdM`.
+- `gaps[].gapCm` / `deficitCm` (integer cm) — the **precise, monotone-per-gap signal**;
+  centimetre integers avoid chasing sub-millimetre float noise. `deficitCm =
+  round((thresholdM − gapM) * 100)`, clamped `>= 0` (0 when that gap is already OK).
+  **Near-threshold caveat (called out so the agent isn't confused):** `status` is computed
+  from the *raw metre* gap via `classify`, then `gapCm` is rounded — so a gap of 0.595 m
+  reports `gapCm:60` yet `status:"tight"`/`deficitCm:1` and is **not** satisfied. The agent
+  must key its stopping decision off `status`/`satisfied` (raw-value truth), not off the
+  rounded `gapCm` reading equal to the threshold; the `deficitCm` (which stays `>0` until the
+  true gap clears) is the reliable "how much more" number at the boundary.
+- `gaps[].axis` + `openDir` — the **direction**, derived from the `a`/`b` leader vector:
+  `axis` is `"x"` when the leader is horizontal (`a.y === b.y`), `"y"` when vertical
+  (`a.x === b.x`); `openDir` is the sign of `(a − b)` on that axis (the way to move the
+  *subject* away from the neighbour to grow the gap). For a `diagonal` pair (both axes
+  separated; `computeClearances` reports `min(dx,dy)` and therefore **under-reports** the
+  true gap, clearance.js:455-503) the flag is `true` so the agent knows to re-check after
+  moving rather than trusting the number as exact.
+- `suggestedMove` + `violations[]` — the **resolved, self-contained instruction**. Not "42
+  cm further apart" (under-determined: which piece? which way?) but "move *Sofa* to
+  ~(0.68, 3.20) m", a concrete `move_symbol {id:"s3", x:0.68, y:3.20}`. This is what makes a
+  weaker agent converge in one step instead of guessing a direction. Overlap (`gapM ≤ 0`)
+  reads as "Sofa overlaps Desk — separate them" with the `openDir` still set.
+
+**Which symbol moves, and reconciling multiple gaps (the H1 fix).** The convention is: the
+**subject** (`item.id`) is the piece the suggestion moves; each neighbour is treated as
+fixed for that item. `suggestedMove` is computed by resolving the subject's violating gaps
+into a single displacement:
+
+1. Group violating gaps by `axis` (`x`/`y`).
+2. Per axis, collect the required outward pushes as signed magnitudes (`deficitCm` in the
+   `openDir` direction). If **all pushes on that axis share one sign**, the axis component is
+   the **largest** deficit in that direction (satisfies the tightest gap; looser same-side
+   gaps only get roomier).
+3. If **both signs appear on one axis** (e.g. tight to the left wall *and* tight to a piece
+   on the right — the symbol is *boxed in*), no single translation opens both: that axis is
+   added to `boxedInAxes`, gets **no** displacement component, and `suggestedMove` becomes
+   `null`. The `violations[]` entry then steers the agent to a *structural* fix instead of a
+   move: "Sofa is pinned on the x-axis between the left wall (42 cm) and Desk (18 cm); moving
+   Sofa alone can't reach 60 cm both sides — widen the room, shrink Sofa/Desk, or move Desk
+   right." This is the anti-livelock signal: the agent gets told the objective is
+   *infeasible by translation*, so it stops nudging and changes the layout.
+4. If no axis is boxed, `suggestedMove = { toX: center.x + dx, toY: center.y + dy }`.
+
+Because symbol-to-symbol gaps are symmetric they appear under **both** items (Sofa's view of
+Desk and Desk's view of Sofa) with opposite `openDir`; the agent moves **one** endpoint
+(moving either by the deficit, or both by half, opens the gap equally). The convergence-test
+harness always moves the subject named in the first violating item, which is deterministic.
 
 **`check_brief`** → the goal oracle. Combines `get_metrics` + `check_clearance` against the
 stored brief and returns `{ satisfied, unmet: [ … ] }` where `unmet` enumerates, in NL, each
 requirement not yet met: missing furniture (`"brief needs a desk; none placed"`), room-size
-mismatch (`"room is 3.8×5.0 m; brief asked 4×5 m"`), and every clearance violation. This is
-the single call an agent polls to decide whether it is done. `satisfied` here is the true
-end-of-loop signal (brief-level, not just clearance-level).
+mismatch, and every clearance violation. This is the single call an agent polls to decide
+whether it is done. `satisfied` here is the true end-of-loop signal (brief-level, not just
+clearance-level).
+
+**M3 — how room dims are matched.** The brief's `room.{w,h}` is compared to the plan's room
+by its **axis-aligned bounding box**: for the (single, MVP) closed room, `w = max(x) − min(x)`,
+`h = max(y) − min(y)` over its verts. Match tolerance is **±0.025 m** (the app's finest snap
+step; `SNAP_PRESETS = ["auto", 0.25, 0.1, 0.025, "off"]`, grid.js:50 — a rebuilt room snaps to
+that grid, so anything finer would be permanently unsatisfiable). Orientation is not enforced
+(a 4×5 room and a 5×4 room both match a `{w:4,h:5}` brief by matching the sorted dimension
+pair). The `unmet` string reports the measured bbox: `"room is 3.80×5.00 m; brief asked 4×5 m
+(±0.025 m)"`.
+
+**M2 — closing the room-size requirement without a destructive footgun.** There is
+deliberately **no `resize_room` tool** in the MVP, and `set_edge_length` is **not** a room
+resizer: `rescaleEdge` moves one shared corner along the edge direction (walls.js:316-342),
+which *deforms* a rectangle into a non-rectangle rather than scaling it to w×h. Rather than
+add a room-scaling geometry primitive (new surface area, and room editing is not where the
+agent-ergonomics risk lies), the loop is **sequenced so room dims are locked first**: when
+`check_brief` reports a room-size mismatch, its `unmet` message explicitly instructs
+`"rebuild the room to 4×5 m via new_plan + add_room BEFORE placing furniture"`. The
+convergence harness and the `design_room` prompt both establish the room (via
+`add_room {rect}` at exact brief dims) as **step 1**, before any `place_symbol`, so the
+destructive rebuild path is only hit if the agent mis-sized the room initially and costs
+nothing once furniture-placement hasn't started. `set_edge_length` remains available for
+*fine geometry* (making one wall an exact length) but its tool note flags it as a
+rectangle-deforming operation, not a resize.
 
 ### Why this shape works as a loop (worked trace)
 
 1. `set_brief {room:{w:4,h:5}, furniture:[{type:"bed"},{type:"desk"},{type:"sofa"}], minWalkwayM:0.6}`
 2. `add_room {rect:{x:0,y:0,w:4,h:5}}` → `{room:"w0", metrics:{areaM2:20,…}}`
 3. `place_symbol {type:"bed", …}` ×3 (bed/desk/sofa) → each returns its own clearance readout.
-4. `check_brief` → `satisfied:false, unmet:["Sofa is 18 cm from Desk — needs 60 cm …"]`.
-5. Agent reads the exact deficit, calls `move_symbol` to open the gap.
-6. `check_brief` → `satisfied:true`. Loop ends.
+4. `check_brief` → `satisfied:false`, with a violation carrying a `suggestedMove` target for
+   Sofa (e.g. `~(0.68, 3.20) m`) — a resolved vector, not just "42 cm apart".
+5. Agent applies the suggestion directly: `move_symbol {id:"s3", x:0.68, y:3.20}`.
+6. `check_brief` → `satisfied:true`. Loop ends. (If a symbol is *boxed in*, step 4 instead
+   returns `boxedInAxes` + a structural instruction, and the agent widens the room or resizes
+   a piece rather than nudging — see the reconciliation rules.)
 7. `save_plan` and/or `get_share_url` → human opens the result.
 
 The convergence-test harness (Test requirements) scripts exactly this and asserts the loop
@@ -328,20 +428,39 @@ the Plan (they stay server-side, exactly as clearance settings stay session-only
 type Brief = {
   room?: { w: number; h: number };          // target room dims, metres (optional)
   furniture?: { type: SymbolType; count: number }[]; // required pieces (count default 1)
-  minWalkwayM: number;                       // default DEFAULT_THRESHOLD (0.60)
+  minWalkwayM: number;                       // default DEFAULT_THRESHOLD (0.60); MUST be in
+                                             // [THRESH_MIN, THRESH_MAX] = [0.30, 1.20] — set_brief
+                                             // rejects out-of-range so setThreshold can't clamp it
+};
+
+// One gap, carrying DIRECTION (not just magnitude) — derived from clearance.js a/b endpoints.
+type Gap = {
+  to: string;                                // "Desk" | "left wall" | …
+  kind: "wall" | "symbol";
+  neighbourId?: string;                      // present when kind==="symbol"
+  axis: "x" | "y";                           // horizontal vs vertical leader
+  openDir: "+x" | "-x" | "+y" | "-y";        // way to move the SUBJECT to grow this gap
+  gapM: number;
+  gapCm: number;                             // round(gapM*100)
+  deficitCm: number;                         // round((thresholdM - gapM)*100), clamped >=0
+  status: "ok" | "tight" | "bad";
+  diagonal: boolean;                          // true → min(dx,dy) under-report; re-check after move
 };
 
 // The convergence payload returned by check_clearance (mcp/src/feedback.js).
 type ClearanceReport = {
-  thresholdM: number;
-  satisfied: boolean;                        // no sub-threshold gap across all subjects
+  thresholdM: number;                        // EFFECTIVE (post-clamp) threshold actually used
+  satisfied: boolean;                        // every gap >= thresholdM across all subjects
   worstStatus: "ok" | "tight" | "bad";
+  axisConvention: string;                    // "+x=right, +y=down (screen coords); metres"
   items: {
     id: string; label: string; worstStatus: "ok" | "tight" | "bad";
-    gaps: { to: string; kind: "wall" | "symbol"; neighbourId?: string;
-            gapCm: number; gapM: number; status: "ok" | "tight" | "bad" }[];
+    center: { x: number; y: number };        // current subject center (metres)
+    gaps: Gap[];
+    suggestedMove: { toX: number; toY: number } | null; // null when boxedInAxes is non-empty
+    boxedInAxes: ("x" | "y")[];              // axes with opposing pushes no single move can fix
   }[];
-  violations: string[];                      // NL, actionable, only sub-threshold gaps
+  violations: string[];                      // NL, self-contained; each ends with a concrete move
 };
 
 // The brief oracle returned by check_brief.
@@ -349,8 +468,11 @@ type BriefReport = { satisfied: boolean; unmet: string[] };
 ```
 
 `SymbolType` and the clamp bounds are read directly from `symbols.js` `CATALOG` — the server
-does not redeclare them (single source of truth). `gapCm = round(gapM * 100)`; deltas in
-`violations` = `round((thresholdM − gapM) * 100)`.
+does not redeclare them (single source of truth). `gapCm = round(gapM * 100)`;
+`deficitCm = max(0, round((thresholdM − gapM) * 100))`. `axis`/`openDir` are derived from the
+clearance leader endpoints: `axis = (a.y === b.y) ? "x" : "y"`, and `openDir` is the sign of
+`(a − b)` on that axis. `status` uses `clearance.js`'s own `classify` verbatim (so `bad` is
+reserved for `gapM <= 0`; a positive sub-threshold gap is `tight`, never `bad`).
 
 Tool argument/result schemas are declared with the MCP SDK's Zod (or JSON-Schema) input
 shapes in `tools.js`; they mirror the tables above. Coordinates are metres, symbol `x,y` are
@@ -374,25 +496,35 @@ exactly **one live plan per server process**, and it lives in those singletons.
   `walls.model.rooms` / `symbols.model.symbols` (or a fresh `buildPlan()`).
 
 **Concurrency contract (the hazard, addressed explicitly).** The core mutating shared
-singletons is a real hazard *if* two logical plans were ever edited at once. It is safe here
-because: (a) stdio MCP is **one process serving one client**; (b) every tool handler is
-**synchronous around its core mutation** — the only `await`s are at the I/O edges
-(`save_plan` file write, `get_share_url` compression), and by then the mutation has already
-committed to the singletons, so no two handlers interleave a half-applied `hydrate`/edit.
-The Node event loop gives us run-to-completion per handler for free. To make the invariant
-explicit and future-proof against someone spawning a second logical session, `session.js`
-holds a **single-session guard**: an `active` flag set on `new_plan`/`load_plan`; there is no
-API to open a second concurrent plan in one process. If the server is ever made to serve
-multiple plans, it MUST move to a real session store keyed by session id, each doing its own
-`hydrate → edit → buildPlan` around a mutex — recorded here as the migration path, not built.
+singletons is a real hazard *if* two mutations were ever interleaved. The guarantee rests on
+one concrete, code-checkable invariant — **no mutator handler contains an `await`**:
+- Every mutator (`add_room`, `place_symbol`, `move_symbol`, …) does its `walls.*`/`symbols.*`
+  work in a single synchronous stretch with no `await` before or within the mutation. A
+  synchronous run of the event loop is not interruptible, so two mutators cannot interleave.
+- The only `await`s in the server are in `save_plan` (file write) and `get_share_url`
+  (`encodePlanToHash` compression). Both snapshot the singletons with `buildPlan()` **before**
+  their first `await` and **never mutate**, so a suspended I/O handler holds a detached
+  snapshot, not a half-applied edit.
+
+This is grounded in the "no mutator awaits" rule, **not** in any assumed SDK request-dispatch
+serialization (the SDK's dispatch model is not relied upon). It is **fragile to any future
+async mutator** — if a mutator ever needs to `await`, it must first take a mutex or copy-edit-
+swap, or the invariant breaks. A lint/review rule ("no `await` in a mutator handler") is
+recommended. `session.js` additionally holds a **single-session guard** (an `active` flag set
+on `new_plan`/`load_plan`; no API opens a second concurrent plan) so two *logical* plans can
+never share the singletons. If the server is ever made to serve multiple plans, it MUST move
+to a real session store keyed by session id, each doing its own `hydrate → edit → buildPlan`
+around a mutex — the migration path, not built here.
 
 **Persistence.** Nothing new is persisted. The plan lives in memory for the session; it
 reaches disk only when the agent calls `save_plan` (a `serializePlan()` file in the sandboxed
 plans dir) or the URL when it calls `get_share_url`. No `localStorage` (that is `store.js`,
 browser-only and not imported). The brief and clearance threshold are **server-session state
-only**, never written into the Plan JSON — so `save_plan` / `get_share_url` output stays
-byte-identical to what the web app would produce for the same geometry (a regression assert
-in Test requirements).
+only** and **never leak any field into the Plan JSON** — the emitted document has exactly the
+`plan.js` shape and passes the same `validatePlan` the app's `importJson` uses. (This is the
+achievable invariant; it is *not* claimed to be byte-identical to the web app's output for
+"the same geometry", since `view.zoom/panX/panY`, `unit`, and id-assignment order also
+determine the bytes and are set independently — see the Regression test.)
 
 **Reset semantics.** Because the singletons persist for the process lifetime, `new_plan`
 MUST fully reset them (empty rooms/chain/symbols, threshold back to default) so a second
@@ -481,6 +613,18 @@ Prompt add cheap context. All are optional to the loop and small.
 17. **`unit` in the loaded document is `ft`.** The core works in metres regardless; feedback
     is always metres+cm. `unit` is preserved through `buildPlan`/`applyPlan` for the human's
     view but does not affect evaluation.
+18. **`minWalkwayM` out of `[0.30, 1.20]`.** `set_brief`/`check_clearance` reject it with
+    `{ ok:false, reason:"walkway must be 0.30–1.20 m" }` — never passed to `setThreshold`
+    (which would silently clamp and desync the objective from the reported `thresholdM`). See M1.
+19. **Room-size requirement with no non-destructive resize.** `set_edge_length`→`rescaleEdge`
+    deforms a rectangle (moves one shared corner along the edge, walls.js:316-342); it does NOT
+    resize a room to w×h. The loop handles this by **sequencing** (see M2): `check_brief`'s
+    room-size `unmet` message instructs the agent to fix room dims via `new_plan`+`add_room`
+    **before** placing furniture, so the destructive rebuild costs nothing.
+20. **`place_symbol type:"door"|"window"` with an `h` arg.** Openings ignore `h`
+    (`resizeSymbol` returns false for opening `dim="h"`, symbols.js:196). The tool accepts and
+    silently drops the `h` arg for openings and notes `hIgnored:true` in the result so the
+    agent isn't confused when depth doesn't change.
 
 ## Dependencies
 
@@ -529,7 +673,7 @@ happens* (recorded, not built here): the server would authenticate **as the user
 | Q5 | **Local security surface.** | **Resolved:** sandbox file I/O to a designated plans dir; `path.basename` + inside-dir re-check; honour MCP **Roots** if the client declares them; no `eval`/shell (core is pure data). |
 | Q6 | **`../src/js` import + surviving `npm publish`.** | **Deferred (framing recorded).** MVP uses the dev-checkout relative import, which is knowingly **not self-contained** and breaks under `npx`. Before any publish, resolve via one of: bundle the core into the artifact at build time, vendor a synced copy with a drift check, or depend on a separately-published core package. The import-smoke test is the early-warning for `src/` coupling drift. #32's acceptance criteria were corrected to reflect this deferral. |
 | Q7 | **One-click install bundle** (`.mcpb` / Desktop Extension). | **Deferred.** Depends on that format being stable; a nice-to-have for non-technical users, orthogonal to the tool-design questions the prototype answers. Revisit in the productionization phase alongside Q6. |
-| Q8 | **Room-to-room overlap evaluation** (raised by external feedback on #32). | **Deferred (out of MVP scope, gap acknowledged).** No evaluator — in `src/` or this server — checks whether two room *polygons* intersect; `validatePlan` is purely structural and `clearance.js` is symbol-subject only, so a plan with overlapping rooms passes every check. The MVP's single-room brief cannot generate this case, so it is not a convergence blocker for the prototype. If the brief grows to multi-room layouts, add a polygon-polygon intersection test (new pure fn in `walls.js` or `mcp/`) feeding a `check_brief` `unmet` entry. Recorded as the first evaluator to add when multi-room support is scoped. |
+| Q8 | **Room-to-room overlap evaluation** (raised by external feedback on #32). | **Deferred (out of MVP scope, gap acknowledged).** No evaluator — in `src/` or this server — checks whether two room *polygons* intersect; `validatePlan` is purely structural and `clearance.js` is symbol-subject only, so a plan with overlapping rooms passes every check. The MVP's single-room brief cannot generate this case, so it is not a convergence blocker for the prototype. If the brief grows to multi-room layouts, add a polygon-polygon intersection test (new pure fn in `walls.js` or `mcp/`) feeding a `check_brief` `unmet` entry. Recorded as the first evaluator to add when multi-room support is scoped. **Related low-priority gap:** nothing stops the agent calling `add_room` twice under a single-room brief, producing disjoint/overlapping rooms that still pass every check; a single-room guard (reject a second `add_room` when `Brief.room` is a single room) is the cheap MVP mitigation and folds into the same multi-room work. |
 
 **Escalation to CEO (product call, not a design call):** the MVP is intentionally
 *not shippable* — its output is a *validated tool/feedback design*, not a released package.
@@ -545,16 +689,46 @@ headless), via a plain `node --test` runner in `mcp/package.json`'s `test` scrip
 **not** join the app's browser `tests.html` harness (that stays build-less and DOM-based);
 `mcp/` owns its own Node test suite. Organised by category:
 
+**M4 — the drift guard must actually run in the pipeline.** The import-smoke test (below) is
+the early-warning for `src/`→`mcp/` coupling breakage, but it only protects `src/` changes if
+it runs when `src/` changes ship. Today `.claude/project.json` `commands.test` (line 18) runs
+**only** the browser Playwright suite (`node {dir}/.github/run-tests.mjs`) — nothing invokes
+the `mcp/` Node suite. **Required project.json change** (the one and only build-config change
+this LLD introduces, and it does not add a build step to `src/`): extend `commands.test` to
+also run the `mcp/` Node tests, e.g. `node {dir}/.github/run-tests.mjs && (cd {dir}/mcp &&
+node --test)`. This makes the import-smoke test fail the ship pipeline the moment a `src/`
+edit leaks a top-level DOM reference into a module the server imports. (`mcp/` tests need no
+Playwright/Chromium; they are pure Node, so this adds negligible CI cost.)
+
 ### Unit — feedback shaping (`feedback.js`, the loop's core)
-- `check_clearance` report: given a known two-symbol layout with an 18 cm gap and a 60 cm
-  threshold → `satisfied:false`, `worstStatus:"bad"`, a `gaps[]` entry with `gapCm:18`, and a
-  `violations[]` string containing the correct deficit ("needs 60 cm", "42 cm further apart").
-- Boundary: a gap exactly at threshold → `status:"ok"`, `satisfied:true`, no violation.
-- Overlap (`gapM ≤ 0`) → "overlapping — separate them", `satisfied:false`.
-- `gapCm`/delta rounding is integer-cm and matches `round(gapM*100)` / `round((thr−gapM)*100)`.
+- `check_clearance` report, positive sub-threshold gap: a two-symbol layout with an 18 cm gap
+  at a 60 cm threshold → `satisfied:false`, `worstStatus:"tight"` (NOT `"bad"` — asserts the
+  report reuses `classify`, which returns `tight` for `0 < gap < threshold`), a `gaps[]` entry
+  with `gapCm:18` and `deficitCm:42`, and a `violations[]` string naming the subject + a
+  concrete move. Run against the real `classify(0.18)` so the assertion actually passes.
+- **Direction is carried:** the Desk gap has the correct `axis` and `openDir` matching the
+  layout (e.g. Desk to the subject's right → `axis:"x"`, `openDir:"-x"`), derived from the
+  `a`/`b` leader endpoints.
+- **`bad` only for overlap:** a genuinely overlapping pair (`gapM <= 0`, `gapCm <= 0`) →
+  `status:"bad"`, item and top-level `worstStatus:"bad"`, violation "overlaps — separate
+  them". This is the separate case that exercises the `bad` path.
+- **Reconciliation / suggestedMove:** a subject tight on two same-sign axes → `suggestedMove`
+  is a single target center that clears both (the larger deficit per axis); re-evaluating at
+  that center yields `satisfied:true`.
+- **Boxed-in:** a subject tight to the left wall AND to a piece on its right → that axis is in
+  `boxedInAxes`, `suggestedMove` is `null`, and the violation gives the structural
+  instruction (widen/resize), NOT a nudge. Asserts no opposing-sign move is emitted.
+- Boundary: a gap exactly at threshold → `status:"ok"`, `deficitCm:0`, `satisfied:true`, no
+  violation. Plus the near-boundary rounding note: `gapM:0.595` → `gapCm:60` but
+  `status:"tight"`/`satisfied:false` (the raw `status` disambiguates the rounded number).
+- `gapCm`/`deficitCm` rounding is integer-cm and matches `round(gapM*100)` /
+  `max(0,round((thr−gapM)*100))`.
 - Rotated subject → report notes bounding-box basis; gap is the conservative (smaller) value.
-- `check_brief` oracle: missing furniture, room-size mismatch, and clearance violations each
-  appear in `unmet`; a fully-satisfying plan returns `satisfied:true, unmet:[]`.
+- **Diagonal pair** (both axes separated) → `diagonal:true` on the gap (surfaces the
+  `min(dx,dy)` under-report so the agent re-checks).
+- `check_brief` oracle: missing furniture, room-size mismatch (using the bbox+tolerance rule),
+  and clearance violations each appear in `unmet`; a fully-satisfying plan returns
+  `satisfied:true, unmet:[]`.
 
 ### Unit — mutators & session (`tools.js`, `session.js`)
 - `add_room {rect}` builds a closed 4-vert room whose `roomMetrics.area` matches `w*h`.
@@ -578,22 +752,32 @@ headless), via a plain `node --test` runner in `mcp/package.json`'s `test` scrip
 
 ### Integration — the convergence loop (the headline test)
 - A **scripted "agent"** (deterministic, not an LLM) drives the tools to satisfy a fixed
-  brief ("4×5 m studio; bed + desk + sofa; 60 cm walkways"): `set_brief` → `add_room` →
-  `place_symbol`×3 (deliberately too close) → poll `check_brief` → on each violation, apply
-  the exact `move_symbol` deficit from `violations` → re-poll. **Assert the loop terminates**
-  (bounded iteration count) with `check_brief.satisfied === true`.
-- Assert the final `get_plan` document passes `validatePlan()` and that `check_clearance`
-  over all furniture reports `worstStatus:"ok"`.
+  brief ("4×5 m studio; bed + desk + sofa; 60 cm walkways"): `set_brief` → `add_room {rect}`
+  at exact brief dims **first** (M2 sequencing) → `place_symbol`×3 (deliberately too close) →
+  poll `check_brief` → on each violation, apply the report's **`suggestedMove`** directly via
+  `move_symbol {id, x:toX, y:toY}` (not a hand-derived magnitude) → re-poll. **Assert the loop
+  terminates** in a bounded iteration count with `check_brief.satisfied === true`.
+- Assert the final `get_plan` document passes `validatePlan()` and `check_clearance` over all
+  furniture reports `worstStatus:"ok"`.
+- **Boxed-in / infeasible-by-translation case:** a brief whose furniture cannot fit at 60 cm
+  walkways in the given room → assert `check_brief` surfaces `boxedInAxes`/a structural
+  instruction and the harness does **not** oscillate (the agent detects the non-translation
+  signal and either resizes a piece or the loop terminates as infeasible within the bound) —
+  proving the design can't livelock on opposing constraints.
 - This test is the executable proof that the feedback shape actually *closes the loop* — its
   failure means the tool/feedback design, not the code, is wrong (which is the whole reason
   the prototype exists).
 
-### Regression — byte-compatibility with the app
-- A plan built via the tools, dumped with `save_plan`/`get_plan`, is **byte-identical** to
-  what the web app's `buildPlan`+`serializePlan` produce for the same geometry (brief and
-  clearance-threshold session state leak **no** fields into the Plan JSON).
-- The emitted document is accepted by the same `validatePlan` the app's `importJson` uses
-  (shared function — asserts the handoff contract holds).
+### Regression — handoff contract with the app
+- **No leakage:** a plan built via the tools and dumped with `save_plan`/`get_plan` has
+  exactly the `plan.js` key set (`schema/app/walls/symbols/view/unit`) — **no** brief or
+  clearance-threshold field appears anywhere in the JSON.
+- **Round-trips:** `decodeHashToPlan(encodePlanToHash(doc))` deep-equals `doc`, and
+  `validatePlan(doc)` returns a non-null normalised plan — the same `validatePlan` the app's
+  `importJson` calls, so the Import handoff is guaranteed to accept the output.
+- (We deliberately do **not** assert byte-identity to the web app's output for "the same
+  geometry": `view`, `unit`, and id-assignment order also drive the bytes and are set
+  independently of geometry. The two invariants above are what the handoff actually needs.)
 
 ### Not tested here (out of scope, deferred with Q6/Q7)
 - npm packaging, `npx` self-containment, `.mcpb` bundle — no tests until productionization.
