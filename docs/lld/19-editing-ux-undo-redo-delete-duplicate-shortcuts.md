@@ -21,8 +21,9 @@ shortcuts plus a cheat sheet. Client-side only; nothing new is sent to a server.
 - **Delete + duplicate** on the current selection, kept in the existing floating **symbol
   inspector** with key-hint tooltips. Reuse the current inspector component — no new panel.
 - **Toasts:** destructive actions (delete) show the existing toast with a one-tap **Undo**
-  affordance; duplicate shows a brief non-actionable confirmation toast. Reuse the existing
-  `actions.js` toast component.
+  affordance (a restore closure scoped to the deleted symbol, not a bare latest-step undo);
+  duplicate shows a brief non-actionable confirmation toast. Reuse the existing `actions.js`
+  toast component.
 - **Shortcuts cheat sheet** opened by `?`, plus a small `?` help button near the zoom
   cluster that opens the same overlay.
 - New unit tests in `src/tests.html` for the history stack.
@@ -78,6 +79,17 @@ undoable step back to the loaded/empty plan. Boot-restore paths (local, shared, 
 choice, reset, import) all re-seed via `history.reset()` so you cannot undo *into* a previous
 document that was replaced wholesale.
 
+**Import JSON re-seed is async — re-seed from `exportJson.js`, not `actions.js`.** Reset
+replaces the model synchronously inside `actions._confirmReset`, so its `reset()` can be
+called there. **Import is different:** `importJson()` (in `exportJson.js`) applies the new
+plan inside a `FileReader.onload` callback — an async continuation that `actions.js` never
+sees. Calling `history.reset()` from the `import-json` menu dispatch would fire *before* the
+file is read (or on failure), re-seeding the wrong/old document. Therefore `exportJson.js`
+gains an **after-apply hook** (a `setOnApplied(cb)` setter mirroring its existing
+`setToastCallback`), invoked from inside `onload` *after* `applyPlan(...)` succeeds; `main.js`
+wires that hook to `history.reset()`. `exportJson.js` is therefore a modified file (see
+Dependencies).
+
 **Two distinct "undo last point" affordances, kept separate (CEO constraint).** The
 draw-mode **Backspace / rail "remove last point"** stays exactly as shipped: chain-scoped,
 pops one in-progress vertex. The new **global Undo (⌘/Ctrl+Z)** operates on the committed
@@ -91,7 +103,12 @@ undo/redo cluster is a separate group below the hairline.
 `scheduleRender()` and clear any transient selection/edit that now points at a vanished
 element (e.g. a symbol that a redo removed). Restoration uses the in-place `hydrate`
 functions so array identities are preserved (measure/symbolRender read `model` by
-reference).
+reference). The `onAfterRestore` callback needs to clear symbol selection + hide the
+inspector, but `symbolTool` today exposes no generic deselect (only the module-private
+`_clearSelection`, and `onDrawModeEnter`, whose name misdescribes this use). We therefore
+add a small exported `symbolTool.deselect()` that wraps `_clearSelection()` (no render — the
+caller renders), and `onAfterRestore` calls it. (`onDrawModeEnter` can be reimplemented as
+`deselect()` + `scheduleRender()` to avoid duplication, but that refactor is optional.)
 
 **Keyboard: global handler in `history.js`, guarded.** ⌘/Ctrl+Z and redo chords are handled
 by a single `window` keydown listener owned by the history module. It ignores events when an
@@ -192,9 +209,22 @@ pose) so a click that selects-but-doesn't-move does not create a history step. C
 - in `onSelectUp` **iff** the symbol's `{x,y,rot}` changed since `onSelectDown`,
 - at the end of `_onRotate90`, `_onDuplicate`, `_deleteSelected`.
 
-Delete/duplicate additionally trigger the appropriate toast (see below). New key handling:
-`D`/⌘D (duplicate) and `R` (rotate 90°) added to the existing `_onKeyDown`, behind the same
-guards, only when a symbol is selected and not in draw mode.
+Delete/duplicate additionally trigger the appropriate toast (see below). `_deleteSelected`
+captures the removed symbol object (or a pre-delete `symbols.model.symbols` snapshot) *before*
+`removeSymbol`, and passes a restore closure `() => { addSymbol(saved); commit(); selectSymbol(saved.id); }`
+as the delete toast's `onAction` (scoped Undo — see Edge Case 7). New key handling: `D`/⌘D
+(duplicate) and `R` (rotate 90°) added to the existing `_onKeyDown`, behind the same guards,
+only when a symbol is selected and not in draw mode.
+
+**New export — `deselect()`.** `symbolTool` currently exposes no generic deselect (only
+module-private `_clearSelection` and `onDrawModeEnter`). Add:
+```js
+// Clear symbol selection + hide inspector, WITHOUT rendering (caller renders).
+// Wraps the module-private _clearSelection(). Used by history's onAfterRestore.
+export function deselect(): void;
+```
+`main.js`'s `onAfterRestore` calls `symbolTool.deselect()` (then history renders). Optionally
+`onDrawModeEnter` is refactored to `deselect()` + `scheduleRender()`.
 
 ### `symbolDimEntry.js` — additions (surgical)
 
@@ -214,14 +244,33 @@ Implemented by rendering `msg` + a `<button>` inside `#toast` (built via DOM API
 detached when the toast hides or is replaced. Used by delete ("Symbol deleted" + "Undo").
 Duplicate uses the plain `showToast("Duplicated")`.
 
+**Delete-toast Undo must be scoped to the deletion, not "the latest step."** Wiring the
+toast button to a bare `history.undo()` is wrong: the toast lingers ~3.5s, and if the user
+commits *another* gesture in that window (e.g. nudges a different symbol), `history.undo()`
+would reverse *that* gesture instead of restoring the deleted symbol. Instead,
+`_deleteSelected` captures a **restore closure at delete time** and passes it as the toast's
+`onAction`:
+- It captures the deleted symbol's data (the pre-delete `symbols.model.symbols` snapshot, or
+  just the removed symbol object) at the moment of deletion.
+- The `onAction` re-inserts that symbol via `symbols.addSymbol(...)`/`hydrateSymbols`, then
+  calls `history.commit()` — so the restoration is itself a normal, undoable committed step
+  layered on top of whatever the user did in between (rather than rewinding it).
+This makes the toast Undo *always* restore the specific deleted symbol regardless of
+intervening gestures, while ⌘Z remains the general "undo the latest step" path.
+
 ### `main.js` — wiring
 
 Import and `initHistory({...})` after all other modules init; pass an `onAfterRestore`
-callback that clears symbol selection/inspector and any open dim-edit, then re-renders.
-Call `history.reset()` in every boot-restore branch (local / shared / conflict choice /
-empty) and expose it to `actions.js` for reset/import (via an injected reference, mirroring
-how `setTool`/hooks are injected — no new import cycle). Grab and pass the new rail
-undo/redo buttons, the `?` help button, and the cheat-sheet overlay elements.
+callback that calls `symbolTool.deselect()` (clears selection/inspector) and cancels any open
+dim-edit (history then re-renders). Call `history.reset()` in every boot-restore branch (local
+/ shared / conflict choice / empty). Wire the two async/deferred re-seed paths:
+- **Reset:** inject a `history.reset` reference into `actions.js` (mirroring how `setTool`/
+  hooks are injected — no new import cycle); `_confirmReset` calls it synchronously.
+- **Import:** call `exportJson.setOnApplied(() => history.reset())` at init (mirroring the
+  existing `setToastCallback`); the hook fires from inside `FileReader.onload` after
+  `applyPlan` succeeds.
+Grab and pass the new rail undo/redo buttons, the `?` help button, and the cheat-sheet overlay
+elements.
 
 
 ## State Model
@@ -299,15 +348,25 @@ imperatively via `scheduleRender()` on undo/redo, exactly like every other contr
    ⌘Z when focus is in an `INPUT`/`TEXTAREA`/`SELECT`, so the browser's native text-undo
    applies inside the field — the plan is not touched. (Consistent with existing keyboard
    guards across `wallTool`/`symbolTool`.)
-7. **Delete toast Undo vs. global redo.** The delete toast's inline "Undo" calls
-   `history.undo()` — the same path as ⌘Z — so there is exactly one undo mechanism; the toast
-   is just a second trigger. If the toast times out, ⌘Z still works.
+7. **Delete toast Undo is scoped to the deletion, not "the latest step."** The toast's
+   inline "Undo" runs a **restore closure captured at delete time** (re-insert the specific
+   removed symbol via `addSymbol`, then `history.commit()`), NOT a bare `history.undo()`. This
+   is deliberate: the toast lingers ~3.5s, so a user could commit another gesture (e.g. move a
+   different symbol) before it dismisses; a `history.undo()` there would reverse *that*
+   gesture, not restore the deletion. The scoped closure always restores the deleted symbol
+   regardless of intervening commits. ⌘Z remains the general "undo the latest step" path and,
+   if used immediately after the delete with no intervening gesture, also restores it. If the
+   toast times out, ⌘Z (immediately) or re-doing the work is the fallback.
 8. **Duplicate then undo.** Duplicate is one committed step; undo removes the duplicate and
    restores selection state via `onAfterRestore` (selection cleared, since the duplicate — the
    selected symbol — is gone). Duplicate shows a brief non-actionable toast only.
-9. **Reset / Import / shared-plan open.** These replace the document wholesale and call
-   `history.reset()`, so you cannot ⌘Z back into the pre-reset plan (matching the existing
-   `window.confirm("…can't be undone")` contract for Reset). This is deliberate.
+9. **Reset / Import / shared-plan open.** These replace the document wholesale and re-seed
+   history, so you cannot ⌘Z back into the pre-reset plan (matching the existing
+   `window.confirm("…can't be undone")` contract for Reset). This is deliberate. **Reset**
+   re-seeds synchronously from `actions._confirmReset`. **Import** applies inside an async
+   `FileReader.onload`, so its re-seed fires from `exportJson.importJson`'s `onApplied` hook
+   (wired to `history.reset()` in `main.js`) *after* `applyPlan` succeeds — never from the
+   `actions.js` menu dispatch, which would run before the file is read.
 10. **`D` key ambiguity.** Plain `D` duplicates the selected symbol; ⌘/Ctrl+D also duplicates
     (and preventDefault's the browser bookmark). Both are guarded to require a current
     selection and select-mode (not draw-mode) and an unfocused editable — otherwise ignored.
@@ -339,9 +398,10 @@ imperatively via `scheduleRender()` on undo/redo, exactly like every other contr
 ## Dependencies
 
 - **Must exist first (all shipped):** `walls.js` (`model`, `hydrate`), `symbols.js`
-  (`model`, `hydrate`, `duplicateSymbol`, `removeSymbol`, `rotateSymbol`), `plan.js`
-  (deep-clone pattern), `surface.js` (`scheduleRender`/`onRender`), `wallTool.js`,
-  `symbolTool.js`, `symbolDimEntry.js`, `actions.js` (toast), `main.js`, `index.html`.
+  (`model`, `hydrate`, `addSymbol`, `duplicateSymbol`, `removeSymbol`, `rotateSymbol`),
+  `plan.js` (deep-clone pattern, `applyPlan`), `surface.js` (`scheduleRender`/`onRender`),
+  `wallTool.js`, `symbolTool.js`, `symbolDimEntry.js`, `actions.js` (toast), `exportJson.js`
+  (`importJson`), `main.js`, `index.html`.
 - **Reused contracts (do not change):** `walls.hydrate` / `symbols.hydrate` (in-place,
   id-counter-safe); the `JSON.parse(JSON.stringify(...))` clone used by `plan.buildPlan`;
   `surface.scheduleRender`; the existing keyboard guards (skip when modifier keys / editable
@@ -350,12 +410,21 @@ imperatively via `scheduleRender()` on undo/redo, exactly like every other contr
   optional `platform.js` helper (or inline).
 - **Modified (surgical):**
   - `wallTool.js` — `commit()` calls at gesture ends.
-  - `symbolTool.js` — `commit()` calls; drag-changed tracking; `D`/`R` shortcuts.
+  - `symbolTool.js` — `commit()` calls; drag-changed tracking; `D`/`R` shortcuts; new
+    exported `deselect()`; scoped delete-toast restore closure in `_deleteSelected`.
   - `symbolDimEntry.js` — `commit()` after successful resize.
-  - `actions.js` — `showToastAction` (undo affordance); accept an injected `history.reset`
-    reference for Reset/Import.
-  - `main.js` — init history, wire `onAfterRestore`, grab new DOM refs, call `reset()` in all
-    boot-restore branches.
+  - `actions.js` — `showToastAction` (undo affordance); call injected `history.reset` in
+    `_confirmReset` (synchronous). Note: **Import re-seed is NOT done here** (it's async — see
+    `exportJson.js`).
+  - `exportJson.js` — add a module-level `onApplied` after-apply hook (a `setOnApplied(cb)`
+    setter mirroring the existing `setToastCallback`), invoked from inside the
+    `FileReader.onload` callback *after* `applyPlan(...)` succeeds. `main.js` wires it to
+    `history.reset()`. Without this, import cannot re-seed history (Edge Case 9), because the
+    model replacement happens in an async callback that `actions.js` (which triggers
+    `importJson()` from its menu dispatch) never observes.
+  - `main.js` — init history, wire `onAfterRestore` (→ `symbolTool.deselect()`), grab new DOM
+    refs, call `reset()` in all boot-restore branches, and wire `importJson`'s `onApplied`
+    hook to `history.reset()`.
   - `index.html` — add the rail undo/redo cluster (below a hairline separator), the `?` help
     button near the zoom cluster, the cheat-sheet overlay markup + CSS, and the toast-action
     button styling. All from existing tokens.
@@ -398,7 +467,10 @@ Extend `src/tests.html` (same in-page `describe`/`it`/`expect` harness). Import 
   Ctrl+Y) replays; rail Undo/Redo buttons do the same and disable at stack ends.
 - Place a symbol, move it, rotate it, resize it — each is one undo step in reverse order.
 - Delete a symbol → toast appears with an "Undo" button; tapping it restores the symbol;
-  the same is achievable with ⌘Z after the toast dismisses.
+  the same is achievable with ⌘Z immediately after (before any other gesture).
+- Delete a symbol, then move a *different* symbol before the toast dismisses, then tap the
+  toast "Undo" → the deleted symbol is restored and the intervening move is NOT reversed
+  (scoped restore closure, not a bare `history.undo()`).
 - Duplicate a symbol → brief non-actionable toast; duplicate is selected; ⌘Z removes it.
 - `D` and ⌘/Ctrl+D duplicate the selected symbol; `R` rotates 90°; Delete/Backspace deletes
   — all only in select mode with a selection, and never while typing in a dim input.
@@ -461,7 +533,9 @@ duplicate → “Duplicate (⌘D)”, delete → “Delete (⌫)”, rotate90 �
 change; hints are tooltip-only to keep the compact toolbar unchanged.
 
 **3. Toasts (reuse `#toast`).** Destructive delete uses `showToastAction("Symbol deleted",
-"Undo", …)` — the existing toast pill with a single inline gold-text `<button>` appended
+"Undo", restoreClosure)` — the closure re-inserts the specific deleted symbol (scoped, not a
+bare `history.undo()`; see Edge Case 7) — the existing toast pill with a single inline
+gold-text `<button>` appended
 (styled from `--gold`/`--hairline`, min tap target ≥ 32px, focusable). Duplicate uses the
 plain `showToast("Duplicated")` — brief, non-actionable. Toast timing/position/reduced-motion
 handling are unchanged from `actions.js`.
