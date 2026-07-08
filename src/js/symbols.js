@@ -241,6 +241,24 @@ export function rotateSymbol(sym, deg) {
   sym.rot = ((deg % 360) + 360) % 360;
 }
 
+// ── Hydrate (LLD 16) ─────────────────────────────────────────────────────────
+
+/**
+ * Replace symbols array IN PLACE (same array identity) and re-sync _counter
+ * past the max s<n> id so the next createSymbol doesn't collide.
+ * @param {{ symbols: Sym[] }} next
+ */
+export function hydrate(next) {
+  model.symbols.splice(0, model.symbols.length, ...next.symbols);
+
+  let maxId = -1;
+  for (const s of model.symbols) {
+    const m = typeof s.id === "string" ? s.id.match(/^s(\d+)$/) : null;
+    if (m) maxId = Math.max(maxId, parseInt(m[1], 10));
+  }
+  _counter = maxId + 1;
+}
+
 /**
  * Four world-space corners of the rotated box, order TL, TR, BR, BL (local frame).
  * Used by render + chip placement.

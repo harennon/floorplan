@@ -28,6 +28,8 @@
 
 const _suites = [];
 let _currentSuite = null;
+// Pending async test promises, resolved before rendering results
+const _asyncCases = [];
 
 function describe(name, fn) {
   _currentSuite = { name, cases: [] };
@@ -37,9 +39,18 @@ function describe(name, fn) {
 }
 
 function it(name, fn) {
-  let err = null;
-  try { fn(); } catch (e) { err = e; }
-  _currentSuite.cases.push({ name, err });
+  const caseObj = { name, err: null };
+  _currentSuite.cases.push(caseObj);
+  let result;
+  try { result = fn(); } catch (e) { caseObj.err = e; return; }
+  // If the function returned a Promise, track it as async
+  if (result && typeof result.then === "function") {
+    const pending = result.then(
+      () => { /* pass */ },
+      (e) => { caseObj.err = e || new Error("async test failed"); }
+    );
+    _asyncCases.push(pending);
+  }
 }
 
 function expect(actual) {
@@ -2269,9 +2280,612 @@ describe("security — no innerHTML from user input in DOM", () => {
   });
 });
 
-// ─── Render ────────────────────────────────────────────────────────────────────
+// ─── Import LLD-16 modules ────────────────────────────────────────────────────
 
-render();
+import {
+  PLAN_SCHEMA, buildPlan, validatePlan, applyPlan, isEmptyPlan, serializePlan,
+} from "./js/plan.js";
+
+import {
+  STORAGE_KEY, loadLocal, saveNow, clearLocal, getState,
+} from "./js/store.js";
+
+import {
+  encodePlanToHash, decodeHashToPlan,
+} from "./js/share.js";
+
+import {
+  contentBounds, buildExportSvg,
+} from "./js/exportImg.js";
+
+import {
+  hydrate as hydrateWalls,
+} from "./js/walls.js";
+
+import {
+  hydrate as hydrateSymbols,
+} from "./js/symbols.js";
+
+import {
+  setView as setViewDirect, fitToContent,
+} from "./js/view.js";
+
+// ─── LLD-16 test helpers ──────────────────────────────────────────────────────
+
+/** Reset all model state cleanly for LLD-16 test suites */
+function resetAll() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  setUnit("ft");
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+}
+
+// ─── Tests: plan.js — buildPlan / validatePlan / serializePlan ────────────────
+
+describe("plan.js — buildPlan snapshots live state", () => {
+  it("result has correct schema, app tag, and unit", () => {
+    resetAll();
+    setUnit("m");
+    const p = buildPlan();
+    expect(p.schema).toBe(PLAN_SCHEMA);
+    expect(p.app).toBe("floorplan");
+    expect(p.unit).toBe("m");
+  });
+
+  it("rooms/chain/symbols are plain JSON-safe copies", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 }] });
+    const s = createSymbol("bed", 2, 2);
+    addSymbol(s);
+    const p = buildPlan();
+    // deep-equal after JSON round-trip
+    const rt = JSON.parse(JSON.stringify(p));
+    if (JSON.stringify(rt.walls.rooms) !== JSON.stringify(p.walls.rooms)) {
+      throw new Error("rooms not JSON-round-trippable");
+    }
+    if (JSON.stringify(rt.symbols.symbols) !== JSON.stringify(p.symbols.symbols)) {
+      throw new Error("symbols not JSON-round-trippable");
+    }
+  });
+
+  it("view is captured correctly", () => {
+    resetAll();
+    view.zoom = 2; view.panX = 150; view.panY = 80;
+    const p = buildPlan();
+    expect(p.view.zoom).toBe(2);
+    expect(p.view.panX).toBe(150);
+    expect(p.view.panY).toBe(80);
+  });
+});
+
+describe("plan.js — validatePlan acceptance", () => {
+  it("accepts a good plan built by buildPlan", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 }] });
+    const p = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(p)));
+    if (!v) throw new Error("validatePlan returned null for a good plan");
+  });
+
+  it("accepts an empty plan", () => {
+    resetAll();
+    const p = buildPlan();
+    if (!validatePlan(p)) throw new Error("validatePlan rejected empty plan");
+  });
+});
+
+describe("plan.js — validatePlan rejections (never throws)", () => {
+  function shouldReject(raw, label) {
+    let result;
+    try { result = validatePlan(raw); } catch (e) { throw new Error(`threw instead of returning null: ${e}`); }
+    if (result !== null) throw new Error(`Expected null for: ${label}, got: ${JSON.stringify(result)}`);
+  }
+
+  it("rejects null", () => { shouldReject(null, "null"); });
+  it("rejects a string", () => { shouldReject("hello", "string"); });
+  it("rejects missing app tag", () => {
+    resetAll();
+    const p = buildPlan();
+    delete p.app;
+    shouldReject(p, "missing app");
+  });
+  it("rejects wrong app tag", () => {
+    resetAll();
+    const p = buildPlan();
+    p.app = "other";
+    shouldReject(p, "wrong app");
+  });
+  it("rejects schema !== PLAN_SCHEMA", () => {
+    resetAll();
+    const p = buildPlan();
+    p.schema = 999;
+    shouldReject(p, "schema=999");
+  });
+  it("rejects non-array rooms", () => {
+    resetAll();
+    const p = buildPlan();
+    p.walls.rooms = "notarray";
+    shouldReject(p, "rooms not array");
+  });
+  it("rejects non-array chain", () => {
+    resetAll();
+    const p = buildPlan();
+    p.walls.chain = null;
+    shouldReject(p, "chain null");
+  });
+  it("rejects non-array symbols", () => {
+    resetAll();
+    const p = buildPlan();
+    p.symbols.symbols = 42;
+    shouldReject(p, "symbols not array");
+  });
+  it("rejects room with non-boolean closed", () => {
+    resetAll();
+    const p = buildPlan();
+    p.walls.rooms = [{ id: "w0", closed: 1, verts: [] }];
+    shouldReject(p, "closed=1");
+  });
+  it("rejects room with string closed", () => {
+    resetAll();
+    const p = buildPlan();
+    p.walls.rooms = [{ id: "w0", closed: "true", verts: [] }];
+    shouldReject(p, "closed='true'");
+  });
+  it("rejects vertex with NaN x", () => {
+    resetAll();
+    const p = buildPlan();
+    p.walls.rooms = [{ id: "w0", closed: false, verts: [{ x: NaN, y: 0 }] }];
+    shouldReject(p, "vertex NaN x");
+  });
+  it("rejects vertex missing y", () => {
+    resetAll();
+    const p = buildPlan();
+    p.walls.rooms = [{ id: "w0", closed: false, verts: [{ x: 1 }] }];
+    shouldReject(p, "vertex missing y");
+  });
+  it("rejects unknown unit", () => {
+    resetAll();
+    const p = buildPlan();
+    p.unit = "km";
+    shouldReject(p, "unit=km");
+  });
+  it("rejects unknown symbol type", () => {
+    resetAll();
+    const p = buildPlan();
+    p.symbols.symbols = [{ id: "s0", type: "alien", x: 0, y: 0, w: 1, h: 1, rot: 0 }];
+    shouldReject(p, "type=alien");
+  });
+  it("rejects symbol with non-finite x", () => {
+    resetAll();
+    const p = buildPlan();
+    p.symbols.symbols = [{ id: "s0", type: "bed", x: Infinity, y: 0, w: 1, h: 1, rot: 0 }];
+    shouldReject(p, "symbol Infinity x");
+  });
+  it("rejects non-finite view.zoom", () => {
+    resetAll();
+    const p = buildPlan();
+    p.view.zoom = NaN;
+    shouldReject(p, "view.zoom=NaN");
+  });
+});
+
+describe("plan.js — round-trip: applyPlan(validatePlan(buildPlan())) is lossless", () => {
+  it("rooms, chain, symbols, view, unit deep-equal after round-trip", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1.5; view.panX = 200; view.panY = 100;
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    model.chain.push({ x: 5, y: 5 });
+    const sym = createSymbol("sofa", 1.5, 2);
+    addSymbol(sym);
+
+    const snapshot = buildPlan();
+    const validated = validatePlan(JSON.parse(JSON.stringify(snapshot)));
+    if (!validated) throw new Error("validatePlan rejected a good snapshot");
+
+    applyPlan(validated);
+
+    // Check model arrays
+    if (JSON.stringify(model.rooms) !== JSON.stringify(snapshot.walls.rooms)) {
+      throw new Error("rooms differ after round-trip");
+    }
+    if (JSON.stringify(model.chain) !== JSON.stringify(snapshot.walls.chain)) {
+      throw new Error("chain differs after round-trip");
+    }
+    if (JSON.stringify(symbolModel.symbols) !== JSON.stringify(snapshot.symbols.symbols)) {
+      throw new Error("symbols differ after round-trip");
+    }
+    // view
+    expect(view.zoom).toBeCloseTo(snapshot.view.zoom, 9);
+    expect(view.panX).toBeCloseTo(snapshot.view.panX, 9);
+    // unit
+    if (unit !== snapshot.unit) throw new Error(`unit mismatch: ${unit} vs ${snapshot.unit}`);
+  });
+});
+
+describe("plan.js — isEmptyPlan", () => {
+  it("true on fresh model", () => {
+    resetAll();
+    if (!isEmptyPlan()) throw new Error("Expected isEmptyPlan() true on fresh model");
+  });
+  it("false after adding a room", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    if (isEmptyPlan()) throw new Error("Expected isEmptyPlan() false after adding room");
+  });
+  it("false after adding a symbol", () => {
+    resetAll();
+    addSymbol(createSymbol("chair", 0, 0));
+    if (isEmptyPlan()) throw new Error("Expected isEmptyPlan() false after adding symbol");
+  });
+  it("false after adding a chain vertex", () => {
+    resetAll();
+    model.chain.push({ x: 0, y: 0 });
+    if (isEmptyPlan()) throw new Error("Expected isEmptyPlan() false with chain vertex");
+  });
+});
+
+describe("plan.js — serializePlan stability", () => {
+  it("same plan → same string (key order fixed)", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 1, y: 2 }] });
+    const p = buildPlan();
+    const s1 = serializePlan(p);
+    const s2 = serializePlan(buildPlan());
+    if (s1 !== s2) throw new Error("serializePlan not stable");
+  });
+});
+
+// ─── Tests: walls.hydrate (LLD 16) ────────────────────────────────────────────
+
+describe("walls.hydrate — in-place replace + counter re-sync", () => {
+  it("replaces rooms array in place (same identity)", () => {
+    resetAll();
+    const origRef = model.rooms;
+    hydrateWalls({ rooms: [{ id: "w10", closed: false, verts: [] }], chain: [] });
+    if (model.rooms !== origRef) throw new Error("rooms array identity changed");
+    if (model.rooms.length !== 1) throw new Error(`Expected 1 room, got ${model.rooms.length}`);
+    if (model.rooms[0].id !== "w10") throw new Error("Wrong room id");
+  });
+
+  it("replaces chain in place", () => {
+    resetAll();
+    hydrateWalls({ rooms: [], chain: [{ x: 1, y: 2 }] });
+    expect(model.chain.length).toBe(1);
+    expect(model.chain[0].x).toBe(1);
+  });
+
+  it("re-syncs counter: next closeRoom mints id > max loaded id (collision guard)", () => {
+    resetAll();
+    // Load rooms with ids w5, w3 — next id must be > 5
+    hydrateWalls({
+      rooms: [
+        { id: "w5", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] },
+        { id: "w3", closed: false, verts: [{ x: 2, y: 0 }, { x: 3, y: 0 }] },
+      ],
+      chain: [],
+    });
+    // Now create a new room
+    model.chain.push({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 });
+    closeRoom();
+    const newId = model.rooms[model.rooms.length - 1].id;
+    const newNum = parseInt(newId.replace("w", ""), 10);
+    if (newNum <= 5) throw new Error(`New room id ${newId} collides or is not > w5`);
+  });
+
+  it("clears existing rooms/chain when hydrated with empty arrays", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: false, verts: [] });
+    model.chain.push({ x: 0, y: 0 });
+    hydrateWalls({ rooms: [], chain: [] });
+    expect(model.rooms.length).toBe(0);
+    expect(model.chain.length).toBe(0);
+  });
+});
+
+// ─── Tests: symbols.hydrate (LLD 16) ─────────────────────────────────────────
+
+describe("symbols.hydrate — in-place replace + counter re-sync", () => {
+  it("replaces symbols array in place (same identity)", () => {
+    resetAll();
+    const origRef = symbolModel.symbols;
+    const testSym = { id: "s7", type: "bed", x: 0, y: 0, w: 1.5, h: 2, rot: 0 };
+    hydrateSymbols({ symbols: [testSym] });
+    if (symbolModel.symbols !== origRef) throw new Error("symbols array identity changed");
+    if (symbolModel.symbols.length !== 1) throw new Error("Expected 1 symbol");
+  });
+
+  it("re-syncs counter: next createSymbol mints id > max loaded id", () => {
+    resetAll();
+    hydrateSymbols({
+      symbols: [
+        { id: "s12", type: "chair", x: 0, y: 0, w: 0.5, h: 0.5, rot: 0 },
+      ],
+    });
+    const newSym = createSymbol("desk", 1, 1);
+    const newNum = parseInt(newSym.id.replace("s", ""), 10);
+    if (newNum <= 12) throw new Error(`New symbol id ${newSym.id} is not > s12`);
+  });
+});
+
+// ─── Tests: view.setView / view.fitToContent (LLD 16) ────────────────────────
+
+describe("view.setView — clamped zoom + fires onChange", () => {
+  it("sets view values directly", () => {
+    resetAll();
+    setViewDirect({ zoom: 2, panX: 100, panY: 50 });
+    expect(view.zoom).toBe(2);
+    expect(view.panX).toBe(100);
+    expect(view.panY).toBe(50);
+  });
+
+  it("clamps zoom below MIN_ZOOM", () => {
+    resetAll();
+    setViewDirect({ zoom: 0.001, panX: 0, panY: 0 });
+    if (view.zoom < MIN_ZOOM) throw new Error(`zoom ${view.zoom} below MIN_ZOOM ${MIN_ZOOM}`);
+  });
+
+  it("clamps zoom above MAX_ZOOM", () => {
+    resetAll();
+    setViewDirect({ zoom: 9999, panX: 0, panY: 0 });
+    if (view.zoom > MAX_ZOOM) throw new Error(`zoom ${view.zoom} above MAX_ZOOM ${MAX_ZOOM}`);
+  });
+});
+
+describe("view.fitToContent — fits bounds in viewport with margin", () => {
+  it("content is on-screen after fitToContent for the given viewport", () => {
+    resetAll();
+    // Content at world (10,10)-(20,15) — with raw pan=0 this would be off-screen
+    // for a 800x600 viewport at zoom=1 (world x=10 → screen x=400, but world x=20 → screen x=800)
+    const bounds = { minX: 10, minY: 10, maxX: 20, maxY: 15 };
+    const vW = 800, vH = 600;
+    fitToContent(bounds, vW, vH);
+    // After fitToContent, center of bounds should be near center of viewport
+    const scale = view.zoom * BASE_PX_PER_M;
+    const contentCenterX = (bounds.minX + bounds.maxX) / 2;
+    const contentCenterY = (bounds.minY + bounds.maxY) / 2;
+    const screenCenterX = contentCenterX * scale + view.panX;
+    const screenCenterY = contentCenterY * scale + view.panY;
+    // Screen center should be close to viewport center (within 5%)
+    const tol = Math.min(vW, vH) * 0.05;
+    if (Math.abs(screenCenterX - vW / 2) > tol) {
+      throw new Error(`Center X off: ${screenCenterX} vs ${vW/2}`);
+    }
+    if (Math.abs(screenCenterY - vH / 2) > tol) {
+      throw new Error(`Center Y off: ${screenCenterY} vs ${vH/2}`);
+    }
+  });
+
+  it("fitToContent zoom is clamped to [MIN_ZOOM, MAX_ZOOM]", () => {
+    resetAll();
+    // Tiny content → very large zoom → clamped at MAX
+    fitToContent({ minX: 0, minY: 0, maxX: 0.001, maxY: 0.001 }, 800, 600);
+    if (view.zoom > MAX_ZOOM) throw new Error("zoom exceeds MAX_ZOOM");
+    if (view.zoom < MIN_ZOOM) throw new Error("zoom below MIN_ZOOM");
+  });
+
+  it("plan drawn on large viewport fits on-screen for narrower viewport", () => {
+    resetAll();
+    // Content at (0,0)-(50,30), sender's viewport 1920x1080
+    // Store sender's raw view: panX from resetView(1920,1080)
+    const senderW = 1920, senderH = 1080;
+    resetView(senderW, senderH);
+    const senderPanX = view.panX;
+
+    // Receiver has narrower viewport: 375x667 (mobile)
+    const receiverW = 375, receiverH = 667;
+    const bounds = { minX: 0, minY: 0, maxX: 50, maxY: 30 };
+
+    // The important check: with sender's raw pan, world(0,0) at screen(senderPanX=1920*0.15=288)
+    // which is outside a 375px viewport after accounting for content spread
+    fitToContent(bounds, receiverW, receiverH);
+    const newScale = view.zoom * BASE_PX_PER_M;
+    const centerSx = ((bounds.minX + bounds.maxX) / 2) * newScale + view.panX;
+    if (centerSx < 0 || centerSx > receiverW) {
+      throw new Error(`Content center ${centerSx} is outside receiver viewport [0,${receiverW}]`);
+    }
+  });
+});
+
+// ─── Tests: share.js codec ────────────────────────────────────────────────────
+
+describe("share.js — compress/decompress round-trip", () => {
+  it("decodeHashToPlan(encodePlanToHash(p)) deep-equals p", async () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    addSymbol(createSymbol("bed", 1.5, 2));
+    const p = buildPlan();
+    const hash = await encodePlanToHash(p);
+    const decoded = await decodeHashToPlan(hash);
+    if (!decoded) throw new Error("decodeHashToPlan returned null");
+    if (serializePlan(decoded) !== serializePlan(p)) {
+      throw new Error("Decoded plan does not deep-equal original");
+    }
+  });
+
+  it("round-trip is correct for non-trivial plan with multiple rooms/symbols", async () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }] });
+    model.rooms.push({ id: "w1", closed: true, verts: [{ x: 5, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 4 }, { x: 5, y: 4 }] });
+    addSymbol(createSymbol("sofa", 2, 2));
+    addSymbol(createSymbol("bed", 7, 2));
+    const p = buildPlan();
+    const hash = await encodePlanToHash(p);
+    const decoded = await decodeHashToPlan(hash);
+    if (!decoded) throw new Error("round-trip failed for non-trivial plan");
+    if (serializePlan(decoded) !== serializePlan(p)) {
+      throw new Error("round-trip mismatch for non-trivial plan");
+    }
+  });
+
+  it("decodeHashToPlan returns null for garbage input (no throw)", async () => {
+    let result;
+    try { result = await decodeHashToPlan("xgarbagestuff123"); } catch (e) { throw new Error(`threw: ${e}`); }
+    if (result !== null) throw new Error("Expected null for garbage");
+  });
+
+  it("decodeHashToPlan returns null for empty string", async () => {
+    let result;
+    try { result = await decodeHashToPlan(""); } catch (e) { throw new Error(`threw: ${e}`); }
+    if (result !== null) throw new Error("Expected null for empty string");
+  });
+
+  it("decodeHashToPlan returns null for truncated payload (no throw)", async () => {
+    resetAll();
+    const p = buildPlan();
+    const hash = await encodePlanToHash(p);
+    const truncated = hash.slice(0, 5);
+    let threw = false;
+    try { await decodeHashToPlan(truncated); } catch { threw = true; }
+    if (threw) throw new Error("decodeHashToPlan threw on truncated input instead of returning null");
+  });
+
+  it("uncompressed codec 'u' round-trips correctly", async () => {
+    resetAll();
+    setUnit("ft");
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }] });
+    const p = buildPlan();
+    // Build uncompressed hash manually using the 'u' codec
+    const json = serializePlan(p);
+    const bytes = new TextEncoder().encode(json);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const b64 = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const uncompressedHash = "u" + b64;
+    const decoded = await decodeHashToPlan(uncompressedHash);
+    if (!decoded) throw new Error("Uncompressed decode returned null");
+    if (serializePlan(decoded) !== serializePlan(p)) throw new Error("Uncompressed round-trip mismatch");
+  });
+});
+
+// ─── Tests: exportImg.contentBounds ──────────────────────────────────────────
+
+describe("exportImg.contentBounds", () => {
+  it("returns null for empty plan", () => {
+    resetAll();
+    const b = contentBounds();
+    if (b !== null) throw new Error(`Expected null for empty plan, got ${JSON.stringify(b)}`);
+  });
+
+  it("returns correct min/max for rooms", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 1, y: 2 }, { x: 5, y: 8 }] });
+    const b = contentBounds();
+    if (!b) throw new Error("Expected non-null bounds");
+    expect(b.minX).toBe(1);
+    expect(b.minY).toBe(2);
+    expect(b.maxX).toBe(5);
+    expect(b.maxY).toBe(8);
+  });
+
+  it("includes rotated symbol footprint corners", () => {
+    resetAll();
+    // A symbol at (0,0) with w=2, h=2, rot=45 — corners extend to ~sqrt(2) in each direction
+    const sym = createSymbol("bed", 0, 0);
+    sym.w = 2; sym.h = 2; sym.rot = 45;
+    addSymbol(sym);
+    const b = contentBounds();
+    if (!b) throw new Error("Expected non-null bounds");
+    // Rotated box corners should extend beyond 1 in both axes
+    if (b.maxX < 1 || b.maxY < 1) throw new Error(`Bounds too small for rotated symbol: ${JSON.stringify(b)}`);
+  });
+
+  it("includes chain vertices", () => {
+    resetAll();
+    model.chain.push({ x: -3, y: -4 }, { x: 7, y: 6 });
+    const b = contentBounds();
+    if (!b) throw new Error("Expected non-null bounds");
+    expect(b.minX).toBe(-3);
+    expect(b.minY).toBe(-4);
+    expect(b.maxX).toBe(7);
+    expect(b.maxY).toBe(6);
+  });
+});
+
+describe("exportImg.buildExportSvg", () => {
+  it("contains an opaque background rect", () => {
+    resetAll();
+    const svg = buildExportSvg();
+    if (!svg.includes('<rect')) throw new Error("No background rect in SVG");
+    if (!svg.includes('fill="#14140f"')) throw new Error("No opaque bg color in SVG");
+  });
+
+  it("does NOT contain snap/grid/draft chrome", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 3 }, { x: 0, y: 3 }] });
+    const svg = buildExportSvg();
+    // No snap glyph class, no grid lines
+    if (svg.includes("snap-pulse")) throw new Error("SVG contains snap-pulse chrome");
+    if (svg.includes("grid-fine")) throw new Error("SVG contains grid chrome");
+  });
+
+  it("includes dimension labels for room edges", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 3 }, { x: 0, y: 3 }] });
+    const svg = buildExportSvg();
+    if (!svg.includes("<text")) throw new Error("No dimension labels in SVG");
+  });
+
+  it("viewBox covers content bounds + margin", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 0, y: 0 }, { x: 5, y: 5 }] });
+    const svg = buildExportSvg();
+    // Should have a viewBox="0 0 W H"
+    if (!svg.includes("viewBox")) throw new Error("No viewBox in SVG");
+  });
+
+  it("produces valid SVG string for empty plan", () => {
+    resetAll();
+    const svg = buildExportSvg();
+    if (!svg.startsWith("<?xml")) throw new Error("SVG does not start with XML declaration");
+    if (!svg.includes("<svg")) throw new Error("No <svg> element");
+  });
+});
+
+// ─── Tests: store.js (localStorage autosave) ──────────────────────────────────
+// These tests use real localStorage if available, or skip gracefully.
+
+describe("store.js — loadLocal / clearLocal / getState", () => {
+  it("loadLocal returns null when no entry exists", () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+    const plan = loadLocal();
+    if (plan !== null) throw new Error(`Expected null, got ${JSON.stringify(plan)}`);
+  });
+
+  it("loadLocal returns null for corrupt data", () => {
+    resetAll();
+    localStorage.setItem(STORAGE_KEY, "notjson{{{");
+    const plan = loadLocal();
+    if (plan !== null) throw new Error("Expected null for corrupt data");
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("loadLocal returns null for invalid plan JSON", () => {
+    resetAll();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ app: "other", schema: 1 }));
+    const plan = loadLocal();
+    if (plan !== null) throw new Error("Expected null for invalid plan");
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("clearLocal removes the key", () => {
+    resetAll();
+    localStorage.setItem(STORAGE_KEY, "data");
+    clearLocal();
+    const val = localStorage.getItem(STORAGE_KEY);
+    if (val !== null) throw new Error("Key still present after clearLocal");
+  });
+});
+
+// ─── Render ────────────────────────────────────────────────────────────────────
+// Wait for all async tests before rendering results
+
+Promise.all(_asyncCases).then(render);
 </script>
 </body>
 </html>
