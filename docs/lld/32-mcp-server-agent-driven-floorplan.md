@@ -67,6 +67,12 @@ my couch fit?"), unlike a generic CRUD-over-JSON MCP server.
   "see" (Q3). MVP relies on text metrics + clearance feedback.
 - **No door-swing / opening clearance, no rotated-polygon exact clearance.** The server
   inherits `clearance.js`'s v1 model as-is (AABB, furniture-subject only) — see LLD 24.
+- **No room-to-room overlap evaluation.** The evaluators cover symbol-to-wall and
+  symbol-to-symbol clearance (LLD 24) but nothing checks whether two *room polygons*
+  overlap each other — a structurally valid plan can still be spatially nonsense at the
+  room level. The single-room MVP brief (`Brief.room` is one room) cannot produce this;
+  it becomes real only for multi-room layouts and is recorded as a known evaluator gap in
+  Q8, not built here.
 - **No real-time collaboration, no server-authoritative multi-client state.**
 
 ## Approach
@@ -523,6 +529,7 @@ happens* (recorded, not built here): the server would authenticate **as the user
 | Q5 | **Local security surface.** | **Resolved:** sandbox file I/O to a designated plans dir; `path.basename` + inside-dir re-check; honour MCP **Roots** if the client declares them; no `eval`/shell (core is pure data). |
 | Q6 | **`../src/js` import + surviving `npm publish`.** | **Deferred (framing recorded).** MVP uses the dev-checkout relative import, which is knowingly **not self-contained** and breaks under `npx`. Before any publish, resolve via one of: bundle the core into the artifact at build time, vendor a synced copy with a drift check, or depend on a separately-published core package. The import-smoke test is the early-warning for `src/` coupling drift. #32's acceptance criteria were corrected to reflect this deferral. |
 | Q7 | **One-click install bundle** (`.mcpb` / Desktop Extension). | **Deferred.** Depends on that format being stable; a nice-to-have for non-technical users, orthogonal to the tool-design questions the prototype answers. Revisit in the productionization phase alongside Q6. |
+| Q8 | **Room-to-room overlap evaluation** (raised by external feedback on #32). | **Deferred (out of MVP scope, gap acknowledged).** No evaluator — in `src/` or this server — checks whether two room *polygons* intersect; `validatePlan` is purely structural and `clearance.js` is symbol-subject only, so a plan with overlapping rooms passes every check. The MVP's single-room brief cannot generate this case, so it is not a convergence blocker for the prototype. If the brief grows to multi-room layouts, add a polygon-polygon intersection test (new pure fn in `walls.js` or `mcp/`) feeding a `check_brief` `unmet` entry. Recorded as the first evaluator to add when multi-room support is scoped. |
 
 **Escalation to CEO (product call, not a design call):** the MVP is intentionally
 *not shippable* — its output is a *validated tool/feedback design*, not a released package.
