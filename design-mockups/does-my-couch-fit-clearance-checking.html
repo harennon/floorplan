@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clearance checking — mockup · floorplan</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ── Design tokens (mirrors src/index.html) ─────────────────────────── */
+      :root {
+        --bg:        #14140f;
+        --bg-deep:   #100f0b;
+        --ink:       #ece7d6;
+        --muted:     #8f8a78;
+        --gold:      #c9a84c;
+        --gold-soft: rgba(201, 168, 76, 0.55);
+        --panel:     rgba(20, 20, 15, 0.72);
+        --hairline:  rgba(201, 168, 76, 0.18);
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+
+        /* Clearance status palette (NEW for this feature) */
+        --clr-ok:     #7fd0c8;   /* teal — comfortable gap        */
+        --clr-tight:  #e0b64f;   /* amber — below threshold       */
+        --clr-bad:    #e57373;   /* red — collision / no walkway  */
+        --clr-ok-fill:    rgba(127, 208, 200, 0.14);
+        --clr-tight-fill: rgba(224, 182, 79, 0.16);
+        --clr-bad-fill:   rgba(229, 115, 115, 0.18);
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: var(--bg-deep);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        overflow: hidden;
+      }
+
+      .app { position: fixed; inset: 0; }
+
+      /* Stage: radial "table" ground with grain-like vignette */
+      .stage {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse 90% 80% at 50% 45%, var(--bg) 0%, var(--bg-deep) 100%);
+      }
+      #scene { display: block; width: 100%; height: 100%; }
+
+      /* ── Grid ─────────────────────────────────────────────────────────── */
+      .grid-fine  { stroke: rgba(201,168,76,0.055); stroke-width: 1; }
+      .grid-major { stroke: rgba(201,168,76,0.14);  stroke-width: 1; }
+
+      /* ── Walls & furniture (echoes symbolRender.js palette) ───────────── */
+      .wall-body { stroke: rgba(201,168,76,0.30); stroke-width: 12; stroke-linejoin: round; fill: none; }
+      .wall-line { stroke: #d9be6e; stroke-width: 1.5; fill: none; }
+      .room-fill { fill: rgba(201,168,76,0.05); }
+
+      .furn      { fill: rgba(201,168,76,0.12); stroke: #d9be6e; stroke-width: 1.5; stroke-linejoin: round; }
+      .furn-glyph { stroke: #d9be6e; stroke-width: 0.9; fill: none; opacity: 0.55; }
+      .furn.selected { fill: rgba(201,168,76,0.18); stroke: var(--gold); stroke-width: 2; }
+      .sel-box   { fill: none; stroke: var(--gold); stroke-width: 1.5; stroke-dasharray: 5 3; }
+      .rotate-stem { stroke: var(--gold-soft); stroke-width: 1; }
+      .rotate-knob { fill: var(--gold); }
+
+      /* ── Clearance visuals (NEW) ──────────────────────────────────────── */
+      /* Leader line drawn edge→neighbour, color by status */
+      .clr-leader      { stroke-width: 1.4; fill: none; }
+      .clr-leader.ok    { stroke: var(--clr-ok); }
+      .clr-leader.tight { stroke: var(--clr-tight); }
+      .clr-leader.bad   { stroke: var(--clr-bad); }
+      /* End caps (little ticks) */
+      .clr-tick { stroke-width: 1.4; }
+      .clr-tick.ok    { stroke: var(--clr-ok); }
+      .clr-tick.tight { stroke: var(--clr-tight); }
+      .clr-tick.bad   { stroke: var(--clr-bad); }
+
+      /* Gap "ribbon" band fill between edge and neighbour (Direction C) */
+      .clr-band.ok    { fill: var(--clr-ok-fill); }
+      .clr-band.tight { fill: var(--clr-tight-fill); }
+      .clr-band.bad   { fill: var(--clr-bad-fill); }
+      .clr-band { stroke: none; }
+
+      /* Pulsing warning halo around a violated gap */
+      @keyframes clr-pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+      .clr-band.tight, .clr-band.bad { animation: clr-pulse 1.6s ease-in-out infinite; }
+      @media (prefers-reduced-motion: reduce) { .clr-band { animation: none !important; } }
+
+      /* ── Clearance distance chips (HTML overlay, like dim chips) ──────── */
+      .overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+      .clr-chip {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        line-height: 1.3;
+        padding: 0.08rem 0.4rem;
+        border-radius: 3px;
+        white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        border: 1px solid;
+        background: rgba(16,15,11,0.82);
+      }
+      .clr-chip.ok    { color: var(--clr-ok);    border-color: rgba(127,208,200,0.5); }
+      .clr-chip.tight { color: var(--clr-tight); border-color: rgba(224,182,79,0.6); }
+      .clr-chip.bad   { color: var(--clr-bad);   border-color: rgba(229,115,115,0.6); font-weight: 700; }
+      .clr-chip .clr-ico { width: 0.75em; height: 0.75em; flex-shrink: 0; }
+
+      /* ── Floating chrome ──────────────────────────────────────────────── */
+      .brand { position: absolute; top: 1.25rem; left: 1.25rem; pointer-events: none; }
+      .brand-name { font-family: var(--font-display); font-size: 1.1rem; font-weight: 700; color: var(--gold); }
+      .brand-sub  { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+
+      .mock-tag {
+        position: absolute; top: 1.35rem; left: 50%; transform: translateX(-50%);
+        font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase;
+        color: var(--muted); border: 1px dashed var(--hairline); border-radius: 100px;
+        padding: 0.2rem 0.8rem; background: var(--panel);
+      }
+
+      /* ── Clearance readout panel (right side, below unit toggle) ──────── */
+      .clr-panel {
+        position: absolute; top: 1.25rem; right: 1.25rem;
+        width: 15rem;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        backdrop-filter: blur(8px);
+        font-family: var(--font-mono);
+        overflow: hidden;
+      }
+      .clr-panel-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0.5rem 0.7rem;
+        gap: 0.5rem;
+      }
+      .clr-panel-title {
+        font-size: 0.62rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted);
+      }
+      /* Master status dot in header */
+      .clr-status-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; flex-shrink: 0; }
+      .clr-status-dot.ok    { background: var(--clr-ok);    box-shadow: 0 0 6px var(--clr-ok); }
+      .clr-status-dot.tight { background: var(--clr-tight); box-shadow: 0 0 6px var(--clr-tight); }
+      .clr-status-dot.bad   { background: var(--clr-bad);   box-shadow: 0 0 6px var(--clr-bad); }
+
+      .clr-panel-body { border-top: 1px solid var(--hairline); }
+
+      /* Threshold control row */
+      .clr-thresh {
+        display: flex; align-items: center; gap: 0.5rem;
+        padding: 0.5rem 0.7rem;
+        border-bottom: 1px solid rgba(201,168,76,0.08);
+      }
+      .clr-thresh-label { font-size: 0.58rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+      .clr-thresh input[type="range"] { flex: 1; accent-color: var(--gold); height: 2px; }
+      .clr-thresh-val { color: var(--gold); font-size: 0.72rem; min-width: 3.2rem; text-align: right; }
+
+      /* Density segmented control */
+      .clr-density {
+        display: flex; align-items: center; gap: 0.35rem;
+        padding: 0.4rem 0.7rem; border-bottom: 1px solid rgba(201,168,76,0.08);
+      }
+      .clr-density button {
+        flex: 1; background: transparent; border: 1px solid var(--hairline); color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.58rem; padding: 0.2rem 0.3rem;
+        border-radius: 5px; cursor: pointer; transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .clr-density button[aria-pressed="true"] { color: var(--gold); border-color: var(--gold-soft); background: rgba(201,168,76,0.1); }
+      .clr-density button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+      /* Toggle switch (show clearances on/off) */
+      .clr-switch { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+      .clr-switch input { display: none; }
+      .clr-switch .track {
+        width: 1.7rem; height: 0.9rem; border-radius: 100px; background: rgba(255,255,255,0.1);
+        border: 1px solid var(--hairline); position: relative; transition: background 0.15s;
+      }
+      .clr-switch .track::after {
+        content: ""; position: absolute; top: 1px; left: 1px;
+        width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--muted);
+        transition: transform 0.15s, background 0.15s;
+      }
+      .clr-switch input:checked + .track { background: rgba(201,168,76,0.25); }
+      .clr-switch input:checked + .track::after { transform: translateX(0.8rem); background: var(--gold); }
+
+      /* Neighbour list rows */
+      .clr-rows { max-height: 11rem; overflow-y: auto; scrollbar-width: thin; }
+      .clr-row {
+        display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 0.5rem;
+        padding: 0.35rem 0.7rem; font-size: 0.66rem;
+        border-bottom: 1px solid rgba(201,168,76,0.06);
+      }
+      .clr-row:last-child { border-bottom: none; }
+      .clr-row-dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; }
+      .clr-row-dot.ok { background: var(--clr-ok); }
+      .clr-row-dot.tight { background: var(--clr-tight); }
+      .clr-row-dot.bad { background: var(--clr-bad); }
+      .clr-row-to { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .clr-row-val { text-align: right; white-space: nowrap; }
+      .clr-row-val.ok { color: var(--ink); }
+      .clr-row-val.tight { color: var(--clr-tight); }
+      .clr-row-val.bad { color: var(--clr-bad); font-weight: 700; }
+      .clr-empty { padding: 0.6rem 0.7rem; color: var(--muted); font-size: 0.62rem; font-style: italic; text-align: center; }
+
+      /* Verdict banner inside panel */
+      .clr-verdict {
+        padding: 0.45rem 0.7rem; font-size: 0.66rem; display: flex; align-items: center; gap: 0.4rem;
+        border-top: 1px solid var(--hairline);
+      }
+      .clr-verdict.ok    { color: var(--clr-ok); }
+      .clr-verdict.tight { color: var(--clr-tight); }
+      .clr-verdict.bad   { color: var(--clr-bad); }
+
+      /* Floating "fit verdict" pill near selected item (Direction B) */
+      .fit-pill {
+        position: absolute; transform: translate(-50%, -50%);
+        font-family: var(--font-mono); font-size: 0.68rem;
+        padding: 0.25rem 0.7rem; border-radius: 100px;
+        display: flex; align-items: center; gap: 0.35rem;
+        border: 1px solid; background: rgba(16,15,11,0.9);
+        backdrop-filter: blur(6px); white-space: nowrap;
+      }
+      .fit-pill.ok    { color: var(--clr-ok);    border-color: rgba(127,208,200,0.55); }
+      .fit-pill.tight { color: var(--clr-tight); border-color: rgba(224,182,79,0.6); }
+      .fit-pill.bad   { color: var(--clr-bad);   border-color: rgba(229,115,115,0.65); font-weight: 700; }
+
+      /* ── Scene switcher (mockup-only affordance) ──────────────────────── */
+      .scenes {
+        position: absolute; bottom: 1.25rem; left: 50%; transform: translateX(-50%);
+        display: flex; gap: 0.25rem; background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 100px; padding: 0.3rem; backdrop-filter: blur(8px); z-index: 20;
+      }
+      .scenes button {
+        background: transparent; border: 1px solid transparent; color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.66rem; padding: 0.3rem 0.8rem;
+        border-radius: 100px; cursor: pointer; transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .scenes button:hover { color: var(--ink); }
+      .scenes button[aria-pressed="true"] { color: var(--gold); border-color: var(--gold-soft); background: rgba(201,168,76,0.1); }
+
+      /* Unit toggle */
+      .unit-toggle { position: absolute; top: 4.6rem; right: 1.25rem; display: flex; gap: 0.25rem; }
+      .unit-toggle button {
+        background: var(--panel); border: 1px solid var(--hairline); color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.06em;
+        padding: 0.25rem 0.6rem; border-radius: 100px; cursor: pointer;
+      }
+      .unit-toggle button[aria-pressed="true"] { color: var(--gold); border-color: var(--gold-soft); }
+
+      .caption {
+        position: absolute; bottom: 4.2rem; left: 50%; transform: translateX(-50%);
+        font-family: var(--font-mono); font-size: 0.66rem; color: var(--muted);
+        background: var(--panel); border: 1px solid var(--hairline); border-radius: 6px;
+        padding: 0.35rem 0.8rem; max-width: 32rem; text-align: center; z-index: 15;
+      }
+      .caption b { color: var(--ink); font-weight: 500; }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="stage">
+        <svg id="scene" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <g id="grid"></g>
+          <g id="rooms"></g>
+          <g id="clearance"></g>
+          <g id="furniture"></g>
+          <g id="furn-overlay"></g>
+        </svg>
+        <div class="overlay" id="overlay"></div>
+      </div>
+
+      <div class="brand">
+        <div class="brand-name">floorplan</div>
+        <div class="brand-sub">does my couch fit?</div>
+      </div>
+      <div class="mock-tag">Clearance checking · design mockup</div>
+
+      <!-- Unit toggle -->
+      <div class="unit-toggle" role="group" aria-label="Units">
+        <button aria-pressed="true">IMPERIAL</button>
+        <button aria-pressed="false">METRIC</button>
+      </div>
+
+      <!-- Clearance readout panel -->
+      <aside class="clr-panel" aria-label="Clearance readout">
+        <div class="clr-panel-head">
+          <span class="clr-panel-title">Clearance</span>
+          <label class="clr-switch" title="Show clearances">
+            <input type="checkbox" id="clr-toggle" checked />
+            <span class="track"></span>
+          </label>
+        </div>
+        <div class="clr-panel-body" id="clr-body"></div>
+      </aside>
+
+      <div class="caption" id="caption"></div>
+
+      <!-- Scene switcher -->
+      <div class="scenes" role="group" aria-label="Demo scenes">
+        <button data-scene="fits"   aria-pressed="true">It fits</button>
+        <button data-scene="tight"  aria-pressed="false">Tight walkway</button>
+        <button data-scene="collide" aria-pressed="false">Won't fit</button>
+        <button data-scene="off"    aria-pressed="false">Toggled off</button>
+      </div>
+    </div>
+
+    <script>
+    /* eslint-disable */
+    (function () {
+      "use strict";
+
+      var NS = "http://www.w3.org/2000/svg";
+      var svg = document.getElementById("scene");
+      var gGrid = document.getElementById("grid");
+      var gRooms = document.getElementById("rooms");
+      var gClr = document.getElementById("clearance");
+      var gFurn = document.getElementById("furniture");
+      var gOverlaySvg = document.getElementById("furn-overlay");
+      var overlay = document.getElementById("overlay");
+      var body = document.getElementById("clr-body");
+      var caption = document.getElementById("caption");
+
+      // World is in centimetres. Fixed camera: px = cm * SCALE + PAN.
+      var SCALE = 0.62;      // px per cm (set in fit())
+      var PAN = { x: 0, y: 0 };
+      function W2S(p) { return { x: p.x * SCALE + PAN.x, y: p.y * SCALE + PAN.y }; }
+
+      // ── Unit formatting (imperial default, matches units.js behaviour) ──
+      var unit = "ft";
+      function fmt(cm) {
+        if (unit === "ft") {
+          var inches = cm / 2.54;
+          // show as e.g. 1'10" for tight gaps, or 23" style
+          var totalIn = Math.round(inches);
+          var ft = Math.floor(totalIn / 12), inch = totalIn % 12;
+          return ft > 0 ? (ft + "'" + inch + '"') : (inch + '"');
+        }
+        return (Math.round(cm) + " cm");
+      }
+
+      // Default min-clearance threshold (walkway). 60cm ≈ 24".
+      var threshold = 60;
+      var showClr = true;
+      // Annotation density: "all" = leaders to every neighbour; "flagged" =
+      // only draw leaders/chips for gaps at or below threshold (cleaner canvas).
+      var density = "all";
+
+      // ── Scene data (cm). Room is a rectangle; furniture are axis-aligned
+      //    boxes (center x/y, width w, depth h). "sel" marks the piece the
+      //    user has selected — clearances radiate from it. ────────────────
+      var ROOM = { x: 40, y: 40, w: 520, h: 380 }; // interior in cm
+
+      var SCENES = {
+        fits: {
+          cap: "Drag a <b>sofa</b> in — gaps to every wall and neighbour read live. All comfortably above the 60&nbsp;cm walkway threshold, so the pill says <b>It fits</b>.",
+          furn: [
+            { id: "sofa",  label: "Sofa",  x: 200, y: 140, w: 200, h: 90, sel: true },
+            { id: "table", label: "Table", x: 235, y: 300, w: 120, h: 80 },
+            { id: "shelf", label: "Shelf", x: 470, y: 120, w: 40,  h: 160 }
+          ]
+        },
+        tight: {
+          cap: "Slide the sofa toward the table and the walkway between them drops to <b>48&nbsp;cm</b> — under the 60&nbsp;cm threshold. That gap flags <b>amber</b>: you can squeeze through, but barely.",
+          furn: [
+            { id: "sofa",  label: "Sofa",  x: 200, y: 175, w: 200, h: 90, sel: true },
+            { id: "table", label: "Table", x: 235, y: 300, w: 120, h: 80 },
+            { id: "shelf", label: "Shelf", x: 470, y: 120, w: 40,  h: 160 }
+          ]
+        },
+        collide: {
+          cap: "Push further and the sofa <b>overlaps</b> the table. The gap goes to zero and flags <b>red</b> — the couch does not fit here.",
+          furn: [
+            { id: "sofa",  label: "Sofa",  x: 210, y: 235, w: 200, h: 90, sel: true },
+            { id: "table", label: "Table", x: 235, y: 300, w: 120, h: 80 },
+            { id: "shelf", label: "Shelf", x: 470, y: 120, w: 40,  h: 160 }
+          ]
+        },
+        off: {
+          cap: "Clearance overlay toggled <b>off</b> from the panel — the editor is back to a clean sketch with no distance annotations.",
+          furn: [
+            { id: "sofa",  label: "Sofa",  x: 200, y: 175, w: 200, h: 90, sel: true },
+            { id: "table", label: "Table", x: 235, y: 300, w: 120, h: 80 },
+            { id: "shelf", label: "Shelf", x: 470, y: 120, w: 40,  h: 160 }
+          ]
+        }
+      };
+
+      var currentScene = "fits";
+
+      // ── Geometry: extents of an axis-aligned box ───────────────────────
+      function box(f) {
+        return { l: f.x - f.w / 2, r: f.x + f.w / 2, t: f.y - f.h / 2, b: f.y + f.h / 2 };
+      }
+      function status(gap) {
+        if (gap <= 0) return "bad";
+        if (gap < threshold) return "tight";
+        return "ok";
+      }
+
+      // Compute clearances from the selected box to the 4 walls and to each
+      // other furniture box. Returns list of {to, gap, status, from:{x,y}, to2:{x,y}}
+      // where from/to2 are the endpoints of the leader in WORLD cm.
+      function computeClearances(scene) {
+        var sel = null, others = [];
+        scene.furn.forEach(function (f) { if (f.sel) sel = f; else others.push(f); });
+        if (!sel) return [];
+        var s = box(sel);
+        var out = [];
+
+        // Walls: gap from each edge to room boundary, leader at box center line.
+        var walls = [
+          { to: "left wall",  gap: s.l - ROOM.x,             from: { x: s.l, y: sel.y }, to2: { x: ROOM.x, y: sel.y } },
+          { to: "right wall", gap: (ROOM.x + ROOM.w) - s.r,  from: { x: s.r, y: sel.y }, to2: { x: ROOM.x + ROOM.w, y: sel.y } },
+          { to: "top wall",   gap: s.t - ROOM.y,             from: { x: sel.x, y: s.t }, to2: { x: sel.x, y: ROOM.y } },
+          { to: "bottom wall",gap: (ROOM.y + ROOM.h) - s.b,  from: { x: sel.x, y: s.b }, to2: { x: sel.x, y: ROOM.y + ROOM.h } }
+        ];
+        walls.forEach(function (w) { w.status = status(w.gap); out.push(w); });
+
+        // Other furniture: axis-aligned gap (like AABB separation).
+        others.forEach(function (o) {
+          var b2 = box(o);
+          var dx = Math.max(s.l - b2.r, b2.l - s.r); // >0 means horizontal gap
+          var dy = Math.max(s.t - b2.b, b2.t - s.b); // >0 means vertical gap
+          var gap, from, to2;
+          if (dx <= 0 && dy <= 0) {
+            gap = 0; // overlapping
+            from = { x: sel.x, y: sel.y }; to2 = { x: o.x, y: o.y };
+          } else if (dx > dy) {
+            gap = dx;
+            var yMid = (Math.max(s.t, b2.t) + Math.min(s.b, b2.b)) / 2;
+            var xA = s.r <= b2.l ? s.r : s.l;
+            var xB = s.r <= b2.l ? b2.l : b2.r;
+            from = { x: xA, y: yMid }; to2 = { x: xB, y: yMid };
+          } else {
+            gap = dy;
+            var xMid = (Math.max(s.l, b2.l) + Math.min(s.r, b2.r)) / 2;
+            var yA = s.b <= b2.t ? s.b : s.t;
+            var yB = s.b <= b2.t ? b2.t : b2.b;
+            from = { x: xMid, y: yA }; to2 = { x: xMid, y: yB };
+          }
+          out.push({ to: o.label, gap: gap, status: status(gap), from: from, to2: to2 });
+        });
+
+        return out;
+      }
+
+      // ── SVG helpers ────────────────────────────────────────────────────
+      function el(tag, attrs) {
+        var n = document.createElementNS(NS, tag);
+        for (var k in attrs) n.setAttribute(k, attrs[k]);
+        return n;
+      }
+      function clear(g) { while (g.firstChild) g.removeChild(g.firstChild); }
+
+      // Fit camera so the room fills most of the viewport.
+      function fit() {
+        var vw = window.innerWidth, vh = window.innerHeight;
+        var margin = 120;
+        var sx = (vw - margin * 2) / ROOM.w;
+        var sy = (vh - margin * 2) / ROOM.h;
+        SCALE = Math.min(sx, sy);
+        var cx = ROOM.x + ROOM.w / 2, cy = ROOM.y + ROOM.h / 2;
+        PAN.x = vw / 2 - cx * SCALE;
+        PAN.y = vh / 2 - cy * SCALE;
+      }
+
+      function drawGrid() {
+        clear(gGrid);
+        var step = 50; // 50cm fine grid
+        var vw = window.innerWidth, vh = window.innerHeight;
+        // vertical lines
+        var startX = Math.floor((-PAN.x / SCALE) / step) * step;
+        for (var x = startX; x * SCALE + PAN.x < vw; x += step) {
+          var px = x * SCALE + PAN.x;
+          gGrid.appendChild(el("line", { x1: px, y1: 0, x2: px, y2: vh,
+            "class": (x % 100 === 0) ? "grid-major" : "grid-fine" }));
+        }
+        var startY = Math.floor((-PAN.y / SCALE) / step) * step;
+        for (var y = startY; y * SCALE + PAN.y < vh; y += step) {
+          var py = y * SCALE + PAN.y;
+          gGrid.appendChild(el("line", { x1: 0, y1: py, x2: vw, y2: py,
+            "class": (y % 100 === 0) ? "grid-major" : "grid-fine" }));
+        }
+      }
+
+      function drawRoom() {
+        clear(gRooms);
+        var tl = W2S({ x: ROOM.x, y: ROOM.y });
+        var wpx = ROOM.w * SCALE, hpx = ROOM.h * SCALE;
+        gRooms.appendChild(el("rect", { x: tl.x, y: tl.y, width: wpx, height: hpx, "class": "room-fill" }));
+        gRooms.appendChild(el("rect", { x: tl.x, y: tl.y, width: wpx, height: hpx, "class": "wall-body" }));
+        gRooms.appendChild(el("rect", { x: tl.x, y: tl.y, width: wpx, height: hpx, "class": "wall-line" }));
+      }
+
+      function drawFurniture(scene) {
+        clear(gFurn);
+        clear(gOverlaySvg);
+        scene.furn.forEach(function (f) {
+          var b = box(f);
+          var tl = W2S({ x: b.l, y: b.t });
+          var wpx = f.w * SCALE, hpx = f.h * SCALE;
+          gFurn.appendChild(el("rect", {
+            x: tl.x, y: tl.y, width: wpx, height: hpx, rx: 3,
+            "class": "furn" + (f.sel ? " selected" : "")
+          }));
+          // simple glyph per type
+          if (f.id === "sofa") {
+            gFurn.appendChild(el("rect", { x: tl.x + 4, y: tl.y + 4, width: wpx - 8, height: hpx * 0.32, rx: 2, "class": "furn-glyph" }));
+          } else if (f.id === "table") {
+            gFurn.appendChild(el("line", { x1: tl.x + 5, y1: tl.y + 5, x2: tl.x + wpx - 5, y2: tl.y + hpx - 5, "class": "furn-glyph" }));
+            gFurn.appendChild(el("line", { x1: tl.x + wpx - 5, y1: tl.y + 5, x2: tl.x + 5, y2: tl.y + hpx - 5, "class": "furn-glyph" }));
+          } else if (f.id === "shelf") {
+            for (var i = 1; i < 4; i++)
+              gFurn.appendChild(el("line", { x1: tl.x + 3, y1: tl.y + hpx * i / 4, x2: tl.x + wpx - 3, y2: tl.y + hpx * i / 4, "class": "furn-glyph" }));
+          }
+          // selection box + rotate handle for the selected piece
+          if (f.sel) {
+            gOverlaySvg.appendChild(el("rect", { x: tl.x - 3, y: tl.y - 3, width: wpx + 6, height: hpx + 6, "class": "sel-box" }));
+            var cx = tl.x + wpx / 2;
+            gOverlaySvg.appendChild(el("line", { x1: cx, y1: tl.y - 3, x2: cx, y2: tl.y - 22, "class": "rotate-stem" }));
+            gOverlaySvg.appendChild(el("circle", { cx: cx, cy: tl.y - 22, r: 6, "class": "rotate-knob" }));
+          }
+        });
+      }
+
+      var ICO = {
+        ok:    '<svg class="clr-ico" viewBox="0 0 16 16" fill="none"><polyline points="3,8 7,12 13,4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        tight: '<svg class="clr-ico" viewBox="0 0 16 16" fill="none"><path d="M8 2 L15 14 H1 Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><line x1="8" y1="6" x2="8" y2="10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="12" r="0.8" fill="currentColor"/></svg>',
+        bad:   '<svg class="clr-ico" viewBox="0 0 16 16" fill="none"><line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+      };
+
+      function drawClearances(list) {
+        clear(gClr);
+        overlay.innerHTML = "";
+        if (!showClr) return;
+
+        list.forEach(function (c) {
+          var a = W2S(c.from), b = W2S(c.to2);
+
+          // Band ribbon (subtle fill perpendicular to the leader) for tight/bad
+          if (c.status !== "ok") {
+            var perp = Math.abs(a.x - b.x) > Math.abs(a.y - b.y);
+            var half = 9;
+            var pts;
+            if (perp) { // horizontal leader → vertical band
+              pts = [ [a.x, a.y - half], [b.x, b.y - half], [b.x, b.y + half], [a.x, a.y + half] ];
+            } else {
+              pts = [ [a.x - half, a.y], [b.x - half, b.y], [b.x + half, b.y], [a.x + half, a.y] ];
+            }
+            gClr.appendChild(el("polygon", { points: pts.map(function (p) { return p.join(","); }).join(" "), "class": "clr-band " + c.status }));
+          }
+
+          // Leader line + end ticks
+          gClr.appendChild(el("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, "class": "clr-leader " + c.status }));
+          var tick = 5;
+          var vert = Math.abs(a.x - b.x) < Math.abs(a.y - b.y);
+          [a, b].forEach(function (p) {
+            if (vert) gClr.appendChild(el("line", { x1: p.x - tick, y1: p.y, x2: p.x + tick, y2: p.y, "class": "clr-tick " + c.status }));
+            else      gClr.appendChild(el("line", { x1: p.x, y1: p.y - tick, x2: p.x, y2: p.y + tick, "class": "clr-tick " + c.status }));
+          });
+
+          // Distance chip at midpoint
+          var mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+          var chip = document.createElement("div");
+          chip.className = "clr-chip " + c.status;
+          chip.style.left = mid.x + "px";
+          chip.style.top = mid.y + "px";
+          chip.innerHTML = ICO[c.status] + "<span>" + (c.gap <= 0 ? "overlap" : fmt(c.gap)) + "</span>";
+          overlay.appendChild(chip);
+        });
+      }
+
+      // Worst status across the list drives the master verdict.
+      function worst(list) {
+        var rank = { ok: 0, tight: 1, bad: 2 };
+        var w = "ok";
+        list.forEach(function (c) { if (rank[c.status] > rank[w]) w = c.status; });
+        return w;
+      }
+
+      var VERDICT = {
+        ok:    { txt: "It fits — room to spare", ico: ICO.ok },
+        tight: { txt: "Tight — under 60 cm walkway", ico: ICO.tight },
+        bad:   { txt: "Won't fit — overlap", ico: ICO.bad }
+      };
+
+      function drawFitPill(scene, list) {
+        var sel = scene.furn.filter(function (f) { return f.sel; })[0];
+        if (!sel || !showClr) return;
+        var w = worst(list);
+        var b = box(sel);
+        var p = W2S({ x: sel.x, y: b.b });
+        var pill = document.createElement("div");
+        pill.className = "fit-pill " + w;
+        pill.style.left = p.x + "px";
+        pill.style.top = (p.y + 26) + "px";
+        pill.innerHTML = VERDICT[w].ico + "<span>" + VERDICT[w].txt + "</span>";
+        overlay.appendChild(pill);
+      }
+
+      function renderPanel(scene, list) {
+        var w = showClr ? worst(list) : "ok";
+        var thumb = threshold, valTxt = fmt(threshold);
+        var rows = "";
+        if (!showClr) {
+          rows = '<div class="clr-empty">Clearance overlay is off</div>';
+        } else if (list.length === 0) {
+          rows = '<div class="clr-empty">Select a piece of furniture to see its clearances</div>';
+        } else {
+          var sorted = list.slice().sort(function (a, b) { return a.gap - b.gap; });
+          rows = '<div class="clr-rows">' + sorted.map(function (c) {
+            return '<div class="clr-row">' +
+              '<span class="clr-row-dot ' + c.status + '"></span>' +
+              '<span class="clr-row-to">to ' + c.to + '</span>' +
+              '<span class="clr-row-val ' + c.status + '">' + (c.gap <= 0 ? "overlap" : fmt(c.gap)) + '</span>' +
+              '</div>';
+          }).join("") + '</div>';
+        }
+
+        body.innerHTML =
+          '<div class="clr-thresh">' +
+            '<span class="clr-thresh-label">Min gap</span>' +
+            '<input type="range" id="clr-range" min="30" max="120" step="5" value="' + thumb + '" ' + (showClr ? "" : "disabled") + ' />' +
+            '<span class="clr-thresh-val">' + valTxt + '</span>' +
+          '</div>' +
+          '<div class="clr-density" role="group" aria-label="Annotation density">' +
+            '<span class="clr-thresh-label">Show</span>' +
+            '<button data-density="all" ' + (density === "all" ? 'aria-pressed="true"' : 'aria-pressed="false"') + (showClr ? "" : " disabled") + '>All gaps</button>' +
+            '<button data-density="flagged" ' + (density === "flagged" ? 'aria-pressed="true"' : 'aria-pressed="false"') + (showClr ? "" : " disabled") + '>Flagged only</button>' +
+          '</div>' +
+          rows +
+          (showClr && list.length ? '<div class="clr-verdict ' + w + '">' + VERDICT[w].ico + '<span>' + VERDICT[w].txt + '</span></div>' : '');
+
+        wirePanelInputs();
+      }
+
+      function wirePanelInputs() {
+        var range = document.getElementById("clr-range");
+        if (range) {
+          range.addEventListener("input", function () {
+            threshold = parseInt(range.value, 10);
+            render(); // re-evaluate statuses live as threshold moves
+          });
+        }
+        document.querySelectorAll(".clr-density button").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            density = btn.getAttribute("data-density");
+            render();
+          });
+        });
+      }
+
+      // ── Master render ──────────────────────────────────────────────────
+      function render() {
+        var scene = SCENES[currentScene];
+        fit();
+        drawGrid();
+        drawRoom();
+        drawFurniture(scene);
+        var list = showClr ? computeClearances(scene) : [];
+        // Canvas annotations respect the density setting; the panel always
+        // lists every neighbour so nothing is hidden from the readout.
+        var drawn = density === "flagged" ? list.filter(function (c) { return c.status !== "ok"; }) : list;
+        drawClearances(drawn);
+        drawFitPill(scene, list);
+        renderPanel(scene, list);
+        caption.innerHTML = scene.cap;
+      }
+
+      // ── Wiring ─────────────────────────────────────────────────────────
+      document.querySelectorAll(".scenes button").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          currentScene = btn.getAttribute("data-scene");
+          document.querySelectorAll(".scenes button").forEach(function (b) {
+            b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+          });
+          // "off" scene forces the toggle off; others turn it on
+          showClr = currentScene !== "off";
+          document.getElementById("clr-toggle").checked = showClr;
+          render();
+        });
+      });
+
+      document.getElementById("clr-toggle").addEventListener("change", function (e) {
+        showClr = e.target.checked;
+        render();
+      });
+
+      document.querySelectorAll(".unit-toggle button").forEach(function (btn, i) {
+        btn.addEventListener("click", function () {
+          unit = i === 0 ? "ft" : "m";
+          document.querySelectorAll(".unit-toggle button").forEach(function (b, j) {
+            b.setAttribute("aria-pressed", j === i ? "true" : "false");
+          });
+          render();
+        });
+      });
+
+      window.addEventListener("resize", render);
+      render();
+    })();
+    </script>
+  </body>
+</html>
