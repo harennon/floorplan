@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Alignment snapping · guide directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:         #14140f;
+    --bg-deep:    #100f0b;
+    --ink:        #ece7d6;
+    --muted:      #8f8a78;
+    --gold:       #c9a84c;
+    --gold-soft:  rgba(201, 168, 76, 0.55);
+    --grid-fine:  rgba(201, 168, 76, 0.055);
+    --grid-major: rgba(201, 168, 76, 0.14);
+    --grid-axis:  rgba(201, 168, 76, 0.34);
+    --panel:      rgba(20, 20, 15, 0.72);
+    --hairline:   rgba(201, 168, 76, 0.18);
+    --font-ui:      "DM Sans", system-ui, sans-serif;
+    --font-mono:    "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+    --wall-line:  #d9be6e;
+    --sym-fill:   rgba(201,168,76,0.12);
+    --sym-fill-hi:rgba(201,168,76,0.18);
+    --sym-stroke: #d9be6e;
+    /* Alignment palette */
+    --align-edge:   #b98bd9;  /* violet — edge-to-edge */
+    --align-center: #7fd0c8;  /* teal — center alignment */
+    --align-spacing:#e0b64f;  /* amber — equal spacing */
+    --snap-grid:  #7fd0c8;
+    --snap-flush: #9cd67a;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--font-ui);
+    color: var(--ink);
+    background: var(--bg-deep);
+    padding: 2rem 1.5rem 4rem;
+    line-height: 1.5;
+  }
+  .page { max-width: 1180px; margin: 0 auto; }
+  header.masthead { margin-bottom: 1.75rem; }
+  header.masthead h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    color: var(--gold);
+    font-size: 1.55rem;
+    margin: 0 0 0.35rem;
+  }
+  header.masthead p {
+    font-family: var(--font-mono);
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin: 0;
+    max-width: 70ch;
+  }
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin: 2.25rem 0 0.85rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+    gap: 1rem;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 0.9rem 0.9rem 1rem;
+  }
+  .card h3 {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--ink);
+    margin: 0 0 0.15rem;
+    display: flex; align-items: center; gap: 0.4rem;
+  }
+  .card .caption {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--muted);
+    margin: 0 0 0.7rem;
+    min-height: 2.4em;
+  }
+  .swatch {
+    width: 9px; height: 9px; border-radius: 2px; display: inline-block;
+  }
+  .stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    border-radius: 8px;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse 90% 80% at 50% 50%, var(--bg) 0%, var(--bg-deep) 100%);
+    border: 1px solid var(--hairline);
+  }
+  .stage svg { display: block; width: 100%; height: 100%; }
+  .demo-stage { cursor: default; }
+  .demo-stage rect.sel { cursor: grab; }
+
+  /* HUD (bottom-right of a stage) */
+  .hud {
+    position: absolute;
+    bottom: 0.6rem; right: 0.6rem;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem;
+  }
+  .hud-cell, .hud-toggle {
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .hud-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 0.35rem; transition: border-color 0.15s; }
+  .hud-toggle:hover { border-color: var(--ink); }
+  .hud-toggle .glyph { width: 12px; height: 12px; }
+  .hud-toggle[data-state="on"]  .val { color: var(--gold); }
+  .hud-toggle[data-state="off"] .val { color: var(--muted); }
+  .hud-toggle[data-state="on"]  .glyph rect { stroke: var(--gold); }
+  .hud-toggle[data-state="on"]  .glyph line { stroke: var(--gold); }
+  .hud-toggle[data-state="off"] .glyph rect { stroke: var(--muted); }
+  .hud-toggle[data-state="off"] .glyph line { stroke: transparent; }
+
+  /* Cursor-side snap tag */
+  .snap-tag {
+    position: absolute;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    padding: 0.08rem 0.35rem;
+    border-radius: 3px;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 6;
+  }
+
+  /* Alignment guide label (rendered mid-guide) */
+  .guide-label {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    padding: 0.05rem 0.3rem;
+    border-radius: 3px;
+    background: rgba(16,15,11,0.9);
+    pointer-events: none;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+  }
+
+  /* Controls row for the interactive demo */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+    margin: 0.9rem 0 0.5rem;
+    font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+  }
+  .controls .seg { display: inline-flex; border: 1px solid var(--hairline); border-radius: 5px; overflow: hidden; }
+  .controls .seg button {
+    background: transparent; border: none; color: var(--muted);
+    font-family: var(--font-mono); font-size: 0.7rem; padding: 0.35rem 0.7rem; cursor: pointer;
+    border-right: 1px solid var(--hairline);
+  }
+  .controls .seg button:last-child { border-right: none; }
+  .controls .seg button[aria-pressed="true"] { background: rgba(201,168,76,0.16); color: var(--gold); }
+  .demo-note { font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin: 0.35rem 0 0; }
+  .demo-stage { aspect-ratio: 16 / 9; }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.6rem 0 0;
+    font-family: var(--font-mono); font-size: 0.66rem; color: var(--muted);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .kbd { font-family: var(--font-mono); background: rgba(201,168,76,0.1); border: 1px solid var(--hairline); border-radius: 3px; padding: 0 0.3rem; color: var(--ink); font-size: 0.62rem; }
+  .precedence { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+  .precedence li {
+    font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+    padding: 0.4rem 0.6rem; border-left: 2px solid var(--hairline); margin-bottom: 0.3rem;
+    background: rgba(20,20,15,0.4);
+  }
+  .precedence li b { color: var(--ink); font-weight: 500; }
+  .precedence li .rank { color: var(--gold); margin-right: 0.5rem; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="masthead">
+    <h1>Object-to-object alignment snapping</h1>
+    <p>Transient drag guides that snap a symbol's edges and centers to neighbouring
+    symbols — the Figma / SketchUp pattern, in the blueprint idiom. Guides live only
+    during a drag and vanish on drop. Below: three guide-styling directions, the snap
+    types, the precedence order, and a live playground.</p>
+  </header>
+
+  <div class="section-label">Direction A — Guide styling options</div>
+  <div class="cards" id="style-cards"></div>
+
+  <div class="section-label">Snap types — what aligns</div>
+  <div class="cards" id="type-cards"></div>
+
+  <div class="section-label">Precedence — one resolution order in the snap path</div>
+  <ul class="precedence">
+    <li><span class="rank">1</span><b>Alt held</b> → raw world point. Full transient bypass, independent of any toggle.</li>
+    <li><span class="rank">2</span><b>Wall-flush (#1)</b> → seat the near edge against a wall face. Owns the perpendicular axis.</li>
+    <li><span class="rank">3</span><b>Object alignment (this issue)</b> → nearest in-range edge/center target on each axis, evaluated per-axis so it can co-exist with wall-flush on the orthogonal axis. Beats the grid.</li>
+    <li><span class="rank">4</span><b>Grid</b> → <code>snapStep()</code> when the snap toggle is on and no closer alignment target exists.</li>
+    <li><span class="rank">5</span><b>Raw</b> → toggle off, no target in range.</li>
+  </ul>
+  <p class="demo-note">Per-axis resolution keeps wall-flush and alignment from fighting: e.g. a sofa can seat flush to a wall (Y) while its left edge aligns to a bookshelf (X) in the same drag.</p>
+
+  <div class="section-label">Live playground — drag the sofa</div>
+  <div class="controls">
+    <span>Snap:</span>
+    <div class="seg" id="toggle-snap" role="group" aria-label="Snap toggle">
+      <button data-snap="on"  aria-pressed="true">On</button>
+      <button data-snap="off" aria-pressed="false">Off</button>
+    </div>
+    <span style="margin-left:0.6rem">Style:</span>
+    <div class="seg" id="toggle-style" role="group" aria-label="Guide style">
+      <button data-style="A" aria-pressed="true">A · Hairline+tick</button>
+      <button data-style="B" aria-pressed="false">B · Solid+chip</button>
+      <button data-style="C" aria-pressed="false">C · Dashed</button>
+    </div>
+    <span style="margin-left:0.6rem"><span class="kbd">Alt</span> hold = raw (bypass)</span>
+  </div>
+  <div class="stage demo-stage" id="demo-stage">
+    <svg id="demo-svg" viewBox="0 0 800 450" preserveAspectRatio="xMidYMid slice"></svg>
+    <div class="hud">
+      <div class="hud-cell" id="demo-readout">Snap · <span class="val">—</span></div>
+      <div class="hud-toggle" id="demo-hud-toggle" data-state="on" role="button" tabindex="0" aria-pressed="true" aria-label="Snap (on)">
+        <svg class="glyph" viewBox="0 0 12 12" aria-hidden="true">
+          <rect x="1.5" y="1.5" width="9" height="9" rx="1" fill="none" stroke-width="1.4"/>
+          <line x1="1.5" y1="6" x2="10.5" y2="6" stroke-width="1"/>
+          <line x1="6" y1="1.5" x2="6" y2="10.5" stroke-width="1"/>
+        </svg>
+        Snap&nbsp;<span class="val" id="demo-hud-val">On</span>
+      </div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--align-edge)"></span> edge-to-edge</span>
+    <span><span class="swatch" style="background:var(--align-center)"></span> center align</span>
+    <span><span class="swatch" style="background:var(--snap-flush)"></span> wall-flush (#1)</span>
+    <span><span class="swatch" style="background:var(--snap-grid)"></span> grid</span>
+  </div>
+  <p class="demo-note">Drag the highlighted sofa near the bed, table, or the wall. Guides appear the instant an
+  edge or center lines up and disappear on release. Everything is a mock — no real physics, just the snapping model rendered.</p>
+</div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+// Draw a furniture-ish box (rotated 0 only for mocks). x,y = top-left, w,h.
+function drawBox(parent, x, y, w, h, opts = {}) {
+  const r = el("rect", {
+    x, y, width: w, height: h, rx: 2,
+    fill: opts.fill || "var(--sym-fill)",
+    stroke: opts.stroke || "var(--sym-stroke)",
+    "stroke-width": opts.sw || 1.4,
+  });
+  if (opts.dash) r.setAttribute("stroke-dasharray", opts.dash);
+  if (opts.opacity) r.setAttribute("opacity", opts.opacity);
+  if (opts.selected) r.setAttribute("class", "sel");
+  parent.appendChild(r);
+  if (opts.label) {
+    const t = el("text", {
+      x: x + w / 2, y: y + h / 2 + 3, "text-anchor": "middle",
+      "font-family": "DM Mono, monospace", "font-size": 10,
+      fill: "var(--muted)",
+    });
+    t.textContent = opts.label;
+    parent.appendChild(t);
+  }
+  return r;
+}
+
+// Alignment guide line + optional end ticks (style A) or dashes (style C).
+function drawGuide(parent, x1, y1, x2, y2, color, style) {
+  const horiz = Math.abs(y2 - y1) < 0.5;
+  const g = el("g", {});
+  const line = el("line", { x1, y1, x2, y2, stroke: color });
+  if (style === "A") { line.setAttribute("stroke-width", 1); }
+  else if (style === "B") { line.setAttribute("stroke-width", 1.4); }
+  else { line.setAttribute("stroke-width", 1); line.setAttribute("stroke-dasharray", "5 4"); }
+  g.appendChild(line);
+  if (style === "A") {
+    const tick = 5;
+    for (const [px, py] of [[x1, y1], [x2, y2]]) {
+      const t = horiz
+        ? el("line", { x1: px, y1: py - tick, x2: px, y2: py + tick, stroke: color, "stroke-width": 1 })
+        : el("line", { x1: px - tick, y1: py, x2: px + tick, y2: py, stroke: color, "stroke-width": 1 });
+      g.appendChild(t);
+    }
+  }
+  parent.appendChild(g);
+  return g;
+}
+function drawPip(parent, x, y, color) {
+  parent.appendChild(el("circle", { cx: x, cy: y, r: 2.5, fill: color }));
+}
+// HTML label positioned over a stage using viewBox coords → percentage.
+function addLabel(stageEl, vbW, vbH, vx, vy, text, color, styleVariant) {
+  const lab = document.createElement("div");
+  lab.className = "guide-label";
+  lab.textContent = text;
+  lab.style.left = (vx / vbW * 100) + "%";
+  lab.style.top = (vy / vbH * 100) + "%";
+  if (styleVariant === "B") { lab.style.background = color; lab.style.color = "#14140f"; lab.style.border = "1px solid " + color; }
+  else { lab.style.color = color; lab.style.border = "1px solid var(--hairline)"; }
+  stageEl.appendChild(lab);
+  return lab;
+}
+
+// ── Build a mini scene into a card ─────────────────────────────────────────
+function makeCard(container, title, swatchColor, caption, builder) {
+  const card = document.createElement("div");
+  card.className = "card";
+  const h = document.createElement("h3");
+  if (swatchColor) {
+    const sw = document.createElement("span");
+    sw.className = "swatch"; sw.style.background = swatchColor;
+    h.appendChild(sw);
+  }
+  h.appendChild(document.createTextNode(title));
+  const cap = document.createElement("p");
+  cap.className = "caption"; cap.textContent = caption;
+  const stage = document.createElement("div");
+  stage.className = "stage";
+  const svg = el("svg", { viewBox: "0 0 400 300", preserveAspectRatio: "xMidYMid meet" });
+  stage.appendChild(svg);
+  card.appendChild(h); card.appendChild(cap); card.appendChild(stage);
+  container.appendChild(card);
+  builder(svg, stage);
+}
+
+// Faint blueprint grid inside a mini SVG (400x300 viewBox).
+function bpGrid(svg, w, h, step) {
+  const g = el("g", {});
+  for (let x = 0; x <= w; x += step)
+    g.appendChild(el("line", { x1: x, y1: 0, x2: x, y2: h, stroke: "var(--grid-fine)", "stroke-width": 1 }));
+  for (let y = 0; y <= h; y += step)
+    g.appendChild(el("line", { x1: 0, y1: y, x2: w, y2: y, stroke: "var(--grid-fine)", "stroke-width": 1 }));
+  svg.appendChild(g);
+}
+
+// Scene shared by the three style cards: a static bed + a dragged sofa whose
+// left edge aligns with the bed's left edge. Renders the guide in the chosen style.
+function styleScene(svg, stage, style) {
+  bpGrid(svg, 400, 300, 25);
+  // Bed (static) top-left at (90,60), 120x150
+  drawBox(svg, 90, 60, 120, 150, { label: "bed" });
+  // Sofa (dragged) — left edge x=90 aligns with bed left edge x=90
+  drawBox(svg, 90, 225, 150, 55, {
+    fill: "var(--sym-fill-hi)", sw: 2, label: "sofa", selected: true,
+  });
+  // Vertical edge-to-edge guide at x=90 spanning both symbols
+  const c = getComputedStyle(document.documentElement).getPropertyValue("--align-edge").trim();
+  drawGuide(svg, 90, 55, 90, 285, c, style);
+  addLabel(stage, 400, 300, 90, 40, "left edges", c, style);
+}
+makeCard(document.getElementById("style-cards"),
+  "A · Hairline + end ticks", getComputedStyle(document.documentElement).getPropertyValue("--align-edge").trim(),
+  "Thin 1px line with small perpendicular ticks marking each aligned edge. Quietest — reads as a draughting construction line. Label sits in a bordered panel chip.",
+  (svg, stage) => styleScene(svg, stage, "A"));
+makeCard(document.getElementById("style-cards"),
+  "B · Solid + filled chip", getComputedStyle(document.documentElement).getPropertyValue("--align-edge").trim(),
+  "Slightly heavier 1.4px line, no ticks; the label chip is filled with the guide colour (Figma-like). Most legible at a glance, most chrome.",
+  (svg, stage) => styleScene(svg, stage, "B"));
+makeCard(document.getElementById("style-cards"),
+  "C · Dashed line", getComputedStyle(document.documentElement).getPropertyValue("--align-edge").trim(),
+  "Dashed 1px line echoing the existing wall-flush guide (which is dashed green). Consistent with #1's language; risk of dash-soup when several guides show at once.",
+  (svg, stage) => styleScene(svg, stage, "C"));
+
+// ── Snap-type cards (use Direction A styling as the reference) ─────────────
+const CSS = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const typeHost = document.getElementById("type-cards");
+
+// 1. Edge-to-edge (place beside): sofa right edge meets table left edge → contact.
+makeCard(typeHost, "Edge-to-edge (place beside)", CSS("--align-edge"),
+  "A dragged edge snaps flush against the facing edge of another symbol — furniture seated side-by-side. Threshold ~12px; the facing edges become coincident.",
+  (svg, stage) => {
+    bpGrid(svg, 400, 300, 25);
+    drawBox(svg, 60, 110, 110, 80, { label: "table" });
+    // sofa placed to the right, right-of-table left edge at x=170
+    drawBox(svg, 170, 120, 150, 60, { fill: "var(--sym-fill-hi)", sw: 2, label: "sofa", selected: true });
+    const c = CSS("--align-edge");
+    drawGuide(svg, 170, 95, 170, 205, c, "A");
+    addLabel(stage, 400, 300, 170, 80, "0.00 m gap", c, "A");
+  });
+
+// 2. Center-to-center: chair center aligns with desk center on both axes.
+makeCard(typeHost, "Center-to-center (both axes)", CSS("--align-center"),
+  "Horizontal and vertical center alignment. Here the chair's centre locks to the desk's centre-line on the X axis; a second guide would show for Y. Pips mark the two centres.",
+  (svg, stage) => {
+    bpGrid(svg, 400, 300, 25);
+    drawBox(svg, 120, 55, 160, 70, { label: "desk" });
+    // chair centered under desk: desk center x=200, chair 50 wide → x=175
+    drawBox(svg, 175, 175, 50, 50, { fill: "var(--sym-fill-hi)", sw: 2, label: "chair", selected: true });
+    const c = CSS("--align-center");
+    drawGuide(svg, 200, 50, 200, 235, c, "A");
+    drawPip(svg, 200, 90, c);
+    drawPip(svg, 200, 200, c);
+    addLabel(stage, 400, 300, 200, 150, "centre · X", c, "A");
+  });
+
+// 3. Co-existence with wall-flush (per-axis).
+makeCard(typeHost, "Co-exists with wall-flush (#1)", CSS("--snap-flush"),
+  "Per-axis resolution: the sofa seats flush to the wall on Y (green, from #1) while its left edge aligns to the bookshelf on X (violet). Two guides, no fight.",
+  (svg, stage) => {
+    bpGrid(svg, 400, 300, 25);
+    // wall along the bottom
+    svg.appendChild(el("rect", { x: 0, y: 250, width: 400, height: 14, fill: "var(--wall-body, rgba(201,168,76,0.30))", stroke: "var(--wall-line)", "stroke-width": 1 }));
+    drawBox(svg, 70, 150, 60, 100, { label: "shelf" });
+    // sofa: left edge x=70 aligns shelf; bottom y=250 flush to wall
+    drawBox(svg, 70, 195, 150, 55, { fill: "var(--sym-fill-hi)", sw: 2, label: "sofa", selected: true });
+    const ce = CSS("--align-edge"), cf = CSS("--snap-flush");
+    drawGuide(svg, 70, 145, 70, 258, ce, "A");
+    addLabel(stage, 400, 300, 70, 132, "left edges", ce, "A");
+    drawGuide(svg, 55, 250, 380, 250, cf, "A");
+    addLabel(stage, 400, 300, 300, 240, "wall flush", cf, "A");
+  });
+
+// ── Interactive playground ─────────────────────────────────────────────────
+const VBW = 800, VBH = 450;
+const dsvg = document.getElementById("demo-svg");
+const dstage = document.getElementById("demo-stage");
+const readout = document.querySelector("#demo-readout .val");
+const hudToggle = document.getElementById("demo-hud-toggle");
+const hudVal = document.getElementById("demo-hud-val");
+const GRID = 25;             // world grid step (viewBox units)
+const THRESH = 10;           // snap threshold (viewBox units)
+const WALL_Y = 60;           // top wall face y
+
+let snapOn = true;
+let style = "A";
+let altHeld = false;
+
+// Static neighbours + wall. Dragged sofa is `sofa`.
+const shelf = { x: 120, y: 150, w: 70, h: 170, label: "shelf" };
+const bed   = { x: 470, y: 90, w: 130, h: 160, label: "bed" };
+const table = { x: 250, y: 300, w: 130, h: 90, label: "table" };
+const statics = [shelf, bed, table];
+const sofa  = { x: 300, y: 140, w: 170, h: 65, label: "sofa" };
+
+// Build candidate target lines on one axis from the static neighbours.
+// axis: "x" or "y". Returns [{line, type}] where type ∈ edge|center|flush.
+function targetsFor(axis) {
+  const out = [];
+  for (const o of statics) {
+    const e = axis === "x" ? edgesX(o) : edgesY(o);
+    out.push({ line: e.min, type: "edge" });
+    out.push({ line: e.max, type: "edge" });
+    out.push({ line: e.mid, type: "center" });
+  }
+  if (axis === "y") out.push({ line: WALL_Y, type: "flush" });
+  return out;
+}
+function edgesX(o) { return { min: o.x, mid: o.x + o.w / 2, max: o.x + o.w }; }
+function edgesY(o) { return { min: o.y, mid: o.y + o.h / 2, max: o.y + o.h }; }
+
+// Resolve one axis: snap the box origin so an anchor (min/mid/max) meets a target.
+// Precedence within an axis: flush > (alignment edge/center by distance) > grid > raw.
+function resolveAxis(rawOrigin, size, targets) {
+  const anchors = [
+    { name: "min", off: 0 },
+    { name: "mid", off: size / 2 },
+    { name: "max", off: size },
+  ];
+  let best = null;
+  for (const tgt of targets) {
+    const isFlush = tgt.type === "flush";
+    for (const a of anchors) {
+      const cur = rawOrigin + a.off;
+      const dist = Math.abs(cur - tgt.line);
+      if (dist > THRESH) continue;
+      // flush outranks alignment; otherwise nearest wins.
+      const better = !best
+        || (isFlush && best.type !== "flush")
+        || (isFlush === (best.type === "flush") && dist < best.dist);
+      if (better) best = { dist, origin: tgt.line - a.off, type: tgt.type, line: tgt.line, anchor: a.name };
+    }
+  }
+  if (best) return best;
+  if (snapOn) return { origin: Math.round(rawOrigin / GRID) * GRID, type: "grid", line: null };
+  return { origin: rawOrigin, type: "free", line: null };
+}
+
+const TYPE_COLOR = {
+  edge:   () => CSS("--align-edge"),
+  center: () => CSS("--align-center"),
+  flush:  () => CSS("--snap-flush"),
+  grid:   () => CSS("--snap-grid"),
+  free:   () => CSS("--muted"),
+};
+
+function clearLabels() {
+  for (const l of dstage.querySelectorAll(".guide-label, .snap-tag")) l.remove();
+}
+
+function render(resX, resY, dragging) {
+  while (dsvg.firstChild) dsvg.removeChild(dsvg.firstChild);
+  clearLabels();
+  bpGrid(dsvg, VBW, VBH, GRID);
+  // wall along the top
+  dsvg.appendChild(el("rect", { x: 0, y: WALL_Y - 12, width: VBW, height: 12,
+    fill: "rgba(201,168,76,0.30)", stroke: "var(--wall-line)", "stroke-width": 1 }));
+  // static neighbours
+  for (const o of statics) drawBox(dsvg, o.x, o.y, o.w, o.h, { label: o.label });
+  // dragged sofa
+  drawBox(dsvg, sofa.x, sofa.y, sofa.w, sofa.h, { fill: "var(--sym-fill-hi)", sw: 2, label: "sofa", selected: true });
+
+  if (!dragging) return;
+
+  // Draw guides for active X/Y snaps (skip grid/free — no alignment guide).
+  const active = [];
+  if (resX && (resX.type === "edge" || resX.type === "center")) {
+    const c = TYPE_COLOR[resX.type]();
+    drawGuide(dsvg, resX.line, WALL_Y - 12, resX.line, VBH, c, style);
+    if (resX.type === "center") { drawPip(dsvg, resX.line, sofa.y + sofa.h / 2, c); }
+    addLabel(dstage, VBW, VBH, resX.line, 30, resX.type === "center" ? "centre · X" : (resX.anchor + " edge"), c, style);
+    active.push(resX.type);
+  }
+  if (resY && (resY.type === "edge" || resY.type === "center" || resY.type === "flush")) {
+    const c = TYPE_COLOR[resY.type]();
+    drawGuide(dsvg, 0, resY.line, VBW, resY.line, c, style);
+    if (resY.type === "center") { drawPip(dsvg, sofa.x + sofa.w / 2, resY.line, c); }
+    addLabel(dstage, VBW, VBH, VBW - 70, resY.line - 12,
+      resY.type === "flush" ? "wall flush" : (resY.type === "center" ? "centre · Y" : (resY.anchor + " edge")), c, style);
+    active.push(resY.type);
+  }
+  return active;
+}
+
+// Map a pointer event to viewBox coords.
+function toVB(e) {
+  const r = dsvg.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) / r.width * VBW,
+    y: (e.clientY - r.top) / r.height * VBH,
+  };
+}
+
+let dragging = false, grabDX = 0, grabDY = 0;
+
+function snapTypeLabel(active) {
+  if (!active || !active.length) return snapOn ? "grid" : "free";
+  // Prefer the most specific alignment label
+  if (active.includes("center")) return "align · centre";
+  if (active.includes("edge") && active.includes("flush")) return "edge + flush";
+  if (active.includes("flush")) return "wall flush";
+  if (active.includes("edge")) return "edge align";
+  return "grid";
+}
+
+function updateReadout(active) {
+  const label = altHeld ? "raw (Alt)" : snapTypeLabel(active);
+  readout.textContent = label;
+}
+
+function showSnapTag(e, active) {
+  const label = altHeld ? "raw" : snapTypeLabel(active);
+  let tag = dstage.querySelector(".snap-tag");
+  if (!tag) { tag = document.createElement("div"); tag.className = "snap-tag"; dstage.appendChild(tag); }
+  tag.textContent = label;
+  const has = active && active.length;
+  tag.style.color = altHeld ? CSS("--muted")
+    : has ? TYPE_COLOR[active.includes("center") ? "center" : active.includes("flush") && !active.includes("edge") ? "flush" : active.includes("edge") ? "edge" : "grid"]()
+    : (snapOn ? CSS("--snap-grid") : CSS("--muted"));
+  const r = dstage.getBoundingClientRect();
+  tag.style.left = (e.clientX - r.left + 14) + "px";
+  tag.style.top = (e.clientY - r.top - 18) + "px";
+}
+
+const sofaHit = () => dsvg.querySelector("rect.sel");
+
+dstage.addEventListener("pointerdown", (e) => {
+  const p = toVB(e);
+  if (p.x >= sofa.x && p.x <= sofa.x + sofa.w && p.y >= sofa.y && p.y <= sofa.y + sofa.h) {
+    dragging = true;
+    grabDX = p.x - sofa.x;
+    grabDY = p.y - sofa.y;
+    dstage.setPointerCapture(e.pointerId);
+    dstage.style.cursor = "grabbing";
+  }
+});
+
+dstage.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  const p = toVB(e);
+  const rawX = p.x - grabDX;
+  const rawY = p.y - grabDY;
+  let resX, resY;
+  if (altHeld) {
+    sofa.x = rawX; sofa.y = rawY;
+    resX = resY = null;
+  } else {
+    resX = resolveAxis(rawX, sofa.w, targetsFor("x"));
+    resY = resolveAxis(rawY, sofa.h, targetsFor("y"));
+    sofa.x = resX.origin; sofa.y = resY.origin;
+  }
+  const active = render(resX, resY, true) || [];
+  updateReadout(active);
+  showSnapTag(e, active);
+});
+
+function endDrag(e) {
+  if (!dragging) return;
+  dragging = false;
+  dstage.style.cursor = "";
+  render(null, null, false);   // guides + snap-tag cleared on drop
+  clearLabels();
+  readout.textContent = "—";
+}
+dstage.addEventListener("pointerup", endDrag);
+dstage.addEventListener("pointercancel", endDrag);
+
+// ── Controls ───────────────────────────────────────────────────────────────
+function setSnap(on) {
+  snapOn = on;
+  for (const b of document.querySelectorAll("#toggle-snap button"))
+    b.setAttribute("aria-pressed", (b.dataset.snap === "on") === on ? "true" : "false");
+  hudToggle.dataset.state = on ? "on" : "off";
+  hudToggle.setAttribute("aria-pressed", on ? "true" : "false");
+  hudToggle.setAttribute("aria-label", "Snap (" + (on ? "on" : "off") + ")");
+  hudVal.textContent = on ? "On" : "Off";
+}
+document.getElementById("toggle-snap").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  setSnap(b.dataset.snap === "on");
+});
+function toggleHud() { setSnap(!snapOn); }
+hudToggle.addEventListener("click", toggleHud);
+hudToggle.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleHud(); }
+});
+
+document.getElementById("toggle-style").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  style = b.dataset.style;
+  for (const x of document.querySelectorAll("#toggle-style button"))
+    x.setAttribute("aria-pressed", x === b ? "true" : "false");
+});
+
+window.addEventListener("keydown", (e) => { if (e.key === "Alt") { altHeld = true; e.preventDefault(); } });
+window.addEventListener("keyup",   (e) => { if (e.key === "Alt") { altHeld = false; } });
+window.addEventListener("blur",    () => { altHeld = false; });
+
+// Initial paint
+setSnap(true);
+render(null, null, false);
+</script>
+</body>
+</html>
