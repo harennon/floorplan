@@ -102,7 +102,7 @@ export function render() {
 
   // Draw fit pill below selected symbol's AABB bottom-center
   if (clearances.length > 0) {
-    _appendPill(sym, worst, clearances);
+    _appendPill(sym, worst);
   }
 }
 
@@ -227,9 +227,8 @@ function _appendChip(c) {
  * Append the fit-verdict pill below the selected symbol's AABB bottom-center.
  * @param {import("./symbols.js").Sym} sym
  * @param {import("./clearance.js").ClrStatus} worst
- * @param {import("./clearance.js").Clearance[]} clearances
  */
-function _appendPill(sym, worst, clearances) {
+function _appendPill(sym, worst) {
   if (!_overlayEl) return;
 
   const box = aabb(sym);
@@ -241,7 +240,7 @@ function _appendPill(sym, worst, clearances) {
   pill.style.left = botCenter.x + "px";
   pill.style.top  = (botCenter.y + PILL_OFFSET) + "px";
 
-  const verdictText = _verdictText(worst, clearances);
+  const verdictText = _verdictText(worst);
   pill.textContent = verdictText;
   pill.style.color = _statusColor(worst);
   pill.setAttribute("aria-hidden", "true");
@@ -252,18 +251,16 @@ function _appendPill(sym, worst, clearances) {
 
 /**
  * Return the verdict text for the fit pill.
+ * worst==="bad" covers both symbol overlap and wall-flush cases (gap clamped to
+ * 0). The LLD specifies "Won't fit — overlap" for all bad states; the sub-
+ * distinction ("no walkway" vs "overlap") was unreachable because any bad status
+ * means gap<=0, so hasOverlap was always true. Simplified to a single branch.
  * @param {import("./clearance.js").ClrStatus} worst
- * @param {import("./clearance.js").Clearance[]} clearances
  * @returns {string}
  */
-function _verdictText(worst, clearances) {
-  const hasOverlap = clearances.some(c => c.gap <= 0);
-  if (worst === "bad") {
-    return hasOverlap ? "Won't fit — overlap" : "Won't fit — no walkway";
-  }
-  if (worst === "tight") {
-    return `Tight — under ${fmtLen(threshold)} ${unitLabel()} walkway`;
-  }
+function _verdictText(worst) {
+  if (worst === "bad")   return "Won't fit — overlap";
+  if (worst === "tight") return `Tight — under ${fmtLen(threshold)} ${unitLabel()} walkway`;
   return "It fits — room to spare";
 }
 

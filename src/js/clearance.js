@@ -275,67 +275,119 @@ export function computeClearances(sym, world) {
     const wallHalf = WALL_M / 2;
 
     // Left side: shoot left from box.l at midY
-    const dLeft = _wallDist(box.l, midY, "left");
-    if (dLeft !== null) {
-      const rawGap = dLeft; // distance from AABB edge to verts centerline
-      const gap = Math.max(0, rawGap - wallHalf);
-      const bx = box.l - rawGap; // the wall centerline x
-      results.push({
-        label: "left wall",
-        kind: "wall",
-        gap,
-        status: classify(gap),
-        a: { x: box.l, y: midY },
-        b: { x: bx + wallHalf, y: midY }, // inner face
-      });
+    {
+      const dLeft  = _wallDist(box.l, midY, "left");
+      const dRight0 = dLeft === null ? _wallDist(box.l, midY, "right") : null;
+      if (dLeft !== null) {
+        const rawGap = dLeft;
+        const gap = Math.max(0, rawGap - wallHalf);
+        const bx = box.l - rawGap; // wall centerline x
+        results.push({
+          label: "left wall",
+          kind: "wall",
+          gap,
+          status: classify(gap),
+          a: { x: box.l, y: midY },
+          b: { x: bx + wallHalf, y: midY },
+        });
+      } else if (dRight0 !== null) {
+        // AABB left edge has crossed the wall — straddle (Edge Case 8)
+        results.push({
+          label: "left wall",
+          kind: "wall",
+          gap: 0,
+          status: "bad",
+          a: { x: box.l, y: midY },
+          b: { x: box.l + dRight0 - wallHalf, y: midY },
+        });
+      }
     }
 
     // Right side: shoot right from box.r at midY
-    const dRight = _wallDist(box.r, midY, "right");
-    if (dRight !== null) {
-      const rawGap = dRight;
-      const gap = Math.max(0, rawGap - wallHalf);
-      const bx = box.r + rawGap;
-      results.push({
-        label: "right wall",
-        kind: "wall",
-        gap,
-        status: classify(gap),
-        a: { x: box.r, y: midY },
-        b: { x: bx - wallHalf, y: midY },
-      });
+    {
+      const dRight = _wallDist(box.r, midY, "right");
+      const dLeft0  = dRight === null ? _wallDist(box.r, midY, "left") : null;
+      if (dRight !== null) {
+        const rawGap = dRight;
+        const gap = Math.max(0, rawGap - wallHalf);
+        const bx = box.r + rawGap;
+        results.push({
+          label: "right wall",
+          kind: "wall",
+          gap,
+          status: classify(gap),
+          a: { x: box.r, y: midY },
+          b: { x: bx - wallHalf, y: midY },
+        });
+      } else if (dLeft0 !== null) {
+        // AABB right edge has crossed the wall — straddle (Edge Case 8)
+        results.push({
+          label: "right wall",
+          kind: "wall",
+          gap: 0,
+          status: "bad",
+          a: { x: box.r, y: midY },
+          b: { x: box.r - dLeft0 + wallHalf, y: midY },
+        });
+      }
     }
 
     // Top side: shoot up from midX at box.t (y-down coords: "up" = -y direction)
-    const dTop = _wallDist(midX, box.t, "up");
-    if (dTop !== null) {
-      const rawGap = dTop;
-      const gap = Math.max(0, rawGap - wallHalf);
-      const by = box.t - rawGap;
-      results.push({
-        label: "top wall",
-        kind: "wall",
-        gap,
-        status: classify(gap),
-        a: { x: midX, y: box.t },
-        b: { x: midX, y: by + wallHalf },
-      });
+    {
+      const dTop  = _wallDist(midX, box.t, "up");
+      const dDown0 = dTop === null ? _wallDist(midX, box.t, "down") : null;
+      if (dTop !== null) {
+        const rawGap = dTop;
+        const gap = Math.max(0, rawGap - wallHalf);
+        const by = box.t - rawGap;
+        results.push({
+          label: "top wall",
+          kind: "wall",
+          gap,
+          status: classify(gap),
+          a: { x: midX, y: box.t },
+          b: { x: midX, y: by + wallHalf },
+        });
+      } else if (dDown0 !== null) {
+        // AABB top edge has crossed the wall — straddle (Edge Case 8)
+        results.push({
+          label: "top wall",
+          kind: "wall",
+          gap: 0,
+          status: "bad",
+          a: { x: midX, y: box.t },
+          b: { x: midX, y: box.t + dDown0 - wallHalf },
+        });
+      }
     }
 
     // Bottom side: shoot down from midX at box.b
-    const dBottom = _wallDist(midX, box.b, "down");
-    if (dBottom !== null) {
-      const rawGap = dBottom;
-      const gap = Math.max(0, rawGap - wallHalf);
-      const by = box.b + rawGap;
-      results.push({
-        label: "bottom wall",
-        kind: "wall",
-        gap,
-        status: classify(gap),
-        a: { x: midX, y: box.b },
-        b: { x: midX, y: by - wallHalf },
-      });
+    {
+      const dBottom = _wallDist(midX, box.b, "down");
+      const dUp0    = dBottom === null ? _wallDist(midX, box.b, "up") : null;
+      if (dBottom !== null) {
+        const rawGap = dBottom;
+        const gap = Math.max(0, rawGap - wallHalf);
+        const by = box.b + rawGap;
+        results.push({
+          label: "bottom wall",
+          kind: "wall",
+          gap,
+          status: classify(gap),
+          a: { x: midX, y: box.b },
+          b: { x: midX, y: by - wallHalf },
+        });
+      } else if (dUp0 !== null) {
+        // AABB bottom edge has crossed the wall — straddle (Edge Case 8)
+        results.push({
+          label: "bottom wall",
+          kind: "wall",
+          gap: 0,
+          status: "bad",
+          a: { x: midX, y: box.b },
+          b: { x: midX, y: box.b - dUp0 + wallHalf },
+        });
+      }
     }
 
     // Only use the first containing room to avoid duplicate wall annotations

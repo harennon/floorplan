@@ -202,7 +202,7 @@ export function update() {
       banner.textContent = "Nothing nearby";
       banner.style.color = "var(--clr-ok)";
     } else {
-      banner.textContent = _verdictText(worst, sorted);
+      banner.textContent = _verdictText(worst);
       banner.style.color = _statusColor(worst);
     }
     _body.appendChild(banner);
@@ -231,14 +231,11 @@ function _statusColor(status) {
   return "var(--clr-ok)";
 }
 
-/** Verdict copy for the panel banner (mirrors render pill text). */
-function _verdictText(worst, clearances) {
-  const hasOverlap = clearances.some(c => c.gap <= 0);
-  if (worst === "bad") {
-    return hasOverlap ? "Won't fit — overlap" : "Won't fit — no walkway";
-  }
-  if (worst === "tight") {
-    return `Tight — under ${fmtLen(threshold)} ${unitLabel()} walkway`;
-  }
+/** Verdict copy for the panel banner (mirrors render pill text).
+ * Simplified: any bad status means gap<=0 (classify clamps), so the
+ * "no walkway" branch was unreachable. Uses "overlap" for all bad cases. */
+function _verdictText(worst) {
+  if (worst === "bad")   return "Won't fit — overlap";
+  if (worst === "tight") return `Tight — under ${fmtLen(threshold)} ${unitLabel()} walkway`;
   return "It fits — room to spare";
 }
