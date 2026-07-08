@@ -52,12 +52,22 @@ function _capture() {
 /**
  * Apply a snapshot to the live models. Preserves the current in-progress chain.
  * Never calls render() — the caller is responsible for scheduleRender().
+ *
+ * Deep-clones the snapshot before handing it to the hydrate functions so that
+ * the live model objects never share identity with the stored snapshot objects.
+ * Without this, an in-place mutation of a live element (move, rotate, resize)
+ * would silently mutate _present too, causing commit()'s stringify dirty-check
+ * to treat the edit as a no-op and leaving _future un-cleared (silent data loss
+ * on subsequent redo).
+ *
  * @param {GeomSnapshot} snap
  */
 function _apply(snap) {
+  // Deep-clone so the live models never share object refs with the snapshot.
+  const cloned = JSON.parse(JSON.stringify(snap));
   // Preserve the live in-progress chain (Edge Case 1)
-  hydrateWalls({ rooms: snap.rooms, chain: [...wallsModel.chain] });
-  hydrateSymbols({ symbols: snap.symbols });
+  hydrateWalls({ rooms: cloned.rooms, chain: [...wallsModel.chain] });
+  hydrateSymbols({ symbols: cloned.symbols });
   // history NEVER calls render(); the main.js caller triggers scheduleRender()
 }
 

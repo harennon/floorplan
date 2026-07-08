@@ -13,7 +13,7 @@ import { init as initInteractions, setDrawHooks, setSelectHooks } from "./intera
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
 import { init as initWallTool, isDrawMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit } from "./wallTool.js";
 import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from "./measure.js";
-import { init as initDimEntry, reposition as dimReposition, getEditingEdge } from "./dimEntry.js";
+import { init as initDimEntry, reposition as dimReposition, getEditingEdge, setHistoryCommit as dimSetHistoryCommit } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim, setHistoryCommit as symDimSetHistoryCommit } from "./symbolDimEntry.js";
 import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast } from "./symbolTool.js";
@@ -188,6 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Wire history.commit into tool modules (injection to avoid circular imports)
   wallSetHistoryCommit(historyCommit);
   symDimSetHistoryCommit(historyCommit);
+  dimSetHistoryCommit(historyCommit); // wall-edge resize (dimEntry.js)
 
   // Wire history + showToast into symbolTool
   setHistoryAndToast(
@@ -237,20 +238,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const meta  = e.ctrlKey || e.metaKey;
 
-    // Undo: Ctrl/Cmd+Z (without Shift)
-    if (meta && !e.shiftKey && e.key === "z") {
+    // Undo: Ctrl/Cmd+Z (without Shift) — accept both cases so Caps Lock doesn't break it
+    if (meta && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
       e.preventDefault();
       if (historyUndo()) scheduleRender();
       return;
     }
 
-    // Redo: Ctrl/Cmd+Shift+Z or Ctrl+Y
+    // Redo: Ctrl/Cmd+Shift+Z or Ctrl+Y — accept both cases so Caps Lock doesn't break it
     if (meta && e.shiftKey && (e.key === "z" || e.key === "Z")) {
       e.preventDefault();
       if (historyRedo()) scheduleRender();
       return;
     }
-    if (meta && !e.shiftKey && e.key === "y") {
+    if (meta && !e.shiftKey && (e.key === "y" || e.key === "Y")) {
       e.preventDefault();
       if (historyRedo()) scheduleRender();
       return;
