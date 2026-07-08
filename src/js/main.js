@@ -16,7 +16,7 @@ import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from
 import { init as initDimEntry, reposition as dimReposition, getEditingEdge, setHistoryCommit as dimSetHistoryCommit } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim, setHistoryCommit as symDimSetHistoryCommit } from "./symbolDimEntry.js";
-import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast } from "./symbolTool.js";
+import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, repositionFlushGuide, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast } from "./symbolTool.js";
 import { init as initStore, loadLocal } from "./store.js";
 import { readBootHash } from "./share.js";
 import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
@@ -54,13 +54,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const inspectorEl = document.getElementById("symbol-inspector");
 
   // HUD
-  const elZoom         = document.getElementById("hud-zoom");
-  const elScale        = document.getElementById("hud-scale");
-  const elCursor       = document.getElementById("hud-cursor");
-  const elUnitImp      = document.getElementById("unit-imperial");
-  const elUnitMet      = document.getElementById("unit-metric");
-  const elHudSnap      = document.getElementById("hud-snap-val");
-  const elSnapModeBtn  = document.getElementById("hud-snap-mode");
+  const elZoom           = document.getElementById("hud-zoom");
+  const elScale          = document.getElementById("hud-scale");
+  const elCursor         = document.getElementById("hud-cursor");
+  const elUnitImp        = document.getElementById("unit-imperial");
+  const elUnitMet        = document.getElementById("unit-metric");
+  const elHudSnap        = document.getElementById("hud-snap-val");
+  const elSnapModeBtn    = document.getElementById("hud-snap-mode");
+  const elGridToggleBtn  = document.getElementById("hud-grid-toggle");
 
   // Zoom buttons
   const btnZoomIn  = document.getElementById("btn-zoom-in");
@@ -108,7 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ── Initialise modules ─────────────────────────────────────────────────────
   initSurface(stage, svg, gGrid, gWorld);
-  initHud(elZoom, elScale, elCursor, elUnitImp, elUnitMet, elSnapModeBtn);
+  initHud(elZoom, elScale, elCursor, elUnitImp, elUnitMet, elSnapModeBtn, elGridToggleBtn);
 
   // wallRender binds mount points + injected getters
   initWallRender(gWorld, gDraft, gSnap, labelsEl, dimLabelsEl, getSnap, getHighlightRoomId, getEditingEdge);
@@ -173,10 +174,12 @@ document.addEventListener("DOMContentLoaded", () => {
   // symbolTool — placement, selection, inspector
   initSymbolTool({
     stage,
-    dock:       dockEl,
-    inspector:  inspectorEl,
+    dock:        dockEl,
+    inspector:   inspectorEl,
     setTool,
     isDrawMode,
+    snapTag:     snapTagEl,
+    symOverlay:  gSymOverlay,
   });
 
   // Wire select hooks into interactions (no static symbol import there)
@@ -196,6 +199,7 @@ document.addEventListener("DOMContentLoaded", () => {
   //        symbolDimReposition → repositionInspector → dimReposition →
   //        measureUpdate → clearancePanelUpdate
   onRender(symbolRenderFn);
+  onRender(repositionFlushGuide); // re-append guide line after symbolRender clears overlay
   onRender(clearanceRenderFn);   // leaders above symbol bodies, below #symbol-overlay
   onRender(symbolDimReposition);
   onRender(repositionInspector);

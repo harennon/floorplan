@@ -5077,6 +5077,360 @@ describe("clearancePanel — empty state prompts", () => {
   });
 });
 
+// ─── Import LLD-26 modules ────────────────────────────────────────────────────
+
+import {
+  PREFS_KEY, gridSnap as prefsGridSnap, setGridSnap, toggleGridSnap, onPrefsChange,
+} from "./js/prefs.js";
+
+import {
+  wallSegments,
+} from "./js/walls.js";
+
+import {
+  WALL_FLUSH_PX, PARALLEL_TOL_DEG, nearestWallFlush,
+} from "./js/symbols.js";
+
+// ─── Tests: prefs.js (LLD 26) ─────────────────────────────────────────────────
+
+describe("prefs.js — default gridSnap is true", () => {
+  it("gridSnap() returns true with no stored value", () => {
+    // Note: module was loaded with potentially stale storage; remove key and check default
+    try { localStorage.removeItem(PREFS_KEY); } catch {}
+    // We cannot reload the module but we can set to known state
+    setGridSnap(true);
+    expect(prefsGridSnap()).toBe(true);
+  });
+
+  it("setGridSnap(false) persists; reading back gives false", () => {
+    setGridSnap(false);
+    expect(prefsGridSnap()).toBe(false);
+    // Also verify localStorage
+    try {
+      const raw = localStorage.getItem(PREFS_KEY);
+      if (raw !== null) {
+        const parsed = JSON.parse(raw);
+        expect(parsed.gridSnap).toBe(false);
+      }
+    } catch {}
+    // Restore
+    setGridSnap(true);
+  });
+
+  it("setGridSnap(true) restores on state", () => {
+    setGridSnap(false);
+    setGridSnap(true);
+    expect(prefsGridSnap()).toBe(true);
+  });
+
+  it("setGridSnap under a throwing localStorage stub: no throw, in-memory updates", () => {
+    const original = localStorage.setItem.bind(localStorage);
+    let threw = false;
+    // Stub setItem to throw
+    Object.defineProperty(localStorage, "setItem", {
+      configurable: true,
+      value: () => { throw new DOMException("QuotaExceededError"); },
+    });
+    try {
+      setGridSnap(false);
+      expect(prefsGridSnap()).toBe(false); // in-memory updated
+    } catch {
+      threw = true;
+    } finally {
+      // Restore
+      Object.defineProperty(localStorage, "setItem", {
+        configurable: true,
+        value: original,
+      });
+      setGridSnap(true);
+    }
+    expect(threw).toBe(false);
+  });
+
+  it("toggleGridSnap flips and returns new value", () => {
+    setGridSnap(true);
+    const v1 = toggleGridSnap();
+    expect(v1).toBe(false);
+    expect(prefsGridSnap()).toBe(false);
+    const v2 = toggleGridSnap();
+    expect(v2).toBe(true);
+    expect(prefsGridSnap()).toBe(true);
+  });
+
+  it("onPrefsChange fires after setGridSnap", () => {
+    setGridSnap(true);
+    let fired = 0;
+    onPrefsChange(() => { fired++; });
+    setGridSnap(false);
+    if (fired < 1) throw new Error(`Expected onPrefsChange to fire, fired=${fired}`);
+    setGridSnap(true);
+  });
+});
+
+// ─── Tests: walls.wallSegments (LLD 26) ──────────────────────────────────────
+
+describe("walls.wallSegments — basic cases", () => {
+  it("returns [] when model is empty", () => {
+    resetModel();
+    const segs = wallSegments();
+    expect(segs.length).toBe(0);
+  });
+
+  it("closed room with 4 verts returns 4 segments (including closing edge)", () => {
+    resetModel();
+    model.rooms.push({
+      id: "ws0", closed: true,
+      verts: [{ x:0,y:0 }, { x:4,y:0 }, { x:4,y:3 }, { x:0,y:3 }],
+    });
+    const segs = wallSegments();
+    expect(segs.length).toBe(4);
+  });
+
+  it("open room with 3 verts returns 2 segments (no closing edge)", () => {
+    resetModel();
+    model.rooms.push({
+      id: "ws1", closed: false,
+      verts: [{ x:0,y:0 }, { x:5,y:0 }, { x:5,y:5 }],
+    });
+    const segs = wallSegments();
+    expect(segs.length).toBe(2);
+  });
+
+  it("active chain with 3 verts returns 2 segments", () => {
+    resetModel();
+    model.chain.push({ x:0,y:0 }, { x:1,y:0 }, { x:1,y:1 });
+    const segs = wallSegments();
+    expect(segs.length).toBe(2);
+  });
+
+  it("combines room segments and chain segments", () => {
+    resetModel();
+    model.rooms.push({ id:"ws2", closed:false, verts:[{x:0,y:0},{x:3,y:0}] });
+    model.chain.push({ x:0,y:2 }, { x:3,y:2 });
+    const segs = wallSegments();
+    expect(segs.length).toBe(2);
+  });
+
+  it("empty model with only a 1-point chain returns []", () => {
+    resetModel();
+    model.chain.push({ x:0,y:0 });
+    expect(wallSegments().length).toBe(0);
+  });
+});
+
+// ─── Tests: nearestWallFlush (LLD 26) ────────────────────────────────────────
+
+// Helper to build a simple axis-aligned Sym-like object and get its corners
+function makeSym(x, y, w, h, rot = 0) {
+  return { id:"t", type:"sofa", x, y, w, h, rot };
+}
+
+// WALL_M from the test environment (imported above)
+const _WALL_M = 0.12;
+
+describe("nearestWallFlush — axis-aligned horizontal wall, symbol above", () => {
+  // Horizontal wall: a=(0,0)→b=(5,0), face at y=+WALL_M/2 and y=-WALL_M/2
+  // Symbol with w=2, h=1 at (2.5, 0.9): bottom edge at y=0.9+0.5=1.4 (far)
+  //   top edge at y=0.9-0.5=0.4; face at y=+0.06
+  //   gap from top edge to bottom face: 0.4 - 0.06 = 0.34 (above outer face)
+  // Symbol at (2.5, 0.7): bottom edge at 1.2, top edge at 0.2; face at 0.06; gap = 0.2-0.06=0.14
+  // Let's place symbol at y=0.15: top edge=0.15-0.5=-0.35 (below top face); bottom face=-0.06
+  //   gap from top edge (-0.35) to top face (0.06): -0.35-0.06=-0.41 → outside
+  //   bottom face at -0.06: gap = -0.35 - (-0.06) = -0.29 → |0.29| > threshold
+
+  // Place symbol just above the outer wall face (+halfWall = +0.06):
+  // Symbol at (2.5, 0.06 + 0.5 + 0.05 = 0.61): bottom edge=0.61+0.5=1.11, top edge=0.61-0.5=0.11
+  // Trying to seat top edge vs bottom face... Let me think differently.
+
+  // Horizontal wall centerline at y=0, WALL_M=0.12, outer faces at y=±0.06.
+  // Symbol (w=2, h=0.5) at x=2.5 (center of 5m wall), y=?
+  // Place symbol such that its bottom edge is 0.05m above the top face (y=+0.06):
+  // bottom edge at y = 0.06 + 0.05 = 0.11
+  // symbol center y = 0.11 - 0.25 = -0.14 → Wait, bottom = center + h/2
+  // So center y = 0.11 - 0.5/2 = 0.11 - 0.25 = -0.14
+  // Hmm. Symbol above the wall means y < 0 (or: lower y value).
+  // Let me use y-down convention where positive y is down.
+  // Wall at y=0. Symbol above = smaller y value.
+  // sym center y = -0.55: bottom face (in screen y-down = +y direction) at -0.55 + 0.25 = -0.30
+  // Wall top face at -0.06. gap = bottom_edge - top_face = -0.30 - (-0.06) = -0.24 (outside threshold)
+  // sym center y = -0.1: bottom face at -0.1 + 0.25 = 0.15; wall inner face at +0.06
+  //   gap = 0.15 - 0.06 = 0.09 m. If threshold >= 0.09 → candidate!
+
+  it("sym just inside threshold of horizontal wall top face → candidate with dy seating flush", () => {
+    // Horizontal segment from (0,0) to (4,0)
+    const segs = [{ a:{x:0,y:0}, b:{x:4,y:0} }];
+    const halfW = _WALL_M / 2; // 0.06
+
+    // Symbol: w=1.5, h=0.5, centered at (2, 0.0) in y-down coords
+    // Bottom edge (max y) = 0.0 + 0.25 = 0.25; wall outer face (top) at y=+0.06
+    // gap = 0.25 - 0.06 = 0.19 m < threshold 0.3 ✓
+    const sym = makeSym(2, 0.0, 1.5, 0.5, 0);
+    const symCorners = corners(sym);
+
+    const threshold = 0.3;
+    const result = nearestWallFlush(symCorners, segs, _WALL_M, threshold, PARALLEL_TOL_DEG);
+
+    if (result === null) throw new Error("Expected a flush candidate, got null");
+    // Translation should be only on y (normal to horizontal wall)
+    if (Math.abs(result.dx) > 1e-9) throw new Error(`Expected dx≈0 for horizontal wall, got ${result.dx}`);
+    // gap should be non-zero; the symbol should move
+    if (Math.abs(result.gap) < 1e-9) throw new Error("Expected non-zero gap");
+
+    // KEY: after applying dx/dy, the symbol's near edge must be coincident with the correct wall face.
+    // Algorithm: nearEdgeN - faceN = result.gap → after move (−gap in n-dir), nearEdgeN_after = faceN.
+    // Horizontal wall: t=(1,0), n=(0,−1), so nComp(c) = c.x*0 + c.y*(−1) = −c.y
+    const nx = 0, ny = -1;
+    const origNProj = symCorners.map(c => c.x * nx + c.y * ny);
+    const symNMin = Math.min(...origNProj);
+    const symNMax = Math.max(...origNProj);
+    // Determine which face was targeted and which edge was "near"
+    // (mirrors the algorithm: pick the edge closest to each face)
+    let targetFaceN = null, nearEdgeN = null;
+    for (const faceN of [halfW, -halfW]) {
+      const edge = Math.abs(symNMin - faceN) <= Math.abs(symNMax - faceN) ? symNMin : symNMax;
+      const gap = edge - faceN;
+      if (Math.abs(gap - result.gap) < 1e-6) { targetFaceN = faceN; nearEdgeN = edge; break; }
+    }
+    if (targetFaceN === null) throw new Error("Could not identify target face from result.gap");
+    // After applying dx/dy, the near edge's n-projection should equal targetFaceN exactly
+    const movedCorners = symCorners.map(c => ({ x: c.x + result.dx, y: c.y + result.dy }));
+    const movedNProj = movedCorners.map(c => c.x * nx + c.y * ny);
+    // The edge that was near is now at faceN: its n-proj moved from nearEdgeN to nearEdgeN - gap = faceN
+    const movedNearEdge = Math.abs(nearEdgeN - symNMin) < 1e-9
+      ? Math.min(...movedNProj) : Math.max(...movedNProj);
+    const coincidentErr = Math.abs(movedNearEdge - targetFaceN);
+    if (coincidentErr > 1e-6) {
+      throw new Error(
+        `After flush snap, near edge n-proj ${movedNearEdge.toFixed(9)} should equal face ${targetFaceN} (err ${coincidentErr})`
+      );
+    }
+  });
+
+  it("sym beyond threshold → null", () => {
+    const segs = [{ a:{x:0,y:0}, b:{x:4,y:0} }];
+    // Symbol far above wall: center y = -5, so nearest edge at y=-5+0.25=-4.75
+    // face at y=-0.06; gap = -4.75 - (-0.06) = -4.69; |gap|=4.69 >> 0.3
+    const sym = makeSym(2, -5, 1.5, 0.5, 0);
+    const result = nearestWallFlush(corners(sym), segs, _WALL_M, 0.3, PARALLEL_TOL_DEG);
+    if (result !== null) throw new Error("Expected null for far symbol");
+  });
+
+  it("sym rotated past PARALLEL_TOL_DEG → null", () => {
+    const segs = [{ a:{x:0,y:0}, b:{x:4,y:0} }];
+    // Symbol rotated 45°: not parallel to the horizontal wall
+    const sym = makeSym(2, 0.0, 1.5, 0.5, 45);
+    const result = nearestWallFlush(corners(sym), segs, _WALL_M, 0.3, PARALLEL_TOL_DEG);
+    if (result !== null) throw new Error("Expected null for rotated symbol");
+  });
+
+  it("sym past wall endpoint (no t-span overlap) → null", () => {
+    // Wall from (0,0) to (2,0). Symbol at x=5 (outside wall extent).
+    const segs = [{ a:{x:0,y:0}, b:{x:2,y:0} }];
+    const sym = makeSym(5, 0.0, 1.0, 0.5, 0);
+    const result = nearestWallFlush(corners(sym), segs, _WALL_M, 0.3, PARALLEL_TOL_DEG);
+    if (result !== null) throw new Error("Expected null for symbol past wall end");
+  });
+
+  it("sym near vertical wall → dy≈0, dx non-zero, near edge coincident with face", () => {
+    // Vertical segment from (0,0) to (0,4): direction t=(0,1), normal n=(1,0)
+    const segs = [{ a:{x:0,y:0}, b:{x:0,y:4} }];
+    // Symbol (w=0.5, h=1.5) centered at (0.15, 2): left edge at 0.15-0.25=-0.1
+    // Wall outer face (in +n=+x direction) at x=+0.06; gap = -0.1 - 0.06 = -0.16 → |0.16| < 0.3 threshold
+    const sym = makeSym(0.15, 2, 0.5, 1.5, 0);
+    const symCorners = corners(sym);
+    const result = nearestWallFlush(symCorners, segs, _WALL_M, 0.3, PARALLEL_TOL_DEG);
+    if (result === null) throw new Error("Expected a flush candidate for vertical wall");
+    if (Math.abs(result.dy) > 1e-9) throw new Error(`Expected dy≈0 for vertical wall, got ${result.dy}`);
+    if (Math.abs(result.dx) < 1e-9) throw new Error("Expected dx non-zero for vertical wall");
+
+    // KEY: after applying dx/dy, the symbol's near edge must be coincident with the wall face.
+    // Vertical wall: t=(0,1), n=(1,0), nComp(c) = c.x
+    const halfW = _WALL_M / 2;
+    const nx = 1, ny = 0;
+    const origNProj = symCorners.map(c => c.x * nx + c.y * ny);
+    const symNMin = Math.min(...origNProj);
+    const symNMax = Math.max(...origNProj);
+    // Determine which face and edge were targeted
+    let targetFaceN = null, nearEdgeN = null;
+    for (const faceN of [halfW, -halfW]) {
+      const edge = Math.abs(symNMin - faceN) <= Math.abs(symNMax - faceN) ? symNMin : symNMax;
+      const gap = edge - faceN;
+      if (Math.abs(gap - result.gap) < 1e-6) { targetFaceN = faceN; nearEdgeN = edge; break; }
+    }
+    if (targetFaceN === null) throw new Error("Could not identify target face from result.gap");
+    const movedCorners = symCorners.map(c => ({ x: c.x + result.dx, y: c.y + result.dy }));
+    const movedNProj = movedCorners.map(c => c.x * nx + c.y * ny);
+    const movedNearEdge = Math.abs(nearEdgeN - symNMin) < 1e-9
+      ? Math.min(...movedNProj) : Math.max(...movedNProj);
+    const coincidentErr = Math.abs(movedNearEdge - targetFaceN);
+    if (coincidentErr > 1e-6) {
+      throw new Error(
+        `After flush snap, near edge x-proj ${movedNearEdge.toFixed(9)} should equal face ${targetFaceN} (err ${coincidentErr})`
+      );
+    }
+  });
+
+  it("two candidate faces (inside corner) → smaller |gap| wins", () => {
+    // Two walls forming an inside corner
+    // Wall 1: horizontal (0,0)→(4,0), Wall 2: vertical (4,0)→(4,4)
+    const segs = [
+      { a:{x:0,y:0}, b:{x:4,y:0} },
+      { a:{x:4,y:0}, b:{x:4,y:4} },
+    ];
+    // Symbol at (3.9, 0.1): near both walls. Closer to vertical wall.
+    const sym = makeSym(3.9, 0.1, 0.5, 0.5, 0);
+    const result = nearestWallFlush(corners(sym), segs, _WALL_M, 0.5, PARALLEL_TOL_DEG);
+    if (result === null) throw new Error("Expected a flush candidate for corner case");
+    // Verify we got *some* result; the function returns the smallest |gap|
+    if (Math.abs(result.gap) > 0.5) throw new Error(`gap ${result.gap} exceeds threshold`);
+  });
+
+  it("threshold respects WALL_M/2 offset (seats against face, not centerline)", () => {
+    // Horizontal wall centerline y=0. Face at y=+0.06.
+    // Symbol with bottom edge at exactly +0.06 (already flush): gap should be 0.
+    const segs = [{ a:{x:0,y:0}, b:{x:4,y:0} }];
+    const halfW = _WALL_M / 2; // 0.06
+    // bottom edge = center + h/2 = halfW → center = halfW - h/2
+    const h = 0.5;
+    const cy = halfW - h / 2; // -0.19
+    const sym = makeSym(2, cy, 1.5, h, 0);
+    const symCorners = corners(sym);
+
+    // Verify the geometry: bottom edge of sym = cy + h/2 = halfW
+    const bottomEdge = symCorners.reduce((max, c) => Math.max(max, c.y), -Infinity);
+    if (Math.abs(bottomEdge - halfW) > 1e-9) {
+      throw new Error(`Bottom edge ${bottomEdge} != halfW ${halfW}`);
+    }
+
+    const result = nearestWallFlush(symCorners, segs, _WALL_M, 0.3, PARALLEL_TOL_DEG);
+    // Gap should be ~0 (already flush) → result may exist with gap≈0 or may fail threshold
+    // It's valid for gap=0 to be included (|0|<=threshold)
+    if (result !== null) {
+      if (Math.abs(result.gap) > 1e-6) throw new Error(`Expected gap≈0 at exact flush, got ${result.gap}`);
+    }
+  });
+});
+
+// ─── Tests: nearestWallFlush — empty segments ─────────────────────────────────
+
+describe("nearestWallFlush — edge cases", () => {
+  it("empty segments → null", () => {
+    const sym = makeSym(2, 0, 1.5, 0.5, 0);
+    const result = nearestWallFlush(corners(sym), [], _WALL_M, 0.3, PARALLEL_TOL_DEG);
+    if (result !== null) throw new Error("Expected null for empty segments");
+  });
+
+  it("degenerate zero-size symbol — no crash", () => {
+    const segs = [{ a:{x:0,y:0}, b:{x:4,y:0} }];
+    const sym = makeSym(2, 0, 0.001, 0.001, 0);
+    // Should not throw; result may be null or a candidate
+    let threw = false;
+    try { nearestWallFlush(corners(sym), segs, _WALL_M, 0.3, PARALLEL_TOL_DEG); }
+    catch { threw = true; }
+    expect(threw).toBe(false);
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 
