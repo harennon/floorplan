@@ -1055,6 +1055,381 @@ describe("units.js — lossless round-trip", () => {
   });
 });
 
+// ─── Import symbols.js ────────────────────────────────────────────────────────
+
+import {
+  model as symbolModel,
+  CATALOG,
+  createSymbol, addSymbol, removeSymbol, duplicateSymbol, getSymbol,
+  hitTest, pickSymbol, clampDim, resizeSymbol, moveSymbol, rotateSymbol, corners,
+} from "./js/symbols.js";
+
+/** Reset symbols model between suites. */
+function resetSymbolModel() {
+  symbolModel.symbols.length = 0;
+}
+
+// ─── Tests: symbols.js — model & catalog ─────────────────────────────────────
+
+describe("symbols.js — createSymbol / addSymbol", () => {
+  it("createSymbol('bed', 1, 2) returns Sym with catalog defaults and unique id", () => {
+    resetSymbolModel();
+    const s = createSymbol("bed", 1, 2);
+    expect(s.type).toBe("bed");
+    expect(s.x).toBeCloseTo(1, 9);
+    expect(s.y).toBeCloseTo(2, 9);
+    expect(s.w).toBeCloseTo(CATALOG.bed.w, 9);
+    expect(s.h).toBeCloseTo(CATALOG.bed.h, 9);
+    expect(s.rot).toBe(0);
+    if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(`id should start with 's', got ${s.id}`);
+  });
+
+  it("addSymbol appends to model.symbols", () => {
+    resetSymbolModel();
+    const s = createSymbol("chair", 0, 0);
+    addSymbol(s);
+    expect(symbolModel.symbols.length).toBe(1);
+    expect(symbolModel.symbols[0]).toBe(s);
+  });
+
+  it("successive ids are unique", () => {
+    resetSymbolModel();
+    const a = createSymbol("bed", 0, 0);
+    const b = createSymbol("sofa", 0, 0);
+    if (a.id === b.id) throw new Error("duplicate ids");
+  });
+
+  it("model objects are JSON-round-trippable (serialization guarantee)", () => {
+    resetSymbolModel();
+    const s = createSymbol("fridge", 3, 4);
+    addSymbol(s);
+    const json = JSON.stringify(symbolModel);
+    const parsed = JSON.parse(json);
+    expect(parsed.symbols.length).toBe(1);
+    const ps = parsed.symbols[0];
+    expect(ps.id).toBe(s.id);
+    expect(ps.type).toBe("fridge");
+    expect(ps.x).toBeCloseTo(3, 9);
+    expect(ps.y).toBeCloseTo(4, 9);
+    expect(ps.w).toBeCloseTo(s.w, 9);
+    expect(ps.h).toBeCloseTo(s.h, 9);
+    expect(ps.rot).toBe(0);
+  });
+});
+
+describe("symbols.js — removeSymbol", () => {
+  it("removes by id and returns true", () => {
+    resetSymbolModel();
+    const s = createSymbol("desk", 0, 0);
+    addSymbol(s);
+    const ok = removeSymbol(s.id);
+    expect(ok).toBe(true);
+    expect(symbolModel.symbols.length).toBe(0);
+  });
+
+  it("returns false for unknown id (no-op)", () => {
+    resetSymbolModel();
+    const ok = removeSymbol("nonexistent");
+    expect(ok).toBe(false);
+  });
+});
+
+describe("symbols.js — duplicateSymbol", () => {
+  it("creates a new Sym offset by +0.3m, same type/dims/rot", () => {
+    resetSymbolModel();
+    const s = createSymbol("table", 1, 2);
+    s.rot = 45;
+    addSymbol(s);
+    const dup = duplicateSymbol(s.id);
+    if (dup === null) throw new Error("Expected non-null duplicate");
+    expect(dup.type).toBe(s.type);
+    expect(dup.w).toBeCloseTo(s.w, 9);
+    expect(dup.h).toBeCloseTo(s.h, 9);
+    expect(dup.rot).toBe(s.rot);
+    expect(dup.x).toBeCloseTo(s.x + 0.3, 9);
+    expect(dup.y).toBeCloseTo(s.y + 0.3, 9);
+  });
+
+  it("duplicate has a different id", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 0, 0);
+    addSymbol(s);
+    const dup = duplicateSymbol(s.id);
+    if (dup === null) throw new Error("null duplicate");
+    if (dup.id === s.id) throw new Error("duplicate id not unique");
+  });
+
+  it("original symbol is unchanged after duplicate", () => {
+    resetSymbolModel();
+    const s = createSymbol("chair", 2, 3);
+    addSymbol(s);
+    duplicateSymbol(s.id);
+    expect(s.x).toBeCloseTo(2, 9);
+    expect(s.y).toBeCloseTo(3, 9);
+  });
+
+  it("returns null for unknown id", () => {
+    resetSymbolModel();
+    const r = duplicateSymbol("notexist");
+    if (r !== null) throw new Error("Expected null");
+  });
+});
+
+describe("symbols.js — getSymbol", () => {
+  it("finds by id", () => {
+    resetSymbolModel();
+    const s = createSymbol("bed", 0, 0);
+    addSymbol(s);
+    const found = getSymbol(s.id);
+    if (found !== s) throw new Error("Wrong symbol returned");
+  });
+
+  it("returns null for unknown id", () => {
+    resetSymbolModel();
+    const r = getSymbol("x999");
+    if (r !== null) throw new Error("Expected null");
+  });
+});
+
+// ─── Tests: symbols.js — geometry ────────────────────────────────────────────
+
+describe("symbols.js — hitTest", () => {
+  it("true for center of unrotated symbol", () => {
+    resetSymbolModel();
+    const s = createSymbol("table", 5, 5);
+    expect(hitTest(s, 5, 5)).toBe(true);
+  });
+
+  it("true just inside the box", () => {
+    resetSymbolModel();
+    const s = createSymbol("table", 0, 0); // w=1.2, h=0.8
+    // Just inside: x = 0.59, y = 0.39 → abs(x) < 0.6, abs(y) < 0.4
+    expect(hitTest(s, 0.59, 0.39)).toBe(true);
+  });
+
+  it("false just outside the box", () => {
+    resetSymbolModel();
+    const s = createSymbol("table", 0, 0); // w=1.2, h=0.8
+    // Outside: x = 0.65, y = 0 → abs(x) > 0.6
+    expect(hitTest(s, 0.65, 0)).toBe(false);
+  });
+
+  it("true inside rotated box (rot=90) but outside axis-aligned box", () => {
+    resetSymbolModel();
+    // Bed: w=1.5, h=2.0 at origin, rot=90
+    // After rot=90, width becomes height and vice versa in world space
+    // Original box: x±0.75, y±1.0
+    // After rot=90 CW: a point at (0, 1.2) is in the original footprint
+    // (in local frame: after inv rot, lx = 0*cos + 1.2*sin = 1.2*1 = 1.2 — actually let me use exact coords)
+    // rotated 90 CW: local = (1.2*cos(90) + 1.2*sin(90), -1.2*sin(90) + 1.2*cos(90)) ... better test:
+    // point (0.8, 0.1): in axis-aligned box (0.75, 1.0) at rot=0? Yes, 0.8 > 0.75, so OUTSIDE axis-aligned
+    // Is it inside rotated (rot=90)? inv-rotate: rx = 0.8*cos90 + 0.1*sin90 = 0.1; ry = -0.8*sin90 + 0.1*cos90 = -0.8
+    // Check: |rx|=0.1 <= 0.75, |ry|=0.8 <= 1.0 → inside rotated box
+    const s = createSymbol("bed", 0, 0);
+    rotateSymbol(s, 90);
+    // point (0.8, 0) in world. After rot=90: rx = 0.8*cos90 + 0*sin90 = 0; ry = -0.8*sin90 + 0*cos90 = -0.8
+    // |rx|=0 <= 0.75, |ry|=0.8 <= 1.0 → inside
+    expect(hitTest(s, 0.8, 0)).toBe(true);
+    // Check it is outside the axis-aligned box of bed at rot=0 (w=1.5, h=2.0)
+    const sNoRot = createSymbol("bed", 0, 0);
+    // At rot=0: |0.8| <= 0.75? No → outside
+    expect(hitTest(sNoRot, 0.8, 0)).toBe(false);
+  });
+
+  it("tolerates point inflation (tolWorld)", () => {
+    resetSymbolModel();
+    const s = createSymbol("chair", 0, 0); // w=h=0.5 → half=0.25
+    // Point at 0.3, 0 — just outside box (0.3 > 0.25)
+    expect(hitTest(s, 0.3, 0, 0)).toBe(false);
+    // With tolWorld=0.06 → effective half = 0.31 → 0.3 < 0.31 → inside
+    expect(hitTest(s, 0.3, 0, 0.06)).toBe(true);
+  });
+});
+
+describe("symbols.js — pickSymbol", () => {
+  it("returns null for empty model", () => {
+    resetSymbolModel();
+    const r = pickSymbol(0, 0);
+    if (r !== null) throw new Error("Expected null");
+  });
+
+  it("returns topmost (last-added) of two overlapping symbols", () => {
+    resetSymbolModel();
+    const a = createSymbol("chair", 0, 0);
+    const b = createSymbol("chair", 0, 0); // same position, on top
+    addSymbol(a);
+    addSymbol(b);
+    const hit = pickSymbol(0, 0);
+    if (hit === null) throw new Error("Expected a hit");
+    expect(hit.id).toBe(b.id);
+  });
+
+  it("returns null for empty space", () => {
+    resetSymbolModel();
+    const s = createSymbol("chair", 10, 10); // far away
+    addSymbol(s);
+    const r = pickSymbol(0, 0);
+    if (r !== null) throw new Error("Expected null");
+  });
+});
+
+describe("symbols.js — clampDim", () => {
+  it("passes through in-range value", () => {
+    expect(clampDim("bed", 1.5)).toBeCloseTo(1.5, 9);
+  });
+
+  it("clamps below min → min", () => {
+    expect(clampDim("chair", 0.1)).toBeCloseTo(CATALOG.chair.min, 9);
+  });
+
+  it("clamps above max → max", () => {
+    expect(clampDim("sofa", 99)).toBeCloseTo(CATALOG.sofa.max, 9);
+  });
+});
+
+describe("symbols.js — resizeSymbol", () => {
+  it("sets width to clamped value", () => {
+    resetSymbolModel();
+    const s = createSymbol("bed", 0, 0);
+    addSymbol(s);
+    resizeSymbol(s, "w", 2.0);
+    expect(s.w).toBeCloseTo(2.0, 9);
+  });
+
+  it("clamps value to [min, max]", () => {
+    resetSymbolModel();
+    const s = createSymbol("chair", 0, 0);
+    resizeSymbol(s, "w", 0.01); // below min=0.30
+    expect(s.w).toBeCloseTo(CATALOG.chair.min, 9);
+    resizeSymbol(s, "w", 999); // above max=1.00
+    expect(s.w).toBeCloseTo(CATALOG.chair.max, 9);
+  });
+
+  it("lockAspect scales both dims proportionally", () => {
+    resetSymbolModel();
+    const s = createSymbol("bed", 0, 0); // w=1.5, h=2.0, ratio h/w = 4/3
+    const origRatio = s.h / s.w;
+    resizeSymbol(s, "w", 1.2, true);
+    expect(s.w).toBeCloseTo(1.2, 5);
+    expect(s.h).toBeCloseTo(1.2 * origRatio, 5);
+  });
+
+  it("openings ignore dim='h'", () => {
+    resetSymbolModel();
+    const s = createSymbol("door", 0, 0);
+    const origH = s.h;
+    const changed = resizeSymbol(s, "h", 0.5);
+    expect(changed).toBe(false);
+    expect(s.h).toBeCloseTo(origH, 9);
+  });
+
+  it("returns true when dimension changed, false when no-change", () => {
+    resetSymbolModel();
+    const s = createSymbol("table", 0, 0);
+    const r1 = resizeSymbol(s, "w", s.w); // same value
+    expect(r1).toBe(false);
+    const r2 = resizeSymbol(s, "w", s.w + 0.1);
+    expect(r2).toBe(true);
+  });
+});
+
+describe("symbols.js — moveSymbol", () => {
+  it("sets center exactly", () => {
+    resetSymbolModel();
+    const s = createSymbol("desk", 0, 0);
+    moveSymbol(s, 3.5, -2.1);
+    expect(s.x).toBeCloseTo(3.5, 9);
+    expect(s.y).toBeCloseTo(-2.1, 9);
+  });
+});
+
+describe("symbols.js — rotateSymbol", () => {
+  it("normalises to [0,360)", () => {
+    resetSymbolModel();
+    const s = createSymbol("chair", 0, 0);
+    rotateSymbol(s, 450);
+    expect(s.rot).toBeCloseTo(90, 9);
+    rotateSymbol(s, -90);
+    expect(s.rot).toBeCloseTo(270, 9);
+    rotateSymbol(s, 0);
+    expect(s.rot).toBe(0);
+    rotateSymbol(s, 360);
+    expect(s.rot).toBe(0);
+  });
+});
+
+describe("symbols.js — corners", () => {
+  it("rot=0: corners equal axis-aligned box", () => {
+    resetSymbolModel();
+    const s = createSymbol("table", 0, 0); // w=1.2, h=0.8
+    const cs = corners(s);
+    expect(cs.length).toBe(4);
+    // TL = (-0.6, -0.4), TR = (0.6, -0.4), BR = (0.6, 0.4), BL = (-0.6, 0.4)
+    expect(cs[0].x).toBeCloseTo(-0.6, 6);
+    expect(cs[0].y).toBeCloseTo(-0.4, 6);
+    expect(cs[1].x).toBeCloseTo( 0.6, 6);
+    expect(cs[1].y).toBeCloseTo(-0.4, 6);
+    expect(cs[2].x).toBeCloseTo( 0.6, 6);
+    expect(cs[2].y).toBeCloseTo( 0.4, 6);
+    expect(cs[3].x).toBeCloseTo(-0.6, 6);
+    expect(cs[3].y).toBeCloseTo( 0.4, 6);
+  });
+
+  it("rot=90: corners are rotated 90° CW about center", () => {
+    resetSymbolModel();
+    const s = createSymbol("table", 0, 0); // w=1.2, h=0.8
+    rotateSymbol(s, 90);
+    const cs = corners(s);
+    // After 90° CW: local (lx,ly) → screen (lx*cos90 - ly*sin90, lx*sin90 + ly*cos90)
+    //   = (ly, lx) wait: cos90=0, sin90=1 → (lx*0 - ly*1, lx*1 + ly*0) = (-ly, lx)
+    // TL local (-0.6, -0.4) → rotated: (-(-0.4), -0.6) = (0.4, -0.6)
+    expect(cs[0].x).toBeCloseTo(0.4, 5);
+    expect(cs[0].y).toBeCloseTo(-0.6, 5);
+    // TR local (0.6, -0.4) → (0.4, 0.6)
+    expect(cs[1].x).toBeCloseTo(0.4, 5);
+    expect(cs[1].y).toBeCloseTo(0.6, 5);
+  });
+});
+
+// ─── Tests: symbols.js — units reuse ─────────────────────────────────────────
+
+describe("symbols.js — units reuse: fmtLen/parseLen round-trip for w/h", () => {
+  it("metres value round-trips through fmtLen → parseLen within display precision", () => {
+    setUnit("m");
+    const L = 1.5; // bed width
+    const formatted = fmtLen(L); // "1.50"
+    const reparsed = parseLen(formatted + "m");
+    if (reparsed === null) throw new Error(`parseLen returned null for "${formatted}m"`);
+    if (Math.abs(reparsed - L) > 0.005) throw new Error(`Round-trip failed: ${L} → "${formatted}" → ${reparsed}`);
+    setUnit("ft");
+  });
+
+  it("toggling unit leaves symbols.model bit-identical", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 1, 2);
+    addSymbol(s);
+    const beforeW = s.w;
+    const beforeH = s.h;
+    setUnit("m");
+    setUnit("ft");
+    setUnit("m");
+    expect(s.w).toBeCloseTo(beforeW, 9);
+    expect(s.h).toBeCloseTo(beforeH, 9);
+    setUnit("ft"); // restore
+  });
+
+  it("chips format via fmtLen + unitLabel", () => {
+    setUnit("m");
+    const meters = 2.0;
+    const label = fmtLen(meters) + " " + unitLabel();
+    if (!label.includes("2.00")) throw new Error(`Expected '2.00 m', got: "${label}"`);
+    setUnit("ft");
+    const labelFt = fmtLen(meters) + " " + unitLabel();
+    if (!labelFt.includes("ft")) throw new Error(`Expected ft in "${labelFt}"`);
+    setUnit("ft"); // restore
+  });
+});
+
 // ─── Import dimEntry and measure (behavioral tests) ───────────────────────────
 
 import { init as initDimEntry, isEditing, getEditingEdge, beginEdit, commit, cancel } from "./js/dimEntry.js";
