@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Least-privilege: this workflow only reads the repository tree to validate it.
+# No secrets are used; fork PRs run safely with these permissions.
+permissions:
+  contents: read
+
+jobs:
+  # The job key "validate" is the load-bearing check-run name.
+  # When branch protection is enabled (deferred — see LLD 13 State Model),
+  # required_status_checks will reference exactly this string: "validate".
+  # Do NOT rename this job without also updating that branch-protection config.
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node 20
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "20"
+
+      # ── Step 1: HTML validation ──────────────────────────────────────────────
+      # html-validate checks structural correctness of all HTML files under src/.
+      # Config at .github/html-validate.json relaxes style/inline-script rules
+      # so both index.html and tests.html (which uses inline <script type="module">)
+      # pass on structural grounds only.
+      - name: Validate HTML
+        run: npx --yes html-validate@9.7.1 --config .github/html-validate.json "src/**/*.html"
+
+      # ── Step 2: JS syntax check ──────────────────────────────────────────────
+      # node --check --input-type=module parses each ES module for syntax errors
+      # with zero dependencies and without executing any src/ code.
+      # --input-type=module avoids needing a {"type":"module"} manifest at repo root.
+      # The loop exits non-zero on the first syntax error (fail-fast).
+      # An empty glob is treated as an error (no files = broken setup).
+      - name: Check JS syntax
+        run: |
+          shopt -s nullglob
+          files=(src/js/*.js)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "Error: no .js files found in src/js/ — check glob or project structure" >&2
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            echo "Checking $f"
+            node --check --input-type=module < "$f" || exit 1
+          done
+
+      # ── Step 3: Dead-link check ──────────────────────────────────────────────
+      # lychee is a fast single-binary Rust link checker (no npm tree).
+      # External link failures (e.g. Google Fonts) must not flap the required check:
+      # --max-retries 2 and --timeout 20 mitigate transient network issues.
+      # --exclude-all-private keeps CI from hitting localhost/intranet false-positives.
+      - name: Check links
+        uses: lycheeverse/lychee-action@82202e5e9c2f4ef1a55a3d02563e1cb6041e5332 # v2.4.1
+        with:
+          args: >-
+            --no-progress
+            --max-retries 2
+            --timeout 20
+            --exclude-all-private
+            "src/**/*.html"
+          fail: true
