@@ -8,6 +8,8 @@
 import { onChange as onViewChange, resetView } from "./view.js";
 import { onChange as onUnitChange } from "./units.js";
 import { init as initSurface, initWallLayer, onRender, resize, render, scheduleRender } from "./surface.js";
+import { scheduleSave } from "./persist.js";
+import { init as initActionsUI, boot as bootActionsUI } from "./actionsUI.js";
 import { init as initHud } from "./hud.js";
 import { init as initInteractions, setDrawHooks, setSelectHooks } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
@@ -20,7 +22,7 @@ import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown,
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   // ── Grab DOM refs ──────────────────────────────────────────────────────────
   const stage    = document.getElementById("stage");
   const svg      = document.getElementById("drawing");
@@ -156,6 +158,26 @@ document.addEventListener("DOMContentLoaded", () => {
   // ── Initial size + view ────────────────────────────────────────────────────
   const { W, H } = resize();
   resetView(W, H);
+
+  // ── Actions UI init (wires DOM, no boot logic yet) ─────────────────────────
+  initActionsUI({
+    actionsCluster: document.getElementById("actions-cluster"),
+    btnShare:       document.getElementById("btn-share"),
+    btnExport:      document.getElementById("btn-export"),
+    btnOverflow:    document.getElementById("btn-overflow"),
+    sharePopover:   document.getElementById("share-popover"),
+    exportMenu:     document.getElementById("export-menu"),
+    overflowMenu:   document.getElementById("overflow-menu"),
+    banner:         document.getElementById("restore-banner"),
+    statusPill:     document.getElementById("status-pill"),
+    fileInput:      document.getElementById("import-file-input"),
+  });
+
+  // ── Boot: restore-vs-share decision (runs before first render) ────────────
+  await bootActionsUI(W, H);
+
+  // ── Wire autosave hook ────────────────────────────────────────────────────
+  onRender(scheduleSave);
 
   // ── Window resize ──────────────────────────────────────────────────────────
   window.addEventListener("resize", () => {

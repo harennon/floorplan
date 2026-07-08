@@ -85,6 +85,40 @@ export function onChange(cb) {
   _listeners.push(cb);
 }
 
+/**
+ * Center + zoom so the world bbox fits the viewport W × H with padPx padding.
+ * If bbox is null (empty plan) falls back to resetView.
+ * @param {number} W  viewport width px
+ * @param {number} H  viewport height px
+ * @param {{ minX:number, minY:number, maxX:number, maxY:number } | null} bbox
+ * @param {number} [padPx=40]
+ */
+export function fitView(W, H, bbox, padPx = 40) {
+  if (!bbox) {
+    resetView(W, H);
+    return;
+  }
+  const bw = bbox.maxX - bbox.minX;
+  const bh = bbox.maxY - bbox.minY;
+  if (bw <= 0 && bh <= 0) {
+    resetView(W, H);
+    return;
+  }
+  const availW = Math.max(1, W - padPx * 2);
+  const availH = Math.max(1, H - padPx * 2);
+  const scaleX = bw > 0 ? availW / (bw * BASE_PX_PER_M) : MAX_ZOOM;
+  const scaleY = bh > 0 ? availH / (bh * BASE_PX_PER_M) : MAX_ZOOM;
+  const rawZoom = Math.min(scaleX, scaleY);
+  view.zoom = clampZoom(rawZoom);
+  const ppm = view.zoom * BASE_PX_PER_M;
+  // Center bbox in viewport
+  const cx = (bbox.minX + bbox.maxX) / 2;
+  const cy = (bbox.minY + bbox.maxY) / 2;
+  view.panX = W / 2 - cx * ppm;
+  view.panY = H / 2 - cy * ppm;
+  _notify();
+}
+
 function _notify() {
   for (const cb of _listeners) cb();
 }

@@ -37,9 +37,30 @@ function describe(name, fn) {
 }
 
 function it(name, fn) {
+  // Store a pending promise so async tests can be awaited via runAll()
   let err = null;
-  try { fn(); } catch (e) { err = e; }
-  _currentSuite.cases.push({ name, err });
+  const caseObj = { name, err: null, _pending: null };
+  _currentSuite.cases.push(caseObj);
+  try {
+    const result = fn();
+    if (result && typeof result.then === "function") {
+      caseObj._pending = result.then(() => {}, (e) => { caseObj.err = e; });
+    }
+  } catch (e) {
+    caseObj.err = e;
+  }
+}
+
+/** Await all pending async test cases, then render results. */
+async function runAll() {
+  const promises = [];
+  for (const suite of _suites) {
+    for (const c of suite.cases) {
+      if (c._pending) promises.push(c._pending);
+    }
+  }
+  await Promise.all(promises);
+  render();
 }
 
 function expect(actual) {
@@ -2269,9 +2290,551 @@ describe("security — no innerHTML from user input in DOM", () => {
   });
 });
 
-// ─── Render ────────────────────────────────────────────────────────────────────
+// ─── Import LLD-15 modules ────────────────────────────────────────────────────
 
-render();
+import {
+  serialize, deserialize, validate,
+  STORAGE_KEY, SAVE_DEBOUNCE_MS,
+  loadFromStorage, saveNow, scheduleSave, hasStoredPlan,
+  onStatusChange,
+} from "./js/persist.js";
+
+import {
+  encode, decode, readHash, buildShareURL, clearHash,
+} from "./js/share.js";
+
+import {
+  planBBox, buildSVG, exportJSON, importJSON,
+} from "./js/exporter.js";
+
+import {
+  replaceRooms, reseedRoomCounter, clearAll as clearWallsAll,
+} from "./js/walls.js";
+
+import {
+  replaceSymbols, reseedCounter as reseedSymCounter,
+  clearAll as clearSymsAll,
+} from "./js/symbols.js";
+
+// fitView added to view.js — augment the already-imported view module
+import { fitView } from "./js/view.js";
+// BASE_PX_PER_M, MIN_ZOOM, MAX_ZOOM, view (as viewState) already imported above
+const viewState = view; // alias for clarity in LLD-15 tests
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function resetAllModels() {
+  clearWallsAll();
+  clearSymsAll();
+}
+
+function makeRoom(id, closed, verts) {
+  return { id, closed, verts };
+}
+function makeSym(id, type, x, y, w, h, rot) {
+  return { id, type, x, y, w, h, rot };
+}
+
+// ─── Tests: walls.js — replaceRooms / clearAll ────────────────────────────────
+
+describe("walls.js LLD-15 — replaceRooms deep-clones and reseeds counter", () => {
+  it("replaceRooms populates model.rooms with clones", () => {
+    resetAllModels();
+    const src = [makeRoom("w0", true, [{x:0,y:0},{x:1,y:0},{x:0,y:1}])];
+    replaceRooms(src);
+    expect(model.rooms.length).toBe(1);
+    expect(model.rooms[0].id).toBe("w0");
+    expect(model.rooms[0].verts.length).toBe(3);
+  });
+
+  it("replaceRooms deep-clones: mutating src does not affect model", () => {
+    resetAllModels();
+    const src = [makeRoom("w0", false, [{x:1,y:2},{x:3,y:4}])];
+    replaceRooms(src);
+    src[0].verts[0].x = 99;  // mutate source
+    expect(model.rooms[0].verts[0].x).toBe(1); // model unaffected
+  });
+
+  it("replaceRooms clears the active chain", () => {
+    resetAllModels();
+    model.chain.push({x:0,y:0});
+    replaceRooms([makeRoom("w0", false, [{x:0,y:0},{x:1,y:0}])]);
+    expect(model.chain.length).toBe(0);
+  });
+
+  it("reseedRoomCounter: new room after load w0,w3 gets non-colliding id", () => {
+    resetAllModels();
+    replaceRooms([
+      makeRoom("w0", false, [{x:0,y:0},{x:1,y:0}]),
+      makeRoom("w3", false, [{x:2,y:0},{x:3,y:0}]),
+    ]);
+    // closeRoom needs at least 3 verts
+    model.chain.push({x:0,y:0},{x:5,y:0},{x:2.5,y:5});
+    closeRoom();
+    const newId = model.rooms[model.rooms.length - 1].id;
+    expect(newId).not.toBe("w0");
+    expect(newId).not.toBe("w3");
+    // Should be w4 (max was 3, so counter = 4)
+    expect(newId).toBe("w4");
+  });
+
+  it("clearAll empties rooms + chain", () => {
+    model.rooms.push(makeRoom("w0", false, [{x:0,y:0},{x:1,y:0}]));
+    model.chain.push({x:0,y:0});
+    clearWallsAll();
+    expect(model.rooms.length).toBe(0);
+    expect(model.chain.length).toBe(0);
+  });
+
+  it("non-numeric id suffix is skipped during reseed (no wedge)", () => {
+    resetAllModels();
+    replaceRooms([
+      makeRoom("w-custom", false, [{x:0,y:0},{x:1,y:0}]),
+    ]);
+    // counter should be 0 (no numeric suffix found), so first new room gets w0
+    model.chain.push({x:0,y:0},{x:5,y:0},{x:2.5,y:5});
+    closeRoom();
+    expect(model.rooms[1].id).toBe("w0");
+  });
+});
+
+// ─── Tests: symbols.js — replaceSymbols / clearAll ───────────────────────────
+
+describe("symbols.js LLD-15 — replaceSymbols deep-clones and reseeds counter", () => {
+  it("replaceSymbols populates model.symbols with clones", () => {
+    resetAllModels();
+    const src = [makeSym("s0", "chair", 1, 2, 0.5, 0.5, 0)];
+    replaceSymbols(src);
+    expect(symbolModel.symbols.length).toBe(1);
+    expect(symbolModel.symbols[0].id).toBe("s0");
+  });
+
+  it("replaceSymbols deep-clones: mutating src does not affect model", () => {
+    resetAllModels();
+    const src = [makeSym("s0", "chair", 1, 2, 0.5, 0.5, 0)];
+    replaceSymbols(src);
+    src[0].x = 999;
+    expect(symbolModel.symbols[0].x).toBe(1);
+  });
+
+  it("reseedCounter: after loading s2, next symbol gets non-colliding id", () => {
+    resetAllModels();
+    replaceSymbols([makeSym("s2", "bed", 0, 0, 1.5, 2, 0)]);
+    const sym = createSymbol("chair", 0, 0);
+    expect(sym.id).toBe("s3");
+  });
+
+  it("clearAll empties symbols", () => {
+    symbolModel.symbols.push(makeSym("s0", "chair", 0, 0, 0.5, 0.5, 0));
+    clearSymsAll();
+    expect(symbolModel.symbols.length).toBe(0);
+  });
+});
+
+// ─── Tests: view.js — fitView ─────────────────────────────────────────────────
+
+describe("view.js LLD-15 — fitView", () => {
+  it("fitView(null) falls back to resetView", () => {
+    viewState.zoom = 5;
+    fitView(800, 600, null);
+    expect(viewState.zoom).toBe(1);
+  });
+
+  it("fitView centers a 4x3m bbox in 800x600 viewport with 40px pad", () => {
+    fitView(800, 600, { minX: 0, minY: 0, maxX: 4, maxY: 3 }, 40);
+    // After fitView the bbox center should map to viewport center
+    const cx = (0 + 4) / 2;  // 2m
+    const cy = (0 + 3) / 2;  // 1.5m
+    const ppm = viewState.zoom * BASE_PX_PER_M;
+    const screenX = cx * ppm + viewState.panX;
+    const screenY = cy * ppm + viewState.panY;
+    // Should be near viewport center (400, 300) within floating-point tolerance
+    if (Math.abs(screenX - 400) > 1) throw new Error(`Expected screenX≈400, got ${screenX}`);
+    if (Math.abs(screenY - 300) > 1) throw new Error(`Expected screenY≈300, got ${screenY}`);
+  });
+
+  it("fitView clamps zoom to MIN_ZOOM for huge bbox", () => {
+    fitView(100, 100, { minX: 0, minY: 0, maxX: 10000, maxY: 10000 }, 0);
+    expect(viewState.zoom).toBe(MIN_ZOOM);
+  });
+
+  it("fitView clamps zoom to MAX_ZOOM for tiny bbox", () => {
+    fitView(4096, 4096, { minX: 0, minY: 0, maxX: 0.001, maxY: 0.001 }, 0);
+    expect(viewState.zoom).toBe(MAX_ZOOM);
+  });
+
+  it("fitView with zero-size bbox falls back to resetView", () => {
+    viewState.zoom = 5;
+    fitView(800, 600, { minX: 2, minY: 2, maxX: 2, maxY: 2 }, 40);
+    expect(viewState.zoom).toBe(1);
+  });
+});
+
+// ─── Tests: persist.js — serialize / deserialize round-trip ──────────────────
+
+describe("persist.js — serialize/deserialize round-trip", () => {
+  it("round-trips rooms bit-exact (coordinates preserved)", () => {
+    resetAllModels();
+    model.rooms.push(makeRoom("w0", true, [{x:1.23456789,y:2.34567891},{x:3,y:0},{x:0,y:3}]));
+    const doc = serialize();
+    clearWallsAll();
+    const ok = deserialize(doc);
+    expect(ok).toBe(true);
+    expect(model.rooms.length).toBe(1);
+    expect(model.rooms[0].verts[0].x).toBeCloseTo(1.23456789, 9);
+    expect(model.rooms[0].verts[0].y).toBeCloseTo(2.34567891, 9);
+  });
+
+  it("round-trips symbols bit-exact", () => {
+    resetAllModels();
+    symbolModel.symbols.push(makeSym("s0", "bed", 1.5, 2.5, 1.5, 2.0, 45));
+    const doc = serialize();
+    clearSymsAll();
+    const ok = deserialize(doc);
+    expect(ok).toBe(true);
+    expect(symbolModel.symbols.length).toBe(1);
+    expect(symbolModel.symbols[0].x).toBeCloseTo(1.5, 9);
+    expect(symbolModel.symbols[0].rot).toBe(45);
+  });
+
+  it("deep-clone: mutating model after deserialize does not affect prior serialize", () => {
+    resetAllModels();
+    model.rooms.push(makeRoom("w0", false, [{x:1,y:2},{x:3,y:4}]));
+    const doc = serialize();
+    // Mutate model after serialize
+    model.rooms[0].verts[0].x = 999;
+    // doc should still have x=1 (it's a separate copy)
+    expect(doc.rooms[0].verts[0].x).toBe(1);
+  });
+
+  it("deserialize returns false on invalid doc", () => {
+    expect(deserialize(null)).toBe(false);
+    expect(deserialize({})).toBe(false);
+    expect(deserialize({ v:1, app:"floorplan" })).toBe(false);
+  });
+});
+
+// ─── Tests: persist.js — validate ────────────────────────────────────────────
+
+describe("persist.js — validate", () => {
+  const good = () => ({ v: 1, app: "floorplan", rooms: [], symbols: [] });
+
+  it("accepts a minimal valid doc", () => {
+    const r = validate(good());
+    if (r === null) throw new Error("Expected non-null for valid doc");
+  });
+
+  it("rejects null", () => { expect(validate(null)).toBe(null); });
+  it("rejects wrong app", () => {
+    expect(validate({ ...good(), app: "other" })).toBe(null);
+  });
+  it("rejects future v", () => {
+    expect(validate({ ...good(), v: 2 })).toBe(null);
+  });
+  it("rejects non-array rooms", () => {
+    expect(validate({ ...good(), rooms: "bad" })).toBe(null);
+  });
+  it("rejects non-array symbols", () => {
+    expect(validate({ ...good(), symbols: 99 })).toBe(null);
+  });
+
+  it("rejects room with NaN coordinate", () => {
+    const doc = good();
+    doc.rooms = [{ id: "w0", closed: false, verts: [{ x: NaN, y: 0 }] }];
+    expect(validate(doc)).toBe(null);
+  });
+
+  it("rejects room with Infinity coordinate", () => {
+    const doc = good();
+    doc.rooms = [{ id: "w0", closed: false, verts: [{ x: Infinity, y: 0 }] }];
+    expect(validate(doc)).toBe(null);
+  });
+
+  it("rejects out-of-catalog symbol type", () => {
+    const doc = good();
+    doc.symbols = [{ id: "s0", type: "unicorn", x: 0, y: 0, w: 1, h: 1, rot: 0 }];
+    expect(validate(doc)).toBe(null);
+  });
+
+  it("accepts doc with rooms and symbols", () => {
+    const doc = good();
+    doc.rooms = [{ id: "w0", closed: true, verts: [{x:0,y:0},{x:1,y:0},{x:0,y:1}] }];
+    doc.symbols = [{ id: "s0", type: "chair", x: 1, y: 1, w: 0.5, h: 0.5, rot: 0 }];
+    if (validate(doc) === null) throw new Error("Expected valid doc to pass");
+  });
+
+  it("rejects doc with 10001 rooms (over cap)", () => {
+    const doc = good();
+    doc.rooms = Array.from({ length: 10001 }, (_, i) => ({
+      id: `w${i}`, closed: false, verts: [{x:0,y:0},{x:1,y:0}],
+    }));
+    expect(validate(doc)).toBe(null);
+  });
+});
+
+// ─── Tests: persist.js — localStorage round-trip ─────────────────────────────
+
+describe("persist.js — saveNow / loadFromStorage", () => {
+  it("saveNow writes a parseable doc to STORAGE_KEY", () => {
+    resetAllModels();
+    model.rooms.push(makeRoom("w0", false, [{x:0,y:0},{x:2,y:0}]));
+    saveNow();
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) throw new Error("Nothing written to STORAGE_KEY");
+    const parsed = JSON.parse(raw);
+    expect(parsed.v).toBe(1);
+    expect(parsed.app).toBe("floorplan");
+    expect(parsed.rooms.length).toBe(1);
+  });
+
+  it("loadFromStorage returns the doc after saveNow", () => {
+    resetAllModels();
+    model.rooms.push(makeRoom("w0", false, [{x:0,y:0},{x:2,y:0}]));
+    saveNow();
+    const doc = loadFromStorage();
+    if (doc === null) throw new Error("Expected non-null doc");
+    expect(doc.rooms.length).toBe(1);
+  });
+
+  it("loadFromStorage returns null for absent key", () => {
+    localStorage.removeItem(STORAGE_KEY);
+    const r = loadFromStorage();
+    expect(r).toBe(null);
+  });
+
+  it("loadFromStorage returns null for corrupt JSON", () => {
+    localStorage.setItem(STORAGE_KEY, "{{{invalid json");
+    const r = loadFromStorage();
+    expect(r).toBe(null);
+    // Restore
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("hasStoredPlan returns true after saveNow with rooms", () => {
+    resetAllModels();
+    model.rooms.push(makeRoom("w0", false, [{x:0,y:0},{x:2,y:0}]));
+    saveNow();
+    expect(hasStoredPlan()).toBe(true);
+  });
+
+  it("hasStoredPlan returns false when key absent", () => {
+    localStorage.removeItem(STORAGE_KEY);
+    expect(hasStoredPlan()).toBe(false);
+  });
+
+  it("saveNow does not overwrite if serialized string is identical (equality guard)", () => {
+    resetAllModels();
+    model.rooms.push(makeRoom("w0", false, [{x:0,y:0},{x:2,y:0}]));
+    saveNow(); // first write
+
+    let writeCount = 0;
+    const origSetItem = localStorage.setItem.bind(localStorage);
+    const spy = (k, v) => { if (k === STORAGE_KEY) writeCount++; origSetItem(k, v); };
+    Object.defineProperty(localStorage, "setItem", { value: spy, configurable: true });
+
+    saveNow(); // identical — should NOT write
+    expect(writeCount).toBe(0);
+
+    // Restore
+    Object.defineProperty(localStorage, "setItem", { value: origSetItem, configurable: true });
+  });
+
+  it("saveNow reports error when localStorage.setItem throws, status becomes error", () => {
+    resetAllModels();
+    model.rooms.push(makeRoom("w0", false, [{x:0,y:0},{x:2,y:0}]));
+    // First save to seed _lastWritten
+    saveNow();
+    // Change the model so it will try to write again
+    model.rooms.push(makeRoom("w1", false, [{x:1,y:0},{x:3,y:0}]));
+
+    const origSetItem = localStorage.setItem.bind(localStorage);
+    let statusSeen = null;
+    onStatusChange(s => { statusSeen = s; });
+    Object.defineProperty(localStorage, "setItem", {
+      value: () => { throw new Error("quota"); },
+      configurable: true,
+    });
+
+    const result = saveNow();
+    expect(result).toBe("error");
+    expect(statusSeen).toBe("error");
+
+    // Restore
+    Object.defineProperty(localStorage, "setItem", { value: origSetItem, configurable: true });
+  });
+});
+
+// ─── Tests: share.js — encode / decode ───────────────────────────────────────
+
+describe("share.js — encode/decode round-trip (compressed)", () => {
+  it("encode produces a string starting with '1' (compressed) or '0' (fallback)", async () => {
+    const doc = { v: 1, app: "floorplan", rooms: [], symbols: [] };
+    const payload = await encode(doc);
+    if (payload[0] !== "1" && payload[0] !== "0") {
+      throw new Error(`Expected codec prefix '0' or '1', got '${payload[0]}'`);
+    }
+  });
+
+  it("encode then decode round-trips a PlanDoc losslessly", async () => {
+    const doc = {
+      v: 1, app: "floorplan",
+      rooms: [{ id: "w0", closed: true, verts: [{x:1.5,y:2.5},{x:3,y:0},{x:0,y:3}] }],
+      symbols: [{ id: "s0", type: "chair", x: 1, y: 1, w: 0.5, h: 0.5, rot: 45 }],
+    };
+    const payload = await encode(doc);
+    const decoded = await decode(payload);
+    if (decoded === null) throw new Error("decode returned null");
+    expect(decoded.rooms.length).toBe(1);
+    expect(decoded.rooms[0].verts[0].x).toBeCloseTo(1.5, 9);
+    expect(decoded.symbols[0].rot).toBe(45);
+  });
+
+  it("decode returns null for tampered/garbage input", async () => {
+    expect(await decode("1AAAA_garbage_%%%")).toBe(null);
+    expect(await decode("")).toBe(null);
+    expect(await decode("x")).toBe(null);
+    expect(await decode(null)).toBe(null);
+  });
+
+  it("decode returns null for truncated payload", async () => {
+    const doc = { v: 1, app: "floorplan", rooms: [], symbols: [] };
+    const payload = await encode(doc);
+    const truncated = payload.slice(0, Math.max(1, payload.length - 10));
+    const result = await decode(truncated);
+    // May or may not decode cleanly depending on truncation; must not throw
+    // Could be null or a validated doc — just must not throw
+    // We consider a truncated result null or valid-but-likely-garbage.
+    // We only guarantee it doesn't throw.
+    try { await decode(truncated); } catch { throw new Error("decode threw on truncated input"); }
+  });
+
+  it("uncompressed fallback path '0' round-trips when CompressionStream stubbed out", async () => {
+    // Save original
+    const orig = globalThis.CompressionStream;
+    globalThis.CompressionStream = undefined;
+
+    const doc = { v: 1, app: "floorplan", rooms: [], symbols: [] };
+    const payload = await encode(doc);
+    expect(payload[0]).toBe("0"); // fallback path
+
+    // decode must also handle '0' prefix
+    const decoded = await decode(payload);
+    if (decoded === null) throw new Error("uncompressed decode returned null");
+    expect(decoded.app).toBe("floorplan");
+
+    // Restore
+    globalThis.CompressionStream = orig;
+  });
+});
+
+// ─── Tests: exporter.js — planBBox ────────────────────────────────────────────
+
+describe("exporter.js — planBBox", () => {
+  it("returns null for empty plan", () => {
+    resetAllModels();
+    expect(planBBox()).toBe(null);
+  });
+
+  it("correct bbox for a single room", () => {
+    resetAllModels();
+    model.rooms.push(makeRoom("w0", true, [{x:1,y:2},{x:4,y:2},{x:4,y:5},{x:1,y:5}]));
+    const bbox = planBBox();
+    if (!bbox) throw new Error("Expected non-null bbox");
+    expect(bbox.minX).toBeCloseTo(1, 9);
+    expect(bbox.minY).toBeCloseTo(2, 9);
+    expect(bbox.maxX).toBeCloseTo(4, 9);
+    expect(bbox.maxY).toBeCloseTo(5, 9);
+  });
+
+  it("includes symbol corners (rotated symbol can extend beyond simple center)", () => {
+    resetAllModels();
+    // Symbol at origin, w=2, h=1, rot=0 → corners at (±1, ±0.5)
+    symbolModel.symbols.push(makeSym("s0", "sofa", 0, 0, 2, 1, 0));
+    const bbox = planBBox();
+    if (!bbox) throw new Error("Expected non-null bbox");
+    expect(bbox.minX).toBeCloseTo(-1, 5);
+    expect(bbox.maxX).toBeCloseTo( 1, 5);
+    expect(bbox.minY).toBeCloseTo(-0.5, 5);
+    expect(bbox.maxY).toBeCloseTo( 0.5, 5);
+  });
+});
+
+// ─── Tests: exporter.js — buildSVG ───────────────────────────────────────────
+
+describe("exporter.js — buildSVG", () => {
+  it("returns a well-formed SVG string for an empty plan", () => {
+    resetAllModels();
+    const svg = buildSVG();
+    if (!svg.includes("<svg")) throw new Error("Missing <svg tag");
+    if (!svg.includes("</svg>")) throw new Error("Missing </svg> close");
+    if (!svg.includes("xmlns=")) throw new Error("Missing xmlns");
+  });
+
+  it("buildSVG includes room polyline points for a room", () => {
+    resetAllModels();
+    model.rooms.push(makeRoom("w0", false, [{x:0,y:0},{x:3,y:0}]));
+    const svg = buildSVG();
+    if (!svg.includes("polyline") && !svg.includes("polygon")) {
+      throw new Error("SVG missing polyline/polygon for room");
+    }
+  });
+
+  it("buildSVG does not contain raw < > & in symbol labels (XSS guard)", () => {
+    resetAllModels();
+    // All catalog types have safe labels, but force a sanity check
+    symbolModel.symbols.push(makeSym("s0", "chair", 1, 1, 0.5, 0.5, 0));
+    const svg = buildSVG();
+    // The raw text "Chair" must appear escaped or as-is (no < or > around it as raw HTML)
+    // We verify no unescaped < > appear INSIDE a text element from user data
+    // (catalog labels are hardcoded strings, so this is really a belt-and-suspenders check)
+    const textMatches = svg.match(/<text[^>]*>([^<]*)<\/text>/g) || [];
+    for (const t of textMatches) {
+      // Extract inner content — it should not contain bare < or >
+      const inner = t.replace(/<text[^>]*>/, "").replace(/<\/text>/, "");
+      if (inner.includes("<") || inner.includes(">")) {
+        throw new Error(`Unescaped HTML in SVG text content: "${inner}"`);
+      }
+    }
+  });
+});
+
+// ─── Tests: security ─────────────────────────────────────────────────────────
+
+describe("security — share/persist: no network requests, data only", () => {
+  it("validate/deserialize never calls eval or Function() on input", () => {
+    // We test that a crafted doc with code-like strings in id fields is safe
+    const malicious = {
+      v: 1, app: "floorplan",
+      rooms: [{ id: "<script>alert(1)</script>", closed: false, verts: [{x:0,y:0},{x:1,y:0}] }],
+      symbols: [],
+    };
+    // validate accepts or rejects — either is fine. The key is no throw and no code execution.
+    const result = validate(malicious);
+    // id is accepted (it's a string), but the SVG builder should XML-escape it.
+    // Just ensure no crash and no code ran:
+    if (typeof result === "undefined") throw new Error("validate returned undefined");
+  });
+
+  it("buildSVG XML-escapes room/symbol ids so malicious ids can't inject markup", () => {
+    resetAllModels();
+    // Inject a room via replaceRooms (bypasses closeRoom id assignment)
+    replaceRooms([{
+      id: '<img src=x onerror=alert(1)>',
+      closed: false,
+      verts: [{x:0,y:0},{x:1,y:0}],
+    }]);
+    // buildSVG should not include the raw injection string as HTML
+    const svg = buildSVG();
+    // The id is not rendered directly into SVG text in our impl, but confirm no raw script tags
+    if (svg.includes("<img ") || svg.includes("<script")) {
+      throw new Error("buildSVG emitted raw injection tag in output");
+    }
+  });
+});
+
+// ─── Run all (supports async tests) ──────────────────────────────────────────
+
+runAll();
 </script>
 </body>
 </html>

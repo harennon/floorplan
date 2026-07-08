@@ -215,6 +215,51 @@ export function undoPoint() {
   }
 }
 
+// ── Persistence helpers (LLD 15) ─────────────────────────────────────────────
+
+/**
+ * Replace model.rooms with deep-cloned copies of `rooms`, clear chain, reseed counter.
+ * @param {Room[]} rooms
+ */
+export function replaceRooms(rooms) {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  for (const r of rooms) {
+    model.rooms.push({
+      id: r.id,
+      closed: r.closed,
+      verts: r.verts.map(v => ({ x: v.x, y: v.y })),
+    });
+  }
+  reseedRoomCounter(rooms);
+}
+
+/**
+ * Set _roomCounter to max(numeric suffix of w<n> ids) + 1 so new rooms don't collide.
+ * Non-numeric / non-matching ids are skipped.
+ * @param {Room[]} rooms
+ */
+export function reseedRoomCounter(rooms) {
+  let max = -1;
+  for (const r of rooms) {
+    const m = r.id.match(/^w(\d+)$/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > max) max = n;
+    }
+  }
+  _roomCounter = max + 1;
+}
+
+/**
+ * Empty rooms + chain and reset counter to 0.
+ */
+export function clearAll() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  _roomCounter = 0;
+}
+
 // ── New geometry (LLD 9) ──────────────────────────────────────────────────────
 
 /**

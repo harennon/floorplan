@@ -790,6 +790,301 @@
         .measure-row,
         .measure-toggle { transition: none; }
       }
+
+      /* ── Actions cluster (top-right, below unit toggle) ───────────────────── */
+      .actions-cluster {
+        position: absolute;
+        top: calc(1.25rem + 2.2rem + 0.5rem); /* below unit toggle */
+        right: 1.25rem;
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+        z-index: 10;
+      }
+
+      .actions-cluster .act-btn {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        letter-spacing: 0.04em;
+        padding: 0.3rem 0.65rem;
+        border-radius: 100px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: color 0.12s, border-color 0.12s;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      .actions-cluster .act-btn:hover {
+        color: var(--ink);
+        border-color: var(--gold-soft);
+      }
+      .actions-cluster .act-btn[aria-expanded="true"] {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+      }
+
+      /* Save-status pill */
+      .status-pill {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        padding: 0.2rem 0.55rem;
+        border-radius: 100px;
+        white-space: nowrap;
+        pointer-events: none;
+        transition: opacity 0.4s;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      .status-pill[data-status="error"],
+      .status-pill[data-status="unsaved"] {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+      }
+      .status-pill.pill--faded {
+        opacity: 0;
+      }
+
+      /* Share popover + export/overflow menus */
+      .act-popover,
+      .act-menu {
+        position: fixed;
+        z-index: 50;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        min-width: 14rem;
+        padding: 0.5rem;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+      }
+
+      .act-popover .share-link-row {
+        display: flex;
+        gap: 0.4rem;
+        margin-bottom: 0.4rem;
+      }
+      .act-popover .share-link-field {
+        flex: 1;
+        background: rgba(20,20,15,0.6);
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        outline: none;
+        min-width: 0;
+        cursor: text;
+      }
+      .act-popover .share-copy-btn {
+        background: var(--gold);
+        border: none;
+        color: #14140f;
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        font-weight: 700;
+        padding: 0.25rem 0.7rem;
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .act-popover .share-copy-btn:hover {
+        background: #d9be6e;
+      }
+      .act-popover .share-meta {
+        font-family: var(--font-mono);
+        font-size: 0.6rem;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .act-popover .share-large-warn {
+        color: var(--gold);
+        font-size: 0.6rem;
+        font-family: var(--font-mono);
+        margin-top: 0.3rem;
+      }
+
+      .act-menu .menu-item {
+        display: block;
+        width: 100%;
+        text-align: left;
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        padding: 0.35rem 0.6rem;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: color 0.1s, background 0.1s;
+      }
+      .act-menu .menu-item:hover {
+        color: var(--ink);
+        background: rgba(201,168,76,0.08);
+      }
+      .act-menu .menu-item--danger {
+        color: var(--muted);
+      }
+      .act-menu .menu-item--danger:hover {
+        color: #e57373;
+        background: rgba(229,115,115,0.1);
+      }
+      .act-menu .menu-sep {
+        height: 1px;
+        background: var(--hairline);
+        margin: 0.25rem 0;
+      }
+
+      /* Conflict / restore banner */
+      .restore-banner {
+        position: fixed;
+        top: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        padding: 0.5rem 0.9rem;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        z-index: 40;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s;
+      }
+      .restore-banner.banner--visible {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .banner-btn {
+        background: transparent;
+        border: 1px solid var(--hairline);
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: color 0.12s, border-color 0.12s;
+      }
+      .banner-btn:hover {
+        border-color: var(--gold-soft);
+        color: var(--gold);
+      }
+      .banner-btn--primary {
+        background: var(--gold);
+        border-color: var(--gold);
+        color: #14140f;
+        font-weight: 700;
+      }
+      .banner-btn--primary:hover {
+        background: #d9be6e;
+        border-color: #d9be6e;
+        color: #14140f;
+      }
+
+      /* Confirm dialog */
+      .confirm-dialog {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        padding: 1.2rem 1.4rem;
+        max-width: 22rem;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      }
+      .confirm-dialog::backdrop {
+        background: rgba(0,0,0,0.5);
+      }
+      .confirm-msg {
+        margin: 0 0 1rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .confirm-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+      }
+      .confirm-cancel {
+        background: transparent;
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        padding: 0.3rem 0.8rem;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      .confirm-cancel:hover {
+        color: var(--ink);
+        border-color: var(--gold-soft);
+      }
+      .confirm-ok {
+        background: #e57373;
+        border: none;
+        color: #14140f;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 0.3rem 0.8rem;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      .confirm-ok:hover {
+        background: #ef9a9a;
+      }
+
+      /* Narrow screen: collapse label text to icons, reflow below unit toggle */
+      @media (max-width: 640px) {
+        .actions-cluster {
+          top: calc(0.75rem + 2rem + 0.4rem + 2rem + 0.4rem);
+          right: 0.75rem;
+          gap: 0.2rem;
+        }
+        .actions-cluster .act-btn {
+          font-size: 0;  /* hide label text */
+          padding: 0.3rem 0.5rem;
+        }
+        .actions-cluster .act-btn::after {
+          font-size: 0.85rem;
+        }
+        .act-btn[data-label="Share"]::after    { content: "⬆"; font-size: 0.85rem; }
+        .act-btn[data-label="Export"]::after   { content: "⬇"; font-size: 0.85rem; }
+        .act-btn[data-label="overflow"]::after { content: "⋯"; font-size: 0.85rem; }
+        .status-pill { display: none; }
+      }
+
+      /* prefers-reduced-motion */
+      @media (prefers-reduced-motion: reduce) {
+        .restore-banner,
+        .status-pill,
+        .act-btn,
+        .banner-btn { transition: none; }
+        .restore-banner.banner--visible { opacity: 1; }
+      }
     </style>
   </head>
   <body>
@@ -1013,7 +1308,59 @@
           <span>Fridge</span>
         </button>
       </nav>
-    </div>
+
+      <!-- Actions cluster (top-right, below unit toggle) -->
+      <div class="actions-cluster" id="actions-cluster">
+        <!-- Save-status pill -->
+        <span class="status-pill" id="status-pill" aria-live="polite" aria-atomic="true">Saved</span>
+
+        <!-- Share button -->
+        <button class="act-btn" id="btn-share" data-label="Share" aria-label="Share plan" aria-expanded="false" aria-haspopup="true">
+          Share
+        </button>
+
+        <!-- Export ▾ menu -->
+        <button class="act-btn" id="btn-export" data-label="Export" aria-label="Export plan" aria-expanded="false" aria-haspopup="true">
+          Export ▾
+        </button>
+
+        <!-- Overflow ⋯ menu -->
+        <button class="act-btn" id="btn-overflow" data-label="overflow" aria-label="More actions" aria-expanded="false" aria-haspopup="true">
+          ⋯
+        </button>
+      </div>
+
+      <!-- Share popover (hidden by default) -->
+      <div class="act-popover" id="share-popover" hidden role="dialog" aria-label="Share plan">
+        <div class="share-link-row">
+          <input class="share-link-field" id="share-link-field" data-role="share-link" type="text" readonly aria-label="Share link"/>
+          <button class="share-copy-btn" data-action="copy-link" aria-label="Copy link to clipboard">Copy</button>
+        </div>
+        <p class="share-meta">Anyone with this link sees this exact plan — nothing is uploaded.</p>
+        <p class="share-large-warn" data-role="large-link-warn" hidden>This plan is large — the link may not work everywhere; use Export JSON to be safe.</p>
+      </div>
+
+      <!-- Export menu (hidden by default) -->
+      <div class="act-menu" id="export-menu" hidden role="menu" aria-label="Export options">
+        <button class="menu-item" data-action="export-png" role="menuitem">PNG image</button>
+        <button class="menu-item" data-action="export-svg" role="menuitem">SVG drawing</button>
+        <button class="menu-item" data-action="export-json" role="menuitem">JSON file</button>
+      </div>
+
+      <!-- Overflow menu (hidden by default) -->
+      <div class="act-menu" id="overflow-menu" hidden role="menu" aria-label="More options">
+        <button class="menu-item" data-action="import-json" role="menuitem">Import JSON…</button>
+        <div class="menu-sep" aria-hidden="true"></div>
+        <button class="menu-item menu-item--danger" data-action="reset-plan" role="menuitem">Reset plan</button>
+      </div>
+
+      <!-- Hidden file input for JSON import -->
+      <input type="file" id="import-file-input" accept=".json,application/json" style="display:none" aria-hidden="true"/>
+
+      <!-- Restore / conflict banner (hidden by default) -->
+      <div class="restore-banner" id="restore-banner" hidden></div>
+
+    </div><!-- /.app -->
 
     <script type="module" src="./js/main.js"></script>
   </body>

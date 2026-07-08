@@ -241,6 +241,44 @@ export function rotateSymbol(sym, deg) {
   sym.rot = ((deg % 360) + 360) % 360;
 }
 
+// ── Persistence helpers (LLD 15) ─────────────────────────────────────────────
+
+/**
+ * Replace model.symbols with deep-cloned copies of `syms`, reseed counter.
+ * @param {Sym[]} syms
+ */
+export function replaceSymbols(syms) {
+  model.symbols.length = 0;
+  for (const s of syms) {
+    model.symbols.push({ id: s.id, type: s.type, x: s.x, y: s.y, w: s.w, h: s.h, rot: s.rot });
+  }
+  reseedCounter(syms);
+}
+
+/**
+ * Set _counter to max(numeric suffix of s<n> ids) + 1.
+ * @param {Sym[]} syms
+ */
+export function reseedCounter(syms) {
+  let max = -1;
+  for (const s of syms) {
+    const m = s.id.match(/^s(\d+)$/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > max) max = n;
+    }
+  }
+  _counter = max + 1;
+}
+
+/**
+ * Empty model.symbols and reset counter to 0.
+ */
+export function clearAll() {
+  model.symbols.length = 0;
+  _counter = 0;
+}
+
 /**
  * Four world-space corners of the rotated box, order TL, TR, BR, BL (local frame).
  * Used by render + chip placement.
