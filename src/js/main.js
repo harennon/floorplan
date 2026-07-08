@@ -16,13 +16,25 @@ import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from
 import { init as initDimEntry, reposition as dimReposition, getEditingEdge } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim } from "./symbolDimEntry.js";
-import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector } from "./symbolTool.js";
+import {
+  init as initSymbolTool,
+  getSelectedId, getPlacementGhost,
+  onSelectDown, onSelectMove, onSelectUp, onTapEmpty,
+  onDrawModeEnter, getLockAspect, repositionInspector,
+  hasSelection, duplicateSelected, deleteSelected, rotateSelected,
+  isDragging as isSymbolDragging,
+  clearSelectionIfStale,
+  setToastFn,
+} from "./symbolTool.js";
 import { init as initStore, loadLocal } from "./store.js";
 import { readBootHash } from "./share.js";
 import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
 import { contentBounds } from "./exportImg.js";
 import { fitToContent } from "./view.js";
-import { init as initActions, showToast, showConflictBanner } from "./actions.js";
+import { init as initActions, showToast, showConflictBanner, setHistoryReset as setActionsHistoryReset } from "./actions.js";
+import { init as initHistory, reset as historyReset, undo as historyUndo, redo as historyRedo } from "./history.js";
+import { init as initShortcuts } from "./shortcuts.js";
+import { setHistoryReset as setExportJsonHistoryReset } from "./exportJson.js";
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
@@ -61,9 +73,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnWall      = document.getElementById("tool-wall");
   const btnUndo      = document.getElementById("tool-undo");
   const btnFinish    = document.getElementById("tool-finish");
+  const btnHistUndo  = document.getElementById("hist-undo");
+  const btnHistRedo  = document.getElementById("hist-redo");
   const railEl        = document.querySelector(".tool-rail");
   const railToggleEl  = document.querySelector(".tool-rail-toggle");
   const railCollapseEl = document.querySelector(".tool-rail-collapse");
+
+  // Shortcuts modal + help button
+  const shortcutsModal = document.getElementById("shortcuts-modal");
+  const btnHelp        = document.getElementById("btn-help");
 
   // Measure inspector
   const measurePanel  = document.querySelector(".measure");
@@ -169,6 +187,34 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Inject toast into symbolTool (avoids circular import)
+  setToastFn(showToast);
+
+  // Initialise history (undo/redo) — rail buttons may be null in environments
+  // that don't have the HTML yet; history.js tolerates null refs.
+  initHistory({
+    btnUndo:    btnHistUndo,
+    btnRedo:    btnHistRedo,
+    onRestore:  clearSelectionIfStale,
+    isDragging: isSymbolDragging,
+  });
+
+  // Inject historyReset into actions and exportJson so they can clear stacks
+  setActionsHistoryReset(historyReset);
+  setExportJsonHistoryReset(historyReset);
+
+  // Initialise keyboard shortcuts + cheat-sheet modal
+  if (shortcutsModal && btnHelp) {
+    initShortcuts({
+      undo:       historyUndo,
+      redo:       historyRedo,
+      duplicate:  duplicateSelected,
+      modal:      shortcutsModal,
+      btnHelp:    btnHelp,
+      isDragging: isSymbolDragging,
+    });
+  }
+
   // Default measure inspector to collapsed on narrow screens (Edge Case 13)
   if (window.matchMedia("(max-width: 640px)").matches) {
     measurePanel.classList.add("measure--collapsed");
@@ -205,6 +251,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (hashSer === localSer) {
         // Identical: treat as local restore (no banner)
         applyPlan(localPlan);
+        historyReset();
         if (toastEl) showToast("Restored your last plan");
         render();
       } else {
@@ -212,6 +259,7 @@ document.addEventListener("DOMContentLoaded", () => {
         showConflictBanner(hashPlan, localPlan, (choice) => {
           if (choice === "shared") {
             applyPlan(hashPlan);
+            historyReset();
             const bounds = contentBounds();
             if (bounds) {
               fitToContent(bounds, vW, vH);
@@ -221,6 +269,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (toastEl) showToast("Opened shared plan");
           } else {
             applyPlan(localPlan);
+            historyReset();
           }
           render();
         });
@@ -230,6 +279,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (hashPlan) {
       // Only hash plan: apply with fit-to-content
       applyPlan(hashPlan);
+      historyReset();
       const bounds = contentBounds();
       if (bounds) {
         fitToContent(bounds, vW, vH);
@@ -241,11 +291,13 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (localPlan) {
       // Only local plan: restore verbatim (view included)
       applyPlan(localPlan);
+      historyReset();
       if (toastEl) showToast("Restored your last plan");
       render();
     } else {
       // Empty start: use default frame
       resetView(vW, vH);
+      historyReset();
       render();
     }
   })();

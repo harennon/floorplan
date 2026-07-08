@@ -13,6 +13,7 @@ import { screenToWorld } from "./view.js";
 import { chooseGridStep } from "./grid.js";
 import { model, resolveSnap, placeVertex, closeRoom, finishChain, undoPoint } from "./walls.js";
 import { scheduleRender } from "./surface.js";
+import { commit as historyCommit } from "./history.js";
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -61,7 +62,7 @@ export function init(refs) {
   _btnSelect.addEventListener("click", () => setTool("select"));
   _btnWall.addEventListener("click",   () => setTool("wall"));
   _btnUndo.addEventListener("click",   () => { undoPoint(); _updateRail(); scheduleRender(); });
-  _btnFinish.addEventListener("click", () => { finishChain(); _updateRail(); scheduleRender(); });
+  _btnFinish.addEventListener("click", () => { finishChain(); historyCommit(); _updateRail(); scheduleRender(); });
 
   // Rail collapse button (inside rail, mobile ≤480px): collapses the rail
   if (_railCollapseEl) {
@@ -103,7 +104,10 @@ export function getSnap() {
 export function setTool(t) {
   if (_tool === "wall" && t !== "wall") {
     // Auto-finish open chain on tool switch (edge case 8)
+    const hadChain = model.chain.length > 0;
     finishChain();
+    // Commit if the chain was non-trivial (finishChain creates a room for >=2 verts)
+    if (hadChain) historyCommit();
   }
   _tool = t;
   _snap = null;
@@ -152,6 +156,8 @@ export function onClick(sx, sy) {
     _snap = null;
     _hideSnapTag();
     _updateHudSnap();
+    // Commit to history after a room is closed/chain cleared
+    historyCommit();
   }
   _updateRail();
   scheduleRender();
@@ -192,6 +198,7 @@ function _onKeyDown(e) {
     case "Escape":
       if (_tool === "wall" && model.chain.length > 0) {
         finishChain();
+        historyCommit();
         _snap = null;
         _hideSnapTag();
         _updateHudSnap();
@@ -202,6 +209,7 @@ function _onKeyDown(e) {
     case "Enter":
       if (_tool === "wall" && model.chain.length > 0) {
         finishChain();
+        historyCommit();
         _snap = null;
         _hideSnapTag();
         _updateHudSnap();

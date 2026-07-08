@@ -20,6 +20,18 @@ import {
 import { scheduleRender } from "./surface.js";
 import { getRotateHandleScreen } from "./symbolRender.js";
 import { beginEdit as beginDimEdit, cancel as cancelDimEdit, isEditing as isDimEditing } from "./symbolDimEntry.js";
+import { commit as historyCommit, undo as historyUndo } from "./history.js";
+
+/** Callback injected from main.js — avoids circular dependency with actions.js. */
+let _showToast = null;
+
+/**
+ * Inject the toast function. Called once from main.js after both modules are init'd.
+ * @param {(msg: string, opts?: object) => void} fn
+ */
+export function setToastFn(fn) {
+  _showToast = fn;
+}
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -205,6 +217,11 @@ export function onSelectMove(sx, sy) {
  * Finalize drag.
  */
 export function onSelectUp(sx, sy) {
+  if (_dragMode !== null) {
+    // Commit the drag — history.commit() diffs vs baseline, so a no-op gesture
+    // (symbol returned to origin) produces no history step.
+    historyCommit();
+  }
   _dragMode = null;
 }
 
@@ -225,6 +242,35 @@ export function getSelectedId() {
   return _selectedId;
 }
 
+/** True when a symbol is currently selected. */
+export function hasSelection() {
+  return _selectedId !== null;
+}
+
+/** Duplicate the selected symbol (wraps _onDuplicate). No-op if nothing selected. */
+export function duplicateSelected() {
+  _onDuplicate();
+}
+
+/** Delete the selected symbol (wraps _deleteSelected). No-op if nothing selected. */
+export function deleteSelected() {
+  if (!_selectedId) return;
+  _deleteSelectedWithToast();
+}
+
+/** Rotate the selected symbol 90° (wraps _onRotate90). No-op if nothing selected. */
+export function rotateSelected() {
+  _onRotate90();
+}
+
+/**
+ * True when a symbol drag is in progress.
+ * Used by history/shortcuts to guard undo/redo during active pointer drag.
+ */
+export function isDragging() {
+  return _dragMode !== null;
+}
+
 /** For symbolRender: placement ghost, or null. */
 export function getPlacementGhost() {
   return _ghost;
@@ -237,6 +283,16 @@ export function getPlacementGhost() {
 export function onDrawModeEnter() {
   _clearSelection();
   scheduleRender();
+}
+
+/**
+ * Called by history after a restore: if the currently selected symbol no longer
+ * exists in the model, clear selection and hide inspector.
+ */
+export function clearSelectionIfStale() {
+  if (_selectedId && !getSymbol(_selectedId)) {
+    _clearSelection();
+  }
 }
 
 /**
@@ -324,6 +380,7 @@ function _onDockPointerDown(e) {
     const sym = createSymbol(typeWas, wp2.x, wp2.y);
     addSymbol(sym);
     selectSymbol(sym.id);
+    historyCommit();
     scheduleRender();
   };
 
@@ -355,6 +412,7 @@ function _onRotate90() {
   const sym = getSymbol(_selectedId);
   if (!sym) return;
   rotateSymbol(sym, sym.rot + 90);
+  historyCommit();
   scheduleRender();
 }
 
@@ -363,13 +421,15 @@ function _onDuplicate() {
   const dup = duplicateSymbol(_selectedId);
   if (dup) {
     selectSymbol(dup.id);
+    historyCommit();
+    if (_showToast) _showToast("Duplicated");
   }
   scheduleRender();
 }
 
 function _onDelete() {
   if (!_selectedId) return;
-  _deleteSelected();
+  _deleteSelectedWithToast();
 }
 
 function _onToggleLockAspect() {
@@ -395,11 +455,30 @@ export function repositionInspector() {
   if (sym) _positionInspector(sym);
 }
 
+/**
+ * Delete selected symbol and show an "Undo" actionable toast.
+ */
+function _deleteSelectedWithToast() {
+  if (!_selectedId) return;
+  if (isDimEditing()) cancelDimEdit();
+  removeSymbol(_selectedId);
+  _clearSelection();
+  historyCommit();
+  if (_showToast) {
+    _showToast("Deleted", {
+      actionLabel: "Undo",
+      onAction: () => historyUndo(),
+    });
+  }
+  scheduleRender();
+}
+
 function _deleteSelected() {
   if (!_selectedId) return;
   if (isDimEditing()) cancelDimEdit();
   removeSymbol(_selectedId);
   _clearSelection();
+  historyCommit();
   scheduleRender();
 }
 
@@ -464,7 +543,26 @@ function _onKeyDown(e) {
     // Only delete symbol if not in wall draw mode
     if (_isDrawModeFn && _isDrawModeFn()) return;
     e.preventDefault();
-    _deleteSelected();
+    _deleteSelectedWithToast();
+    return;
+  }
+
+  // R key: rotate selected symbol 90° (select mode only)
+  if (e.key === "r" || e.key === "R") {
+    if (_isDrawModeFn && _isDrawModeFn()) return;
+    if (_selectedId) {
+      _onRotate90();
+    }
+    return;
+  }
+
+  // Esc: clear symbol selection in select mode (wallTool handles Esc for draw mode)
+  if (e.key === "Escape") {
+    if (_isDrawModeFn && _isDrawModeFn()) return; // wallTool owns Esc in draw mode
+    if (_selectedId) {
+      _clearSelection();
+      scheduleRender();
+    }
   }
 }
 

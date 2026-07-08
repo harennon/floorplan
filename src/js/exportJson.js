@@ -10,6 +10,17 @@ import { render } from "./surface.js";
 /** Registered toast callback (set by actions.js). */
 let _showToast = (_msg) => {};
 
+/** history.reset callback (set by main.js). */
+let _historyReset = null;
+
+/**
+ * Inject the history.reset callback so importJson can clear history after import.
+ * @param {() => void} fn
+ */
+export function setHistoryReset(fn) {
+  _historyReset = fn;
+}
+
 /**
  * Inject the toast callback from actions.js so exportJson can show feedback.
  * @param {(msg:string)=>void} cb
@@ -65,6 +76,7 @@ export function importJson() {
           return;
         }
         applyPlan(plan);
+        if (_historyReset) _historyReset();
         render();
         _showToast("Plan imported");
       } catch {

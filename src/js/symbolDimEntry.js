@@ -20,6 +20,7 @@ import { fmtLen, parseLen, onChange as onUnitChange } from "./units.js";
 import { model as symbolModel, getSymbol, resizeSymbol, CATALOG, corners } from "./symbols.js";
 import { scheduleRender } from "./surface.js";
 import { worldToScreen } from "./view.js";
+import { commit as historyCommit } from "./history.js";
 
 // ── State ──────────────────────────────────────────────────────────────────────
 
@@ -171,6 +172,7 @@ export function commit() {
 
   resizeSymbol(sym, _editing.dim, targetM, _getLockAspect());
   _closeInput();
+  historyCommit();
   scheduleRender();
 }
 

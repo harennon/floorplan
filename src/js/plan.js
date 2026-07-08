@@ -10,6 +10,10 @@ import { model as symbolsModel, hydrate as hydrateSymbols, CATALOG } from "./sym
 import { view, setView } from "./view.js";
 import { unit, setUnit } from "./units.js";
 
+/**
+ * @typedef {{ walls: { rooms: Room[], chain: Vertex[] }, symbols: { symbols: Sym[] } }} GeometrySnapshot
+ */
+
 export const PLAN_SCHEMA = 1;
 const APP_TAG = "floorplan";
 const VALID_UNITS = ["ft", "m"];
@@ -160,6 +164,54 @@ export function serializePlan(plan) {
     view: plan.view,
     unit: plan.unit,
   });
+}
+
+// ── Geometry snapshot / restore (LLD 20) ────────────────────────────────────
+
+/**
+ * Deep-copied, JSON-safe geometry-only snapshot (no view/unit).
+ * Excludes view and unit so pan/zoom/unit toggles don't affect history.
+ * @returns {GeometrySnapshot}
+ */
+export function snapshotGeometry() {
+  return {
+    walls: {
+      rooms: JSON.parse(JSON.stringify(wallsModel.rooms)),
+      chain: JSON.parse(JSON.stringify(wallsModel.chain)),
+    },
+    symbols: {
+      symbols: JSON.parse(JSON.stringify(symbolsModel.symbols)),
+    },
+  };
+}
+
+/**
+ * Stable JSON string of a geometry snapshot, for dirty-checking.
+ * Fixed key order ensures identical geometry always produces identical strings.
+ * @param {GeometrySnapshot} snap
+ * @returns {string}
+ */
+export function serializeGeometry(snap) {
+  return JSON.stringify({
+    walls: {
+      rooms: snap.walls.rooms,
+      chain: snap.walls.chain,
+    },
+    symbols: {
+      symbols: snap.symbols.symbols,
+    },
+  });
+}
+
+/**
+ * Hydrate walls+symbols in place from a snapshot.
+ * Calls the existing hydrateWalls / hydrateSymbols (same in-place array-identity
+ * contract as boot restore). Caller must scheduleRender() afterward.
+ * @param {GeometrySnapshot} snap
+ */
+export function restoreGeometry(snap) {
+  hydrateWalls(snap.walls);
+  hydrateSymbols(snap.symbols);
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────

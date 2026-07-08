@@ -16,6 +16,14 @@ import { resetView } from "./view.js";
 import { render, onRender } from "./surface.js";
 import * as surface from "./surface.js";
 
+/** history.reset callback — injected by main.js after history.init. */
+let _historyReset = null;
+
+/** Set the history.reset callback so actions.js can clear history after Reset. */
+export function setHistoryReset(fn) {
+  _historyReset = fn;
+}
+
 /** Cached encoded hash for synchronous clipboard copy (Safari user-activation). */
 let _cachedHashUrl = null;
 
@@ -107,17 +115,44 @@ export function init(els) {
 }
 
 /**
- * Show a transient toast message.
+ * Show a transient toast message, optionally with a one-tap action button.
+ * Backward-compatible: existing callers pass only `msg` and get the same behaviour.
  * @param {string} msg
+ * @param {{ actionLabel?: string, onAction?: () => void }} [opts]
  */
-export function showToast(msg) {
+export function showToast(msg, opts) {
   if (!_toastEl) return;
-  _toastEl.textContent = msg;
+
+  if (opts && opts.actionLabel) {
+    // Actionable toast: message text + action button
+    _toastEl.textContent = "";
+    const textNode = document.createTextNode(msg + " · ");
+    _toastEl.appendChild(textNode);
+    const btn = document.createElement("button");
+    btn.className = "toast-action-btn";
+    btn.textContent = opts.actionLabel;
+    btn.addEventListener("click", () => {
+      if (opts.onAction) opts.onAction();
+      _dismissToast();
+    });
+    _toastEl.appendChild(btn);
+    _toastEl.classList.add("toast--action");
+  } else {
+    // Non-actionable toast (original behaviour)
+    _toastEl.textContent = msg;
+    _toastEl.classList.remove("toast--action");
+  }
+
   _toastEl.classList.add("toast--visible");
   if (_toastTimer) clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => {
-    if (_toastEl) _toastEl.classList.remove("toast--visible");
-  }, TOAST_DURATION_MS);
+  _toastTimer = setTimeout(_dismissToast, TOAST_DURATION_MS);
+}
+
+function _dismissToast() {
+  if (_toastEl) {
+    _toastEl.classList.remove("toast--visible");
+    _toastEl.classList.remove("toast--action");
+  }
 }
 
 /**
@@ -294,6 +329,8 @@ function _confirmReset() {
   _cacheStale = true;
   // Edge Case 16: Reset is the one deliberate view reset
   resetView(surface.W, surface.H);
+  // LLD 20: Reset clears history so the empty plan can't be "undone" back
+  if (_historyReset) _historyReset();
   render();
 }
 

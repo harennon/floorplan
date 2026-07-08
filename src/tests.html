@@ -3247,6 +3247,311 @@ describe("Reset — hydrate to empty + clearLocal + resetView", () => {
   });
 });
 
+// ─── Import LLD-20 modules ────────────────────────────────────────────────────
+
+import {
+  snapshotGeometry, serializeGeometry, restoreGeometry,
+} from "./js/plan.js";
+
+import {
+  init as initHistory,
+  commit as historyCommit,
+  undo as historyUndo,
+  redo as historyRedo,
+  reset as historyReset,
+  canUndo, canRedo,
+} from "./js/history.js";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Full reset for LLD-20 tests. */
+function resetAll20() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  setUnit("ft");
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  historyReset();
+}
+
+// ─── Tests: plan.js — snapshotGeometry / serializeGeometry / restoreGeometry ─
+
+describe("plan.js (LLD-20) — snapshotGeometry excludes view/unit", () => {
+  it("snapshot does not include view properties", () => {
+    model.rooms.length = 0; model.chain.length = 0; symbolModel.symbols.length = 0;
+    view.zoom = 3; view.panX = 500; view.panY = 300;
+    const snap = snapshotGeometry();
+    if ("view" in snap) throw new Error("snapshot includes 'view'");
+    if ("unit" in snap) throw new Error("snapshot includes 'unit'");
+  });
+
+  it("snapshot includes walls.rooms, walls.chain, symbols.symbols", () => {
+    model.rooms.length = 0;
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 }] });
+    model.chain.push({ x: 2, y: 2 });
+    symbolModel.symbols.length = 0;
+    const s = createSymbol("chair", 3, 3);
+    addSymbol(s);
+    const snap = snapshotGeometry();
+    expect(snap.walls.rooms.length).toBe(1);
+    expect(snap.walls.chain.length).toBe(1);
+    expect(snap.symbols.symbols.length).toBe(1);
+  });
+
+  it("snapshot is a deep copy — mutating live model does not alter snapshot", () => {
+    model.rooms.length = 0;
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    const snap = snapshotGeometry();
+    const originalX = snap.walls.rooms[0].verts[1].x;
+    // Mutate live model
+    model.rooms[0].verts[1].x = 99;
+    expect(snap.walls.rooms[0].verts[1].x).toBe(originalX);
+    model.rooms[0].verts[1].x = originalX; // restore
+  });
+});
+
+describe("plan.js (LLD-20) — serializeGeometry is stable", () => {
+  it("identical geometry produces identical string", () => {
+    model.rooms.length = 0;
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 }] });
+    symbolModel.symbols.length = 0;
+    const snap1 = snapshotGeometry();
+    const snap2 = snapshotGeometry();
+    expect(serializeGeometry(snap1)).toBe(serializeGeometry(snap2));
+  });
+
+  it("different geometry produces different string", () => {
+    model.rooms.length = 0;
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    symbolModel.symbols.length = 0;
+    const s1 = serializeGeometry(snapshotGeometry());
+    model.rooms[0].verts[1].x = 5;
+    const s2 = serializeGeometry(snapshotGeometry());
+    if (s1 === s2) throw new Error("Expected different serializations for different geometry");
+  });
+
+  it("view changes do not change geometry serialization", () => {
+    model.rooms.length = 0;
+    symbolModel.symbols.length = 0;
+    const snap1 = snapshotGeometry();
+    view.zoom = 5; view.panX = 999;
+    const snap2 = snapshotGeometry();
+    expect(serializeGeometry(snap1)).toBe(serializeGeometry(snap2));
+    view.zoom = 1; view.panX = 0;
+  });
+});
+
+describe("plan.js (LLD-20) — restoreGeometry replaces model in place", () => {
+  it("restores rooms and symbols from snapshot", () => {
+    model.rooms.length = 0;
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 1, y: 2 }] });
+    symbolModel.symbols.length = 0;
+    const s = createSymbol("sofa", 5, 5);
+    addSymbol(s);
+    const snap = snapshotGeometry();
+
+    // Mutate to different state
+    model.rooms.length = 0;
+    symbolModel.symbols.length = 0;
+    createSymbol("bed", 0, 0); // also bumps counter
+
+    // Restore
+    restoreGeometry(snap);
+
+    expect(model.rooms.length).toBe(1);
+    expect(model.rooms[0].id).toBe("w0");
+    expect(symbolModel.symbols.length).toBe(1);
+    expect(symbolModel.symbols[0].type).toBe("sofa");
+  });
+
+  it("array identity is preserved (same Array objects, replaced contents)", () => {
+    model.rooms.length = 0;
+    symbolModel.symbols.length = 0;
+    const originalRooms = model.rooms;
+    const originalSymbols = symbolModel.symbols;
+    const snap = snapshotGeometry();
+    model.rooms.push({ id: "w1", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    restoreGeometry(snap);
+    if (model.rooms !== originalRooms) throw new Error("rooms array identity changed");
+    if (symbolModel.symbols !== originalSymbols) throw new Error("symbols array identity changed");
+    expect(model.rooms.length).toBe(0);
+    expect(symbolModel.symbols.length).toBe(0);
+  });
+});
+
+// ─── Tests: history.js — core logic ──────────────────────────────────────────
+
+describe("history.js — commit pushes only on change", () => {
+  it("no-op when geometry is unchanged", () => {
+    resetAll20();
+    expect(canUndo()).toBe(false);
+    historyCommit(); // geometry unchanged from baseline
+    expect(canUndo()).toBe(false);
+  });
+
+  it("pushes one step when geometry changed", () => {
+    resetAll20();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 }] });
+    historyCommit();
+    expect(canUndo()).toBe(true);
+    expect(canRedo()).toBe(false);
+  });
+
+  it("double-commit is a no-op (same geometry → no phantom step)", () => {
+    resetAll20();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 }] });
+    historyCommit();
+    historyCommit(); // second commit with same geometry
+    // Should still be exactly 1 step
+    historyUndo();
+    expect(canUndo()).toBe(false);
+    expect(model.rooms.length).toBe(0);
+  });
+
+  it("clears redo stack on new commit after undo", () => {
+    resetAll20();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 }] });
+    historyCommit();
+    historyUndo();
+    expect(canRedo()).toBe(true);
+    // New commit (different state)
+    model.chain.push({ x: 5, y: 5 });
+    historyCommit();
+    expect(canRedo()).toBe(false);
+  });
+});
+
+describe("history.js — undo/redo move state between stacks", () => {
+  it("undo restores previous geometry", () => {
+    resetAll20();
+    // State A: empty
+    // Now add a room → State B
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 }] });
+    historyCommit();
+    // Undo → State A (empty rooms)
+    const didUndo = historyUndo();
+    expect(didUndo).toBe(true);
+    expect(model.rooms.length).toBe(0);
+    expect(canUndo()).toBe(false);
+    expect(canRedo()).toBe(true);
+  });
+
+  it("redo restores the state after undo", () => {
+    resetAll20();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 }] });
+    historyCommit();
+    historyUndo();
+    const didRedo = historyRedo();
+    expect(didRedo).toBe(true);
+    expect(model.rooms.length).toBe(1);
+    expect(canRedo()).toBe(false);
+  });
+
+  it("undo returns false on empty stack", () => {
+    resetAll20();
+    const result = historyUndo();
+    expect(result).toBe(false);
+    expect(model.rooms.length).toBe(0);
+  });
+
+  it("redo returns false on empty redo stack", () => {
+    resetAll20();
+    const result = historyRedo();
+    expect(result).toBe(false);
+  });
+
+  it("multiple undo/redo steps are correct", () => {
+    resetAll20();
+    // Step 1: add room A
+    model.rooms.push({ id: "wA", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    historyCommit();
+    // Step 2: add symbol
+    const s = createSymbol("chair", 2, 2);
+    addSymbol(s);
+    historyCommit();
+    // Undo step 2 → room A, no symbol
+    historyUndo();
+    expect(symbolModel.symbols.length).toBe(0);
+    expect(model.rooms.length).toBe(1);
+    // Undo step 1 → empty
+    historyUndo();
+    expect(model.rooms.length).toBe(0);
+    // Redo step 1
+    historyRedo();
+    expect(model.rooms.length).toBe(1);
+    // Redo step 2
+    historyRedo();
+    expect(symbolModel.symbols.length).toBe(1);
+  });
+});
+
+describe("history.js — reset clears both stacks and re-baselines", () => {
+  it("reset leaves canUndo=false, canRedo=false", () => {
+    resetAll20();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 }] });
+    historyCommit();
+    historyUndo();
+    expect(canRedo()).toBe(true);
+    historyReset();
+    expect(canUndo()).toBe(false);
+    expect(canRedo()).toBe(false);
+  });
+
+  it("after reset, commit on changed geometry produces one step", () => {
+    resetAll20();
+    historyReset();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }] });
+    historyCommit();
+    expect(canUndo()).toBe(true);
+  });
+});
+
+describe("history.js — MAX_STEPS cap drops oldest entry", () => {
+  it("only MAX_STEPS entries are kept (oldest dropped, not newest)", () => {
+    // Use a much smaller cap by doing 101 commits; we can't change MAX_STEPS at
+    // runtime but we can verify the stack behaviour by building up many steps.
+    resetAll20();
+    // 101 distinct commits (each changes geometry)
+    for (let i = 0; i < 101; i++) {
+      model.rooms.length = 0;
+      model.rooms.push({ id: `w${i}`, closed: false, verts: [{ x: i, y: 0 }, { x: i + 1, y: 0 }] });
+      historyCommit();
+    }
+    // Stack should be capped at MAX_STEPS (100). We can undo 100 times but the
+    // 101st undo returns false.
+    let count = 0;
+    while (historyUndo()) count++;
+    expect(count).toBe(100);
+  });
+});
+
+describe("history.js — canUndo / canRedo track stack lengths", () => {
+  it("canUndo false before any commit", () => {
+    resetAll20();
+    expect(canUndo()).toBe(false);
+  });
+
+  it("canUndo true after a commit", () => {
+    resetAll20();
+    model.chain.push({ x: 1, y: 1 });
+    historyCommit();
+    expect(canUndo()).toBe(true);
+  });
+
+  it("canRedo false before any undo", () => {
+    resetAll20();
+    expect(canRedo()).toBe(false);
+  });
+
+  it("canRedo true after undo", () => {
+    resetAll20();
+    model.chain.push({ x: 1, y: 1 });
+    historyCommit();
+    historyUndo();
+    expect(canRedo()).toBe(true);
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 

@@ -15,6 +15,7 @@ import { fmtLen, parseLen, onChange as onUnitChange } from "./units.js";
 import { model, edgeLength, rescaleEdge } from "./walls.js";
 import { scheduleRender } from "./surface.js";
 import { worldToScreen } from "./view.js";
+import { commit as historyCommit } from "./history.js";
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -193,6 +194,7 @@ export function commit() {
   }
 
   _closeInput();
+  historyCommit();
   scheduleRender();
 }
 
