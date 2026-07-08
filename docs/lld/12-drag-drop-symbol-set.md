@@ -73,6 +73,27 @@ pointer capture from the dock), so it does not go through `interactions.js`.
 `#symbol-overlay` selection box/handles) and appends dim chips to `.dim-labels`. It fires no
 events.
 
+**Shared `.dim-labels` clear/ordering contract (critical — the two renderers co-own this one
+overlay).** `wallRender.render()` unconditionally clears the *entire* `.dim-labels` container
+each frame (`_clearDimLabels`, wallRender.js:404-407) and then re-appends wall chips. Because
+SVG/DOM has no per-owner clearing, the layer is shared by convention with a strict discipline:
+- `symbolRender` **owns and clears only its own two SVG groups** (`#symbols`, `#symbol-overlay`)
+  each frame. It **MUST NOT** call any clear on `.dim-labels`.
+- `symbolRender` **appends** its symbol dim chips to `.dim-labels` *without clearing it*, so it
+  never wipes the wall chips that `wallRender` just added.
+- Therefore `symbolRender.render` **MUST be registered as an `onRender` hook AFTER `wallRender`
+  runs**. Per `surface._doRender` (surface.js:105-113) the fixed order is: `drawGrid` →
+  `_wallRender()` → `_renderHooks` in registration order → `hudUpdate`. `wallRender` runs as
+  `_wallRender` (before all hooks), so any `onRender` hook is already after it; among hooks,
+  `main.js` registers `symbolRender.render` (and then `symbolDimEntry.reposition`) — do not
+  register it before other `.dim-labels` writers. Net invariant each frame: `wallRender` clears
+  `.dim-labels` and adds wall chips first; `symbolRender` then appends symbol chips; nobody else
+  clears the container. Violating either rule (symbolRender clearing `.dim-labels`, or running
+  before `wallRender`) either wipes all wall chips or duplicates symbol chips every frame.
+
+Symbol chips carry a distinct CSS class/`data-*` selector from wall chips (see `dimEntry.js`
+reuse note) so `symbolDimEntry` can locate/reposition only its own chip within the shared layer.
+
 ## Interfaces / Types
 
 ### `symbols.js` (new — pure model + geometry)
@@ -121,12 +142,19 @@ export function getSymbol(id): Sym | null
 
 /**
  * Point-in-symbol hit test in WORLD metres, honoring rotation. Transforms the world point
- * into the symbol's local (un-rotated) frame and tests the w×h box. Returns boolean.
+ * into the symbol's local (un-rotated) frame and tests the w×h box inflated by `tolWorld`
+ * metres on every side. `tolWorld` defaults to 0 (exact box). Callers that want a
+ * screen-space minimum hit target pass a world tolerance = (minPx/2)/pxPerM() (see
+ * onSelectDown below and Edge Case 14). Returns boolean.
  */
-export function hitTest(sym, wx, wy): boolean
+export function hitTest(sym, wx, wy, tolWorld = 0): boolean
 
-/** Topmost symbol at world point (last in array wins = drawn last = on top), or null. */
-export function pickSymbol(wx, wy): Sym | null
+/**
+ * Topmost symbol at world point (last in array wins = drawn last = on top), or null.
+ * `tolWorld` (metres) is forwarded to hitTest so a caller can enforce a minimum on-screen
+ * hit target regardless of zoom. Defaults to 0.
+ */
+export function pickSymbol(wx, wy, tolWorld = 0): Sym | null
 
 /** Clamp a dimension value to the type's [min,max]. */
 export function clampDim(type, metres): number
@@ -154,6 +182,12 @@ export function init(refs): void
 // refs: { stage, dock, dockItems:NodeList, inspector, dimLabels }
 
 // Select-mode pointer hooks injected into interactions.js (see below).
+// onSelectDown converts (sx,sy)→world via screenToWorld, then computes a world tolerance
+// so the effective hit target is never smaller than MIN_HIT_PX on screen:
+//     const tolWorld = (MIN_HIT_PX / 2) / pxPerM();   // MIN_HIT_PX = 12
+// It tests handles first (rotate knob, then chips — themselves screen-sized DOM), then calls
+// pickSymbol(wx, wy, tolWorld). This is the ONLY place the screen→world minimum is applied;
+// pure symbols.js stays zoom-agnostic (Edge Case 14).
 export function onSelectDown(sx, sy): boolean   // true if a symbol/handle was hit (consume; suppress pan)
 export function onSelectMove(sx, sy): void      // drag move/rotate of the active symbol
 export function onSelectUp(sx, sy): void        // finalize drag
@@ -296,9 +330,16 @@ Every mutation ends with `scheduleRender()`.
     placement drag from a dock item first switches back to select mode.
 13. **Two symbols overlapping** → `pickSymbol` returns the topmost (last-drawn) symbol so the
     visually-front piece is selected.
-14. **Very small symbol at low zoom** (e.g. a chair at min zoom) → still hit-testable; render
-    enforces a minimum on-screen handle/hit size so it stays selectable (mirrors the wall
-    `Math.max(6, WALL_M*ppm)` body-width floor).
+14. **Very small symbol at low zoom** (e.g. a 0.5 m chair at min zoom, whose true box is only
+    a few px) → stays selectable because `onSelectDown` inflates the world hit point by
+    `tolWorld = (MIN_HIT_PX/2)/pxPerM()` (MIN_HIT_PX = 12) before calling
+    `pickSymbol(wx,wy,tolWorld)`, giving a ≥12 px on-screen hit target at any zoom. The
+    minimum is a *hit-test* concern applied in the tool layer (which has `pxPerM`), NOT in the
+    pure `symbols.js` model and NOT a render-only stroke floor — this is distinct from the
+    wall `Math.max(6, WALL_M*ppm)` case, which is purely `wallRender` stroke width (walls are
+    not selectable, so that floor never touches hit-testing). `symbolRender` independently
+    draws the selection box/handles at their normal screen sizes so the visible affordance and
+    the hit target agree.
 15. **Window/pan/zoom during an open edit or active drag** → chips, inspector, ghost, and the
     inline input reposition every frame from world coords (no drift).
 
