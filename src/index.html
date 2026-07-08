@@ -65,6 +65,14 @@
 
         /* Dimension entry */
         --error: #e57373;
+
+        /* Clearance status palette */
+        --clr-ok:         #7fd0c8;
+        --clr-tight:      #e0b64f;
+        --clr-bad:        #e57373;
+        --clr-ok-fill:    rgba(127,208,200,0.14);
+        --clr-tight-fill: rgba(224,182,79,0.16);
+        --clr-bad-fill:   rgba(229,115,115,0.18);
       }
 
       /* ── Reset ────────────────────────────────────────────────────────── */
@@ -541,11 +549,25 @@
         .dim-input { font-size: 0.7rem; min-width: 4rem; padding: 0.2rem 0.4rem; }
       }
 
-      /* ── Measure inspector ────────────────────────────────────────────────── */
-      .measure {
+      /* ── Right-side panel rail (Measure + Clearance stacked) ────────────── */
+      .right-rail {
         position: absolute;
         top: calc(1.25rem + 2.2rem + 0.5rem); /* below unit toggle */
         right: 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        z-index: 5;
+      }
+      @media (max-width: 640px) {
+        .right-rail {
+          top: calc(1.25rem + 2rem + 0.4rem);
+          right: 0.75rem;
+        }
+      }
+
+      /* ── Measure inspector ────────────────────────────────────────────────── */
+      .measure {
         width: 14rem;
         background: var(--panel);
         border: 1px solid var(--hairline);
@@ -652,8 +674,6 @@
       /* Mobile: default collapsed, ensure it doesn't cover canvas center */
       @media (max-width: 640px) {
         .measure {
-          top: calc(1.25rem + 2rem + 0.4rem);
-          right: 0.75rem;
           width: auto;
           min-width: 7rem;
         }
@@ -666,6 +686,258 @@
       /* prefers-reduced-motion: no transitions */
       @media (prefers-reduced-motion: reduce) {
         .dim-chip, .measure-row, .measure-toggle { transition: none; }
+      }
+
+      /* ── Clearance panel ──────────────────────────────────────────────────── */
+      .clearance {
+        width: 14rem;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        overflow: hidden;
+      }
+      .clr-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.5rem 0.7rem 0.35rem;
+        gap: 0.4rem;
+      }
+      .clr-header-label {
+        color: var(--muted);
+        font-size: 0.62rem;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        flex: 1;
+      }
+      .clr-header-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        background: var(--muted);
+      }
+      .clr-header-dot.clr-dot--ok    { background: var(--clr-ok);    }
+      .clr-header-dot.clr-dot--tight { background: var(--clr-tight);  }
+      .clr-header-dot.clr-dot--bad   { background: var(--clr-bad);    }
+      .clr-enable-switch {
+        background: transparent;
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        padding: 0.1rem 0.45rem;
+        border-radius: 100px;
+        cursor: pointer;
+        transition: color 0.12s, border-color 0.12s;
+        flex-shrink: 0;
+      }
+      .clr-enable-switch[aria-pressed="true"] {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+      }
+      .clr-enable-switch:hover { color: var(--ink); border-color: var(--ink); }
+      .clr-toggle {
+        background: transparent;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        padding: 0;
+        line-height: 1;
+        transition: color 0.12s;
+        flex-shrink: 0;
+      }
+      .clr-toggle:hover { color: var(--ink); }
+
+      /* Body (controls + list + verdict) */
+      .clr-body {
+        border-top: 1px solid var(--hairline);
+      }
+      .clearance--collapsed .clr-body {
+        display: none;
+      }
+      .clearance--collapsed {
+        width: auto;
+        min-width: 8rem;
+      }
+
+      /* Controls */
+      .clr-controls {
+        padding: 0.5rem 0.7rem 0.3rem;
+        border-bottom: 1px solid var(--hairline);
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+      }
+      .clr-slider-row {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .clr-slider-label {
+        color: var(--muted);
+        font-size: 0.62rem;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .clr-slider {
+        flex: 1;
+        min-width: 0;
+        accent-color: var(--gold);
+        cursor: pointer;
+      }
+      .clr-slider-val {
+        color: var(--ink);
+        font-size: 0.65rem;
+        white-space: nowrap;
+        min-width: 3rem;
+        text-align: right;
+      }
+      .clr-density-row {
+        display: flex;
+        gap: 0.25rem;
+      }
+      .clr-density-btn {
+        flex: 1;
+        background: transparent;
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.6rem;
+        padding: 0.2rem 0;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .clr-density-btn[aria-pressed="true"] {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+        background: rgba(201,168,76,0.1);
+      }
+      .clr-density-btn:hover:not([aria-pressed="true"]) {
+        color: var(--ink);
+        border-color: var(--ink);
+      }
+      .clr-density-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      /* Gap list */
+      .clr-list {
+        max-height: 10rem;
+        overflow-y: auto;
+        scrollbar-width: thin;
+      }
+      .clr-empty {
+        padding: 0.5rem 0.7rem;
+        color: var(--muted);
+        font-size: 0.65rem;
+        text-align: center;
+        font-style: italic;
+      }
+      .clr-row {
+        display: grid;
+        grid-template-columns: 10px 1fr auto;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.25rem 0.7rem;
+        border-bottom: 1px solid rgba(201,168,76,0.07);
+      }
+      .clr-row:last-child { border-bottom: none; }
+      .clr-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        background: var(--muted);
+      }
+      .clr-dot--ok    { background: var(--clr-ok);    }
+      .clr-dot--tight { background: var(--clr-tight);  }
+      .clr-dot--bad   { background: var(--clr-bad);    }
+      .clr-row-label {
+        color: var(--muted);
+        font-size: 0.65rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .clr-row-val {
+        font-size: 0.65rem;
+        white-space: nowrap;
+        text-align: right;
+      }
+
+      /* Verdict banner */
+      .clr-verdict {
+        padding: 0.4rem 0.7rem;
+        font-size: 0.68rem;
+        font-weight: 500;
+        border-top: 1px solid var(--hairline);
+        text-align: center;
+      }
+
+      /* Canvas overlay chips + pill */
+      .clr-chip {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        font-family: var(--font-mono);
+        font-size: 0.6rem;
+        padding: 0.08rem 0.28rem;
+        border-radius: 3px;
+        white-space: nowrap;
+        pointer-events: none;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        line-height: 1.4;
+        user-select: none;
+      }
+      .fit-pill {
+        position: absolute;
+        transform: translate(-50%, 0);
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        padding: 0.15rem 0.55rem;
+        border-radius: 100px;
+        white-space: nowrap;
+        pointer-events: none;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        line-height: 1.5;
+        user-select: none;
+      }
+      @media (max-width: 640px) {
+        .clr-chip { font-size: 0.55rem; padding: 0.06rem 0.22rem; }
+        .clearance {
+          width: auto;
+          min-width: 7rem;
+        }
+        .clearance:not(.clearance--collapsed) {
+          width: 12rem;
+        }
+      }
+
+      /* Band pulse animation */
+      @keyframes clr-pulse {
+        0%   { opacity: 1; }
+        50%  { opacity: 0.45; }
+        100% { opacity: 1; }
+      }
+      .clr-band {
+        animation: clr-pulse 1.6s ease-in-out infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .clr-band { animation: none !important; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .clr-enable-switch, .clr-density-btn, .clr-toggle { transition: none; }
       }
 
       /* ── Symbol dock (bottom-center) ─────────────────────────────────────── */
@@ -1134,6 +1406,8 @@
           <g id="snap"></g>
           <!-- Symbol bodies (above walls) -->
           <g id="symbols"></g>
+          <!-- Clearance leaders, ticks, and bands (above symbols, below selection overlay) -->
+          <g id="clearance"></g>
           <!-- Symbol selection overlay, handles, ghost -->
           <g id="symbol-overlay"></g>
         </svg>
@@ -1255,17 +1529,33 @@
         <button id="unit-metric"   aria-pressed="false">METRIC</button>
       </div>
 
-      <!-- Measure inspector -->
-      <aside class="measure" aria-label="Measure inspector">
-        <div class="measure-header">
-          <span class="measure-header-label">Floor Area</span>
-          <span class="measure-total-val" aria-live="polite" aria-atomic="true">0.0 ft²</span>
-          <button class="measure-toggle" aria-label="Toggle measure panel" aria-expanded="true">▾</button>
-        </div>
-        <div class="measure-body">
-          <div class="measure-list" role="table" aria-label="Room measurements"></div>
-        </div>
-      </aside>
+      <!-- Right-side panel rail (Measure + Clearance stacked) -->
+      <div class="right-rail">
+        <!-- Measure inspector -->
+        <aside class="measure" aria-label="Measure inspector">
+          <div class="measure-header">
+            <span class="measure-header-label">Floor Area</span>
+            <span class="measure-total-val" aria-live="polite" aria-atomic="true">0.0 ft²</span>
+            <button class="measure-toggle" aria-label="Toggle measure panel" aria-expanded="true">▾</button>
+          </div>
+          <div class="measure-body">
+            <div class="measure-list" role="table" aria-label="Room measurements"></div>
+          </div>
+        </aside>
+
+        <!-- Clearance inspector -->
+        <aside class="clearance" aria-label="Clearance inspector">
+          <div class="clr-header">
+            <span class="clr-header-label">Clearance</span>
+            <span class="clr-header-dot" aria-hidden="true"></span>
+            <button class="clr-enable-switch" aria-pressed="true" aria-label="Toggle clearance overlay">On</button>
+            <button class="clr-toggle" aria-label="Toggle clearance panel" aria-expanded="true">▾</button>
+          </div>
+          <div class="clr-body" id="clr-body">
+            <!-- Rebuilt by clearancePanel.update() each render -->
+          </div>
+        </aside>
+      </div>
 
       <!-- Zoom cluster -->
       <div class="zoom-cluster" aria-label="Zoom controls">

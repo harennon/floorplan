@@ -24,9 +24,13 @@ import { contentBounds } from "./exportImg.js";
 import { fitToContent } from "./view.js";
 import { init as initActions, showToast, showConflictBanner, setHistoryReset } from "./actions.js";
 import { model as wallsModel } from "./walls.js";
+import { getSymbol } from "./symbols.js";
 import { init as initHistory, reset as historyReset, commit as historyCommit, undo as historyUndo, redo as historyRedo, canUndo, canRedo, depth as historyDepth, onChange as historyOnChange } from "./history.js";
 import { init as initHelp } from "./help.js";
 import { onSnapModeChange } from "./grid.js";
+import { init as initClearanceRender, render as clearanceRenderFn } from "./clearanceRender.js";
+import { init as initClearancePanel, update as clearancePanelUpdate } from "./clearancePanel.js";
+import { onChange as onClearanceChange, setEnabled as setClearanceEnabled } from "./clearance.js";
 
 /** Detect macOS for platform-correct tooltip chords. */
 const _isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
@@ -79,6 +83,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const measureTotal  = document.querySelector(".measure-total-val");
   const measureToggle = document.querySelector(".measure-toggle");
 
+  // Clearance inspector
+  const clearancePanel  = document.querySelector(".clearance");
+  const clearanceBody   = document.getElementById("clr-body");
+  const clearanceToggle = document.querySelector(".clr-toggle");
+  const clearanceSwitch = document.querySelector(".clr-enable-switch");
+  const gClearance      = document.getElementById("clearance");
+
   // Persistence / share DOM refs
   const savePillEl     = document.getElementById("save-pill");
   const btnShare       = document.getElementById("btn-share");
@@ -127,6 +138,29 @@ document.addEventListener("DOMContentLoaded", () => {
   // Measure inspector
   initMeasure({ panel: measurePanel, list: measureList, total: measureTotal, toggle: measureToggle });
 
+  // Clearance render — reads selected id + symbol, paints into #clearance + .dim-labels
+  initClearanceRender(gClearance, dimLabelsEl, getSelectedId, getSymbol);
+
+  // Clearance panel — sorted gap list, verdict, slider, density, on/off
+  if (clearancePanel && clearanceBody) {
+    initClearancePanel({
+      panel:         clearancePanel,
+      body:          clearanceBody,
+      toggle:        clearanceToggle,
+      getSelectedId,
+      getSymbol,
+    });
+  }
+
+  // Wire the enable switch (defined in HTML, wired here)
+  if (clearanceSwitch) {
+    clearanceSwitch.addEventListener("click", () => {
+      const next = clearanceSwitch.getAttribute("aria-pressed") !== "true";
+      setClearanceEnabled(next);
+      scheduleRender();
+    });
+  }
+
   // dimEntry (handles its own pointer-isolation and unit-cancel binding internally)
   initDimEntry({ stage, dimLabels: dimLabelsEl });
 
@@ -158,11 +192,15 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Register post-render hooks
-  // Order: wallRender (in _wallRender) → symbolRenderFn → symbolDimReposition → repositionInspector → dimReposition → measureUpdate
+  // Order: wallRender (in _wallRender) → symbolRenderFn → clearanceRenderFn →
+  //        symbolDimReposition → repositionInspector → dimReposition →
+  //        measureUpdate → clearancePanelUpdate
   onRender(symbolRenderFn);
+  onRender(clearanceRenderFn);   // leaders above symbol bodies, below #symbol-overlay
   onRender(symbolDimReposition);
   onRender(repositionInspector);
   onRender(measureUpdate);
+  onRender(clearancePanelUpdate);
   onRender(dimReposition);
 
   // Initialise store (save pill + autosave hook)
@@ -297,13 +335,21 @@ document.addEventListener("DOMContentLoaded", () => {
     measurePanel.classList.add("measure--collapsed");
     measureToggle.textContent = "▸";
     measureToggle.setAttribute("aria-expanded", "false");
+    // Also default clearance panel to collapsed on mobile
+    if (clearancePanel && clearanceToggle) {
+      clearancePanel.classList.add("clearance--collapsed");
+      clearanceToggle.textContent = "▸";
+      clearanceToggle.setAttribute("aria-expanded", "false");
+    }
   }
 
-  // ── Wire re-render on view / unit / snap-mode changes ─────────────────────
+  // ── Wire re-render on view / unit / snap-mode / clearance-state changes ──
   onViewChange(scheduleRender);
   onUnitChange(scheduleRender);
   // Snap mode change: reschedule render so live placement ghosts re-snap on next move
   onSnapModeChange(scheduleRender);
+  // Clearance state change (threshold / density / enabled) triggers re-render
+  onClearanceChange(scheduleRender);
 
   // ── Initial size (always) ──────────────────────────────────────────────────
   // CRITICAL: resize() must always run first (measures viewport).
