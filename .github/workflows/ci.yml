@@ -35,7 +35,7 @@ jobs:
       # so both index.html and tests.html (which uses inline <script type="module">)
       # pass on structural grounds only.
       - name: Validate HTML
-        run: npx --yes html-validate@9.9.0 --config .github/html-validate.json "src/**/*.html"
+        run: npx --yes html-validate@9.7.1 --config .github/html-validate.json "src/**/*.html"
 
       # ── Step 2: JS syntax check ──────────────────────────────────────────────
       # node --check --input-type=module parses each ES module for syntax errors
