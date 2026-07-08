@@ -81,7 +81,17 @@ Key decisions and rationale:
    **uncompressed** base64url when `CompressionStream` is missing, and so future codecs
    stay decodable. No third-party compression library is bundled.
 
-6. **Export renders headless, independent of the live view.** PNG/SVG export must not
+6. **Clipboard copy ordering (Safari user-activation).** The Share flow needs the
+   compressed hash (an `await` on `CompressionStream`) before it can copy. Awaiting first
+   and calling `navigator.clipboard.writeText` afterward risks Safari treating the gesture
+   as spent (`NotAllowedError`), making the fallback the *common* path there. Two-part
+   handling: keep a lazily-recomputed encoded-hash cache refreshed on the autosave/render
+   dirty-check so the click handler usually has the URL **synchronously** and can
+   `writeText` before yielding; and always wrap `writeText` in try/catch with a
+   same-handler transient-input select fallback. Prefer the sync path; treat the fallback
+   as the exceptional path, not the default. (Edge Case 18.)
+
+7. **Export renders headless, independent of the live view.** PNG/SVG export must not
    bake in grid, snap glyphs, chrome, or the user's pan/zoom. `exportImg.js` computes a
    world-space bounding box over all room verts and symbol footprints, applies a fixed
    export scale + margin, and emits a fresh SVG mirroring the on-canvas styling (wall
@@ -116,7 +126,8 @@ export function buildPlan(): Plan
  * Deep structural + type validation. Returns the normalised Plan or null.
  * Rejects: non-object, wrong app tag, schema !== PLAN_SCHEMA, missing/!array
  * rooms|chain|symbols, verts/symbols with non-finite numbers, unknown unit,
- * unknown symbol type. Never throws.
+ * unknown symbol type. Also requires each room's `closed` to be a boolean and each
+ * vertex to be an object of shape {x:number, y:number} (both finite). Never throws.
  */
 export function validatePlan(raw: unknown): Plan | null
 
@@ -217,8 +228,18 @@ export function hydrate(next: { rooms: Room[], chain: Vertex[] }): void
 export function hydrate(next: { symbols: Sym[] }): void
 
 // view.js
-/** Set zoom/panX/panY (clamped zoom) and fire onChange. */
+/** Set zoom/panX/panY (clamped zoom) and fire onChange. Used by applyPlan (verbatim
+ *  same-device restore + JSON import). */
 export function setView(v: { zoom:number, panX:number, panY:number }): void
+
+/**
+ * Compute and apply a zoom/pan that fits `bounds` (world-space) centered within a
+ * W×H viewport with a small margin, then fire onChange. Zoom is clamped to
+ * [MIN_ZOOM, MAX_ZOOM]. Used by share-open (applyShared) so a plan drawn on one device
+ * frames correctly on another. No-op-safe: caller passes non-null bounds (empty plan
+ * falls back to resetView).
+ */
+export function fitToContent(bounds: {minX,minY,maxX,maxY:number}, W:number, H:number): void
 ```
 
 ## State Model
@@ -248,25 +269,61 @@ selection, in-progress dim-entry input, hint dismissal).
 3. Import / share-open / Reset call `saveNow()`-equivalents explicitly so the pill and
    baseline stay coherent.
 
-**Boot restore order (in `main.js`, before first `render()`):**
-1. `readBootHash()` → `hashPlan`.
-2. `loadLocal()` → `localPlan`.
-3. Decision:
+**Boot restore order (in `main.js`, replacing the current unconditional
+`resize()` → `resetView(W,H)` → `render()` tail, lines 156–167):**
+
+> **CRITICAL — `resetView` must NOT run unconditionally.** Today `main.js` calls
+> `resize()` then `resetView(W, H)` right before `render()`. `resetView` overwrites
+> `view.zoom/panX/panY`. If left unconditional it will **clobber any restored view**
+> (from `applyPlan`) on every reload and every share-open. The boot sequence below moves
+> `resetView(W, H)` into the **empty-start branch only**: it runs when no plan is applied
+> (and after the destructive Reset, Edge Case 16). Whenever a `hashPlan` or `localPlan` is
+> applied, `resetView` is **skipped** and the view comes from the plan/frame logic below.
+> `resize()` still always runs first (it only measures the viewport; it does not touch
+> `view`).
+
+1. `resize()` → `{ W, H }` (always; measures viewport only).
+2. `readBootHash()` → `hashPlan`.
+3. `loadLocal()` → `localPlan`.
+4. Decision:
    - `hashPlan` present **and** `localPlan` present **and** `!isEmptyPlan`-equivalent for
      local (local has content) **and** the two serialize differently → **show
-     banner-with-choice**; apply nothing yet.
-   - `hashPlan` present otherwise → apply `hashPlan`; toast "Opened shared plan".
-   - else `localPlan` present → apply `localPlan`; light auto-dismiss toast "Restored
-     your last plan".
-   - else → empty start (existing default).
-4. Always strip `location.hash` after reading (so a later autosave/refresh doesn't
+     banner-with-choice**; apply nothing yet, **do not** call `resetView`. The chosen
+     branch (below) applies its plan and sets the view.
+   - `hashPlan` present otherwise → apply `hashPlan` via `applyShared(hashPlan, W, H)`
+     (see below); toast "Opened shared plan". **No `resetView`.**
+   - else `localPlan` present → `applyPlan(localPlan)` (restores the stored view verbatim);
+     light auto-dismiss toast "Restored your last plan". **No `resetView`.**
+   - else → empty start: call `resetView(W, H)` (existing default frame).
+5. Always strip `location.hash` after reading (so a later autosave/refresh doesn't
    re-trigger the shared-open path, and the URL is clean).
-5. `render()`.
+6. `render()`.
 
-Banner choices: **Open shared** → `applyPlan(hashPlan)` + render (local plan remains in
-localStorage until the next autosave overwrites it — so nothing is lost until the user
-edits). **Keep mine** → `applyPlan(localPlan)` (or leave as already-loaded) + render;
-discard `hashPlan`.
+**Share-open view handling (`applyShared`) — cross-device fit, not raw pan.** A shared
+plan's `view.panX/panY` are absolute *screen pixels* derived from the **sender's**
+viewport (`worldToScreen = wx*scale + panX`; `resetView` sets `panX = W*0.15`). Applying
+them verbatim on a differently-sized device (wide desktop → narrow phone, or vice-versa)
+can render the plan partially or fully **off-screen** — a bad first impression for the
+headline share feature. Therefore share-open does **not** trust the payload's pan/zoom:
+after `applyPlan(hashPlan)` (which restores rooms/symbols/unit and the raw view),
+`applyShared` immediately **reframes to fit content** for the *current* viewport via a new
+`view.fitToContent(bounds, W, H)` helper (see Interfaces) using `contentBounds()` from
+`exportImg.js`. If the plan is empty (`contentBounds` → null), fall back to
+`resetView(W, H)`. This makes "opening the link reconstructs the exact plan on any device"
+true for the *content* (walls/symbols/dimensions/unit are byte-exact) while the *frame* is
+recomputed to guarantee the plan is visible and centered on the opener's screen.
+
+> This treatment is **specific to share-open**. The same-device localStorage restore keeps
+> the stored pan/zoom verbatim (via plain `applyPlan`) because the viewport is the same
+> machine and the user's last frame is exactly what they expect back. `view` is still
+> included in the persisted/shared payload (JSON round-trip stays lossless and
+> same-device restore is exact); share-open simply overrides the *applied* frame after
+> loading.
+
+Banner choices: **Open shared** → `applyShared(hashPlan, W, H)` + render (fit-to-content
+frame; local plan remains in localStorage until the next autosave overwrites it — so
+nothing is lost until the user edits). **Keep mine** → `applyPlan(localPlan)` (stored view
+verbatim) + render; discard `hashPlan`.
 
 ## Edge Cases
 
@@ -324,8 +381,23 @@ discard `hashPlan`.
     tag guard + `validatePlan` → reject toast; live plan untouched.
 16. **Reset.** Overflow ⋯ → Reset → confirm ("Replace current plan? This can't be
     undone."). On confirm: `walls.hydrate({rooms:[],chain:[]})`,
-    `symbols.hydrate({symbols:[]})`, `clearLocal()`, `resetView(W,H)`, render, pill →
+    `symbols.hydrate({symbols:[]})`, `clearLocal()`, `resetView(W,H)` (Reset is the one
+    deliberate view-reset that survives the boot-restore change above), render, pill →
     `saved` (empty). No accidental one-click path.
+17. **Hand-edited / foreign JSON with a missing or non-boolean `closed`.** `polygonArea`
+    / `perimeter` treat a falsy `closed` as an open polyline, so a bad `closed` would
+    silently mis-measure a room. `validatePlan` rejects any room whose `closed` is not a
+    strict boolean (and any vertex not of shape `{x:number,y:number}`) → import/share
+    reject toast, no partial load.
+18. **Clipboard user-activation lost across `await` (Safari).** The Share handler must
+    compress via `CompressionStream` (async) before it has a URL to copy. In Safari,
+    awaiting across a microtask can spend the user-activation gesture, so a *later*
+    `navigator.clipboard.writeText` rejects with `NotAllowedError` — pushing every Safari
+    copy onto the fallback path. Mitigation: (a) `writeText` is still attempted and its
+    rejection caught; (b) on rejection, fall back to selecting the URL in a transient
+    input **within the same handler** so manual copy works; (c) optionally pre-compute /
+    memoize the encoded hash on the last render so the click handler has the URL
+    synchronously and can `writeText` before yielding. See Approach note 6.
 
 ## Dependencies
 
@@ -341,7 +413,9 @@ discard `hashPlan`.
   live view).
 
 **New thin additions required in existing files:**
-- `walls.hydrate`, `symbols.hydrate`, `view.setView` (see Interfaces).
+- `walls.hydrate`, `symbols.hydrate`, `view.setView`, `view.fitToContent` (see Interfaces).
+  Share-open uses `view.fitToContent(contentBounds(), W, H)`; the boot tail moves
+  `resetView(W,H)` into the empty-start / Reset branches only (no longer unconditional).
 - `main.js` boot-restore block + `store.init` + register autosave `onRender` hook + wire
   the actions cluster.
 - `index.html` — actions-cluster markup + save pill + toast/banner containers + CSS
@@ -380,8 +454,11 @@ family, no new runtime dependency.**
 **Layout (new "actions" cluster, top-right):** placed above/left of the existing unit
 toggle so it doesn't collide with the measure inspector. Three affordances + an ambient
 pill:
-- **Share** button → primary action; on click computes the hash URL, copies to clipboard,
-  shows a "Link copied" toast. (Label reads "Copy link" / "Share".)
+- **Share** button → primary action; on click copies the hash URL to clipboard and shows a
+  "Link copied" toast. Prefer a pre-computed (cached, dirty-checked) hash so `writeText`
+  runs before any `await` (Safari user-activation, Approach note 6 / Edge Case 18); fall
+  back to selecting the URL in a transient input within the same handler on rejection.
+  (Label reads "Copy link" / "Share".)
 - **Export** button → small popover menu: **PNG**, **SVG**, **JSON**, divider, **Import
   JSON…**. Same panel/hairline styling as the symbol dock / inspector.
 - **Overflow ⋯** button → menu with a single destructive **Reset** item (rendered in the
@@ -419,7 +496,8 @@ cases run in the in-browser harness.
   acceptance criterion — lossless).
 - `validatePlan` accepts a good plan; returns `null` (never throws) for: non-object,
   missing/`wrong app` tag, `schema` ≠ `PLAN_SCHEMA`, non-array rooms/chain/symbols,
-  non-finite vertex/symbol numbers, unknown unit, unknown symbol type.
+  non-finite vertex/symbol numbers, malformed vertex (missing/non-numeric `x`/`y`),
+  non-boolean or missing room `closed`, unknown unit, unknown symbol type.
 - `isEmptyPlan` true for a fresh model, false after adding a room or symbol.
 - `serializePlan` is stable (same plan → identical string; key order fixed) so the
   dirty-check is reliable.
@@ -430,6 +508,10 @@ cases run in the in-browser harness.
   (collision guard, Edge Case 9).
 - `symbols.hydrate` likewise for `s<n>`.
 - `view.setView` clamps zoom to `[MIN_ZOOM, MAX_ZOOM]` and fires `onChange`.
+- `view.fitToContent(bounds, W, H)` produces a zoom (clamped) and pan such that the
+  bounds map inside the W×H viewport with margin and are centered; fires `onChange`.
+  Verify a plan that fits off-screen under the sender's raw pan lands on-screen after
+  `fitToContent` for a different (narrower) W×H.
 
 **Unit — `share.js` codec:**
 - `decodeHashToPlan(await encodePlanToHash(p))` deep-equals `p` (compressed path).
@@ -448,13 +530,21 @@ cases run in the in-browser harness.
 - **Autosave:** mutating the model then advancing past the debounce writes a valid plan to
   `localStorage[STORAGE_KEY]`; pill transitions `unsaved → saving → saved`; a no-op render
   does not write (dirty-check).
-- **Reload restore:** seed `localStorage` with a known plan, run boot restore → model
-  matches; light "Restored" toast; no conflict banner.
+- **Reload restore (view verbatim):** seed `localStorage` with a known plan whose stored
+  `view` differs from the default frame, run the **full boot sequence** → model matches
+  **and `view.view` equals the stored view** (i.e. `resetView` did NOT clobber it — the
+  regression the reviewer flagged; note the pure `applyPlan(validatePlan(buildPlan()))`
+  round-trip test does *not* exercise the boot tail, so this behavioral test is the one
+  that guards it); light "Restored" toast; no conflict banner.
+- **Empty-start view:** no hash, no local plan → boot calls `resetView(W,H)`; `view`
+  equals the default frame.
 - **Share open, no local plan:** set `location.hash` to an encoded plan, empty local → boot
-  applies it, toast shown, hash stripped from URL.
+  applies rooms/symbols/unit byte-exact, **reframes via `fitToContent`** (not the sender's
+  raw pan) so content is on-screen for the current viewport, toast shown, hash stripped
+  from URL. `resetView` is NOT called.
 - **Share open, conflicting local plan:** non-empty local + differing hash → **banner
-  shown**, nothing applied yet; "Open shared" applies hash; "Keep mine" retains local.
-  Identical hash+local → no banner (Edge Case 14).
+  shown**, nothing applied yet; "Open shared" applies hash + fit-to-content; "Keep mine"
+  retains local with its stored view. Identical hash+local → no banner (Edge Case 14).
 - **JSON round-trip:** `exportJson` produces a blob whose parsed content re-imports via the
   `importJson` validate path to a deep-equal model.
 - **Import rejection:** feeding wrong-schema / non-plan JSON to the import handler shows a
