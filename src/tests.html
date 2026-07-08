@@ -101,6 +101,15 @@ function render() {
     ? `${failed} of ${total} tests FAILED`
     : `All ${total} tests passed`;
   out.appendChild(summary);
+  // Expose result for headless CI runner (read via window.__testResult).
+  // failures[] is included so run-tests.mjs can print per-case details in CI logs.
+  const failures = [];
+  for (const suite of _suites) {
+    for (const c of suite.cases) {
+      if (c.err) failures.push({ suite: suite.name, name: c.name, error: c.err.message });
+    }
+  }
+  window.__testResult = { total, failed, passed: total - failed, failures };
 }
 
 // ─── Import modules under test ────────────────────────────────────────────────

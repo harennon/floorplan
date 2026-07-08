@@ -56,7 +56,22 @@ jobs:
             node --check --input-type=module < "$f" || exit 1
           done
 
-      # ── Step 3: Dead-link check ──────────────────────────────────────────────
+      # ── Step 3: Unit tests (headless Chromium via Playwright) ───────────────
+      # tests.html is a browser ES-module test suite; it cannot run under Node
+      # directly because it uses the DOM.  We serve src/ over a local HTTP
+      # server, load the page in headless Chromium, and read window.__testResult
+      # (set by the harness's render() function after all async tests resolve).
+      # playwright is installed locally (--no-save avoids creating package.json)
+      # so run-tests.mjs can import it; node_modules/ is gitignored.
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --no-save playwright@1.49.1
+          npx playwright install --with-deps chromium
+
+      - name: Run unit tests
+        run: node .github/run-tests.mjs
+
+      # ── Step 4: Dead-link check ──────────────────────────────────────────────
       # lychee is a fast single-binary Rust link checker (no npm tree).
       # External link failures (e.g. Google Fonts) must not flap the required check:
       # --max-retries 2 and --timeout 20 mitigate transient network issues.

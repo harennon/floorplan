@@ -352,25 +352,74 @@ export function computeClearances(sym, world) {
     const cat = CATALOG[other.type];
     const label = cat ? cat.label : other.type;
 
-    // Axis-separated gap: positive means a gap exists on that axis
+    // Axis-separated gap: positive means a gap exists on that axis.
+    // dx > 0: the two boxes are separated horizontally (a walkway between their x-facing edges).
+    // dy > 0: the two boxes are separated vertically (a walkway between their y-facing edges).
+    // Real adjacent furniture shares overlap on exactly ONE axis, so the gap lives on the other.
     const dx = Math.max(ob.l - box.r, box.l - ob.r); // >0 if separated on x
     const dy = Math.max(ob.t - box.b, box.t - ob.b); // >0 if separated on y
 
-    if (dx > 0 && dy > 0) {
-      // Separated on both axes: use the shorter gap's axis (nearest face pair)
+    if (dx > 0 && dy <= 0) {
+      // Separated only on x → horizontal gap
+      const gap = dx;
+      // Leader runs along the shared y mid-span of the facing edges
+      const sharedT = Math.max(box.t, ob.t);
+      const sharedB = Math.min(box.b, ob.b);
+      const midY = sharedT < sharedB
+        ? (sharedT + sharedB) / 2
+        : (box.t + box.b) / 2;  // no y overlap: fall back to selected sym midline
+
+      let aX, bX;
+      if (ob.l >= box.r) { aX = box.r; bX = ob.l; }
+      else                { aX = box.l; bX = ob.r; }
+
+      results.push({
+        label, kind: "symbol", gap,
+        status: classify(gap),
+        a: { x: aX, y: midY },
+        b: { x: bX, y: midY },
+        neighbourId: other.id,
+      });
+    } else if (dx <= 0 && dy > 0) {
+      // Separated only on y → vertical gap
+      const gap = dy;
+      const sharedL = Math.max(box.l, ob.l);
+      const sharedR = Math.min(box.r, ob.r);
+      const midX = sharedL < sharedR
+        ? (sharedL + sharedR) / 2
+        : (box.l + box.r) / 2;  // no x overlap: fall back to selected sym midline
+
+      let aY, bY;
+      if (ob.t >= box.b) { aY = box.b; bY = ob.t; }
+      else                { aY = box.t; bY = ob.b; }
+
+      results.push({
+        label, kind: "symbol", gap,
+        status: classify(gap),
+        a: { x: midX, y: aY },
+        b: { x: midX, y: bY },
+        neighbourId: other.id,
+      });
+    } else if (dx > 0 && dy > 0) {
+      // Separated on both axes (diagonal arrangement).
+      // Report min(dx, dy) as a conservative lower-bound approximation of the
+      // nearest-corner distance; the true Euclidean corner gap would be
+      // sqrt(dx²+dy²) but we keep this simple for v1.
+      // NOTE: this intentionally under-reports the actual gap for diagonal
+      // arrangements. It is conservative: a tight flag here may not mean the
+      // walkway is truly tight, but it is never a false "ok" for a real gap.
       if (dx <= dy) {
-        // Horizontal separation is smaller — report horizontal gap
+        // Horizontal face pair is nearer — report horizontal gap
         const gap = dx;
-        // Leader from the facing edges' mid-span (overlap clamped to shared range)
         const sharedT = Math.max(box.t, ob.t);
         const sharedB = Math.min(box.b, ob.b);
         const midY = sharedT < sharedB
           ? (sharedT + sharedB) / 2
-          : (box.t + box.b) / 2;  // no y overlap: use selected sym mid
+          : (box.t + box.b) / 2;
 
         let aX, bX;
         if (ob.l >= box.r) { aX = box.r; bX = ob.l; }
-        else { aX = box.l; bX = ob.r; }
+        else                { aX = box.l; bX = ob.r; }
 
         results.push({
           label, kind: "symbol", gap,
@@ -380,7 +429,7 @@ export function computeClearances(sym, world) {
           neighbourId: other.id,
         });
       } else {
-        // Vertical separation is smaller — report vertical gap
+        // Vertical face pair is nearer — report vertical gap
         const gap = dy;
         const sharedL = Math.max(box.l, ob.l);
         const sharedR = Math.min(box.r, ob.r);
@@ -390,7 +439,7 @@ export function computeClearances(sym, world) {
 
         let aY, bY;
         if (ob.t >= box.b) { aY = box.b; bY = ob.t; }
-        else { aY = box.t; bY = ob.b; }
+        else                { aY = box.t; bY = ob.b; }
 
         results.push({
           label, kind: "symbol", gap,
@@ -401,8 +450,7 @@ export function computeClearances(sym, world) {
         });
       }
     } else {
-      // Overlapping (at least on one axis when dx<=0 or dy<=0)
-      // gap = 0, leader from center to center
+      // dx <= 0 AND dy <= 0: true 2-D overlap → gap 0, leader center-to-center
       const gap = 0;
       results.push({
         label, kind: "symbol", gap,
