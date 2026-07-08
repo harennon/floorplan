@@ -308,8 +308,10 @@ y-down. `+x` = right, `−x` = left, `+y` = down, `−y` = up. All lengths metre
           "axis": "y", "openDir": "-y",      // move SUBJECT −y (up) to open this gap
           "gapCm": 40, "gapM": 0.40, "deficitCm": 20, "status": "tight", "diagonal": false }
       ],
-      "suggestedMove": { "toX": 0.68, "toY": 3.20 },  // resolved target center (see reconciliation)
-      "boxedInAxes": []                // axes with opposing pushes that a single move can't fix
+      "suggestedMove": { "toX": 0.68, "toY": 3.20 },  // resolved target center; null if any axis is boxed-in
+      "boxedInAxes": []                // axes where span < subject + 2×threshold (infeasible by
+                                       // translation), judged from ALL gaps on the axis — not
+                                       // just currently-violated ones (see reconciliation)
     }
   ],
   "violations": [                      // NL, actionable, ONLY sub-threshold gaps; ends with the move
@@ -343,26 +345,52 @@ Rationale for each layer:
   ~(0.68, 3.20) m", a concrete `move_symbol {id:"s3", x:0.68, y:3.20}`. This is what makes a
   weaker agent converge in one step instead of guessing a direction. Overlap (`gapM ≤ 0`)
   reads as "Sofa overlaps Desk — separate them" with the `openDir` still set.
+- `boxedInAxes` — the **infeasibility signal**, and the thing that makes the "can't livelock
+  on opposing constraints" claim true. It is computed from the *full* per-axis span
+  (nearest opposing clearances + subject extent vs `subject + 2×threshold`), so it fires from
+  a single report even when the two opposing gaps are never sub-threshold *in the same
+  report* — the case that would otherwise oscillate between single-violation endpoints. When
+  set, `suggestedMove` is `null` and the loop is told to restructure, not nudge.
 
-**Which symbol moves, and reconciling multiple gaps (the H1 fix).** The convention is: the
-**subject** (`item.id`) is the piece the suggestion moves; each neighbour is treated as
-fixed for that item. `suggestedMove` is computed by resolving the subject's violating gaps
-into a single displacement:
+**Which symbol moves, and reconciling multiple gaps (the H1 fix + the cross-iteration
+anti-livelock fix).** The convention is: the **subject** (`item.id`) is the piece the
+suggestion moves; each neighbour is treated as fixed for that item. `suggestedMove` and
+`boxedInAxes` are computed from the subject's **full per-axis gap set — every gap on the
+axis, both the ones that currently violate and the ones that are currently OK** — not just
+the violated subset. This is the critical point: infeasibility must be judged against the
+whole span, because a move that clears one violating gap can silently push a currently-OK
+opposing gap below threshold, and a violated-only check would never notice.
 
-1. Group violating gaps by `axis` (`x`/`y`).
-2. Per axis, collect the required outward pushes as signed magnitudes (`deficitCm` in the
-   `openDir` direction). If **all pushes on that axis share one sign**, the axis component is
-   the **largest** deficit in that direction (satisfies the tightest gap; looser same-side
-   gaps only get roomier).
-3. If **both signs appear on one axis** (e.g. tight to the left wall *and* tight to a piece
-   on the right — the symbol is *boxed in*), no single translation opens both: that axis is
-   added to `boxedInAxes`, gets **no** displacement component, and `suggestedMove` becomes
-   `null`. The `violations[]` entry then steers the agent to a *structural* fix instead of a
-   move: "Sofa is pinned on the x-axis between the left wall (42 cm) and Desk (18 cm); moving
-   Sofa alone can't reach 60 cm both sides — widen the room, shrink Sofa/Desk, or move Desk
-   right." This is the anti-livelock signal: the agent gets told the objective is
-   *infeasible by translation*, so it stops nudging and changes the layout.
-4. If no axis is boxed, `suggestedMove = { toX: center.x + dx, toY: center.y + dy }`.
+Per axis (`x`, then `y`):
+
+1. **Feasibility first (from ALL gaps on the axis, violated or not).** If the subject has a
+   neighbour on *both* directions of the axis (at least one `−`-side gap and at least one
+   `+`-side gap), take the **nearest on each side**: `gapNegM` = smallest `gapM` among
+   `openDir`-negative gaps, `gapPosM` = smallest among `openDir`-positive gaps. Moving the
+   subject along the axis trades one for the other 1:1, so the axis is **translation-feasible
+   iff `gapNegM + gapPosM >= 2 × thresholdM`** (there is enough total span to seat the subject
+   with a threshold gap on both sides). If it is **infeasible** (`gapNegM + gapPosM <
+   2 × thresholdM`), add the axis to `boxedInAxes`, give it **no** displacement component, and
+   force `suggestedMove = null`. This fires **even when only one side is currently
+   sub-threshold** (or neither is) — closing the oscillation-between-single-violation-endpoints
+   livelock, where the two gaps are never sub-threshold in the *same* report so a violated-only
+   check would loop forever.
+2. **Otherwise (feasible axis, or subject flanked on one side only): push.** Collect the
+   violating gaps' required outward pushes as signed magnitudes (`deficitCm` in the `openDir`
+   direction). All violating pushes on a feasible axis necessarily share one sign (opposing
+   sub-threshold gaps would have failed step 1), so the axis component is the **largest**
+   deficit in that direction (satisfies the tightest gap; looser same-side gaps only get
+   roomier). No violating gap on the axis → zero component.
+3. `suggestedMove = { toX: center.x + dx, toY: center.y + dy }` from the per-axis components,
+   **unless any axis was marked infeasible in step 1**, in which case `suggestedMove = null`.
+
+When an axis is infeasible, the `violations[]` entry steers the agent to a *structural* fix,
+quantified from the span so it is actionable: "Sofa is pinned on the x-axis: span between the
+left wall and Desk is 78 cm, but Sofa (60 cm) needs 60 + 2×60 = 180 cm to seat with 60 cm
+each side — widen the room or use a smaller Sofa/Desk." (Span = `gapNegM + subjectExtentM +
+gapPosM`; needed = `subjectExtentM + 2 × thresholdM`.) This is the anti-livelock signal: the
+agent is told the objective is *infeasible by translation* from a single report, so it stops
+nudging and changes the layout instead of oscillating.
 
 Because symbol-to-symbol gaps are symmetric they appear under **both** items (Sofa's view of
 Desk and Desk's view of Sofa) with opposite `openDir`; the agent moves **one** endpoint
@@ -458,7 +486,10 @@ type ClearanceReport = {
     center: { x: number; y: number };        // current subject center (metres)
     gaps: Gap[];
     suggestedMove: { toX: number; toY: number } | null; // null when boxedInAxes is non-empty
-    boxedInAxes: ("x" | "y")[];              // axes with opposing pushes no single move can fix
+    boxedInAxes: ("x" | "y")[];              // axes infeasible by translation: span (both nearest
+                                             // opposing clearances + subject) < subject + 2×threshold.
+                                             // Judged from ALL gaps on the axis (violated AND ok),
+                                             // so it fires even when only one side currently violates.
   }[];
   violations: string[];                      // NL, self-contained; each ends with a concrete move
 };
@@ -759,11 +790,18 @@ Playwright/Chromium; they are pure Node, so this adds negligible CI cost.)
   terminates** in a bounded iteration count with `check_brief.satisfied === true`.
 - Assert the final `get_plan` document passes `validatePlan()` and `check_clearance` over all
   furniture reports `worstStatus:"ok"`.
-- **Boxed-in / infeasible-by-translation case:** a brief whose furniture cannot fit at 60 cm
-  walkways in the given room → assert `check_brief` surfaces `boxedInAxes`/a structural
-  instruction and the harness does **not** oscillate (the agent detects the non-translation
-  signal and either resizes a piece or the loop terminates as infeasible within the bound) —
-  proving the design can't livelock on opposing constraints.
+- **Boxed-in / infeasible-by-translation case (adversarial start):** a subject in an x-span
+  too narrow to clear both a left wall and a right-side Desk at 60 cm, **started pinned flush
+  against the left wall** (NOT centered). This is the exact livelock the reviewer
+  constructed: from the pinned start only the wall gap violates, so a violated-only resolver
+  would push right, land at the wall boundary, then see only the Desk gap, push left, and
+  oscillate forever — the two gaps are never sub-threshold in the *same* report. Assert that
+  the **first** `check_clearance`/`check_brief` report already sets `boxedInAxes:["x"]`,
+  `suggestedMove:null`, and a structural instruction (from the full-span check), and that the
+  harness therefore does **not** emit any `move_symbol` oscillation — it terminates as
+  infeasible (or resizes a piece) within the bound. A centered start must NOT be used, since
+  it can mask the bug by luck. This test is what backs the "can't livelock on opposing
+  constraints" claim.
 - This test is the executable proof that the feedback shape actually *closes the loop* — its
   failure means the tool/feedback design, not the code, is wrong (which is the whole reason
   the prototype exists).
