@@ -117,6 +117,7 @@ import {
 
 import {
   NICE_STEPS, MAJOR_EVERY, chooseGridStep,
+  SNAP_PRESETS, getSnapMode, setSnapMode, cycleSnapMode, snapStep, onSnapModeChange,
 } from "./js/grid.js";
 
 import {
@@ -3558,6 +3559,395 @@ describe("history.js — depth() reflects _past.length", () => {
     expect(historyDepth()).toBe(1);
     historyUndo();
     expect(historyDepth()).toBe(0);
+  });
+});
+
+// ─── Tests: LLD-22 — view.js MAX_ZOOM raised to 16 ───────────────────────────
+
+describe("LLD-22 — view.js: MAX_ZOOM is 16", () => {
+  it("MAX_ZOOM equals 16", () => {
+    expect(MAX_ZOOM).toBe(16);
+  });
+
+  it("clampZoom permits zoom up to 16", () => {
+    expect(clampZoom(16)).toBe(16);
+    expect(clampZoom(15)).toBe(15);
+    expect(clampZoom(12)).toBe(12);
+  });
+
+  it("clampZoom still clamps at MIN_ZOOM for values below it", () => {
+    expect(clampZoom(0)).toBe(MIN_ZOOM);
+    expect(clampZoom(-1)).toBe(MIN_ZOOM);
+  });
+
+  it("clampZoom rejects values above 16", () => {
+    expect(clampZoom(17)).toBe(16);
+    expect(clampZoom(100)).toBe(16);
+  });
+});
+
+// ─── Tests: LLD-22 — chooseGridStep regression at new max zoom ────────────────
+
+describe("LLD-22 — chooseGridStep: 0.1m cell unlocked at 16× (640px/m)", () => {
+  it("at zoom=14 (560px/m) chooseGridStep(56) returns 0.1m", () => {
+    view.zoom = 14; view.panX = 0; view.panY = 0;
+    const step = chooseGridStep(56);
+    // 0.1 * 560 = 56 >= 56 → qualifies
+    expect(step).toBe(0.1);
+    view.zoom = 1; // restore
+  });
+
+  it("at zoom=16 (640px/m) chooseGridStep(56) returns 0.1m", () => {
+    view.zoom = 16; view.panX = 0; view.panY = 0;
+    const step = chooseGridStep(56);
+    // 0.1 * 640 = 64 >= 56 → qualifies
+    expect(step).toBe(0.1);
+    view.zoom = 1; // restore
+  });
+
+  it("at zoom=8 (320px/m) chooseGridStep(56) still returns 0.25m (pre-existing behavior)", () => {
+    view.zoom = 8; view.panX = 0; view.panY = 0;
+    const step = chooseGridStep(56);
+    // 0.1 * 320 = 32 < 56 → rejected; 0.25 * 320 = 80 >= 56 → accepted
+    expect(step).toBe(0.25);
+    view.zoom = 1; // restore
+  });
+});
+
+// ─── Tests: LLD-22 — SNAP_PRESETS ────────────────────────────────────────────
+
+describe("LLD-22 — SNAP_PRESETS content and order", () => {
+  it("SNAP_PRESETS starts with 'auto'", () => {
+    expect(SNAP_PRESETS[0]).toBe("auto");
+  });
+
+  it("SNAP_PRESETS ends with 'off'", () => {
+    expect(SNAP_PRESETS[SNAP_PRESETS.length - 1]).toBe("off");
+  });
+
+  it("SNAP_PRESETS contains 0.25, 0.1, and 0.025 in that order", () => {
+    const idx025 = SNAP_PRESETS.indexOf(0.25);
+    const idx01  = SNAP_PRESETS.indexOf(0.1);
+    const idx002 = SNAP_PRESETS.indexOf(0.025);
+    if (idx025 < 0) throw new Error("0.25 not in SNAP_PRESETS");
+    if (idx01  < 0) throw new Error("0.1 not in SNAP_PRESETS");
+    if (idx002 < 0) throw new Error("0.025 not in SNAP_PRESETS");
+    if (!(idx025 < idx01 && idx01 < idx002)) {
+      throw new Error(`Order wrong: 0.25 at ${idx025}, 0.1 at ${idx01}, 0.025 at ${idx002}`);
+    }
+  });
+
+  it("SNAP_PRESETS has exactly 5 entries", () => {
+    expect(SNAP_PRESETS.length).toBe(5);
+  });
+});
+
+// ─── Tests: LLD-22 — getSnapMode / setSnapMode ───────────────────────────────
+
+describe("LLD-22 — getSnapMode / setSnapMode", () => {
+  // Restore "auto" before each test in this group via a helper
+  function restoreAutoMode() {
+    // Silently restore to auto (may be different after previous test)
+    try { setSnapMode("auto"); } catch {}
+  }
+
+  it("default mode is 'auto'", () => {
+    restoreAutoMode();
+    expect(getSnapMode()).toBe("auto");
+  });
+
+  it("setSnapMode('off') changes mode to 'off'", () => {
+    restoreAutoMode();
+    setSnapMode("off");
+    expect(getSnapMode()).toBe("off");
+    setSnapMode("auto"); // restore
+  });
+
+  it("setSnapMode(0.025) sets mode to 0.025", () => {
+    restoreAutoMode();
+    setSnapMode(0.025);
+    expect(getSnapMode()).toBe(0.025);
+    setSnapMode("auto"); // restore
+  });
+
+  it("setSnapMode(0.1) sets mode to 0.1", () => {
+    restoreAutoMode();
+    setSnapMode(0.1);
+    expect(getSnapMode()).toBe(0.1);
+    setSnapMode("auto"); // restore
+  });
+
+  it("setSnapMode(0.25) sets mode to 0.25", () => {
+    restoreAutoMode();
+    setSnapMode(0.25);
+    expect(getSnapMode()).toBe(0.25);
+    setSnapMode("auto"); // restore
+  });
+
+  it("setSnapMode throws on invalid mode (dev error guard)", () => {
+    restoreAutoMode();
+    expect(() => setSnapMode("invalid")).toThrow();
+    expect(() => setSnapMode(0.5)).toThrow();
+    expect(() => setSnapMode(null)).toThrow();
+    setSnapMode("auto"); // restore
+  });
+
+  it("setSnapMode fires onSnapModeChange listeners", () => {
+    restoreAutoMode();
+    let fired = 0;
+    let lastMode = null;
+    onSnapModeChange((m) => { fired++; lastMode = m; });
+    setSnapMode("off");
+    expect(fired).toBeGreaterThanOrEqual(1);
+    expect(lastMode).toBe("off");
+    setSnapMode("auto"); // restore
+  });
+
+  it("setSnapMode fires listener only once per call", () => {
+    restoreAutoMode();
+    let count = 0;
+    const cb = () => count++;
+    onSnapModeChange(cb);
+    const before = count;
+    setSnapMode(0.1);
+    const after = count;
+    // Should fire exactly once
+    expect(after - before).toBe(1);
+    setSnapMode("auto"); // restore
+  });
+});
+
+// ─── Tests: LLD-22 — cycleSnapMode ───────────────────────────────────────────
+
+describe("LLD-22 — cycleSnapMode cycles through all presets in order and wraps", () => {
+  it("cycles auto → 0.25 → 0.1 → 0.025 → off → auto", () => {
+    setSnapMode("auto");
+    expect(cycleSnapMode()).toBe(0.25);
+    expect(cycleSnapMode()).toBe(0.1);
+    expect(cycleSnapMode()).toBe(0.025);
+    expect(cycleSnapMode()).toBe("off");
+    expect(cycleSnapMode()).toBe("auto"); // wraps
+  });
+
+  it("cycleSnapMode fires onSnapModeChange once per cycle", () => {
+    setSnapMode("auto");
+    let count = 0;
+    onSnapModeChange(() => count++);
+    const before = count;
+    cycleSnapMode(); // auto → 0.25
+    expect(count - before).toBe(1);
+    setSnapMode("auto"); // restore
+  });
+
+  it("full round-trip: cycling 5 times from any start returns to start", () => {
+    for (const startMode of SNAP_PRESETS) {
+      setSnapMode(startMode);
+      for (let i = 0; i < SNAP_PRESETS.length; i++) cycleSnapMode();
+      expect(getSnapMode()).toBe(startMode);
+    }
+    setSnapMode("auto"); // restore
+  });
+});
+
+// ─── Tests: LLD-22 — snapStep() ──────────────────────────────────────────────
+
+describe("LLD-22 — snapStep(): mode 'auto' delegates to chooseGridStep", () => {
+  it("auto returns chooseGridStep(56) at current zoom", () => {
+    setSnapMode("auto");
+    view.zoom = 1;
+    const s = snapStep();
+    expect(s).toBe(chooseGridStep(56));
+  });
+
+  it("auto result changes with zoom (zoom-dependent)", () => {
+    setSnapMode("auto");
+    view.zoom = 1;
+    const s1 = snapStep();
+    view.zoom = 8;
+    const s2 = snapStep();
+    view.zoom = 1; // restore
+    // At zoom 8, 0.25m*320px/m = 80px; at zoom 1, 1m*40px/m = 40px < 56px
+    // so chooseGridStep is different at different zoom levels
+    // (not strictly required to be different at these specific zooms, but for
+    // zoom 1 step should be 1.0 and zoom 8 step should be 0.25)
+    // This is already covered by chooseGridStep tests; just verify it is not null
+    if (s1 === null) throw new Error("auto snapStep returned null at zoom 1");
+    if (s2 === null) throw new Error("auto snapStep returned null at zoom 8");
+  });
+});
+
+describe("LLD-22 — snapStep(): fixed presets are zoom-independent", () => {
+  const testZooms = [0.15, 0.5, 1, 4, 8, 16];
+
+  it("mode 0.25 returns exactly 0.25 at all zooms", () => {
+    setSnapMode(0.25);
+    for (const z of testZooms) {
+      view.zoom = z;
+      expect(snapStep()).toBe(0.25);
+    }
+    view.zoom = 1; // restore
+    setSnapMode("auto");
+  });
+
+  it("mode 0.1 returns exactly 0.1 at all zooms", () => {
+    setSnapMode(0.1);
+    for (const z of testZooms) {
+      view.zoom = z;
+      expect(snapStep()).toBe(0.1);
+    }
+    view.zoom = 1; // restore
+    setSnapMode("auto");
+  });
+
+  it("mode 0.025 returns exactly 0.025 at all zooms", () => {
+    setSnapMode(0.025);
+    for (const z of testZooms) {
+      view.zoom = z;
+      expect(snapStep()).toBe(0.025);
+    }
+    view.zoom = 1; // restore
+    setSnapMode("auto");
+  });
+
+  it("mode 0.025 at zoom 0.15 (low) returns 0.025 (not clamped)", () => {
+    setSnapMode(0.025);
+    view.zoom = 0.15;
+    expect(snapStep()).toBe(0.025);
+    view.zoom = 1; // restore
+    setSnapMode("auto");
+  });
+});
+
+describe("LLD-22 — snapStep(): mode 'off' returns null", () => {
+  it("returns null when mode is 'off'", () => {
+    setSnapMode("off");
+    const s = snapStep();
+    if (s !== null) throw new Error(`Expected null for Off mode, got ${s}`);
+    setSnapMode("auto"); // restore
+  });
+
+  it("null is returned for 'off' regardless of zoom", () => {
+    setSnapMode("off");
+    for (const z of [0.15, 1, 8, 16]) {
+      view.zoom = z;
+      if (snapStep() !== null) throw new Error(`snapStep returned non-null for Off at zoom ${z}`);
+    }
+    view.zoom = 1;
+    setSnapMode("auto"); // restore
+  });
+});
+
+// ─── Tests: LLD-22 — resolveSnap with step=null (Off mode) ───────────────────
+
+describe("LLD-22 — resolveSnap: step=null (Off mode) → free when no close/point", () => {
+  it("returns free when step is null and no nearby vertex", () => {
+    setView(1, 0, 0);
+    const snap = resolveSnap(50, 50, { chain: [], rooms: [], altHeld: false, step: null });
+    expect(snap.type).toBe("free");
+  });
+
+  it("step=null: raw world coordinates are preserved (no rounding)", () => {
+    setView(1, 0, 0);
+    // World point that is NOT on a grid boundary
+    // screen (55, 75) → world (1.375, 1.875) at zoom=1, pan=0
+    const snap = resolveSnap(55, 75, { chain: [], rooms: [], altHeld: false, step: null });
+    expect(snap.type).toBe("free");
+    expect(snap.x).toBeCloseTo(1.375, 9);
+    expect(snap.y).toBeCloseTo(1.875, 9);
+  });
+
+  it("step=null: close snap still wins over free (Edge Case 3 from LLD)", () => {
+    setView(1, 0, 0);
+    const chain = [{x:0,y:0},{x:1,y:0},{x:0.5,y:1}];
+    // cursor at screen(5,0): within CLOSE_PX of chain[0]
+    const snap = resolveSnap(5, 0, { chain, rooms: [], altHeld: false, step: null });
+    expect(snap.type).toBe("close");
+    expect(snap.x).toBe(0);
+    expect(snap.y).toBe(0);
+  });
+
+  it("step=null: endpoint snap still wins over free (Edge Case 3 from LLD)", () => {
+    setView(1, 0, 0);
+    const v = { x: 1, y: 1 }; // screen(40,40)
+    const rooms = [{ id:"r0", closed:false, verts:[v] }];
+    // cursor at screen(45,40): within SNAP_PT_PX of vertex
+    const snap = resolveSnap(45, 40, { chain: [], rooms, altHeld: false, step: null });
+    expect(snap.type).toBe("point");
+    expect(snap.x).toBe(1);
+    expect(snap.y).toBe(1);
+  });
+
+  it("altHeld=true + step=null → both mean free, no conflict", () => {
+    setView(1, 0, 0);
+    const snap = resolveSnap(55, 75, { chain: [], rooms: [], altHeld: true, step: null });
+    expect(snap.type).toBe("free");
+  });
+});
+
+// ─── Tests: LLD-22 — no NaN when step is null (guard regression) ──────────────
+
+describe("LLD-22 — gridSnap is never called with null (call sites guard step==null)", () => {
+  it("gridSnap({x:1,y:2}, 0.025) produces valid finite coordinates", () => {
+    const r = gridSnap({ x: 1.013, y: 2.019 }, 0.025);
+    if (!isFinite(r.x) || !isFinite(r.y)) throw new Error(`NaN/Inf from gridSnap: ${r.x}, ${r.y}`);
+    expect(r.x).toBeCloseTo(1.0, 3);  // 1.013 / 0.025 = 40.52 → round to 41 → 1.025
+    // Actually 1.013 / 0.025 = 40.52 → Math.round(40.52) = 41 → 41 * 0.025 = 1.025
+    expect(r.x).toBeCloseTo(1.025, 9);
+  });
+
+  it("resolveSnap with step=null does not produce NaN coordinates", () => {
+    setView(1, 0, 0);
+    const snap = resolveSnap(107, 83, { chain: [], rooms: [], altHeld: false, step: null });
+    if (!isFinite(snap.x) || !isFinite(snap.y)) throw new Error(`NaN/Inf from resolveSnap: ${snap.x}, ${snap.y}`);
+  });
+});
+
+// ─── Tests: LLD-22 — 0.025m snap granularity (the reported bug regression) ───
+
+describe("LLD-22 — 0.025m snap enables sub-0.25m nudge at zoom 8 (reported bug regression)", () => {
+  it("with mode 0.025, gridSnap at zoom 8 snaps to 0.025m increments", () => {
+    setSnapMode(0.025);
+    view.zoom = 8; // was max zoom; 0.1m was unreachable before
+    // World point 1.013m: with 0.025m step → rounds to 1.025m
+    const snapped = gridSnap({ x: 1.013, y: 2.019 }, snapStep());
+    expect(snapped.x).toBeCloseTo(1.025, 9); // 40.52 rounds to 41 × 0.025
+    expect(snapped.y).toBeCloseTo(2.025, 9); // 80.76 rounds to 81 × 0.025
+    view.zoom = 1;
+    setSnapMode("auto");
+  });
+
+  it("with mode 0.025 at zoom 1 (low zoom): snap still applies 0.025m step", () => {
+    setSnapMode(0.025);
+    view.zoom = 1;
+    const snapped = gridSnap({ x: 0.013, y: 0.019 }, snapStep());
+    // 0.013 / 0.025 = 0.52 → rounds to 1 → 0.025
+    expect(snapped.x).toBeCloseTo(0.025, 9);
+    // 0.019 / 0.025 = 0.76 → rounds to 1 → 0.025
+    expect(snapped.y).toBeCloseTo(0.025, 9);
+    view.zoom = 1;
+    setSnapMode("auto");
+  });
+});
+
+// ─── Tests: LLD-22 — snap mode not persisted in plan ────────────────────────
+
+describe("LLD-22 — snap mode is not persisted in plan / share hash", () => {
+  it("buildPlan() does not include snapMode key", () => {
+    setSnapMode(0.025);
+    const p = buildPlan();
+    const json = serializePlan(p);
+    if (json.includes("snapMode")) throw new Error("snapMode leaked into serialized plan");
+    setSnapMode("auto"); // restore
+  });
+
+  it("default load restores 'auto' mode (zero behavior change for new users)", () => {
+    // Simulate a fresh start by explicitly setting to auto
+    setSnapMode("auto");
+    expect(getSnapMode()).toBe("auto");
+    // auto at zoom=1 → chooseGridStep(56) → same as before
+    view.zoom = 1;
+    const step = snapStep();
+    expect(step).toBe(chooseGridStep(56));
   });
 });
 

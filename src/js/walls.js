@@ -140,8 +140,8 @@ export function resolveSnap(sx, sy, opts) {
     return { x: nearest.x, y: nearest.y, type: "point" };
   }
 
-  // 3. Free (Alt held): skip grid, use raw world point
-  if (altHeld) {
+  // 3. Free (Alt held OR step is null / Off mode): skip grid, use raw world point
+  if (altHeld || step == null) {
     return { x: raw.x, y: raw.y, type: "free" };
   }
 

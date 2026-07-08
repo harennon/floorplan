@@ -1,5 +1,5 @@
 /**
- * grid.js — adaptive grid renderer
+ * grid.js — adaptive grid renderer + snap-precision authority
  *
  * Draws fine / major / axis line tiers into an SVG <g> element.
  * Grid is locked to world space (lines move with pan/zoom).
@@ -7,6 +7,11 @@
  * Step selection:
  *   Pick the smallest NICE step whose on-screen spacing >= targetPx (~56px).
  *   Every MAJOR_EVERY-th line is a "major" line; world origin lines are "axis".
+ *
+ * Snap-precision mode:
+ *   snapStep() is the single authority for the effective snap increment.
+ *   It is decoupled from chooseGridStep() / grid rendering — fixed presets
+ *   apply at any zoom without requiring extreme zoom levels.
  *
  * Implementation notes:
  *   - Lines are built into a DocumentFragment and appended once.
@@ -33,6 +38,80 @@ export function chooseGridStep(targetPx = 56) {
     if (step * scale >= targetPx) return step;
   }
   return NICE_STEPS[NICE_STEPS.length - 1];
+}
+
+// ── Snap-precision mode ───────────────────────────────────────────────────────
+
+/**
+ * Ordered presets for the HUD Snap chip.
+ * "auto" and "off" are sentinels; numbers are fixed steps in metres.
+ * @type {Array<"auto"|number|"off">}
+ */
+export const SNAP_PRESETS = ["auto", 0.25, 0.1, 0.025, "off"];
+
+/**
+ * @typedef {"auto" | 0.25 | 0.1 | 0.025 | "off"} SnapMode
+ */
+
+/** Current snap-precision mode. In-memory (not persisted), default "auto". */
+let _snapMode = "auto";
+
+/** Registered mode-change callbacks. */
+const _modeListeners = [];
+
+/**
+ * Returns the current snap mode.
+ * @returns {SnapMode}
+ */
+export function getSnapMode() {
+  return _snapMode;
+}
+
+/**
+ * Set the snap mode. Must be one of SNAP_PRESETS.
+ * Fires onSnapModeChange listeners after update.
+ * Throws (dev error) on invalid mode.
+ * @param {SnapMode} mode
+ */
+export function setSnapMode(mode) {
+  if (!SNAP_PRESETS.includes(mode)) {
+    throw new Error(`setSnapMode: invalid mode "${mode}"; must be one of ${JSON.stringify(SNAP_PRESETS)}`);
+  }
+  _snapMode = mode;
+  for (const cb of _modeListeners) cb(mode);
+}
+
+/**
+ * Advance to the next preset (wraps around).
+ * Used by the HUD chip click.
+ * @returns {SnapMode}
+ */
+export function cycleSnapMode() {
+  const idx = SNAP_PRESETS.indexOf(_snapMode);
+  const nextIdx = (idx + 1) % SNAP_PRESETS.length;
+  setSnapMode(SNAP_PRESETS[nextIdx]);
+  return _snapMode;
+}
+
+/**
+ * Effective snap step in metres for the current mode, decoupled from render/zoom.
+ *  - "auto"  → chooseGridStep(56)  (adaptive; zoom-dependent, unchanged rule)
+ *  - number  → that value verbatim (zoom-INDEPENDENT)
+ *  - "off"   → null                (free placement; caller skips grid snap)
+ * @returns {number|null}
+ */
+export function snapStep() {
+  if (_snapMode === "off") return null;
+  if (_snapMode === "auto") return chooseGridStep(56);
+  return _snapMode; // fixed numeric preset
+}
+
+/**
+ * Register a callback fired after the snap mode changes (for HUD re-render etc.).
+ * @param {(mode: SnapMode) => void} cb
+ */
+export function onSnapModeChange(cb) {
+  _modeListeners.push(cb);
 }
 
 /**

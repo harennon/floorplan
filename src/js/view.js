@@ -13,7 +13,7 @@
 
 export const BASE_PX_PER_M = 40; // 40px = 1m at zoom 1
 export const MIN_ZOOM = 0.15;    // ~6px/m — whole floors visible
-export const MAX_ZOOM = 8;       // ~320px/m — detail work
+export const MAX_ZOOM = 16;      // ~640px/m — detail work; raised from 8 so Auto snap can reach 0.1m cell
 
 /**
  * Mutable view state — single source of truth.

@@ -10,7 +10,7 @@
  */
 
 import { screenToWorld } from "./view.js";
-import { chooseGridStep } from "./grid.js";
+import { snapStep } from "./grid.js";
 import { model, resolveSnap, placeVertex, closeRoom, finishChain, undoPoint } from "./walls.js";
 import { scheduleRender } from "./surface.js";
 import { isOpen as isHelpOpen } from "./help.js";
@@ -143,7 +143,7 @@ export function onHover(sx, sy) {
     chain: model.chain,
     rooms: model.rooms,
     altHeld: _altHeld,
-    step: chooseGridStep(),
+    step: snapStep(),
   });
   _positionSnapTag(sx, sy);
   _updateHudSnap();
@@ -160,7 +160,7 @@ export function onClick(sx, sy) {
     chain: model.chain,
     rooms: model.rooms,
     altHeld: _altHeld,
-    step: chooseGridStep(),
+    step: snapStep(),
   });
   _snap = snap;
   placeVertex(snap);

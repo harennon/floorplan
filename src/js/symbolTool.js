@@ -14,7 +14,7 @@
 
 import { screenToWorld, worldToScreen, pxPerM } from "./view.js";
 import { gridSnap } from "./walls.js";
-import { chooseGridStep } from "./grid.js";
+import { snapStep } from "./grid.js";
 import {
   model, CATALOG,
   createSymbol, addSymbol, removeSymbol, duplicateSymbol,
@@ -200,10 +200,12 @@ export function onSelectMove(sx, sy) {
     let newY = wp.y - _dragOffsetY;
 
     if (!_altHeld) {
-      const step = chooseGridStep();
-      const snapped = gridSnap({ x: newX, y: newY }, step);
-      newX = snapped.x;
-      newY = snapped.y;
+      const step = snapStep();
+      if (step != null) {
+        const snapped = gridSnap({ x: newX, y: newY }, step);
+        newX = snapped.x;
+        newY = snapped.y;
+      }
     }
 
     moveSymbol(sym, newX, newY);
@@ -363,8 +365,8 @@ function _onDockPointerDown(e) {
 
 function _snapToGrid(sx, sy, altHeld) {
   const wp = screenToWorld(sx, sy);
-  if (altHeld) return wp;
-  const step = chooseGridStep();
+  const step = snapStep();
+  if (altHeld || step == null) return wp; // Alt OR Off → free
   return gridSnap(wp, step);
 }
 
