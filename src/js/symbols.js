@@ -1,0 +1,265 @@
+/**
+ * symbols.js — symbol geometry data model and pure geometry functions
+ *
+ * World coordinates in metres. Rotation in degrees clockwise (screen convention,
+ * y-down). Pure, DOM-free, testable — mirrors walls.js structure.
+ *
+ * Coordinate contract:
+ *   x, y = symbol CENTER in world metres
+ *   w, h = width (across) and depth, world metres (to scale)
+ *   rot  = degrees CW about center; normalised to [0,360)
+ */
+
+/** @typedef {"door"|"window"|"bed"|"sofa"|"table"|"chair"|"desk"|"fridge"} SymbolType */
+/** @typedef {{ id:string, type:SymbolType, x:number, y:number, w:number, h:number, rot:number }} Sym */
+
+// ── In-memory model ───────────────────────────────────────────────────────────
+
+let _counter = 0;
+
+/**
+ * Serializable model — MVP-6 can JSON.stringify(model) directly.
+ * Mirrors walls.model.
+ */
+export const model = { symbols: /** @type {Sym[]} */ ([]) };
+
+// ── Catalog ────────────────────────────────────────────────────────────────────
+
+/**
+ * Per-type catalog. openings:true → single editable dimension (width);
+ * depth is a fixed thin marker and its chip is hidden. Furniture edits both w and h.
+ * @type {Record<SymbolType, {label:string, category:"openings"|"furniture",
+ *   openings?:boolean, w:number, h:number, min:number, max:number}>}
+ */
+export const CATALOG = {
+  door:   { label: "Door",   category: "openings",  openings: true, w: 0.90, h: 0.12, min: 0.60, max: 2.00 },
+  window: { label: "Window", category: "openings",  openings: true, w: 1.00, h: 0.12, min: 0.30, max: 3.00 },
+  bed:    { label: "Bed",    category: "furniture",               w: 1.50, h: 2.00, min: 0.30, max: 2.50 },
+  sofa:   { label: "Sofa",   category: "furniture",               w: 2.00, h: 0.90, min: 0.30, max: 3.50 },
+  table:  { label: "Table",  category: "furniture",               w: 1.20, h: 0.80, min: 0.30, max: 3.00 },
+  chair:  { label: "Chair",  category: "furniture",               w: 0.50, h: 0.50, min: 0.30, max: 1.00 },
+  desk:   { label: "Desk",   category: "furniture",               w: 1.40, h: 0.70, min: 0.30, max: 2.50 },
+  fridge: { label: "Fridge", category: "furniture",               w: 0.70, h: 0.70, min: 0.30, max: 1.20 },
+};
+
+// ── CRUD ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Create a symbol from catalog defaults at world center (x,y).
+ * Assigns id `s<n>`. Does NOT add to model.
+ * @param {SymbolType} type
+ * @param {number} x  world metres
+ * @param {number} y  world metres
+ * @returns {Sym}
+ */
+export function createSymbol(type, x, y) {
+  const cat = CATALOG[type];
+  if (!cat) throw new Error(`Unknown symbol type: ${type}`);
+  return {
+    id: `s${_counter++}`,
+    type,
+    x,
+    y,
+    w: cat.w,
+    h: cat.h,
+    rot: 0,
+  };
+}
+
+/**
+ * Add a fully-formed Sym to the model. Returns it.
+ * @param {Sym} sym
+ * @returns {Sym}
+ */
+export function addSymbol(sym) {
+  model.symbols.push(sym);
+  return sym;
+}
+
+/**
+ * Remove by id. No-op if absent. Returns boolean.
+ * @param {string} id
+ * @returns {boolean}
+ */
+export function removeSymbol(id) {
+  const idx = model.symbols.findIndex(s => s.id === id);
+  if (idx === -1) return false;
+  model.symbols.splice(idx, 1);
+  return true;
+}
+
+/**
+ * Duplicate by id, offset by +0.3m x/y, new id. Returns new Sym or null.
+ * @param {string} id
+ * @returns {Sym|null}
+ */
+export function duplicateSymbol(id) {
+  const sym = getSymbol(id);
+  if (!sym) return null;
+  const dup = {
+    id: `s${_counter++}`,
+    type: sym.type,
+    x: sym.x + 0.3,
+    y: sym.y + 0.3,
+    w: sym.w,
+    h: sym.h,
+    rot: sym.rot,
+  };
+  model.symbols.push(dup);
+  return dup;
+}
+
+/**
+ * Find by id. Returns the Sym or null.
+ * @param {string} id
+ * @returns {Sym|null}
+ */
+export function getSymbol(id) {
+  return model.symbols.find(s => s.id === id) || null;
+}
+
+// ── Geometry ───────────────────────────────────────────────────────────────────
+
+/**
+ * Point-in-symbol hit test in world metres, honouring rotation.
+ *
+ * Transforms the world point into the symbol's local (un-rotated) frame and
+ * tests the w×h box inflated by tolWorld metres on every side.
+ * tolWorld defaults to 0 (exact box).
+ *
+ * @param {Sym} sym
+ * @param {number} wx  world x
+ * @param {number} wy  world y
+ * @param {number} [tolWorld=0]  box inflation, metres
+ * @returns {boolean}
+ */
+export function hitTest(sym, wx, wy, tolWorld = 0) {
+  // Translate to symbol-center-relative coords
+  const lx = wx - sym.x;
+  const ly = wy - sym.y;
+
+  // Inverse CW rotation (rotate CCW by sym.rot) to get local frame coords.
+  // CW rotation: x' = x*cos - y*sin, y' = x*sin + y*cos
+  // Inverse:     rx = lx*cos + ly*sin, ry = -lx*sin + ly*cos
+  const rad = (sym.rot * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const rx = lx * cos + ly * sin;
+  const ry = -lx * sin + ly * cos;
+
+  return Math.abs(rx) <= sym.w / 2 + tolWorld
+      && Math.abs(ry) <= sym.h / 2 + tolWorld;
+}
+
+/**
+ * Topmost symbol at world point (last in array wins = drawn last = on top),
+ * or null. tolWorld (metres) is forwarded to hitTest.
+ * @param {number} wx
+ * @param {number} wy
+ * @param {number} [tolWorld=0]
+ * @returns {Sym|null}
+ */
+export function pickSymbol(wx, wy, tolWorld = 0) {
+  for (let i = model.symbols.length - 1; i >= 0; i--) {
+    if (hitTest(model.symbols[i], wx, wy, tolWorld)) {
+      return model.symbols[i];
+    }
+  }
+  return null;
+}
+
+/**
+ * Clamp a dimension value to the type's [min, max].
+ * @param {SymbolType} type
+ * @param {number} metres
+ * @returns {number}
+ */
+export function clampDim(type, metres) {
+  const cat = CATALOG[type];
+  if (!cat) return metres;
+  return Math.min(cat.max, Math.max(cat.min, metres));
+}
+
+/**
+ * Set width or depth (metres), clamped to type range.
+ * lockAspect scales the other dimension to preserve w:h ratio; each result is
+ * independently clamped — if a clamp would break the ratio, the edited dim wins.
+ * Openings ignore dim="h". Mutates sym. Returns boolean (changed).
+ * @param {Sym} sym
+ * @param {"w"|"h"} dim
+ * @param {number} metres
+ * @param {boolean} [lockAspect=false]
+ * @returns {boolean}
+ */
+export function resizeSymbol(sym, dim, metres, lockAspect = false) {
+  // Openings ignore "h"
+  if (CATALOG[sym.type]?.openings && dim === "h") return false;
+
+  const clamped = clampDim(sym.type, metres);
+
+  if (lockAspect) {
+    if (dim === "w") {
+      const ratio = sym.w > 0 ? sym.h / sym.w : 1;
+      sym.w = clamped;
+      sym.h = clampDim(sym.type, clamped * ratio);
+    } else {
+      const ratio = sym.h > 0 ? sym.w / sym.h : 1;
+      sym.h = clamped;
+      sym.w = clampDim(sym.type, clamped * ratio);
+    }
+    return true;
+  }
+
+  if (dim === "w") {
+    const changed = sym.w !== clamped;
+    sym.w = clamped;
+    return changed;
+  } else {
+    const changed = sym.h !== clamped;
+    sym.h = clamped;
+    return changed;
+  }
+}
+
+/**
+ * Move center to world (x, y). Mutates.
+ * @param {Sym} sym
+ * @param {number} x
+ * @param {number} y
+ */
+export function moveSymbol(sym, x, y) {
+  sym.x = x;
+  sym.y = y;
+}
+
+/**
+ * Set rotation degrees (normalised to [0, 360)). Mutates.
+ * @param {Sym} sym
+ * @param {number} deg
+ */
+export function rotateSymbol(sym, deg) {
+  sym.rot = ((deg % 360) + 360) % 360;
+}
+
+/**
+ * Four world-space corners of the rotated box, order TL, TR, BR, BL (local frame).
+ * Used by render + chip placement.
+ * @param {Sym} sym
+ * @returns {{ x:number, y:number }[]}
+ */
+export function corners(sym) {
+  const rad = (sym.rot * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const hw = sym.w / 2;
+  const hh = sym.h / 2;
+
+  // Local frame corners: TL=(-hw,-hh), TR=(hw,-hh), BR=(hw,hh), BL=(-hw,hh)
+  // CW rotation in screen (y-down): x' = lx*cos - ly*sin, y' = lx*sin + ly*cos
+  return [
+    { x: sym.x + (-hw) * cos - (-hh) * sin, y: sym.y + (-hw) * sin + (-hh) * cos }, // TL
+    { x: sym.x + ( hw) * cos - (-hh) * sin, y: sym.y + ( hw) * sin + (-hh) * cos }, // TR
+    { x: sym.x + ( hw) * cos - ( hh) * sin, y: sym.y + ( hw) * sin + ( hh) * cos }, // BR
+    { x: sym.x + (-hw) * cos - ( hh) * sin, y: sym.y + (-hw) * sin + ( hh) * cos }, // BL
+  ];
+}

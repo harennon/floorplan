@@ -32,6 +32,27 @@ export function setDrawHooks(h) {
   _drawHooks = h;
 }
 
+// ─── Select hooks (injected by main.js; no static symbol import) ─────────────
+
+/**
+ * @type {{ onDown:(sx:number,sy:number)=>boolean,
+ *          onMove:(sx:number,sy:number)=>void,
+ *          onUp:(sx:number,sy:number)=>void,
+ *          onTapEmpty:()=>void } | null}
+ */
+let _selectHooks = null;
+
+/**
+ * Inject select-mode hooks. Called once by main.js after symbolTool is initialised.
+ * In select mode a single-pointer pointerdown calls selectHooks.onDown(sx,sy).
+ * If it returns true, subsequent moves route to onMove and the release to onUp
+ * (pan is suppressed). If it returns false, pan proceeds; a release under
+ * DRAG_THRESHOLD calls onTapEmpty().
+ */
+export function setSelectHooks(h) {
+  _selectHooks = h;
+}
+
 /** Click-vs-drag threshold in screen pixels. */
 const DRAG_THRESHOLD = 6;
 
@@ -47,6 +68,15 @@ let _hintDismissed = false;
 let _drawPending = false;
 let _drawDownX = 0;
 let _drawDownY = 0;
+
+/**
+ * Select-mode symbol drag state.
+ * true  = select hooks consumed the down; route moves/up to them, suppress pan.
+ * false = no symbol hit; pan proceeds.
+ */
+let _selectConsumed = false;
+let _selectDownX = 0;
+let _selectDownY = 0;
 
 /** Map<pointerId, PointerEvent> for multi-touch tracking. */
 const _pointers = new Map();
@@ -123,6 +153,31 @@ function _onPointerDown(e) {
       _updateCursor();
       return;
     }
+
+    // Select mode: let select hooks try to consume the down first.
+    if (_selectHooks && !(_drawHooks && _drawHooks.isDrawMode()) && !_spaceHeld) {
+      const consumed = _selectHooks.onDown(e.clientX, e.clientY);
+      _selectConsumed = consumed;
+      _selectDownX = e.clientX;
+      _selectDownY = e.clientY;
+      if (consumed) {
+        // Hooks consumed — suppress pan, no _dragging
+        _dragging = false;
+        _drawPending = false;
+        _lastX = e.clientX;
+        _lastY = e.clientY;
+        _updateCursor();
+        return;
+      }
+      // Not consumed — fall through to pan start below
+      _lastX = e.clientX;
+      _lastY = e.clientY;
+      _dragging = true;
+      _drawPending = false;
+      _updateCursor();
+      return;
+    }
+
     _dragging = true;
     _drawPending = false;
     _lastX = e.clientX;
@@ -165,6 +220,12 @@ function _onPointerMove(e) {
     _updateCursor();
   }
 
+  // Select hooks consumed the down → route moves to them
+  if (_selectConsumed && _selectHooks) {
+    _selectHooks.onMove(e.clientX, e.clientY);
+    return;
+  }
+
   if (_dragging) {
     const dx = e.clientX - _lastX;
     const dy = e.clientY - _lastY;
@@ -197,6 +258,22 @@ function _onPointerEnd(e) {
     if (_drawPending && _drawHooks && _drawHooks.isDrawMode()) {
       _drawHooks.onClick(e.clientX, e.clientY);
     }
+
+    // Select hooks: finalize
+    if (_selectConsumed && _selectHooks) {
+      _selectHooks.onUp(e.clientX, e.clientY);
+      _selectConsumed = false;
+    } else if (!_drawPending && !(_drawHooks && _drawHooks.isDrawMode()) && _selectHooks) {
+      // Was panning (not consumed by select hooks): if pointer didn't exceed threshold,
+      // it's a tap on empty canvas
+      const dx = e.clientX - _selectDownX;
+      const dy = e.clientY - _selectDownY;
+      if (Math.sqrt(dx * dx + dy * dy) <= DRAG_THRESHOLD) {
+        _selectHooks.onTapEmpty();
+      }
+      _selectConsumed = false;
+    }
+
     _drawPending = false;
     _dragging = false;
 
