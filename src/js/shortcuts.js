@@ -45,7 +45,9 @@ export function init(refs) {
   _duplicateFn = refs.duplicate;
   _modal       = refs.modal;
   _btnHelp     = refs.btnHelp;
+  _modalOpen   = false;   // reset open state on re-init
   if (refs.isDragging) _isDragging = refs.isDragging;
+  else _isDragging = () => false;
 
   // Help button: toggle modal
   if (_btnHelp) {
@@ -66,7 +68,8 @@ export function init(refs) {
     });
   }
 
-  // Global keydown
+  // Global keydown (remove any previous registration first so re-init is clean)
+  window.removeEventListener("keydown", _onKeyDown);
   window.addEventListener("keydown", _onKeyDown);
 }
 
@@ -92,6 +95,31 @@ function _onKeyDown(e) {
     return;
   }
 
+  // Focus trap: Tab/Shift+Tab while the modal is open must stay within it.
+  // Prevents keyboard focus from leaving the dialog into the background UI.
+  if (_modalOpen && _modal && e.key === "Tab") {
+    const focusable = Array.from(_modal.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), ' +
+      'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ));
+    if (focusable.length > 0) {
+      const first = focusable[0];
+      const last  = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    return;
+  }
+
   // ? opens/closes the modal
   if (e.key === "?" && !ctrl && !inField) {
     e.preventDefault();
@@ -107,23 +135,25 @@ function _onKeyDown(e) {
 
   if (ctrl) {
     const shift = e.shiftKey;
-    const key   = e.key;
+    // Use toLowerCase() so the chord matches regardless of whether Shift is held:
+    // when Shift is held e.key is the uppercase letter (e.g. "Z"), not "z".
+    const lkey  = e.key.toLowerCase();
 
-    if (key === "z" && !shift) {
+    if (lkey === "z" && !shift) {
       // Undo
       e.preventDefault();
       if (!dragging) _undoFn();
       return;
     }
 
-    if ((key === "z" && shift) || key === "y" || key === "Y") {
-      // Redo: Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y
+    if ((lkey === "z" && shift) || lkey === "y") {
+      // Redo: Ctrl/Cmd+Shift+Z (key="Z" when Shift held) or Ctrl/Cmd+Y
       e.preventDefault();
       if (!dragging) _redoFn();
       return;
     }
 
-    if (key === "d" || key === "D") {
+    if (lkey === "d") {
       // Duplicate
       e.preventDefault();
       if (!dragging) _duplicateFn();

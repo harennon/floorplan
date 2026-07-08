@@ -3552,6 +3552,328 @@ describe("history.js — canUndo / canRedo track stack lengths", () => {
   });
 });
 
+// ─── Import shortcuts.js ─────────────────────────────────────────────────────
+
+import {
+  init as initShortcuts,
+  isModalOpen,
+  IS_MAC,
+} from "./js/shortcuts.js";
+
+// ─── shortcuts.js test helpers ───────────────────────────────────────────────
+
+/**
+ * Build a minimal DOM rig for shortcuts tests.
+ * Returns { modal, closeBtn, btnHelp } plus:
+ *   - calls(name): array of call counts per action name
+ *   - fire(key, opts): dispatches a synthetic KeyboardEvent on window
+ *   - cleanup(): removes DOM elements
+ */
+function makeShortcutsRig() {
+  const modal = document.createElement("div");
+  modal.id = "shortcuts-modal-test-" + Math.random().toString(36).slice(2);
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("hidden", "");
+  modal.setAttribute("aria-hidden", "true");
+
+  const closeBtn = document.createElement("button");
+  closeBtn.setAttribute("data-action", "close-shortcuts");
+  closeBtn.textContent = "×";
+  modal.appendChild(closeBtn);
+
+  const btnHelp = document.createElement("button");
+  btnHelp.id = "btn-help-test-" + Math.random().toString(36).slice(2);
+  btnHelp.textContent = "?";
+
+  document.body.appendChild(modal);
+  document.body.appendChild(btnHelp);
+
+  const _calls = { undo: 0, redo: 0, duplicate: 0 };
+  initShortcuts({
+    undo:      () => { _calls.undo++; },
+    redo:      () => { _calls.redo++; },
+    duplicate: () => { _calls.duplicate++; },
+    modal,
+    btnHelp,
+    isDragging: () => false,
+  });
+
+  /**
+   * Fire a synthetic keydown on window with the given key and optional options.
+   * opts: { ctrlKey, metaKey, shiftKey, activeTag }
+   *   activeTag: if set, creates a hidden element of that tag, focuses it, and then fires.
+   */
+  function fire(key, opts = {}) {
+    const { ctrlKey = false, metaKey = false, shiftKey = false, activeTag = null } = opts;
+
+    let prevActive = null;
+    let fakeEl = null;
+    if (activeTag) {
+      fakeEl = document.createElement(activeTag);
+      fakeEl.style.position = "absolute";
+      fakeEl.style.left = "-9999px";
+      if (activeTag === "input") fakeEl.type = "text";
+      document.body.appendChild(fakeEl);
+      prevActive = document.activeElement;
+      fakeEl.focus();
+    }
+
+    const evt = new KeyboardEvent("keydown", {
+      key, ctrlKey, metaKey, shiftKey,
+      bubbles: true, cancelable: true,
+    });
+    window.dispatchEvent(evt);
+
+    if (fakeEl) {
+      document.body.removeChild(fakeEl);
+      if (prevActive && prevActive.focus) prevActive.focus();
+    }
+  }
+
+  function cleanup() {
+    if (modal.parentNode) document.body.removeChild(modal);
+    if (btnHelp.parentNode) document.body.removeChild(btnHelp);
+    // Remove the global keydown listener added by initShortcuts by replacing window
+    // (we can't remove it directly, but the listener uses captured references that are
+    // now stale, so it will no-op after cleanup — good enough for unit tests).
+  }
+
+  return { modal, closeBtn, btnHelp, calls: _calls, fire, cleanup };
+}
+
+// ─── Tests: shortcuts.js — undo chord ────────────────────────────────────────
+
+describe("shortcuts.js — Ctrl+Z triggers undo", () => {
+  it("Ctrl+Z calls undo once", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("z", { ctrlKey: true });
+    expect(rig.calls.undo).toBe(1);
+    expect(rig.calls.redo).toBe(0);
+    rig.cleanup();
+  });
+
+  it("Cmd+Z calls undo on macOS style (metaKey)", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("z", { metaKey: true });
+    expect(rig.calls.undo).toBe(1);
+    rig.cleanup();
+  });
+
+  it("plain Z (no modifier) does NOT call undo", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("z");
+    expect(rig.calls.undo).toBe(0);
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: shortcuts.js — redo chord (the critical bug) ─────────────────────
+
+describe("shortcuts.js — Ctrl+Shift+Z triggers redo (key='Z' when Shift held)", () => {
+  it("Ctrl+Shift+Z (key='Z', uppercase) calls redo", () => {
+    const rig = makeShortcutsRig();
+    // When Shift is held, KeyboardEvent.key is "Z" (uppercase), not "z".
+    // This is the exact bug: the old code tested key === "z" && shift, which
+    // was always false because key is "Z" when Shift is held.
+    rig.fire("Z", { ctrlKey: true, shiftKey: true });
+    expect(rig.calls.redo).toBe(1);
+    expect(rig.calls.undo).toBe(0);
+    rig.cleanup();
+  });
+
+  it("Cmd+Shift+Z (metaKey, key='Z') calls redo", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("Z", { metaKey: true, shiftKey: true });
+    expect(rig.calls.redo).toBe(1);
+    rig.cleanup();
+  });
+
+  it("Ctrl+Y calls redo", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("y", { ctrlKey: true });
+    expect(rig.calls.redo).toBe(1);
+    rig.cleanup();
+  });
+
+  it("Ctrl+Y (uppercase Y) also calls redo", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("Y", { ctrlKey: true });
+    expect(rig.calls.redo).toBe(1);
+    rig.cleanup();
+  });
+
+  it("Ctrl+Shift+Z does NOT call undo", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("Z", { ctrlKey: true, shiftKey: true });
+    expect(rig.calls.undo).toBe(0);
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: shortcuts.js — duplicate chord ───────────────────────────────────
+
+describe("shortcuts.js — Ctrl+D triggers duplicate", () => {
+  it("Ctrl+d calls duplicate", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("d", { ctrlKey: true });
+    expect(rig.calls.duplicate).toBe(1);
+    rig.cleanup();
+  });
+
+  it("Ctrl+D (uppercase) also calls duplicate", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("D", { ctrlKey: true });
+    expect(rig.calls.duplicate).toBe(1);
+    rig.cleanup();
+  });
+
+  it("plain D does NOT call duplicate", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("d");
+    expect(rig.calls.duplicate).toBe(0);
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: shortcuts.js — cheat-sheet modal (? / Esc) ───────────────────────
+
+describe("shortcuts.js — ? toggles modal; Esc closes it", () => {
+  it("? opens the modal (isModalOpen() becomes true)", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("?");
+    expect(isModalOpen()).toBe(true);
+    rig.cleanup();
+  });
+
+  it("second ? closes the modal (toggle)", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("?");
+    rig.fire("?");
+    expect(isModalOpen()).toBe(false);
+    rig.cleanup();
+  });
+
+  it("Esc closes the modal", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("?");
+    expect(isModalOpen()).toBe(true);
+    rig.fire("Escape");
+    expect(isModalOpen()).toBe(false);
+    rig.cleanup();
+  });
+
+  it("Esc does nothing when modal is already closed", () => {
+    const rig = makeShortcutsRig();
+    expect(isModalOpen()).toBe(false);
+    rig.fire("Escape"); // no-op
+    expect(isModalOpen()).toBe(false);
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: shortcuts.js — shortcuts suppressed when modal open ───────────────
+
+describe("shortcuts.js — chords suppressed while modal is open", () => {
+  it("Ctrl+Z does NOT call undo while modal is open", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("?");
+    expect(isModalOpen()).toBe(true);
+    rig.fire("z", { ctrlKey: true });
+    expect(rig.calls.undo).toBe(0);
+    rig.fire("Escape"); // close modal
+    rig.cleanup();
+  });
+
+  it("Ctrl+D does NOT call duplicate while modal is open", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("?");
+    rig.fire("d", { ctrlKey: true });
+    expect(rig.calls.duplicate).toBe(0);
+    rig.fire("Escape");
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: shortcuts.js — shortcuts suppressed when focus is in a field ──────
+
+describe("shortcuts.js — chords suppressed when focus is in INPUT/TEXTAREA/SELECT", () => {
+  it("Ctrl+Z does NOT call undo when an input has focus", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("z", { ctrlKey: true, activeTag: "input" });
+    expect(rig.calls.undo).toBe(0);
+    rig.cleanup();
+  });
+
+  it("Ctrl+D does NOT call duplicate when a textarea has focus", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("d", { ctrlKey: true, activeTag: "textarea" });
+    expect(rig.calls.duplicate).toBe(0);
+    rig.cleanup();
+  });
+
+  it("Ctrl+Shift+Z does NOT call redo when an input has focus", () => {
+    const rig = makeShortcutsRig();
+    rig.fire("Z", { ctrlKey: true, shiftKey: true, activeTag: "input" });
+    expect(rig.calls.redo).toBe(0);
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: shortcuts.js — focus trap while modal is open ────────────────────
+
+describe("shortcuts.js — focus trap: Tab/Shift+Tab stays within modal", () => {
+  it("Tab at the last focusable element wraps to first", () => {
+    const rig = makeShortcutsRig();
+    // Add a second button so there are two focusable elements: [closeBtn, extraBtn]
+    const extraBtn = document.createElement("button");
+    extraBtn.textContent = "extra";
+    rig.modal.appendChild(extraBtn);
+
+    rig.fire("?"); // open modal
+    expect(isModalOpen()).toBe(true);
+
+    // Focus the last focusable element inside the modal
+    extraBtn.focus();
+    expect(document.activeElement).toBe(extraBtn);
+
+    // Fire Tab — should wrap around to first focusable (closeBtn)
+    const tabEvt = new KeyboardEvent("keydown", {
+      key: "Tab", shiftKey: false, bubbles: true, cancelable: true,
+    });
+    window.dispatchEvent(tabEvt);
+
+    expect(document.activeElement).toBe(rig.closeBtn);
+    rig.fire("Escape");
+    rig.modal.removeChild(extraBtn);
+    rig.cleanup();
+  });
+
+  it("Shift+Tab at the first focusable element wraps to last", () => {
+    const rig = makeShortcutsRig();
+    const extraBtn = document.createElement("button");
+    extraBtn.textContent = "extra";
+    rig.modal.appendChild(extraBtn);
+
+    rig.fire("?"); // open modal
+
+    // Focus the first focusable element (closeBtn)
+    rig.closeBtn.focus();
+    expect(document.activeElement).toBe(rig.closeBtn);
+
+    // Fire Shift+Tab — should wrap to last (extraBtn)
+    const shiftTabEvt = new KeyboardEvent("keydown", {
+      key: "Tab", shiftKey: true, bubbles: true, cancelable: true,
+    });
+    window.dispatchEvent(shiftTabEvt);
+
+    expect(document.activeElement).toBe(extraBtn);
+    rig.fire("Escape");
+    rig.modal.removeChild(extraBtn);
+    rig.cleanup();
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 
