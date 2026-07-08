@@ -101,6 +101,15 @@ function render() {
     ? `${failed} of ${total} tests FAILED`
     : `All ${total} tests passed`;
   out.appendChild(summary);
+  // Expose result for headless CI runner (read via window.__testResult).
+  // failures[] is included so run-tests.mjs can print per-case details in CI logs.
+  const failures = [];
+  for (const suite of _suites) {
+    for (const c of suite.cases) {
+      if (c.err) failures.push({ suite: suite.name, name: c.name, error: c.err.message });
+    }
+  }
+  window.__testResult = { total, failed, passed: total - failed, failures };
 }
 
 // ─── Import modules under test ────────────────────────────────────────────────
@@ -3536,7 +3545,10 @@ describe("history.js — _apply deep-clones snapshot (no aliasing)", () => {
     // in-place assignment above, commit() dirty-check would see no change, and
     // canRedo() would still be true — that is the bug.
     expect(canRedo()).toBe(false); // _future was cleared by commit()
-    expect(historyDepth()).toBe(1); // one undo step (A → C recorded)
+    // depth === _past.length === 2: init captured the empty baseline, then
+    // both the empty→A commit and the A→C commit survive the undo+recommit
+    // (past = [empty, A]). The primary assertion of this test is canRedo above.
+    expect(historyDepth()).toBe(2);
 
     // Undo should restore x=0 (state A), not x=9
     historyUndo();
@@ -3894,8 +3906,7 @@ describe("LLD-22 — gridSnap is never called with null (call sites guard step==
   it("gridSnap({x:1,y:2}, 0.025) produces valid finite coordinates", () => {
     const r = gridSnap({ x: 1.013, y: 2.019 }, 0.025);
     if (!isFinite(r.x) || !isFinite(r.y)) throw new Error(`NaN/Inf from gridSnap: ${r.x}, ${r.y}`);
-    expect(r.x).toBeCloseTo(1.0, 3);  // 1.013 / 0.025 = 40.52 → round to 41 → 1.025
-    // Actually 1.013 / 0.025 = 40.52 → Math.round(40.52) = 41 → 41 * 0.025 = 1.025
+    // 1.013 / 0.025 = 40.52 → Math.round(40.52) = 41 → 41 * 0.025 = 1.025
     expect(r.x).toBeCloseTo(1.025, 9);
   });
 
@@ -4060,6 +4071,1008 @@ describe("LLD-22 — HUD chip label: 0.025 m preset shows correct precision (bug
     const imperialLabel = rig.snapModeVal.textContent;
     if (!imperialLabel.includes("~1 in")) throw new Error(`Imperial label after toggle wrong: "${imperialLabel}"`);
     setSnapMode("auto");
+    rig.cleanup();
+  });
+});
+
+// ─── Import clearance.js ──────────────────────────────────────────────────────
+
+import {
+  threshold as clrThreshold, density as clrDensity, enabled as clrEnabled,
+  THRESH_MIN, THRESH_MAX, THRESH_STEP, DEFAULT_THRESHOLD,
+  setThreshold, setDensity, setEnabled, onChange as onClrChange,
+  classify, aabb as clrAabb, pointInRoom,
+  computeClearances, worstStatus,
+} from "./js/clearance.js";
+
+// ─── clearance.js helpers ─────────────────────────────────────────────────────
+
+/** Reset clearance session state to defaults.
+ * Also clears the shared walls model so clearance tests are order-independent:
+ * computeClearances() reads wallsModel.rooms for wall gaps, and an earlier
+ * suite (e.g. the serializePlan tests) can leave a room in it. Without this,
+ * phantom wall gaps leak into tests that only set up symbol neighbours. */
+function resetClearance() {
+  setThreshold(DEFAULT_THRESHOLD);
+  setDensity("flagged");
+  setEnabled(true);
+  model.rooms.length = 0;
+  model.chain.length = 0;
+}
+
+/** Build a minimal unrotated Sym for testing. */
+function mkSym(id, type, x, y, w, h, rot = 0) {
+  return { id, type, x, y, w, h, rot };
+}
+
+/** Build a closed rectangular room from (x0,y0) to (x1,y1). */
+function mkRoom(id, x0, y0, x1, y1) {
+  return {
+    id, closed: true,
+    verts: [
+      { x: x0, y: y0 },
+      { x: x1, y: y0 },
+      { x: x1, y: y1 },
+      { x: x0, y: y1 },
+    ],
+  };
+}
+
+// ─── Tests: clearance.js — constants ─────────────────────────────────────────
+
+describe("clearance.js — constants", () => {
+  it("THRESH_MIN is 0.30", () => { expect(THRESH_MIN).toBe(0.30); });
+  it("THRESH_MAX is 1.20", () => { expect(THRESH_MAX).toBe(1.20); });
+  it("THRESH_STEP is 0.05", () => { expect(THRESH_STEP).toBe(0.05); });
+  it("DEFAULT_THRESHOLD is 0.60", () => { expect(DEFAULT_THRESHOLD).toBe(0.60); });
+});
+
+// ─── Tests: clearance.js — setThreshold / onChange ───────────────────────────
+
+describe("clearance.js — setThreshold clamping and onChange", () => {
+  it("setThreshold sets within range", () => {
+    resetClearance();
+    setThreshold(0.80);
+    expect(clrThreshold).toBeCloseTo(0.80, 9);
+    resetClearance();
+  });
+
+  it("setThreshold clamps below THRESH_MIN → THRESH_MIN", () => {
+    resetClearance();
+    setThreshold(0.10);
+    expect(clrThreshold).toBeCloseTo(THRESH_MIN, 9);
+    resetClearance();
+  });
+
+  it("setThreshold clamps above THRESH_MAX → THRESH_MAX", () => {
+    resetClearance();
+    setThreshold(5.0);
+    expect(clrThreshold).toBeCloseTo(THRESH_MAX, 9);
+    resetClearance();
+  });
+
+  it("setThreshold fires onChange listener", () => {
+    resetClearance();
+    let fired = 0;
+    onClrChange(() => fired++);
+    const before = fired;
+    setThreshold(0.75);
+    expect(fired).toBeGreaterThanOrEqual(before + 1);
+    resetClearance();
+  });
+
+  it("setDensity fires onChange listener", () => {
+    resetClearance();
+    let fired = 0;
+    onClrChange(() => fired++);
+    const before = fired;
+    setDensity("all");
+    expect(fired).toBeGreaterThanOrEqual(before + 1);
+    resetClearance();
+  });
+
+  it("setEnabled fires onChange listener", () => {
+    resetClearance();
+    let fired = 0;
+    onClrChange(() => fired++);
+    const before = fired;
+    setEnabled(false);
+    expect(fired).toBeGreaterThanOrEqual(before + 1);
+    resetClearance();
+  });
+});
+
+// ─── Tests: clearance.js — classify ─────────────────────────────────────────
+
+describe("clearance.js — classify", () => {
+  it("gap <= 0 → bad", () => {
+    setThreshold(0.60);
+    expect(classify(0)).toBe("bad");
+    expect(classify(-0.1)).toBe("bad");
+    expect(classify(-999)).toBe("bad");
+  });
+
+  it("0 < gap < threshold → tight", () => {
+    setThreshold(0.60);
+    expect(classify(0.01)).toBe("tight");
+    expect(classify(0.30)).toBe("tight");
+    expect(classify(0.59)).toBe("tight");
+  });
+
+  it("gap >= threshold → ok (boundary at exactly threshold)", () => {
+    setThreshold(0.60);
+    expect(classify(0.60)).toBe("ok");
+    expect(classify(0.61)).toBe("ok");
+    expect(classify(2.0)).toBe("ok");
+  });
+
+  it("boundary is inclusive at threshold", () => {
+    setThreshold(0.75);
+    expect(classify(0.75)).toBe("ok");
+    expect(classify(0.749)).toBe("tight");
+  });
+});
+
+// ─── Tests: clearance.js — aabb ──────────────────────────────────────────────
+
+describe("clearance.js — aabb", () => {
+  it("unrotated 2×1 box at (5,3) → exact l/r/t/b", () => {
+    resetSymbolModel();
+    const sym = mkSym("s0", "sofa", 5, 3, 2, 1, 0);
+    const box = clrAabb(sym);
+    expect(box.l).toBeCloseTo(4, 6);  // 5 - 1
+    expect(box.r).toBeCloseTo(6, 6);  // 5 + 1
+    expect(box.t).toBeCloseTo(2.5, 6); // 3 - 0.5
+    expect(box.b).toBeCloseTo(3.5, 6); // 3 + 0.5
+  });
+
+  it("rotated 45° AABB is larger than the footprint (conservative)", () => {
+    resetSymbolModel();
+    const sym = mkSym("s1", "table", 0, 0, 2, 1, 45);
+    const box = clrAabb(sym);
+    // For a 2×1 at rot=45, the AABB should extend beyond w/2=1 in x and y
+    const halfDiag = Math.sqrt(2 * 2 + 1 * 1) / 2; // half-diagonal of 2×1 ≈ 1.118
+    expect(box.r).toBeGreaterThanOrEqual(1); // must be at least w/2
+    expect(box.b).toBeGreaterThanOrEqual(0.5); // must be at least h/2
+    // And should be larger (conservative)
+    expect(box.r).toBeGreaterThanOrEqual(halfDiag * 0.9); // at least 90% of half-diagonal
+  });
+
+  it("rot=90 swaps effective width and height", () => {
+    resetSymbolModel();
+    const sym = mkSym("s2", "table", 0, 0, 2, 1, 90);
+    const box = clrAabb(sym);
+    // After 90° rotation, the effective x-span ≈ h=1, y-span ≈ w=2
+    expect(box.r - box.l).toBeCloseTo(1, 3); // ≈ h
+    expect(box.b - box.t).toBeCloseTo(2, 3); // ≈ w
+  });
+});
+
+// ─── Tests: clearance.js — pointInRoom ───────────────────────────────────────
+
+describe("clearance.js — pointInRoom", () => {
+  it("point inside a rectangle → true", () => {
+    const room = mkRoom("r0", 0, 0, 4, 3);
+    if (!pointInRoom(room, 2, 1.5)) throw new Error("Expected point inside rect to be true");
+  });
+
+  it("point outside a rectangle → false", () => {
+    const room = mkRoom("r0", 0, 0, 4, 3);
+    if (pointInRoom(room, 5, 1.5)) throw new Error("Expected point outside rect to be false");
+    if (pointInRoom(room, 2, 5))   throw new Error("Expected point below rect to be false");
+    if (pointInRoom(room, -1, 1))  throw new Error("Expected point left of rect to be false");
+  });
+
+  it("point inside an L-shaped polygon → true", () => {
+    // L-shape: (0,0)-(4,0)-(4,2)-(2,2)-(2,4)-(0,4)
+    const room = {
+      id: "r1", closed: true,
+      verts: [
+        { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 2 },
+        { x: 2, y: 2 }, { x: 2, y: 4 }, { x: 0, y: 4 },
+      ],
+    };
+    // Center of the bottom rectangle of the L
+    if (!pointInRoom(room, 2, 1)) throw new Error("Expected center of L-bottom to be inside");
+    // Center of the left column of the L
+    if (!pointInRoom(room, 1, 3)) throw new Error("Expected center of L-left to be inside");
+    // Top-right corner of L (outside the shape)
+    if (pointInRoom(room, 3, 3)) throw new Error("Expected top-right of L to be outside");
+  });
+});
+
+// ─── Tests: clearance.js — computeClearances ─────────────────────────────────
+
+describe("clearance.js — computeClearances: null and edge cases", () => {
+  it("returns [] for null sym", () => {
+    resetClearance();
+    const result = computeClearances(null, { rooms: [], symbols: [] });
+    expect(result.length).toBe(0);
+  });
+
+  it("returns [] for an opening (door)", () => {
+    resetClearance();
+    const door = mkSym("s0", "door", 2, 2, 0.9, 0.12, 0);
+    const result = computeClearances(door, { rooms: [], symbols: [] });
+    expect(result.length).toBe(0);
+  });
+
+  it("returns [] for an opening (window)", () => {
+    resetClearance();
+    const win = mkSym("s0", "window", 2, 2, 1, 0.12, 0);
+    const result = computeClearances(win, { rooms: [], symbols: [] });
+    expect(result.length).toBe(0);
+  });
+
+  it("returns [] when enabled === false", () => {
+    setEnabled(false);
+    const sofa = mkSym("s0", "sofa", 2, 2, 2, 0.9, 0);
+    const result = computeClearances(sofa, { rooms: [], symbols: [] });
+    expect(result.length).toBe(0);
+    resetClearance();
+  });
+});
+
+describe("clearance.js — computeClearances: two axis-aligned furniture symbols", () => {
+  it("horizontal gap: sofa and table side-by-side with known 1m gap", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Sofa: center (1, 5), w=2, h=1 → AABB l=0, r=2, t=4.5, b=5.5
+    // Table: center (5, 5), w=2, h=1 → AABB l=4, r=6, t=4.5, b=5.5
+    // Gap on x-axis: 4 - 2 = 2... wait, let me recompute:
+    // sofa r=2, table l=4 → dx = 4-2 = 2m gap
+    const sofa  = mkSym("s0", "sofa",  1, 5, 2, 1, 0);
+    const table = mkSym("s1", "table", 5, 5, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [], symbols: [sofa, table] });
+    expect(result.length).toBe(1);
+    const c = result[0];
+    expect(c.kind).toBe("symbol");
+    expect(c.gap).toBeCloseTo(2.0, 6);
+    // Leader endpoints at facing edges' mid-span
+    expect(c.a.x).toBeCloseTo(2, 6); // sofa right edge
+    expect(c.b.x).toBeCloseTo(4, 6); // table left edge
+    expect(c.a.y).toBeCloseTo(c.b.y, 6); // same y (shared midspan)
+  });
+
+  it("vertical gap: two symbols stacked vertically with known 0.5m gap", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Sym A: center (5, 1), w=2, h=1 → AABB t=0.5, b=1.5
+    // Sym B: center (5, 4), w=2, h=1 → AABB t=3.5, b=4.5
+    // dy = 3.5 - 1.5 = 2m gap? Wait let me recalculate:
+    // A: t=0.5, b=1.5; B: t=3.5, b=4.5; dy=3.5-1.5=2m
+    // Let's use: A center (5,1), B center (5,3): A b=1.5, B t=2.5 → dy=1m
+    const symA = mkSym("s0", "bed",   5, 1, 2, 1, 0);
+    const symB = mkSym("s1", "table", 5, 3, 2, 1, 0);
+    // A AABB: l=4,r=6,t=0.5,b=1.5  B AABB: l=4,r=6,t=2.5,b=3.5
+    // dx = max(4-6, 4-6) = -2 (overlap on x)
+    // dy = max(2.5-1.5, 0.5-3.5) = max(1, -3) = 1
+    // Since dx<=0, this is an overlap on x → gap=0, bad
+    // Let's instead offset them so dx>dy:
+    // A: center (5, 2), w=2, h=1, B: center (5, 4), w=2, h=1
+    // A: l=4,r=6,t=1.5,b=2.5; B: l=4,r=6,t=3.5,b=4.5
+    // dx = max(4-6, 4-6) = -2 (overlap on x!)
+    // We need them NOT to overlap on x. Let me offset x:
+    // A: center (5, 2), w=1 → l=4.5,r=5.5; B: center (5, 4), w=1 → l=4.5,r=5.5; dy=3.5-2.5=1
+    // dx = max(4.5-5.5, 4.5-5.5) = -1 still overlap
+    // For vertical-dominant gap test, use narrow symbols:
+    // A: center (5, 2), w=2, h=0.4 → AABB t=1.8, b=2.2
+    // B: center (5, 5), w=2, h=0.4 → AABB t=4.8, b=5.2
+    // dx = max(4-6,4-6)=-2 (x overlap); dy = max(4.8-2.2, 1.8-5.2) = 2.6
+    // Both axes: dx<0, dy>0 → overlap → gap=0, bad. Not what we want.
+    // Actually when dx<=0 AND dy<=0 it's a true 2D overlap.
+    // When dx<=0 AND dy>0 → separated only on y → report vertical gap
+    const symC = mkSym("s2", "bed",   5, 1, 2, 0.4, 0); // AABB t=0.8, b=1.2
+    const symD = mkSym("s3", "table", 5, 3, 2, 0.4, 0); // AABB t=2.8, b=3.2
+    // dx = max(4-6, 4-6) = -2 (x overlap); dy = max(2.8-1.2, 0.8-3.2) = 1.6
+    const result2 = computeClearances(symC, { rooms: [], symbols: [symC, symD] });
+    expect(result2.length).toBe(1);
+    const c2 = result2[0];
+    expect(c2.kind).toBe("symbol");
+    expect(c2.gap).toBeCloseTo(1.6, 5);
+    expect(c2.a.y).toBeCloseTo(1.2, 5); // symC bottom edge
+    expect(c2.b.y).toBeCloseTo(2.8, 5); // symD top edge
+  });
+
+  it("overlapping pieces → gap === 0, status === bad, center-to-center leader", () => {
+    resetClearance();
+    resetSymbolModel();
+    const symA = mkSym("s0", "sofa",  5, 5, 2, 1, 0);
+    const symB = mkSym("s1", "table", 5.5, 5, 1, 0.8, 0); // centered inside symA
+    const result = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    expect(result.length).toBe(1);
+    const c = result[0];
+    expect(c.gap).toBe(0);
+    expect(c.status).toBe("bad");
+    // Leader from symA center to symB center
+    expect(c.a.x).toBeCloseTo(5, 5);
+    expect(c.a.y).toBeCloseTo(5, 5);
+    expect(c.b.x).toBeCloseTo(5.5, 5);
+    expect(c.b.y).toBeCloseTo(5, 5);
+  });
+});
+
+describe("clearance.js — computeClearances: wall gaps", () => {
+  it("sym inside a 10x8 room → four wall gaps computed", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Room from (0,0) to (10,8)
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    // Sofa at center (5,4), w=2, h=1 → AABB l=4,r=6,t=3.5,b=4.5
+    const sofa = mkSym("s0", "sofa", 5, 4, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    // Should have 4 wall gaps (left, right, top, bottom)
+    const wallGaps = result.filter(c => c.kind === "wall");
+    expect(wallGaps.length).toBe(4);
+  });
+
+  it("wall gap is measured to inner wall face (subtract WALL_M/2 from centerline distance)", () => {
+    resetClearance();
+    resetSymbolModel();
+    const WALL_M = 0.12;
+    // Room from (0,0) to (10,8)
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    // Sofa at (5,4), w=2, h=1 → left edge of AABB at x=4
+    // Left wall centerline is at x=0; raw gap = 4m
+    // Expected gap = 4 - WALL_M/2 = 4 - 0.06 = 3.94m
+    const sofa = mkSym("s0", "sofa", 5, 4, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const leftWall = result.find(c => c.kind === "wall" && c.label === "left wall");
+    if (!leftWall) throw new Error("No left wall gap found");
+    expect(leftWall.gap).toBeCloseTo(4 - WALL_M / 2, 5);
+  });
+
+  it("symbol face within WALL_M/2 of centerline clamps wall gap to 0", () => {
+    resetClearance();
+    resetSymbolModel();
+    const WALL_M = 0.12;
+    // Room from (0,0) to (10,8)
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    // Place sofa very close to the left wall
+    // sofa left edge at x=0.04 → raw gap = 0.04 < WALL_M/2=0.06 → clamped to 0
+    // sofa center x = 0.04 + sofa.w/2 = 0.04 + 1 = 1.04; sofa w=2
+    const sofa = mkSym("s0", "sofa", 1.04, 4, 2, 1, 0);
+    // AABB l = 1.04 - 1 = 0.04; raw gap to wall at x=0 = 0.04; minus 0.06 = -0.02 → clamped to 0
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const leftWall = result.find(c => c.kind === "wall" && c.label === "left wall");
+    if (!leftWall) throw new Error("No left wall gap found");
+    expect(leftWall.gap).toBe(0);
+    expect(leftWall.status).toBe("bad");
+  });
+
+  it("sym outside any closed room → zero wall gaps", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Room in a far-away location
+    const room = mkRoom("r0", 100, 100, 110, 108);
+    const sofa = mkSym("s0", "sofa", 5, 4, 2, 1, 0); // NOT inside this room
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const wallGaps = result.filter(c => c.kind === "wall");
+    expect(wallGaps.length).toBe(0);
+  });
+
+  it("sym straddling a wall (partly outside) \u2192 that side gap === 0 \u2192 bad (Edge Case 8)", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Room from (0,0) to (10,8); sofa partially outside the left wall
+    // sofa center at (0.3, 4), w=2 \u2192 AABB l=-0.7, r=1.3
+    // The sofa's left edge (-0.7) is outside the room (left wall at x=0).
+    // The outward (leftward) ray from x=-0.7 finds no left-side wall hit;
+    // the straddle detector fires a rightward opposite-direction ray which
+    // does find the wall at x=0, so gap=0/bad is emitted (LLD Edge Case 8).
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    const sofa = mkSym("s0", "sofa", 0.3, 4, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const leftWall = result.find(c => c.kind === "wall" && c.label === "left wall");
+    if (!leftWall) throw new Error("Expected left wall gap to be reported for straddling sofa");
+    expect(leftWall.gap).toBe(0);
+    expect(leftWall.status).toBe("bad");
+  });
+
+  it("QA repro Edge Case 8: room (0,0)-(6,4), sofa center (0.5,2) w=2 straddles left wall", () => {
+    resetClearance();
+    resetSymbolModel();
+    // AABB l = 0.5 - 1 = -0.5 (outside left wall at x=0); center is inside room
+    const room = mkRoom("r0", 0, 0, 6, 4);
+    const sofa = mkSym("s0", "sofa", 0.5, 2, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const leftWall = result.find(c => c.kind === "wall" && c.label === "left wall");
+    if (!leftWall) throw new Error("Expected left wall gap for straddling sofa (QA repro)");
+    expect(leftWall.gap).toBe(0);
+    expect(leftWall.status).toBe("bad");
+  });
+});
+
+// ─── Tests: clearance.js — worstStatus ───────────────────────────────────────
+
+describe("clearance.js — worstStatus", () => {
+  it("empty list → ok", () => {
+    expect(worstStatus([])).toBe("ok");
+  });
+
+  it("[ok, ok] → ok", () => {
+    const list = [
+      { gap: 1, status: "ok", label: "", kind: "wall", a: {x:0,y:0}, b: {x:1,y:0} },
+      { gap: 2, status: "ok", label: "", kind: "wall", a: {x:0,y:0}, b: {x:1,y:0} },
+    ];
+    expect(worstStatus(list)).toBe("ok");
+  });
+
+  it("[ok, tight] → tight", () => {
+    const list = [
+      { gap: 1, status: "ok",    label: "", kind: "wall", a: {x:0,y:0}, b: {x:1,y:0} },
+      { gap: 0.3, status: "tight", label: "", kind: "wall", a: {x:0,y:0}, b: {x:1,y:0} },
+    ];
+    expect(worstStatus(list)).toBe("tight");
+  });
+
+  it("[tight, bad] → bad", () => {
+    const list = [
+      { gap: 0.3, status: "tight", label: "", kind: "wall", a: {x:0,y:0}, b: {x:1,y:0} },
+      { gap: 0,   status: "bad",   label: "", kind: "wall", a: {x:0,y:0}, b: {x:1,y:0} },
+    ];
+    expect(worstStatus(list)).toBe("bad");
+  });
+
+  it("[bad] → bad (short-circuits)", () => {
+    const list = [
+      { gap: 0, status: "bad", label: "", kind: "symbol", a: {x:0,y:0}, b: {x:1,y:0} },
+    ];
+    expect(worstStatus(list)).toBe("bad");
+  });
+});
+
+// ─── Tests: clearance.js — horizontal vs vertical gap selection ───────────────
+
+describe("clearance.js — gap axis selection: dy > dx picks vertical", () => {
+  it("when dy > dx, reports vertical gap", () => {
+    resetClearance();
+    resetSymbolModel();
+    // symA: center (5, 2), w=3, h=1 → AABB l=3.5, r=6.5, t=1.5, b=2.5
+    // symB: center (5, 6), w=3, h=1 → AABB l=3.5, r=6.5, t=5.5, b=6.5
+    // dx = max(3.5-6.5, 3.5-6.5) = -3 (overlap on x)
+    // dy = max(5.5-2.5, 1.5-6.5) = max(3, -5) = 3 → vertical gap 3m
+    const symA = mkSym("s0", "sofa",  5, 2, 3, 1, 0);
+    const symB = mkSym("s1", "table", 5, 6, 3, 1, 0);
+    const result = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    expect(result.length).toBe(1);
+    const c = result[0];
+    expect(c.gap).toBeCloseTo(3, 5);
+    // Vertical leader: a and b should differ in y, not in x
+    expect(Math.abs(c.a.y - c.b.y)).toBeGreaterThanOrEqual(c.gap * 0.9);
+  });
+});
+
+// ─── Tests: LLD-24 — plan serialization not affected by clearance ─────────────
+
+describe("LLD-24 — clearance adds NO fields to plan JSON (serialization contract)", () => {
+  it("buildPlan() output does not include threshold, density, or enabled keys", () => {
+    resetAll();
+    setThreshold(0.90);
+    setDensity("all");
+    setEnabled(false);
+    const p = buildPlan();
+    const json = serializePlan(p);
+    if (json.includes("threshold")) throw new Error("'threshold' leaked into serialized plan");
+    if (json.includes("density"))   throw new Error("'density' leaked into serialized plan");
+    if (json.includes("clearance")) throw new Error("'clearance' leaked into serialized plan");
+    if (json.includes("enabled"))   throw new Error("'enabled' leaked into serialized plan");
+    resetClearance();
+  });
+
+  it("serializePlan output before and after clearance state changes is byte-identical (same model)", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:4,y:0 },{ x:4,y:3 },{ x:0,y:3 }] });
+    addSymbol(createSymbol("sofa", 2, 1.5));
+    const serialBefore = serializePlan(buildPlan());
+    // Change clearance state
+    setThreshold(0.80);
+    setDensity("all");
+    setEnabled(false);
+    const serialAfter = serializePlan(buildPlan());
+    if (serialBefore !== serialAfter) {
+      throw new Error("serializePlan output changed after clearance state mutation — clearance state leaked into plan");
+    }
+    resetClearance();
+  });
+});
+
+
+// ─── Import clearanceRender + clearancePanel ──────────────────────────────────
+
+import {
+  init as initClearanceRender,
+  render as clrRender,
+} from "./js/clearanceRender.js";
+
+import {
+  init as initClearancePanel,
+  update as clrPanelUpdate,
+} from "./js/clearancePanel.js";
+
+// ─── Integration: clearanceRender helpers ─────────────────────────────────────
+
+/**
+ * Build a minimal DOM rig for clearanceRender tests.
+ * Returns { gClearance, overlay, cleanup }.
+ */
+const NS_SVG = "http://www.w3.org/2000/svg";
+function makeRenderRig() {
+  const svg = document.createElementNS(NS_SVG, "svg");
+  const gClearance = document.createElementNS(NS_SVG, "g");
+  gClearance.id = "clearance";
+  svg.appendChild(gClearance);
+  const overlay = document.createElement("div");
+  overlay.className = "dim-labels";
+  document.body.appendChild(svg);
+  document.body.appendChild(overlay);
+  return {
+    gClearance, overlay,
+    cleanup() {
+      document.body.removeChild(svg);
+      document.body.removeChild(overlay);
+    },
+  };
+}
+
+// ─── Integration: clearancePanel helpers ─────────────────────────────────────
+
+/**
+ * Build a minimal DOM rig for clearancePanel tests.
+ * Returns { panel, body, toggle, cleanup }.
+ */
+function makePanelRig() {
+  const panel  = document.createElement("aside");
+  panel.className = "clearance";
+  const header = document.createElement("div");
+  header.className = "clr-header";
+  const dot = document.createElement("span");
+  dot.className = "clr-header-dot";
+  const sw = document.createElement("button");
+  sw.className = "clr-enable-switch";
+  sw.setAttribute("aria-pressed", "true");
+  sw.textContent = "On";
+  header.appendChild(dot);
+  header.appendChild(sw);
+  const toggle = document.createElement("button");
+  toggle.className = "clr-panel-toggle";
+  toggle.setAttribute("aria-expanded", "true");
+  const body = document.createElement("div");
+  body.className = "clr-body";
+  panel.appendChild(header);
+  panel.appendChild(toggle);
+  panel.appendChild(body);
+  document.body.appendChild(panel);
+  return {
+    panel, body, toggle,
+    cleanup() { document.body.removeChild(panel); },
+  };
+}
+
+// ─── Integration: clearanceRender — leader/pill append and clear ──────────────
+
+describe("clearanceRender — leader and pill append then clear on deselect", () => {
+  it("selecting a furniture symbol appends leaders and a fit-pill", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Sofa centred in a room — all four wall gaps are large (~3.5–4m → "ok"),
+    // so density must be "all" for leaders to be drawn (flagged annotates only
+    // tight/bad gaps). This test verifies the append mechanism, not flagging.
+    setDensity("all");
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    const sofa = mkSym("s0", "sofa", 5, 4, 2, 0.9, 0);
+
+    const rig = makeRenderRig();
+    initClearanceRender(
+      rig.gClearance, rig.overlay,
+      () => "s0",            // getSelectedId
+      () => sofa,            // getSymbol
+    );
+    // Patch model so computeClearances sees the room
+    const savedRooms = model.rooms.slice();
+    model.rooms.length = 0;
+    model.rooms.push(room);
+
+    clrRender();
+    const leaders = rig.gClearance.querySelectorAll(".clr-leader");
+    const pill    = rig.overlay.querySelector(".fit-pill");
+    if (leaders.length === 0) throw new Error("Expected leaders to be appended");
+    if (!pill) throw new Error("Expected fit-pill to be appended");
+
+    model.rooms.length = 0;
+    for (const r of savedRooms) model.rooms.push(r);
+    rig.cleanup();
+  });
+
+  it("deselecting removes leaders and pill, leaves other chips intact", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const sofa = mkSym("s0", "sofa", 5, 4, 2, 0.9, 0);
+
+    const rig = makeRenderRig();
+    // Add a non-clearance chip to overlay (simulates dim chip from walls)
+    const dimChip = document.createElement("div");
+    dimChip.className = "dim-chip";
+    dimChip.textContent = "2.0 m";
+    rig.overlay.appendChild(dimChip);
+
+    let selected = "s0";
+    initClearanceRender(
+      rig.gClearance, rig.overlay,
+      () => selected,
+      () => (selected === "s0" ? sofa : null),
+    );
+
+    clrRender(); // with selection → adds clr nodes
+    selected = null; // deselect
+    clrRender(); // should clear only clr nodes
+
+    const remaining = rig.overlay.querySelectorAll(".clr-chip, .fit-pill");
+    expect(remaining.length).toBe(0);
+    // The dim-chip must still be present
+    const dimChips = rig.overlay.querySelectorAll(".dim-chip");
+    expect(dimChips.length).toBe(1);
+
+    rig.cleanup();
+  });
+});
+
+// ─── Integration: clearanceRender — density flagged-vs-all ───────────────────
+
+describe("clearanceRender — density flagged vs all governs canvas annotation count", () => {
+  it("density=flagged: only tight/bad gaps annotated; all: every gap annotated", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // Two symbols side by side: large gap (ok) between them; sofa inside no room
+    // sofa AABB r=2; chair AABB l=5 → gap=3m (ok at threshold=0.60)
+    const sofa  = mkSym("s0", "sofa",  1, 4, 2, 0.9, 0); // AABB l=0, r=2
+    const chair = mkSym("s1", "chair", 5.25, 4, 0.5, 0.5, 0); // AABB l=5, r=5.5 → gap=3m
+
+    // Patch symbolsModel so computeClearances sees the second symbol
+    symbolModel.symbols.push(sofa);
+    symbolModel.symbols.push(chair);
+
+    const rig = makeRenderRig();
+
+    setDensity("flagged"); // default
+    initClearanceRender(rig.gClearance, rig.overlay, () => "s0", () => sofa);
+    clrRender();
+    const countFlagged = rig.gClearance.querySelectorAll(".clr-leader").length;
+    // gap=3m > threshold=0.60 → ok → no leaders in flagged mode
+    expect(countFlagged).toBe(0);
+
+    // Now switch to all — re-init with same rig (or just call setDensity + re-render)
+    setDensity("all");
+    clrRender();
+    const countAll = rig.gClearance.querySelectorAll(".clr-leader").length;
+    expect(countAll).toBeGreaterThanOrEqual(1); // at least 1 ok gap annotated
+
+    resetClearance();
+    symbolModel.symbols.length = 0;
+    rig.cleanup();
+  });
+
+  it("panel list length is unchanged by density (always shows all neighbours)", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+
+    const sofa  = mkSym("s0", "sofa",  1, 4, 2, 0.9, 0);
+    const chair = mkSym("s1", "chair", 5.25, 4, 0.5, 0.5, 0);
+    symbolModel.symbols.push(sofa);
+    symbolModel.symbols.push(chair);
+
+    const rig = makePanelRig();
+    initClearancePanel({
+      panel: rig.panel, body: rig.body, toggle: rig.toggle,
+      getSelectedId: () => "s0",
+      getSymbol: () => sofa,
+    });
+
+    setDensity("flagged");
+    clrPanelUpdate();
+    const rowsFlagged = rig.body.querySelectorAll(".clr-row").length;
+
+    setDensity("all");
+    clrPanelUpdate();
+    const rowsAll = rig.body.querySelectorAll(".clr-row").length;
+
+    // Both should equal 1 (one furniture neighbour)
+    expect(rowsFlagged).toBe(1);
+    expect(rowsAll).toBe(1);
+
+    resetClearance();
+    symbolModel.symbols.length = 0;
+    rig.cleanup();
+  });
+});
+
+// ─── Integration: clearanceRender — live threshold flip ──────────────────────
+
+describe("clearanceRender — live threshold flip changes statuses", () => {
+  it("a gap flips ok→tight when threshold crosses it; re-render without recomputing selection", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // sofa AABB r=2; chair AABB l=2.5 → gap=0.5m
+    // At threshold=0.40: 0.5>=0.40 → ok → no leaders in flagged mode
+    // At threshold=0.70: 0.5<0.70 → tight → 1 leader in flagged mode
+    const sofa  = mkSym("s0", "sofa",  1, 4, 2, 0.9, 0);
+    const chair = mkSym("s1", "chair", 2.75, 4, 0.5, 0.5, 0); // l=2.5, r=3.0; gap=0.5
+
+    symbolModel.symbols.push(sofa);
+    symbolModel.symbols.push(chair);
+
+    const rig = makeRenderRig();
+    setDensity("flagged");
+    setThreshold(0.40);
+    initClearanceRender(rig.gClearance, rig.overlay, () => "s0", () => sofa);
+    clrRender();
+    const countOk = rig.gClearance.querySelectorAll(".clr-leader").length;
+    expect(countOk).toBe(0); // gap=0.5 is ok at threshold=0.40
+
+    setThreshold(0.70);
+    clrRender();
+    const countTight = rig.gClearance.querySelectorAll(".clr-leader").length;
+    expect(countTight).toBeGreaterThanOrEqual(1); // gap=0.5 is now tight → annotated
+
+    resetClearance();
+    symbolModel.symbols.length = 0;
+    rig.cleanup();
+  });
+});
+
+// ─── Integration: clearanceRender — on/off switch ────────────────────────────
+
+describe("clearanceRender — on/off switch clears canvas annotations", () => {
+  it("enabled=false: no SVG/overlay clearance nodes; pill suppressed", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    const sofa  = mkSym("s0", "sofa",  1, 4, 2, 0.9, 0);
+    const chair = mkSym("s1", "chair", 2.75, 4, 0.5, 0.5, 0);
+    symbolModel.symbols.push(sofa);
+    symbolModel.symbols.push(chair);
+
+    const rig = makeRenderRig();
+    setDensity("all");
+    setEnabled(true);
+    initClearanceRender(rig.gClearance, rig.overlay, () => "s0", () => sofa);
+    clrRender();
+    const beforeLeaders = rig.gClearance.querySelectorAll(".clr-leader").length;
+    expect(beforeLeaders).toBeGreaterThanOrEqual(1);
+
+    setEnabled(false);
+    clrRender();
+    const afterLeaders  = rig.gClearance.querySelectorAll(".clr-leader").length;
+    const afterPill     = rig.overlay.querySelectorAll(".fit-pill").length;
+    expect(afterLeaders).toBe(0);
+    expect(afterPill).toBe(0);
+
+    resetClearance();
+    symbolModel.symbols.length = 0;
+    rig.cleanup();
+  });
+});
+
+// ─── Integration: clearancePanel — on/off state ───────────────────────────────
+
+describe("clearancePanel — on/off state", () => {
+  it("enabled=false: body shows 'Clearance overlay is off'; slider and density disabled", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+
+    const sofa = mkSym("s0", "sofa", 5, 4, 2, 0.9, 0);
+    symbolModel.symbols.push(sofa);
+
+    const rig = makePanelRig();
+    setEnabled(false);
+    initClearancePanel({
+      panel: rig.panel, body: rig.body, toggle: rig.toggle,
+      getSelectedId: () => "s0",
+      getSymbol: () => sofa,
+    });
+    clrPanelUpdate();
+
+    const offMsg = rig.body.querySelector(".clr-empty");
+    if (!offMsg || !offMsg.textContent.includes("off"))
+      throw new Error("Expected 'Clearance overlay is off' message");
+
+    const slider = rig.body.querySelector(".clr-slider");
+    if (!slider || !slider.disabled) throw new Error("Expected slider to be disabled");
+
+    const densityBtns = rig.body.querySelectorAll(".clr-density-btn");
+    for (const btn of densityBtns) {
+      if (!btn.disabled) throw new Error("Expected density buttons to be disabled");
+    }
+
+    resetClearance();
+    symbolModel.symbols.length = 0;
+    rig.cleanup();
+  });
+});
+
+// ─── Integration: clearancePanel — tightest-first sort ───────────────────────
+
+describe("clearancePanel — rows sorted tightest-first", () => {
+  it("tightest gap appears first in panel row list", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+
+    // sofa with two neighbours at different gaps
+    // chair: gap 0.3m (tight); table: gap 1.5m (ok)
+    const sofa  = mkSym("s0", "sofa",  1,  4, 2, 0.9, 0); // AABB r=2
+    const chair = mkSym("s1", "chair", 2.55, 4, 0.5, 0.5, 0); // l=2.3 → gap=0.3m (tight)
+    const table = mkSym("s2", "table", 4.1, 4, 1.2, 0.8, 0);  // l=3.5 → gap=1.5m (ok)
+
+    symbolModel.symbols.push(sofa);
+    symbolModel.symbols.push(chair);
+    symbolModel.symbols.push(table);
+
+    const rig = makePanelRig();
+    setDensity("all");
+    initClearancePanel({
+      panel: rig.panel, body: rig.body, toggle: rig.toggle,
+      getSelectedId: () => "s0",
+      getSymbol: () => sofa,
+    });
+    clrPanelUpdate();
+
+    const rows = rig.body.querySelectorAll(".clr-row");
+    if (rows.length < 2) throw new Error(`Expected >= 2 rows, got ${rows.length}`);
+    // First row should be tightest (chair at ~0.3m)
+    const firstVal = rows[0].querySelector(".clr-row-val");
+    const lastVal  = rows[rows.length - 1].querySelector(".clr-row-val");
+    if (!firstVal || !lastVal) throw new Error("Row value spans not found");
+    // First gap value should be smaller than last
+    const firstGap = parseFloat(firstVal.textContent);
+    const lastGap  = parseFloat(lastVal.textContent);
+    if (isNaN(firstGap) || isNaN(lastGap)) throw new Error(`Unparseable gaps: ${firstVal.textContent}, ${lastVal.textContent}`);
+    if (firstGap > lastGap) throw new Error(`Expected tightest first: got ${firstGap} > ${lastGap}`);
+
+    resetClearance();
+    symbolModel.symbols.length = 0;
+    rig.cleanup();
+  });
+
+  it("overlap rendered as 'overlap' text in row (gap=0)", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+
+    // Two symbols overlapping
+    const sofa  = mkSym("s0", "sofa",  5, 5, 2, 0.9, 0);
+    const chair = mkSym("s1", "chair", 5.1, 5, 0.5, 0.5, 0); // inside sofa → overlap
+
+    symbolModel.symbols.push(sofa);
+    symbolModel.symbols.push(chair);
+
+    const rig = makePanelRig();
+    initClearancePanel({
+      panel: rig.panel, body: rig.body, toggle: rig.toggle,
+      getSelectedId: () => "s0",
+      getSymbol: () => sofa,
+    });
+    clrPanelUpdate();
+
+    const rows = rig.body.querySelectorAll(".clr-row");
+    let hasOverlapText = false;
+    for (const row of rows) {
+      const val = row.querySelector(".clr-row-val");
+      if (val && val.textContent.trim() === "overlap") { hasOverlapText = true; break; }
+    }
+    if (!hasOverlapText) throw new Error("Expected 'overlap' text in a row for gap=0");
+
+    resetClearance();
+    symbolModel.symbols.length = 0;
+    rig.cleanup();
+  });
+});
+
+// ─── Integration: clearancePanel — unit toggle reformatting ──────────────────
+
+describe("clearancePanel — unit toggle reformats chips and slider", () => {
+  it("switching unit m→ft reformats the slider value and row values", () => {
+    resetClearance();
+    resetSymbolModel();
+
+    const sofa  = mkSym("s0", "sofa",  1, 4, 2, 0.9, 0);
+    const chair = mkSym("s1", "chair", 2.75, 4, 0.5, 0.5, 0); // gap=0.5m
+
+    symbolModel.symbols.push(sofa);
+    symbolModel.symbols.push(chair);
+
+    const rig = makePanelRig();
+    setUnit("m");
+    initClearancePanel({
+      panel: rig.panel, body: rig.body, toggle: rig.toggle,
+      getSelectedId: () => "s0",
+      getSymbol: () => sofa,
+    });
+    clrPanelUpdate();
+    const sliderValM = rig.body.querySelector(".clr-slider-val");
+    if (!sliderValM) throw new Error("Slider val span not found");
+    const mText = sliderValM.textContent;
+    if (!mText.includes("m")) throw new Error(`Expected metric unit in slider val, got: ${mText}`);
+
+    // Switch to ft
+    setUnit("ft");
+    clrPanelUpdate();
+    const sliderValFt = rig.body.querySelector(".clr-slider-val");
+    const ftText = sliderValFt.textContent;
+    if (!ftText.includes("ft")) throw new Error(`Expected imperial unit in slider val, got: ${ftText}`);
+
+    // Also check a row value is in ft
+    const row = rig.body.querySelector(".clr-row-val");
+    if (row && !row.textContent.includes("ft") && !row.textContent.includes("overlap")) {
+      throw new Error(`Expected ft unit in row val, got: ${row.textContent}`);
+    }
+
+    setUnit("ft"); // reset to default
+    resetClearance();
+    symbolModel.symbols.length = 0;
+    rig.cleanup();
+  });
+});
+
+// ─── Integration: clearancePanel — empty state prompts ───────────────────────
+
+describe("clearancePanel — empty state prompts", () => {
+  it("no selection → 'Select a piece of furniture' prompt", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+
+    const rig = makePanelRig();
+    initClearancePanel({
+      panel: rig.panel, body: rig.body, toggle: rig.toggle,
+      getSelectedId: () => null,  // nothing selected
+      getSymbol: () => null,
+    });
+    clrPanelUpdate();
+
+    const empty = rig.body.querySelector(".clr-empty");
+    if (!empty || !empty.textContent.includes("Select"))
+      throw new Error("Expected 'Select a piece of furniture' empty-state prompt");
+
+    rig.cleanup();
+  });
+
+  it("selected symbol with no neighbours → 'Nothing nearby to measure.' prompt", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+
+    // Sofa alone (no room, no other symbols)
+    const sofa = mkSym("s0", "sofa", 5, 4, 2, 0.9, 0);
+    symbolModel.symbols.push(sofa);
+
+    const rig = makePanelRig();
+    initClearancePanel({
+      panel: rig.panel, body: rig.body, toggle: rig.toggle,
+      getSelectedId: () => "s0",
+      getSymbol: () => sofa,
+    });
+    clrPanelUpdate();
+
+    const empty = rig.body.querySelector(".clr-empty");
+    if (!empty || !empty.textContent.includes("Nothing nearby"))
+      throw new Error("Expected 'Nothing nearby to measure.' prompt");
+
+    symbolModel.symbols.length = 0;
     rig.cleanup();
   });
 });
