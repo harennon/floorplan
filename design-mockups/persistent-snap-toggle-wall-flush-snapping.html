@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Snap toggle + wall-flush snapping · floorplan mockup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ── Design tokens (mirrors src/index.html) ─────────────────────────── */
+      :root {
+        --bg:         #14140f;
+        --bg-deep:    #100f0b;
+        --ink:        #ece7d6;
+        --muted:      #8f8a78;
+        --gold:       #c9a84c;
+        --gold-soft:  rgba(201, 168, 76, 0.55);
+
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --grid-axis:  rgba(201, 168, 76, 0.34);
+
+        --panel:      rgba(20, 20, 15, 0.72);
+        --hairline:   rgba(201, 168, 76, 0.18);
+
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+
+        --wall-body:     rgba(201,168,76,0.30);
+        --wall-line:     #d9be6e;
+        --room-fill:     rgba(201,168,76,0.07);
+        --snap-grid:     #7fd0c8;
+        --snap-point:    #e0b64f;
+        --snap-flush:    #8fd6a0;   /* NEW — wall-flush guide colour */
+        --error: #e57373;
+      }
+
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        font-family: var(--font-ui);
+        color: var(--ink);
+        background: var(--bg-deep);
+        padding: 2rem 1.5rem 4rem;
+        line-height: 1.5;
+      }
+
+      /* ── Mockup scaffolding (not part of the app) ───────────────────────── */
+      .doc { max-width: 1180px; margin: 0 auto; }
+      .doc-head { margin-bottom: 2rem; }
+      .doc-head h1 {
+        font-family: var(--font-display);
+        color: var(--gold);
+        font-size: 1.6rem;
+        font-weight: 700;
+        margin: 0 0 0.4rem;
+      }
+      .doc-head p {
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        max-width: 60ch;
+      }
+      .section-title {
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--gold);
+        border-bottom: 1px solid var(--hairline);
+        padding-bottom: 0.4rem;
+        margin: 2.5rem 0 1rem;
+      }
+      .caption {
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        color: var(--muted);
+        margin: 0.6rem 0 0;
+      }
+      .caption strong { color: var(--ink); font-weight: 500; }
+      .stage-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+        gap: 1.5rem;
+      }
+      .option-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 1.5rem;
+      }
+      .card {
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--bg);
+      }
+      .card-label {
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        color: var(--ink);
+        padding: 0.6rem 0.8rem;
+        border-bottom: 1px solid var(--hairline);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .card-label .tag {
+        margin-left: auto;
+        font-size: 0.58rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .card-label .tag.rec { color: var(--gold); }
+
+      /* ── Miniature canvas stage ─────────────────────────────────────────── */
+      .stage {
+        position: relative;
+        height: 300px;
+        background:
+          radial-gradient(ellipse 90% 80% at 50% 50%, var(--bg) 0%, var(--bg-deep) 100%);
+        overflow: hidden;
+      }
+      .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+      .grid-fine  { stroke: var(--grid-fine);  stroke-width: 1; shape-rendering: crispEdges; }
+      .grid-major { stroke: var(--grid-major); stroke-width: 1; shape-rendering: crispEdges; }
+      .grid-axis  { stroke: var(--grid-axis);  stroke-width: 1.5; shape-rendering: crispEdges; }
+
+      /* Wall body + centreline */
+      .wall-body { fill: none; stroke: var(--wall-body); stroke-width: 12; stroke-linecap: round; stroke-linejoin: round; }
+      .wall-line { fill: none; stroke: var(--wall-line); stroke-width: 1.5; stroke-linejoin: round; }
+      .room-fill { fill: var(--room-fill); stroke: none; }
+
+      /* Symbol box */
+      .sym-fill { fill: rgba(201,168,76,0.10); stroke: var(--gold); stroke-width: 1.6; }
+      .sym-fill.ghost { fill: rgba(201,168,76,0.06); stroke: var(--gold-soft); stroke-dasharray: 4 3; }
+      .sym-label { fill: var(--muted); font-family: var(--font-mono); font-size: 10px; text-anchor: middle; }
+
+      /* Snap guides */
+      .flush-guide { stroke: var(--snap-flush); stroke-width: 2; stroke-dasharray: 5 4; }
+      .flush-edge  { stroke: var(--snap-flush); stroke-width: 2.5; }
+      .grid-snap-dot { fill: none; stroke: var(--snap-grid); stroke-width: 1.6; }
+      .free-x { stroke: var(--muted); stroke-width: 1.4; }
+
+      /* Cursor marker */
+      .cursor-dot { fill: var(--ink); }
+
+      /* ── Snap tag (cursor-side type label) ──────────────────────────────── */
+      .snap-tag {
+        position: absolute;
+        font-family: var(--font-mono);
+        font-size: 0.6rem;
+        padding: 0.1rem 0.4rem;
+        border-radius: 3px;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      .snap-tag.flush { color: var(--snap-flush); border-color: var(--snap-flush); }
+      .snap-tag.grid  { color: var(--snap-grid); }
+      .snap-tag.free  { color: var(--muted); }
+
+      /* ── HUD stack (bottom-right of stage) ──────────────────────────────── */
+      .hud {
+        position: absolute;
+        bottom: 0.75rem;
+        right: 0.75rem;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.15rem;
+      }
+      .hud-cell {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        padding: 0.2rem 0.55rem;
+        border-radius: 4px;
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .hud-cell span { color: var(--ink); }
+
+      /* Interactive snap-precision chip (existing chrome) */
+      button.hud-snap-mode {
+        cursor: pointer;
+        border: 1px solid var(--hairline);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--muted);
+        background: var(--panel);
+        padding: 0.2rem 0.55rem;
+        border-radius: 4px;
+        white-space: nowrap;
+        text-align: left;
+        min-height: 1.75rem;
+        transition: border-color 0.15s;
+      }
+      button.hud-snap-mode:hover { border-color: var(--ink); }
+      button.hud-snap-mode span { color: var(--ink); }
+
+      /* ── OPTION A: dedicated snap toggle inside the HUD ─────────────────── */
+      button.hud-snap-toggle {
+        cursor: pointer;
+        border: 1px solid var(--hairline);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--muted);
+        background: var(--panel);
+        padding: 0.2rem 0.55rem 0.2rem 0.5rem;
+        border-radius: 4px;
+        white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 1.75rem;
+        transition: border-color 0.15s, color 0.15s;
+      }
+      button.hud-snap-toggle:hover { border-color: var(--ink); }
+      .snap-pip {
+        width: 0.7rem; height: 0.7rem;
+        border-radius: 50%;
+        border: 1px solid var(--muted);
+        flex-shrink: 0;
+        transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+      }
+      button.hud-snap-toggle[aria-pressed="true"] { color: var(--gold); border-color: var(--gold-soft); }
+      button.hud-snap-toggle[aria-pressed="true"] .snap-pip {
+        background: var(--gold);
+        border-color: var(--gold);
+        box-shadow: 0 0 6px rgba(201,168,76,0.5);
+      }
+      button.hud-snap-toggle[aria-pressed="false"] .snap-pip { background: transparent; }
+
+      /* ── OPTION B: segmented ON/OFF pill (top-right style) ──────────────── */
+      .snap-seg {
+        display: inline-flex;
+        border: 1px solid var(--hairline);
+        border-radius: 100px;
+        overflow: hidden;
+        background: var(--panel);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+      }
+      .snap-seg .seg-label {
+        color: var(--muted);
+        padding: 0.28rem 0.5rem 0.28rem 0.7rem;
+        letter-spacing: 0.05em;
+        display: flex; align-items: center; gap: 0.35rem;
+      }
+      .snap-seg button {
+        background: transparent;
+        border: none;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        padding: 0.28rem 0.7rem;
+        cursor: pointer;
+        transition: color 0.15s, background 0.15s;
+      }
+      .snap-seg button[aria-pressed="true"] {
+        color: var(--gold);
+        background: rgba(201,168,76,0.12);
+      }
+      .snap-seg button:not([aria-pressed="true"]):hover { color: var(--ink); }
+
+      /* ── OPTION C: magnet icon button on the tool rail ──────────────────── */
+      .tool-rail {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        padding: 0.4rem 0.3rem;
+      }
+      .tool-rail button {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        width: 2.4rem; height: 2.4rem;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .tool-rail button:hover { color: var(--ink); border-color: var(--hairline); }
+      .tool-rail button[aria-pressed="true"] {
+        color: var(--gold);
+        background: rgba(201, 168, 76, 0.1);
+        border-color: var(--gold-soft);
+      }
+      .tool-rail-sep { width: 100%; height: 1px; background: var(--hairline); margin: 0.1rem 0; }
+      /* struck-through magnet when snap OFF */
+      .magnet-off-slash { stroke: var(--error); stroke-width: 1.6; stroke-linecap: round; }
+
+      .row { display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap; }
+      .state-note {
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="doc">
+      <div class="doc-head">
+        <h1>Persistent snap toggle + wall-flush snapping</h1>
+        <p>
+          Issue #29 · Two things: a discoverable, persisted grid-snap on/off control,
+          and symbols that seat flush against a nearby wall face. Alt still bypasses
+          snapping transiently. Wall-flush beats the nearest grid line.
+        </p>
+      </div>
+
+      <!-- ══════════ PART 1: the toggle control — three placements ══════════ -->
+      <div class="section-title">Part 1 · Snap toggle — three placement options</div>
+      <div class="option-grid">
+
+        <!-- OPTION A -->
+        <div class="card">
+          <div class="card-label">Option A · HUD toggle cell <span class="tag rec">recommended</span></div>
+          <div class="stage" data-mini="a">
+            <svg viewBox="0 0 360 300" preserveAspectRatio="xMidYMid slice" data-grid></svg>
+            <div class="hud">
+              <button class="hud-snap-toggle" aria-pressed="true"
+                      aria-label="Grid snapping on (click to toggle)">
+                <span class="snap-pip"></span>Snap&nbsp;<span>On</span>
+              </button>
+              <button class="hud-snap-mode" aria-label="Snap precision (click to cycle)">
+                Grid&nbsp;<span>Auto</span>
+              </button>
+              <div class="hud-cell">Zoom&nbsp;<span>100%</span></div>
+            </div>
+          </div>
+          <p class="caption">
+            A new interactive HUD cell sits directly above the existing precision chip.
+            One tap toggles; the filled pip + gold text mean <strong>On</strong>. Lives in
+            the same stack as the Grid/Scale/Zoom cells — zero new screen real estate.
+          </p>
+        </div>
+
+        <!-- OPTION B -->
+        <div class="card">
+          <div class="card-label">Option B · Segmented On/Off pill <span class="tag">variant</span></div>
+          <div class="stage" data-mini="b">
+            <svg viewBox="0 0 360 300" preserveAspectRatio="xMidYMid slice" data-grid></svg>
+            <div class="hud">
+              <div class="snap-seg" role="group" aria-label="Grid snapping">
+                <span class="seg-label">Snap</span>
+                <button aria-pressed="true">ON</button>
+                <button aria-pressed="false">OFF</button>
+              </div>
+              <button class="hud-snap-mode" aria-label="Snap precision">
+                Grid&nbsp;<span>Auto</span>
+              </button>
+              <div class="hud-cell">Zoom&nbsp;<span>100%</span></div>
+            </div>
+          </div>
+          <p class="caption">
+            An explicit two-state pill echoing the top-right unit toggle. More self-evident
+            (both states visible) but wider and visually heavier than the single cell.
+          </p>
+        </div>
+
+        <!-- OPTION C -->
+        <div class="card">
+          <div class="card-label">Option C · Magnet button on tool rail <span class="tag">variant</span></div>
+          <div class="stage" data-mini="c">
+            <svg viewBox="0 0 360 300" preserveAspectRatio="xMidYMid slice" data-grid></svg>
+            <div style="position:absolute; left:0.75rem; top:50%; transform:translateY(-50%);">
+              <nav class="tool-rail" aria-label="Tools">
+                <button aria-label="Select" aria-pressed="true">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 2 L4 13 L7 10 L9 14 L11 13 L9 9 L13 9 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+                </button>
+                <button aria-label="Draw wall">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+                </button>
+                <div class="tool-rail-sep"></div>
+                <button aria-label="Grid snapping on" aria-pressed="true" data-magnet>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M4 3 V8 A4 4 0 0 0 12 8 V3" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                    <line x1="4" y1="3" x2="6.5" y2="3" stroke="currentColor" stroke-width="1.5"/>
+                    <line x1="9.5" y1="3" x2="12" y2="3" stroke="currentColor" stroke-width="1.5"/>
+                  </svg>
+                </button>
+              </nav>
+            </div>
+          </div>
+          <p class="caption">
+            A magnet toggle on the existing left rail (a common CAD idiom). Strong metaphor,
+            but the rail is drawing-tool focused and hidden/collapsed on mobile, so the
+            control would be less reachable while placing furniture.
+          </p>
+        </div>
+      </div><!-- /option-grid -->
+
+      <div class="section-title">Recommended toggle — the three states</div>
+      <div class="row">
+        <div>
+          <button class="hud-snap-toggle" aria-pressed="true"><span class="snap-pip"></span>Snap&nbsp;<span>On</span></button>
+          <p class="state-note">Default. Filled gold pip.</p>
+        </div>
+        <div>
+          <button class="hud-snap-toggle" aria-pressed="false"><span class="snap-pip"></span>Snap&nbsp;<span style="color:var(--muted)">Off</span></button>
+          <p class="state-note">Persisted off. Hollow pip, muted.</p>
+        </div>
+        <div>
+          <button class="hud-snap-toggle" aria-pressed="true" style="border-color:var(--muted); border-style:dashed; opacity:0.85"><span class="snap-pip" style="background:transparent;border-color:var(--muted);box-shadow:none"></span>Snap&nbsp;<span style="color:var(--muted)">Alt</span></button>
+          <p class="state-note">Alt held — transient bypass while On.</p>
+        </div>
+      </div>
+      <p class="caption">
+        The toggle owns the <strong>persisted</strong> preference (survives reload via
+        <code>localStorage</code>). Holding <strong>Alt</strong> is a momentary override that
+        does not change the stored value — the cell shows a dashed "Alt" hint while held,
+        then reverts.
+      </p>
+
+      <!-- ══════════ PART 2: wall-flush snapping behaviour ══════════ -->
+      <div class="section-title">Part 2 · Snapping behaviour when placing / dragging a symbol</div>
+      <div class="stage-grid">
+
+        <div class="card">
+          <div class="card-label">1 · Grid snap (Snap On, no wall near)</div>
+          <div class="stage" data-scene="grid"></div>
+          <p class="caption">
+            Away from walls the symbol lands on the nearest grid line — today's behaviour,
+            unchanged. A teal grid-snap dot marks the target.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-label">2 · Wall-flush snap <span class="tag rec">the new value</span></div>
+          <div class="stage" data-scene="flush"></div>
+          <p class="caption">
+            When the symbol's nearest edge is within threshold of a wall face, that edge
+            snaps <strong>flush</strong> against the wall. A green guide line highlights the
+            wall face; the seated edge glows green.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-label">3 · Precedence: wall beats grid</div>
+          <div class="stage" data-scene="precedence"></div>
+          <p class="caption">
+            When a grid line <em>and</em> a wall face are both in range, the wall wins. The
+            faint teal grid dot shows where grid alone would have landed; the symbol instead
+            seats on the green wall face.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-label">4 · Snap Off / Alt held → raw point</div>
+          <div class="stage" data-scene="free"></div>
+          <p class="caption">
+            With the toggle Off (or Alt held), the symbol drops at the exact pointer
+            position — no grid, no wall-flush. A muted ✕ marks the raw drop point.
+          </p>
+        </div>
+      </div>
+
+      <div class="section-title">Interaction model &amp; feedback</div>
+      <p class="caption" style="max-width:74ch">
+        <strong>Cursor-side snap tag</strong> reuses the existing <code>.snap-tag</code>
+        element to name the active snap so the behaviour is legible:
+        <span class="snap-tag flush" style="position:static;display:inline-block">flush</span>
+        <span class="snap-tag grid" style="position:static;display:inline-block">grid</span>
+        <span class="snap-tag free" style="position:static;display:inline-block">free</span>.
+        Green = wall-flush, teal = grid, muted = free. Guide lines fade in over ~120ms and
+        clear the instant the edge leaves threshold, honouring
+        <code>prefers-reduced-motion</code>.
+      </p>
+
+    </div><!-- /doc -->
+    <script>
+      const SVGNS = "http://www.w3.org/2000/svg";
+      const el = (n, a = {}) => {
+        const e = document.createElementNS(SVGNS, n);
+        for (const k in a) e.setAttribute(k, a[k]);
+        return e;
+      };
+      const STEP = 30; // px per grid cell in these minis
+
+      // ── Grid background painter ──────────────────────────────────────────
+      function paintGrid(svg, w = 360, h = 300) {
+        for (let x = 0; x <= w; x += STEP) {
+          const major = (x / STEP) % 5 === 0;
+          svg.appendChild(el("line", { x1: x, y1: 0, x2: x, y2: h,
+            class: major ? "grid-major" : "grid-fine" }));
+        }
+        for (let y = 0; y <= h; y += STEP) {
+          const major = (y / STEP) % 5 === 0;
+          svg.appendChild(el("line", { x1: 0, y1: y, x2: w, y2: y,
+            class: major ? "grid-major" : "grid-fine" }));
+        }
+      }
+      document.querySelectorAll("svg[data-grid]").forEach(s => paintGrid(s));
+
+      // ── Helpers for behaviour scenes ─────────────────────────────────────
+      function sceneSvg(host) {
+        const svg = el("svg", { viewBox: "0 0 360 300",
+          preserveAspectRatio: "xMidYMid slice" });
+        host.appendChild(svg);
+        paintGrid(svg);
+        return svg;
+      }
+      function snapTag(host, cls, text, x, y) {
+        const t = document.createElement("div");
+        t.className = "snap-tag " + cls;
+        t.textContent = text;
+        t.style.left = x + "px";
+        t.style.top = y + "px";
+        host.appendChild(t);
+      }
+      // Draw a horizontal wall (body + centreline) at world y across [x1,x2]
+      function wall(svg, x1, x2, y) {
+        svg.appendChild(el("line", { x1, y1: y, x2, y2: y, class: "wall-body" }));
+        svg.appendChild(el("line", { x1, y1: y, x2, y2: y, class: "wall-line" }));
+      }
+      // Symbol rect centred at (cx,cy), width w, height h. edge flags → glow class.
+      function symbol(svg, cx, cy, w, h, label, opts = {}) {
+        const x = cx - w / 2, y = cy - h / 2;
+        svg.appendChild(el("rect", { x, y, width: w, height: h, rx: 3,
+          class: "sym-fill" + (opts.ghost ? " ghost" : "") }));
+        if (opts.flushEdge === "top")
+          svg.appendChild(el("line", { x1: x, y1: y, x2: x + w, y2: y, class: "flush-edge" }));
+        if (label)
+          svg.appendChild(el("text", { x: cx, y: cy + 4, class: "sym-label" },)).textContent = label;
+        return { x, y, w, h };
+      }
+
+      // ── Scene 1: grid snap ───────────────────────────────────────────────
+      (() => {
+        const host = document.querySelector('[data-scene="grid"]');
+        if (!host) return;
+        const svg = sceneSvg(host);
+        // symbol centred on a grid intersection
+        const cx = 180, cy = 150;
+        symbol(svg, cx, cy, 90, 60, "sofa");
+        // grid-snap dot at target centre
+        svg.appendChild(el("circle", { cx, cy, r: 5, class: "grid-snap-dot" }));
+        // pointer slightly off
+        svg.appendChild(el("circle", { cx: cx + 11, cy: cy - 8, r: 3, class: "cursor-dot" }));
+        snapTag(host, "grid", "grid", cx + 22, cy - 26);
+      })();
+
+      // ── Scene 2: wall-flush snap ─────────────────────────────────────────
+      (() => {
+        const host = document.querySelector('[data-scene="flush"]');
+        if (!host) return;
+        const svg = sceneSvg(host);
+        const wallY = 108;
+        wall(svg, 40, 320, wallY);
+        // wall face guide (highlighted span the symbol width)
+        const cx = 180, w = 100, h = 62;
+        const cy = wallY + 6 + h / 2; // top edge sits just below wall face
+        svg.appendChild(el("line", { x1: cx - w / 2 - 10, y1: wallY + 6,
+          x2: cx + w / 2 + 10, y2: wallY + 6, class: "flush-guide" }));
+        symbol(svg, cx, cy, w, h, "bed", { flushEdge: "top" });
+        svg.appendChild(el("circle", { cx: cx + 14, cy: cy + 6, r: 3, class: "cursor-dot" }));
+        snapTag(host, "flush", "flush", cx + 26, cy - 8);
+      })();
+
+      // ── Scene 3: precedence (wall beats grid) ────────────────────────────
+      (() => {
+        const host = document.querySelector('[data-scene="precedence"]');
+        if (!host) return;
+        const svg = sceneSvg(host);
+        const wallY = 96; // between grid lines
+        wall(svg, 40, 320, wallY);
+        const cx = 180, w = 100, h = 62;
+        const cyFlush = wallY + 6 + h / 2;
+        // faint grid-snap alternative: where grid alone would have put the top edge
+        const gridTop = 120; // nearest grid line below
+        svg.appendChild(el("rect", { x: cx - w / 2, y: gridTop, width: w, height: h, rx: 3,
+          class: "sym-fill ghost", opacity: 0.35 }));
+        svg.appendChild(el("circle", { cx, cy: gridTop + h / 2, r: 4,
+          class: "grid-snap-dot", opacity: 0.5 }));
+        // actual flush placement (wins)
+        svg.appendChild(el("line", { x1: cx - w / 2 - 10, y1: wallY + 6,
+          x2: cx + w / 2 + 10, y2: wallY + 6, class: "flush-guide" }));
+        symbol(svg, cx, cyFlush, w, h, "bed", { flushEdge: "top" });
+        snapTag(host, "flush", "flush ▸ beats grid", cx + 20, cyFlush - 8);
+      })();
+
+      // ── Scene 4: free / raw point ────────────────────────────────────────
+      (() => {
+        const host = document.querySelector('[data-scene="free"]');
+        if (!host) return;
+        const svg = sceneSvg(host);
+        // deliberately off-grid centre
+        const cx = 173, cy = 141;
+        symbol(svg, cx, cy, 90, 60, "table");
+        // raw ✕ marker at pointer
+        const s = 6;
+        svg.appendChild(el("line", { x1: cx - s, y1: cy - s, x2: cx + s, y2: cy + s, class: "free-x" }));
+        svg.appendChild(el("line", { x1: cx - s, y1: cy + s, x2: cx + s, y2: cy - s, class: "free-x" }));
+        snapTag(host, "free", "free", cx + 18, cy - 24);
+      })();
+    </script>
+  </body>
+</html>
