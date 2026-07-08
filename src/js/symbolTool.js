@@ -20,6 +20,8 @@ import {
 import { scheduleRender } from "./surface.js";
 import { getRotateHandleScreen } from "./symbolRender.js";
 import { beginEdit as beginDimEdit, cancel as cancelDimEdit, isEditing as isDimEditing } from "./symbolDimEntry.js";
+import { commit } from "./history.js";
+import { showToastAction, showToast } from "./actions.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -57,6 +59,11 @@ let _lockAspect = false;
 
 /** Whether alt is held (free snap). */
 let _altHeld = false;
+
+/** Pose (x, y, rot) of the selected symbol at the start of a drag, for changed-detection. */
+let _dragStartX   = 0;
+let _dragStartY   = 0;
+let _dragStartRot = 0;
 
 /** Type being dragged from the dock. */
 let _dockDragType = null;
@@ -103,6 +110,21 @@ export function init(refs) {
     if (btnDuplicate) btnDuplicate.addEventListener("click", _onDuplicate);
     if (btnDelete)    btnDelete.addEventListener("click",    _onDelete);
     if (btnLock)      btnLock.addEventListener("click",      _onToggleLockAspect);
+
+    // Key-hint tooltips (LLD 19)
+    if (btnRotate90) {
+      btnRotate90.setAttribute("title", "Rotate 90° (R)");
+      btnRotate90.setAttribute("aria-label", "Rotate 90° (R)");
+    }
+    if (btnDuplicate) {
+      const dupHint = "Duplicate (⌘D)";
+      btnDuplicate.setAttribute("title", dupHint);
+      btnDuplicate.setAttribute("aria-label", dupHint);
+    }
+    if (btnDelete) {
+      btnDelete.setAttribute("title", "Delete (⌫)");
+      btnDelete.setAttribute("aria-label", "Delete (⌫)");
+    }
   }
 
   // Keyboard: Delete/Backspace for selected symbol
@@ -137,11 +159,14 @@ export function onSelectDown(sx, sy) {
       const hdx = sx - handlePos.x;
       const hdy = sy - handlePos.y;
       if (Math.sqrt(hdx * hdx + hdy * hdy) <= ROTATE_HIT_R) {
-        // Start rotate drag
-        _dragMode = "rotate";
+        // Start rotate drag — record start pose for changed-detection
+        _dragMode      = "rotate";
         _rotateStartRot = sym.rot;
         _rotateStartAngle = Math.atan2(sy - worldToScreen(sym.x, sym.y).y,
                                        sx - worldToScreen(sym.x, sym.y).x);
+        _dragStartX   = sym.x;
+        _dragStartY   = sym.y;
+        _dragStartRot = sym.rot;
         return true;
       }
     }
@@ -150,11 +175,14 @@ export function onSelectDown(sx, sy) {
   // 2. Hit-test symbols (topmost wins)
   const hit = pickSymbol(wp.x, wp.y, tolWorld);
   if (hit) {
-    // Start move drag
-    _selectedId = hit.id;
-    _dragMode = "move";
+    // Start move drag — record start pose for changed-detection
+    _selectedId  = hit.id;
+    _dragMode    = "move";
     _dragOffsetX = wp.x - hit.x;
     _dragOffsetY = wp.y - hit.y;
+    _dragStartX   = hit.x;
+    _dragStartY   = hit.y;
+    _dragStartRot = hit.rot;
     _showInspector(hit);
     scheduleRender();
     return true;
@@ -205,6 +233,16 @@ export function onSelectMove(sx, sy) {
  * Finalize drag.
  */
 export function onSelectUp(sx, sy) {
+  if (_dragMode && _selectedId) {
+    const sym = getSymbol(_selectedId);
+    if (sym) {
+      // Only commit if the symbol's pose actually changed
+      const poseChanged = sym.x !== _dragStartX || sym.y !== _dragStartY || sym.rot !== _dragStartRot;
+      if (poseChanged) {
+        commit();
+      }
+    }
+  }
   _dragMode = null;
 }
 
@@ -237,6 +275,14 @@ export function getPlacementGhost() {
 export function onDrawModeEnter() {
   _clearSelection();
   scheduleRender();
+}
+
+/**
+ * Clear symbol selection + hide inspector, WITHOUT rendering (caller renders).
+ * Wraps the module-private _clearSelection(). Used by history's onAfterRestore.
+ */
+export function deselect() {
+  _clearSelection();
 }
 
 /**
@@ -324,6 +370,7 @@ function _onDockPointerDown(e) {
     const sym = createSymbol(typeWas, wp2.x, wp2.y);
     addSymbol(sym);
     selectSymbol(sym.id);
+    commit();
     scheduleRender();
   };
 
@@ -355,6 +402,7 @@ function _onRotate90() {
   const sym = getSymbol(_selectedId);
   if (!sym) return;
   rotateSymbol(sym, sym.rot + 90);
+  commit();
   scheduleRender();
 }
 
@@ -363,6 +411,8 @@ function _onDuplicate() {
   const dup = duplicateSymbol(_selectedId);
   if (dup) {
     selectSymbol(dup.id);
+    commit();
+    showToast("Duplicated");
   }
   scheduleRender();
 }
@@ -398,8 +448,26 @@ export function repositionInspector() {
 function _deleteSelected() {
   if (!_selectedId) return;
   if (isDimEditing()) cancelDimEdit();
+
+  // Capture the symbol data for the scoped restore closure (Edge Case 7)
+  const sym = getSymbol(_selectedId);
+  if (!sym) { _clearSelection(); scheduleRender(); return; }
+  // Deep-clone so the restore closure is independent of future mutations
+  const savedSym = JSON.parse(JSON.stringify(sym));
+
   removeSymbol(_selectedId);
   _clearSelection();
+  commit();
+
+  // Scoped restore closure: re-inserts THIS symbol regardless of intervening commits
+  const restoreClosure = () => {
+    addSymbol(savedSym);
+    commit();
+    selectSymbol(savedSym.id);
+    scheduleRender();
+  };
+
+  showToastAction("Symbol deleted", "Undo", restoreClosure);
   scheduleRender();
 }
 
@@ -456,15 +524,42 @@ function _clearSelection() {
 // ── Keyboard ───────────────────────────────────────────────────────────────────
 
 function _onKeyDown(e) {
-  if (e.ctrlKey || e.metaKey) return;
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+  // ⌘/Ctrl+D — duplicate (intercepts browser bookmark shortcut)
+  const isAccelD = (e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D");
+  if (isAccelD) {
+    if (_selectedId && !(_isDrawModeFn && _isDrawModeFn())) {
+      e.preventDefault();
+      _onDuplicate();
+    }
+    return;
+  }
+
+  // For all remaining keys, ignore if any modifier is held
+  if (e.ctrlKey || e.metaKey) return;
 
   if ((e.key === "Delete" || e.key === "Backspace") && _selectedId) {
     // Only delete symbol if not in wall draw mode
     if (_isDrawModeFn && _isDrawModeFn()) return;
     e.preventDefault();
     _deleteSelected();
+    return;
+  }
+
+  // D — duplicate (no modifier)
+  if ((e.key === "d" || e.key === "D") && _selectedId) {
+    if (_isDrawModeFn && _isDrawModeFn()) return;
+    _onDuplicate();
+    return;
+  }
+
+  // R — rotate 90°
+  if ((e.key === "r" || e.key === "R") && _selectedId) {
+    if (_isDrawModeFn && _isDrawModeFn()) return;
+    _onRotate90();
+    return;
   }
 }
 

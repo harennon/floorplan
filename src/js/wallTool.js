@@ -13,6 +13,7 @@ import { screenToWorld } from "./view.js";
 import { chooseGridStep } from "./grid.js";
 import { model, resolveSnap, placeVertex, closeRoom, finishChain, undoPoint } from "./walls.js";
 import { scheduleRender } from "./surface.js";
+import { commit } from "./history.js";
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -60,8 +61,8 @@ export function init(refs) {
   // Rail buttons
   _btnSelect.addEventListener("click", () => setTool("select"));
   _btnWall.addEventListener("click",   () => setTool("wall"));
-  _btnUndo.addEventListener("click",   () => { undoPoint(); _updateRail(); scheduleRender(); });
-  _btnFinish.addEventListener("click", () => { finishChain(); _updateRail(); scheduleRender(); });
+  _btnUndo.addEventListener("click",   () => { undoPoint(); _updateRail(); commit(); scheduleRender(); });
+  _btnFinish.addEventListener("click", () => { finishChain(); _updateRail(); commit(); scheduleRender(); });
 
   // Rail collapse button (inside rail, mobile ≤480px): collapses the rail
   if (_railCollapseEl) {
@@ -104,6 +105,7 @@ export function setTool(t) {
   if (_tool === "wall" && t !== "wall") {
     // Auto-finish open chain on tool switch (edge case 8)
     finishChain();
+    commit();
   }
   _tool = t;
   _snap = null;
@@ -154,6 +156,7 @@ export function onClick(sx, sy) {
     _updateHudSnap();
   }
   _updateRail();
+  commit();
   scheduleRender();
 }
 
@@ -196,6 +199,7 @@ function _onKeyDown(e) {
         _hideSnapTag();
         _updateHudSnap();
         _updateRail();
+        commit();
         scheduleRender();
       }
       break;
@@ -206,6 +210,7 @@ function _onKeyDown(e) {
         _hideSnapTag();
         _updateHudSnap();
         _updateRail();
+        commit();
         scheduleRender();
       }
       break;
@@ -214,6 +219,7 @@ function _onKeyDown(e) {
         e.preventDefault(); // prevent browser back navigation
         undoPoint();
         _updateRail();
+        commit();
         scheduleRender();
       }
       break;

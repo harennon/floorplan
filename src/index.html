@@ -923,11 +923,132 @@
         text-align: center;
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
       }
 
       .toast.toast--visible {
         opacity: 1;
         transform: translateX(-50%) translateY(0);
+      }
+
+      /* Inline action button inside toast */
+      .toast-action-btn {
+        background: transparent;
+        border: 1px solid var(--gold-soft);
+        color: var(--gold);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        padding: 0.2rem 0.55rem;
+        border-radius: 100px;
+        cursor: pointer;
+        min-height: 2rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.12s, color 0.12s;
+        flex-shrink: 0;
+      }
+      .toast-action-btn:hover {
+        background: rgba(201,168,76,0.12);
+      }
+
+      /* ── Shortcut cheat sheet overlay ────────────────────────────────────── */
+      .shortcut-sheet {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        align-items: center;
+        justify-content: center;
+        background: rgba(16, 15, 11, 0.6);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+      }
+      .shortcut-sheet.sheet--open {
+        display: flex;
+      }
+      .shortcut-sheet-panel {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 12px;
+        padding: 1.4rem 1.6rem;
+        width: min(480px, calc(100vw - 2rem));
+        max-height: calc(100vh - 4rem);
+        overflow-y: auto;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--ink);
+        box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+        position: relative;
+      }
+      .shortcut-sheet-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+      }
+      .shortcut-sheet-title {
+        color: var(--gold);
+        font-size: 0.8rem;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+      }
+      .shortcut-sheet-close {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 1rem;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 5px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: color 0.12s, border-color 0.12s;
+      }
+      .shortcut-sheet-close:hover {
+        color: var(--ink);
+        border-color: var(--hairline);
+      }
+      .shortcut-sheet-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem 2rem;
+      }
+      .shortcut-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.2rem 0;
+        border-bottom: 1px solid rgba(201,168,76,0.06);
+      }
+      .shortcut-row:last-child { border-bottom: none; }
+      .shortcut-action {
+        color: var(--muted);
+        font-size: 0.68rem;
+        flex: 1;
+      }
+      .shortcut-key {
+        color: var(--ink);
+        font-size: 0.68rem;
+        white-space: nowrap;
+        text-align: right;
+        flex-shrink: 0;
+      }
+      @media (max-width: 560px) {
+        .shortcut-sheet-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .shortcut-sheet, .shortcut-sheet-panel { transition: none; }
       }
 
       /* ── Conflict banner ──────────────────────────────────────────────────── */
@@ -1057,6 +1178,29 @@
         </button>
         <!-- Collapse affordance: shown only at ≤480px; closes the rail -->
         <button class="tool-rail-collapse" aria-label="Collapse tool rail">‹</button>
+
+        <!-- Global undo/redo cluster — separated by a hairline (LLD 19) -->
+        <div class="tool-rail-sep" aria-hidden="true"></div>
+        <button
+          id="history-undo"
+          aria-label="Undo (Ctrl+Z)"
+          title="Undo (Ctrl+Z)"
+          disabled
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M5 4 L2 7 L5 10 M2 7 H10 Q14 7 14 11 Q14 14 10 14 H6" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" fill="none"/>
+          </svg>
+        </button>
+        <button
+          id="history-redo"
+          aria-label="Redo (Ctrl+Y)"
+          title="Redo (Ctrl+Y)"
+          disabled
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M11 4 L14 7 L11 10 M14 7 H6 Q2 7 2 11 Q2 14 6 14 H10" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" fill="none"/>
+          </svg>
+        </button>
       </nav>
 
       <!-- Rail collapse toggle (mobile ≤480px); shown only when rail is collapsed -->
@@ -1136,8 +1280,9 @@
         </div>
       </aside>
 
-      <!-- Zoom cluster -->
+      <!-- Zoom cluster (with ? help button above) -->
       <div class="zoom-cluster" aria-label="Zoom controls">
+        <button id="btn-help" aria-label="Keyboard shortcuts (?)" title="Keyboard shortcuts (?)">?</button>
         <button id="btn-zoom-in"    aria-label="Zoom in">+</button>
         <button id="btn-zoom-out"   aria-label="Zoom out">−</button>
         <button id="btn-zoom-reset" class="reset-btn" aria-label="Reset zoom">RESET</button>
@@ -1202,6 +1347,41 @@
         <span class="banner-text">Opened a shared plan — open it or keep your current work?</span>
         <button data-banner-action="open-shared" aria-label="Open shared plan">Open shared</button>
         <button data-banner-action="keep-mine" aria-label="Keep my current plan">Keep mine</button>
+      </div>
+
+      <!-- Keyboard shortcut cheat sheet overlay (LLD 19) -->
+      <div
+        id="shortcut-sheet"
+        class="shortcut-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shortcut-sheet-title"
+        aria-hidden="true"
+      >
+        <div class="shortcut-sheet-panel">
+          <div class="shortcut-sheet-header">
+            <span id="shortcut-sheet-title" class="shortcut-sheet-title">Keyboard Shortcuts</span>
+            <button id="shortcut-sheet-close" class="shortcut-sheet-close" aria-label="Close shortcuts">✕</button>
+          </div>
+          <div class="shortcut-sheet-grid">
+            <div>
+              <div class="shortcut-row"><span class="shortcut-action">Draw wall</span><span class="shortcut-key">W</span></div>
+              <div class="shortcut-row"><span class="shortcut-action">Select</span><span class="shortcut-key">V</span></div>
+              <div class="shortcut-row"><span class="shortcut-action">Finish chain</span><span class="shortcut-key">Enter / Esc</span></div>
+              <div class="shortcut-row"><span class="shortcut-action">Remove last point</span><span class="shortcut-key">⌫</span></div>
+              <div class="shortcut-row"><span class="shortcut-action">Free snap (hold)</span><span class="shortcut-key">Alt</span></div>
+              <div class="shortcut-row"><span class="shortcut-action">Pan</span><span class="shortcut-key">Space‑drag</span></div>
+            </div>
+            <div>
+              <div class="shortcut-row"><span class="shortcut-action">Undo</span><span class="shortcut-key">⌘Z / Ctrl+Z</span></div>
+              <div class="shortcut-row"><span class="shortcut-action">Redo</span><span class="shortcut-key">⌘⇧Z / Ctrl+Y</span></div>
+              <div class="shortcut-row"><span class="shortcut-action">Duplicate</span><span class="shortcut-key">⌘D / D</span></div>
+              <div class="shortcut-row"><span class="shortcut-action">Delete</span><span class="shortcut-key">⌫ / Delete</span></div>
+              <div class="shortcut-row"><span class="shortcut-action">Rotate 90°</span><span class="shortcut-key">R</span></div>
+              <div class="shortcut-row"><span class="shortcut-action">Shortcuts</span><span class="shortcut-key">?</span></div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Symbol dock (bottom-center, always visible in select mode) -->

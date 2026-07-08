@@ -16,6 +16,17 @@ import { resetView } from "./view.js";
 import { render, onRender } from "./surface.js";
 import * as surface from "./surface.js";
 
+/** Injected history.reset callback (injected from main.js to avoid circular deps). */
+let _historyReset = null;
+
+/**
+ * Inject the history reset callback so _confirmReset can call it synchronously.
+ * @param {()=>void} fn
+ */
+export function setHistoryReset(fn) {
+  _historyReset = fn;
+}
+
 /** Cached encoded hash for synchronous clipboard copy (Safari user-activation). */
 let _cachedHashUrl = null;
 
@@ -35,6 +46,8 @@ let _overflowMenuEl  = null;
 let _toastEl         = null;
 let _bannerEl        = null;
 let _toastTimer      = null;
+/** The current inline action button inside the toast, if any. */
+let _toastActionBtn  = null;
 const TOAST_DURATION_MS = 3500;
 
 // URL length soft threshold (Edge Case 7)
@@ -112,12 +125,71 @@ export function init(els) {
  */
 export function showToast(msg) {
   if (!_toastEl) return;
+  _clearToastAction();
   _toastEl.textContent = msg;
   _toastEl.classList.add("toast--visible");
+  // Allow pointer-events so the toast is readable but non-interactive
+  _toastEl.style.pointerEvents = "";
   if (_toastTimer) clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => {
-    if (_toastEl) _toastEl.classList.remove("toast--visible");
+    if (_toastEl) {
+      _toastEl.classList.remove("toast--visible");
+      _clearToastAction();
+    }
   }, TOAST_DURATION_MS);
+}
+
+/**
+ * Show a toast with a single inline action button (e.g. "Undo").
+ * The button is built via DOM APIs — no innerHTML from dynamic strings.
+ * @param {string} msg
+ * @param {string} actionLabel
+ * @param {()=>void} onAction
+ */
+export function showToastAction(msg, actionLabel, onAction) {
+  if (!_toastEl) return;
+  _clearToastAction();
+
+  // Build content: message text node + action button
+  _toastEl.textContent = "";
+  const msgSpan = document.createElement("span");
+  msgSpan.textContent = msg;
+
+  const btn = document.createElement("button");
+  btn.textContent = actionLabel;
+  btn.className = "toast-action-btn";
+  btn.setAttribute("aria-label", `${actionLabel} — ${msg}`);
+  btn.addEventListener("click", () => {
+    _clearToastAction();
+    if (_toastEl) _toastEl.classList.remove("toast--visible");
+    if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+    onAction();
+  });
+  _toastActionBtn = btn;
+
+  _toastEl.appendChild(msgSpan);
+  _toastEl.appendChild(btn);
+  _toastEl.classList.add("toast--visible");
+  _toastEl.style.pointerEvents = "auto";
+
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => {
+    if (_toastEl) {
+      _toastEl.classList.remove("toast--visible");
+      _clearToastAction();
+    }
+  }, TOAST_DURATION_MS);
+}
+
+/** Remove and detach the current action button from the toast. */
+function _clearToastAction() {
+  if (_toastActionBtn) {
+    if (_toastActionBtn.parentNode) _toastActionBtn.parentNode.removeChild(_toastActionBtn);
+    _toastActionBtn = null;
+  }
+  if (_toastEl) {
+    _toastEl.style.pointerEvents = "";
+  }
 }
 
 /**
@@ -294,6 +366,8 @@ function _confirmReset() {
   _cacheStale = true;
   // Edge Case 16: Reset is the one deliberate view reset
   resetView(surface.W, surface.H);
+  // Re-seed history from the (now empty) model
+  if (_historyReset) _historyReset();
   render();
 }
 

@@ -3247,6 +3247,377 @@ describe("Reset — hydrate to empty + clearLocal + resetView", () => {
   });
 });
 
+// ─── Import history.js ────────────────────────────────────────────────────────
+
+import {
+  HISTORY_CAP,
+  init as initHistory, reset as historyReset, commit as historyCommit,
+  undo as historyUndo, redo as historyRedo,
+  canUndo, canRedo,
+  snapshotDoc, restoreDoc,
+  isMac, accel,
+} from "./js/history.js";
+
+/** Reset all model + history state between history suites. */
+function resetAllForHistory() {
+  model.rooms.length    = 0;
+  model.chain.length    = 0;
+  symbolModel.symbols.length = 0;
+  setUnit("ft");
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  historyReset();
+}
+
+// ─── Tests: history.js — snapshotDoc ─────────────────────────────────────────
+
+describe("history — snapshotDoc returns a deep clone", () => {
+  it("mutating the returned object does not touch walls.model", () => {
+    resetAll();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 1, y: 2 }] });
+    const snap = snapshotDoc();
+    snap.walls.rooms[0].verts[0].x = 999;
+    expect(model.rooms[0].verts[0].x).toBe(1);
+  });
+
+  it("mutating walls.model after snapshot does not change the snapshot", () => {
+    resetAll();
+    model.rooms.push({ id: "w1", closed: false, verts: [{ x: 3, y: 4 }] });
+    const snap = snapshotDoc();
+    model.rooms[0].verts[0].x = 999;
+    expect(snap.walls.rooms[0].verts[0].x).toBe(3);
+  });
+
+  it("mutating symbols.model after snapshot does not change the snapshot", () => {
+    resetAll();
+    const s = createSymbol("bed", 1, 2);
+    addSymbol(s);
+    const snap = snapshotDoc();
+    s.x = 999;
+    expect(snap.symbols.symbols[0].x).toBe(1);
+  });
+
+  it("snapshotDoc excludes view (no view property)", () => {
+    resetAll();
+    view.zoom = 5; view.panX = 100; view.panY = 200;
+    const snap = snapshotDoc();
+    if ("view" in snap) throw new Error("snapshotDoc should not include view");
+  });
+
+  it("snapshotDoc excludes unit (no unit property)", () => {
+    resetAll();
+    setUnit("m");
+    const snap = snapshotDoc();
+    if ("unit" in snap) throw new Error("snapshotDoc should not include unit");
+    setUnit("ft");
+  });
+});
+
+// ─── Tests: history.js — restoreDoc ─────────────────────────────────────────
+
+describe("history — restoreDoc rehydrates in place, no view/unit change", () => {
+  it("restoreDoc replaces rooms in-place (same array identity)", () => {
+    resetAll();
+    const origRooms = model.rooms;
+    const snap = snapshotDoc();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 1, y: 2 }] });
+    restoreDoc(snap);
+    if (model.rooms !== origRooms) throw new Error("rooms array identity changed");
+    expect(model.rooms.length).toBe(0);
+  });
+
+  it("restoreDoc replaces symbols in-place (same array identity)", () => {
+    resetAll();
+    const origSymbols = symbolModel.symbols;
+    const s = createSymbol("chair", 0, 0);
+    addSymbol(s);
+    const snap = snapshotDoc();
+    symbolModel.symbols.length = 0;
+    restoreDoc(snap);
+    if (symbolModel.symbols !== origSymbols) throw new Error("symbols array identity changed");
+    expect(symbolModel.symbols.length).toBe(1);
+  });
+
+  it("restoreDoc does NOT alter view", () => {
+    resetAll();
+    view.zoom = 3; view.panX = 50; view.panY = 80;
+    const snap = snapshotDoc();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    restoreDoc(snap);
+    // View should still be what we set just before restoreDoc, not what it was during snapshot
+    expect(view.zoom).toBe(1);
+    expect(view.panX).toBe(0);
+  });
+
+  it("restoreDoc does NOT alter unit", () => {
+    resetAll();
+    setUnit("m");
+    const snap = snapshotDoc();
+    setUnit("ft");
+    restoreDoc(snap);
+    // unit should still be ft (restoreDoc never touches it)
+    if (unit !== "ft") throw new Error(`unit changed to ${unit} after restoreDoc — should not`);
+    setUnit("ft");
+  });
+});
+
+// ─── Tests: history.js — reset / canUndo / canRedo ───────────────────────────
+
+describe("history — reset seeds baseline", () => {
+  it("after reset: canUndo()===false, canRedo()===false", () => {
+    resetAll();
+    historyReset();
+    expect(canUndo()).toBe(false);
+    expect(canRedo()).toBe(false);
+  });
+
+  it("after reset: undo stack has exactly 1 entry (baseline)", () => {
+    resetAll();
+    historyReset();
+    // We verify via canUndo being false (length===1 means nothing to undo)
+    expect(canUndo()).toBe(false);
+    // But redo is also empty
+    expect(canRedo()).toBe(false);
+  });
+});
+
+// ─── Tests: history.js — commit ─────────────────────────────────────────────
+
+describe("history — commit", () => {
+  it("commit after a real mutation pushes one snapshot; canUndo() becomes true", () => {
+    resetAll();
+    historyReset();
+    expect(canUndo()).toBe(false);
+    model.rooms.push({ id: "wc0", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    historyCommit();
+    expect(canUndo()).toBe(true);
+  });
+
+  it("commit with no net change (identical to stack top) pushes nothing", () => {
+    resetAll();
+    historyReset();
+    const before = canUndo();
+    // No mutations — commit again
+    historyCommit();
+    expect(canUndo()).toBe(before); // still false
+  });
+
+  it("a new commit after undo truncates the redo stack", () => {
+    resetAll();
+    historyReset();
+    model.rooms.push({ id: "wt0", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    historyCommit();
+    historyUndo(); // now we have a redo entry
+    expect(canRedo()).toBe(true);
+    // Make a new change and commit
+    model.rooms.push({ id: "wt1", closed: false, verts: [{ x: 2, y: 0 }, { x: 3, y: 0 }] });
+    historyCommit();
+    expect(canRedo()).toBe(false); // redo stack cleared
+  });
+
+  it("commit enforces HISTORY_CAP: after CAP+N commits length stays at CAP", () => {
+    resetAll();
+    historyReset();
+    // Push CAP+5 unique states by modifying x each time
+    for (let i = 0; i < HISTORY_CAP + 5; i++) {
+      model.rooms.length = 0;
+      model.rooms.push({ id: `wh${i}`, closed: false, verts: [{ x: i, y: 0 }, { x: i + 1, y: 0 }] });
+      historyCommit();
+    }
+    // After capping, we can undo HISTORY_CAP-1 times (CAP steps remain)
+    let undoCount = 0;
+    while (canUndo()) { historyUndo(); undoCount++; }
+    expect(undoCount).toBeLessThanOrEqual(HISTORY_CAP - 1);
+  });
+});
+
+// ─── Tests: history.js — undo / redo ─────────────────────────────────────────
+
+describe("history — undo", () => {
+  it("undo() restores the prior document and returns true", () => {
+    resetAll();
+    historyReset();
+    // Baseline: empty
+    model.rooms.push({ id: "wu0", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    historyCommit();
+    expect(model.rooms.length).toBe(1);
+    const didUndo = historyUndo();
+    expect(didUndo).toBe(true);
+    expect(model.rooms.length).toBe(0);
+  });
+
+  it("undo() past baseline returns false and leaves model unchanged", () => {
+    resetAll();
+    historyReset();
+    expect(canUndo()).toBe(false);
+    const firstUndo = historyUndo();
+    expect(firstUndo).toBe(false);
+    // Model still empty
+    expect(model.rooms.length).toBe(0);
+  });
+
+  it("undo() after second mutation also restores the intermediate state", () => {
+    resetAll();
+    historyReset();
+    // Step 1
+    model.rooms.push({ id: "wu1", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    historyCommit();
+    // Step 2
+    model.rooms.push({ id: "wu2", closed: false, verts: [{ x: 2, y: 0 }, { x: 3, y: 0 }] });
+    historyCommit();
+    expect(model.rooms.length).toBe(2);
+    historyUndo();
+    expect(model.rooms.length).toBe(1);
+    historyUndo();
+    expect(model.rooms.length).toBe(0);
+  });
+});
+
+describe("history — redo", () => {
+  it("redo() re-applies an undone snapshot and returns true", () => {
+    resetAll();
+    historyReset();
+    model.rooms.push({ id: "wr0", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    historyCommit();
+    historyUndo();
+    expect(model.rooms.length).toBe(0);
+    const didRedo = historyRedo();
+    expect(didRedo).toBe(true);
+    expect(model.rooms.length).toBe(1);
+  });
+
+  it("redo() returns false when redo stack is empty", () => {
+    resetAll();
+    historyReset();
+    expect(canRedo()).toBe(false);
+    const r = historyRedo();
+    expect(r).toBe(false);
+  });
+});
+
+// ─── Tests: history.js — commit integration with model ───────────────────────
+
+describe("history — commit integration: wall operations", () => {
+  it("placing a wall point yields one undoable step; undo() reverses it", () => {
+    resetAll();
+    historyReset();
+    // Simulate placing a wall point
+    model.chain.push({ x: 0, y: 0 });
+    historyCommit();
+    expect(model.chain.length).toBe(1);
+    historyUndo();
+    expect(model.chain.length).toBe(0);
+  });
+
+  it("closing a room yields one undoable step; undo() reverses it", () => {
+    resetAll();
+    historyReset();
+    model.chain.push({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 });
+    closeRoom();
+    historyCommit();
+    expect(model.rooms.length).toBe(1);
+    expect(model.chain.length).toBe(0);
+    historyUndo();
+    expect(model.rooms.length).toBe(0);
+  });
+
+  it("finishing a chain yields one undoable step; undo() reverses it", () => {
+    resetAll();
+    historyReset();
+    model.chain.push({ x: 0, y: 0 }, { x: 1, y: 0 });
+    finishChain();
+    historyCommit();
+    expect(model.rooms.length).toBe(1);
+    historyUndo();
+    expect(model.rooms.length).toBe(0);
+  });
+});
+
+describe("history — commit integration: symbol operations", () => {
+  it("duplicate then undo returns symbols length to prior value", () => {
+    resetAll();
+    historyReset();
+    const s = createSymbol("chair", 0, 0);
+    addSymbol(s);
+    historyCommit();
+    expect(symbolModel.symbols.length).toBe(1);
+    // Duplicate
+    const dup = duplicateSymbol(s.id);
+    if (!dup) throw new Error("duplicateSymbol returned null");
+    historyCommit();
+    expect(symbolModel.symbols.length).toBe(2);
+    // Undo
+    historyUndo();
+    expect(symbolModel.symbols.length).toBe(1);
+  });
+
+  it("delete then undo restores the deleted symbol (id, pose, dims)", () => {
+    resetAll();
+    historyReset();
+    const s = createSymbol("bed", 3, 4);
+    s.rot = 90;
+    addSymbol(s);
+    historyCommit();
+    const savedId = s.id;
+    const savedX = s.x; const savedY = s.y; const savedRot = s.rot;
+    const savedW = s.w; const savedH = s.h;
+    // Delete
+    removeSymbol(s.id);
+    historyCommit();
+    expect(symbolModel.symbols.length).toBe(0);
+    // Undo
+    historyUndo();
+    expect(symbolModel.symbols.length).toBe(1);
+    const restored = symbolModel.symbols[0];
+    expect(restored.id).toBe(savedId);
+    expect(restored.x).toBeCloseTo(savedX, 9);
+    expect(restored.y).toBeCloseTo(savedY, 9);
+    expect(restored.rot).toBe(savedRot);
+    expect(restored.w).toBeCloseTo(savedW, 9);
+    expect(restored.h).toBeCloseTo(savedH, 9);
+  });
+
+  it("a move that returns a symbol to its original pose adds no history step", () => {
+    resetAll();
+    historyReset();
+    const s = createSymbol("desk", 1, 1);
+    addSymbol(s);
+    historyCommit(); // baseline after placement
+    expect(canUndo()).toBe(true);
+    const undoCount1 = canUndo() ? 1 : 0;
+
+    // Move and return to original pose
+    s.x = 5; s.y = 5;
+    s.x = 1; s.y = 1; // restore exact position
+    historyCommit(); // should be a no-op (identical to stack top)
+
+    // Still only one undo step above baseline
+    expect(canUndo()).toBe(true);
+    historyUndo(); // undo the placement
+    expect(canUndo()).toBe(false); // back at baseline
+  });
+});
+
+// ─── Tests: history.js — isMac / accel helpers ──────────────────────────────
+
+describe("history — isMac / accel helpers", () => {
+  it("isMac() returns a boolean", () => {
+    const result = isMac();
+    if (typeof result !== "boolean") throw new Error(`isMac() returned ${typeof result}, expected boolean`);
+  });
+
+  it("accel() returns e.metaKey on mac, e.ctrlKey on non-mac", () => {
+    // Create mock KeyboardEvents
+    const mac = isMac();
+    const evt = new KeyboardEvent("keydown", { metaKey: true, ctrlKey: false });
+    const result = accel(evt);
+    if (mac) {
+      expect(result).toBe(true);  // metaKey was true
+    } else {
+      expect(result).toBe(false); // ctrlKey was false
+    }
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 

@@ -18,6 +18,18 @@ export function setToastCallback(cb) {
   _showToast = cb;
 }
 
+/** Registered after-apply hook (set by main.js to call history.reset). */
+let _onApplied = null;
+
+/**
+ * Inject the after-apply hook. Fired from inside FileReader.onload
+ * AFTER applyPlan() succeeds, so history.reset() sees the new model.
+ * @param {()=>void} cb
+ */
+export function setOnApplied(cb) {
+  _onApplied = cb;
+}
+
 /**
  * Serialize current Plan and trigger a .json download.
  */
@@ -66,6 +78,8 @@ export function importJson() {
         }
         applyPlan(plan);
         render();
+        // Fire after-apply hook AFTER applyPlan succeeds (main.js wires history.reset here)
+        if (_onApplied) _onApplied();
         _showToast("Plan imported");
       } catch {
         _showToast("Couldn't read this file");

@@ -16,13 +16,15 @@ import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from
 import { init as initDimEntry, reposition as dimReposition, getEditingEdge } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim } from "./symbolDimEntry.js";
-import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector } from "./symbolTool.js";
+import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, deselect as symbolDeselect } from "./symbolTool.js";
 import { init as initStore, loadLocal } from "./store.js";
 import { readBootHash } from "./share.js";
 import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
 import { contentBounds } from "./exportImg.js";
 import { fitToContent } from "./view.js";
-import { init as initActions, showToast, showConflictBanner } from "./actions.js";
+import { init as initActions, showToast, showConflictBanner, setHistoryReset } from "./actions.js";
+import { init as initHistory, reset as historyReset } from "./history.js";
+import { setOnApplied } from "./exportJson.js";
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
@@ -70,6 +72,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const measureList   = document.querySelector(".measure-list");
   const measureTotal  = document.querySelector(".measure-total-val");
   const measureToggle = document.querySelector(".measure-toggle");
+
+  // History undo/redo rail buttons + help button + cheat-sheet overlay
+  const btnHistoryUndo = document.getElementById("history-undo");
+  const btnHistoryRedo = document.getElementById("history-redo");
+  const btnHelp        = document.getElementById("btn-help");
+  const sheetEl        = document.getElementById("shortcut-sheet");
+  const sheetCloseEl   = document.getElementById("shortcut-sheet-close");
 
   // Persistence / share DOM refs
   const savePillEl     = document.getElementById("save-pill");
@@ -169,6 +178,25 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Initialise history (undo/redo, cheat sheet, keyboard shortcuts)
+  initHistory({
+    btnUndo:   btnHistoryUndo,
+    btnRedo:   btnHistoryRedo,
+    btnHelp,
+    sheet:     sheetEl,
+    sheetClose: sheetCloseEl,
+    onAfterRestore: () => {
+      // Clear symbol selection/inspector (the restored doc may not have the selected id)
+      symbolDeselect();
+    },
+  });
+
+  // Wire history.reset into actions.js (for synchronous Reset confirm path)
+  setHistoryReset(historyReset);
+
+  // Wire history.reset into importJson's async after-apply hook
+  setOnApplied(historyReset);
+
   // Default measure inspector to collapsed on narrow screens (Edge Case 13)
   if (window.matchMedia("(max-width: 640px)").matches) {
     measurePanel.classList.add("measure--collapsed");
@@ -205,6 +233,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (hashSer === localSer) {
         // Identical: treat as local restore (no banner)
         applyPlan(localPlan);
+        historyReset();
         if (toastEl) showToast("Restored your last plan");
         render();
       } else {
@@ -222,6 +251,7 @@ document.addEventListener("DOMContentLoaded", () => {
           } else {
             applyPlan(localPlan);
           }
+          historyReset();
           render();
         });
         // Don't call render yet — banner choice will trigger it
@@ -236,16 +266,19 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         resetView(vW, vH);
       }
+      historyReset();
       if (toastEl) showToast("Opened shared plan");
       render();
     } else if (localPlan) {
       // Only local plan: restore verbatim (view included)
       applyPlan(localPlan);
+      historyReset();
       if (toastEl) showToast("Restored your last plan");
       render();
     } else {
       // Empty start: use default frame
       resetView(vW, vH);
+      historyReset();
       render();
     }
   })();
