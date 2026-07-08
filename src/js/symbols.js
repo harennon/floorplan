@@ -241,6 +241,147 @@ export function rotateSymbol(sym, deg) {
   sym.rot = ((deg % 360) + 360) % 360;
 }
 
+// ── Wall-flush snapping (LLD 26) ─────────────────────────────────────────────
+
+/** Screen-px flush threshold, converted to metres by the caller before use. */
+export const WALL_FLUSH_PX = 12;
+
+/** Angle tolerance (degrees) for treating symbol axes as parallel to a wall. */
+export const PARALLEL_TOL_DEG = 12;
+
+/**
+ * @typedef {{
+ *   dx:number, dy:number,
+ *   gap:number,
+ *   guide:{ a:{x:number,y:number}, b:{x:number,y:number} }
+ * }} FlushCandidate
+ */
+
+/**
+ * Find the nearest wall face the symbol's near edge can seat flush against.
+ *
+ * Pure: does not read global state; all inputs injected.
+ *
+ * Algorithm:
+ *   For each segment [{a,b}] and each wall face (±WALL_M/2 perpendicular
+ *   offsets), we:
+ *     1. Check angle between the symbol's local x-axis and the segment
+ *        direction is within PARALLEL_TOL_DEG.
+ *     2. Check the symbol's projection onto the segment direction overlaps the
+ *        segment's own span.
+ *     3. Compute the signed gap between the symbol's nearest edge and the face.
+ *     4. If |gap| <= thresholdM, record it as a candidate.
+ *   Return the candidate with the smallest |gap|, or null.
+ *
+ * @param {{ x:number,y:number }[]} corners4  four world-space corners [TL,TR,BR,BL]
+ * @param {{ a:{x:number,y:number}, b:{x:number,y:number} }[]} segments
+ * @param {number} wallM     wall thickness in metres (for face offset)
+ * @param {number} thresholdM  flush distance threshold in world metres
+ * @param {number} parallelTolDeg  angle tolerance in degrees
+ * @returns {FlushCandidate|null}
+ */
+export function nearestWallFlush(corners4, segments, wallM, thresholdM, parallelTolDeg) {
+  const tolRad = (parallelTolDeg * Math.PI) / 180;
+  const halfWall = wallM / 2;
+
+  let bestGapAbs = Infinity;
+  let best = null;
+
+  for (const seg of segments) {
+    const ax = seg.a.x, ay = seg.a.y;
+    const bx = seg.b.x, by = seg.b.y;
+    const segDx = bx - ax;
+    const segDy = by - ay;
+    const segLen = Math.sqrt(segDx * segDx + segDy * segDy);
+    if (segLen < 1e-9) continue; // degenerate
+
+    // Unit direction along the segment (t) and unit normal (n) — n points 90° CW
+    const tx = segDx / segLen;
+    const ty = segDy / segLen;
+    const nx = ty;   // 90° CW in y-down screen coords: rotate (tx,ty) CW → (ty,-tx)
+    const ny = -tx;
+
+    // For each corner, project onto t to get the symbol's span along the segment
+    // and onto n to find the near-face offset.
+    // Project each corner onto t (relative to seg.a) to find symbol's t-span
+    let symTMin = Infinity, symTMax = -Infinity;
+    let symNMin = Infinity, symNMax = -Infinity;
+    for (const c of corners4) {
+      const relX = c.x - ax;
+      const relY = c.y - ay;
+      const t = relX * tx + relY * ty;
+      const n = relX * nx + relY * ny;
+      if (t < symTMin) symTMin = t;
+      if (t > symTMax) symTMax = t;
+      if (n < symNMin) symNMin = n;
+      if (n > symNMax) symNMax = n;
+    }
+
+    // Segment's t-span is [0, segLen] (by construction)
+    const segTMin = 0;
+    const segTMax = segLen;
+
+    // t-span overlap check: the symbol's footprint along the wall must overlap
+    const overlapMin = Math.max(symTMin, segTMin);
+    const overlapMax = Math.min(symTMax, segTMax);
+    if (overlapMax <= overlapMin) continue;
+
+    // Parallel check: either the symbol's local x-axis (TL→TR) or its local y-axis
+    // (TL→BL) must be within parallelTolDeg of the wall direction.
+    // We check both axes so that both horizontal and vertical symbols match both
+    // horizontal and vertical walls.
+    const symXX = corners4[1].x - corners4[0].x;
+    const symXY = corners4[1].y - corners4[0].y;
+    const symXLen = Math.sqrt(symXX * symXX + symXY * symXY);
+    if (symXLen < 1e-9) continue;
+    const symYX = corners4[3].x - corners4[0].x;  // TL→BL
+    const symYY = corners4[3].y - corners4[0].y;
+    const symYLen = Math.sqrt(symYX * symYX + symYY * symYY);
+
+    const cosAngleX = Math.abs((symXX * tx + symXY * ty) / symXLen);
+    const cosAngleY = symYLen > 1e-9 ? Math.abs((symYX * tx + symYY * ty) / symYLen) : 0;
+    // Parallel if either axis is within tolerance of the wall direction
+    const cosThresh = Math.cos(tolRad);
+    if (cosAngleX < cosThresh && cosAngleY < cosThresh) continue;
+
+    // Two wall faces: at n = +halfWall (face in +n direction) and n = -halfWall
+    for (const faceN of [halfWall, -halfWall]) {
+      // gap = distance from the nearest symbol edge in the n direction to the face
+      // If gap > 0: symbol is on the positive side of the face (needs to move -n)
+      // If gap < 0: symbol is on the negative side (needs to move +n)
+      // Pick the symbol's edge (symNMin or symNMax) that is CLOSEST to this face.
+      // For a symbol entirely on the positive-n side, symNMin is closer to faceN=+halfWall.
+      // For a symbol entirely on the negative-n side, symNMax is closer to faceN=-halfWall.
+      const nearEdgeN = Math.abs(symNMin - faceN) <= Math.abs(symNMax - faceN)
+        ? symNMin : symNMax;
+      const gap = nearEdgeN - faceN;
+      const gapAbs = Math.abs(gap);
+      if (gapAbs <= thresholdM && gapAbs < bestGapAbs) {
+        bestGapAbs = gapAbs;
+        // Translation to seat flush: move by -gap along n
+        const dx = -gap * nx;
+        const dy = -gap * ny;
+
+        // Guide segment: along the wall face at faceN offset, from symTMin..symTMax
+        // (clamped to segment t-span)
+        const guideT0 = Math.max(symTMin, segTMin);
+        const guideT1 = Math.min(symTMax, segTMax);
+        const guideA = {
+          x: ax + guideT0 * tx + faceN * nx,
+          y: ay + guideT0 * ty + faceN * ny,
+        };
+        const guideB = {
+          x: ax + guideT1 * tx + faceN * nx,
+          y: ay + guideT1 * ty + faceN * ny,
+        };
+        best = { dx, dy, gap, guide: { a: guideA, b: guideB } };
+      }
+    }
+  }
+
+  return best;
+}
+
 // ── Hydrate (LLD 16) ─────────────────────────────────────────────────────────
 
 /**

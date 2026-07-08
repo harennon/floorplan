@@ -10,6 +10,7 @@
 import { view, pxPerM, screenToWorld } from "./view.js";
 import { fmtLen, unitLabel, unit, setUnit } from "./units.js";
 import { getSnapMode, cycleSnapMode, onSnapModeChange } from "./grid.js";
+import { gridSnap as prefsGridSnap, toggleGridSnap, onPrefsChange } from "./prefs.js";
 
 /** DOM refs — populated by init(). */
 let _elZoom = null;
@@ -18,6 +19,8 @@ let _elCursor = null;
 let _elUnitImp = null;
 let _elUnitMet = null;
 let _elSnapModeVal = null;   // <span id="hud-snap-mode-val">
+let _elGridToggleBtn = null; // <button id="hud-grid-toggle">
+let _elGridToggleVal = null; // <span id="hud-grid-toggle-val">
 
 /** Last known cursor screen position (updated by interactions.js). */
 export let cursorScreen = { x: 0, y: 0 };
@@ -28,7 +31,7 @@ export function setCursorScreen(x, y) {
 }
 
 /** Bind HUD element references. Called once from main.js. */
-export function init(elZoom, elScale, elCursor, elUnitImp, elUnitMet, elSnapModeBtn) {
+export function init(elZoom, elScale, elCursor, elUnitImp, elUnitMet, elSnapModeBtn, elGridToggleBtn) {
   _elZoom = elZoom;
   _elScale = elScale;
   _elCursor = elCursor;
@@ -53,8 +56,26 @@ export function init(elZoom, elScale, elCursor, elUnitImp, elUnitMet, elSnapMode
     });
   }
 
+  // Wire grid-snap toggle button
+  if (elGridToggleBtn) {
+    _elGridToggleBtn = elGridToggleBtn;
+    _elGridToggleVal = elGridToggleBtn.querySelector("#hud-grid-toggle-val");
+    elGridToggleBtn.addEventListener("click", () => {
+      toggleGridSnap();
+    });
+    elGridToggleBtn.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggleGridSnap();
+      }
+    });
+  }
+
   // Subscribe to snap mode changes to keep chip up to date
   onSnapModeChange(() => update());
+
+  // Subscribe to prefs changes (grid toggle state)
+  onPrefsChange(() => update());
 }
 
 /** Update all HUD cells from current view + unit state. */
@@ -81,6 +102,17 @@ export function update() {
   // Snap-precision chip label
   if (_elSnapModeVal) {
     _elSnapModeVal.textContent = _snapChipLabel(getSnapMode());
+  }
+
+  // Grid-snap toggle button
+  if (_elGridToggleBtn) {
+    const on = prefsGridSnap();
+    _elGridToggleBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    _elGridToggleBtn.setAttribute("aria-label", `Grid snap (${on ? "on" : "off"})`);
+    _elGridToggleBtn.setAttribute("data-state", on ? "on" : "off");
+    if (_elGridToggleVal) {
+      _elGridToggleVal.textContent = on ? "On" : "Off";
+    }
   }
 }
 

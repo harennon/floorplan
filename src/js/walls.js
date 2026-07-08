@@ -297,6 +297,51 @@ export function hydrate(next) {
   _roomCounter = maxId + 1;
 }
 
+// ── New export (LLD 26) ──────────────────────────────────────────────────────
+
+/**
+ * All wall segments as {a,b} vertex pairs:
+ *   - Each committed room contributes consecutive vertex pairs (plus the closing
+ *     edge verts[n-1]→verts[0] when the room is closed).
+ *   - The active chain contributes consecutive vertex pairs from model.chain.
+ *
+ * Short segments (< MIN_SEG_M) are silently skipped — they have no usable
+ * direction and cannot be flush targets.
+ *
+ * @returns {{ a:Vertex, b:Vertex }[]}
+ */
+export function wallSegments() {
+  const out = [];
+
+  for (const room of model.rooms) {
+    const verts = room.verts;
+    const n = verts.length;
+    if (n < 2) continue;
+    for (let i = 0; i < n - 1; i++) {
+      _pushSegIfLong(out, verts[i], verts[i + 1]);
+    }
+    if (room.closed && n >= 2) {
+      _pushSegIfLong(out, verts[n - 1], verts[0]);
+    }
+  }
+
+  const chain = model.chain;
+  const cn = chain.length;
+  for (let i = 0; i < cn - 1; i++) {
+    _pushSegIfLong(out, chain[i], chain[i + 1]);
+  }
+
+  return out;
+}
+
+function _pushSegIfLong(out, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  if (Math.sqrt(dx * dx + dy * dy) >= MIN_SEG_M) {
+    out.push({ a, b });
+  }
+}
+
 /**
  * Rescale room edge `edgeIndex` to exactly `targetLenM`, keeping verts[i] fixed
  * and moving the far endpoint along the current edge direction. Mutates room.verts

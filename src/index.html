@@ -287,6 +287,54 @@
         color: var(--ink);
       }
 
+      /* Grid-snap toggle button — interactive HUD cell (LLD 26) */
+      button.hud-grid-toggle {
+        cursor: pointer;
+        pointer-events: auto;
+        border: 1px solid var(--hairline);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--muted);
+        background: var(--panel);
+        padding: 0.2rem 0.55rem;
+        border-radius: 4px;
+        white-space: nowrap;
+        text-align: left;
+        min-height: 1.75rem; /* touch target */
+        user-select: none;
+        transition: border-color 0.15s, color 0.15s;
+      }
+      button.hud-grid-toggle:hover,
+      button.hud-grid-toggle:focus-visible {
+        border-color: var(--ink);
+        outline: none;
+      }
+      /* On state: value span in gold accent */
+      button.hud-grid-toggle[data-state="on"] #hud-grid-toggle-val {
+        color: #d9be6e; /* var(--wall-line) / accent gold */
+      }
+      /* Off state: value span muted */
+      button.hud-grid-toggle[data-state="off"] #hud-grid-toggle-val {
+        color: var(--muted);
+      }
+      /* Default (before JS sets data-state): same as on */
+      button.hud-grid-toggle #hud-grid-toggle-val {
+        color: #d9be6e;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        button.hud-grid-toggle { transition: none; }
+      }
+
+      /* Flush guide line (LLD 26) — fades in when wall-flush snap is active */
+      .flush-guide {
+        transition: opacity 120ms ease;
+        pointer-events: none;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .flush-guide { transition: none; }
+      }
+
       /* Hide cursor cell on narrow screens */
       @media (max-width: 560px) {
         .hud-cursor { display: none; }
@@ -1568,6 +1616,8 @@
 
       <!-- HUD -->
       <div class="hud" aria-live="off" aria-atomic="true">
+        <button class="hud-cell hud-grid-toggle" id="hud-grid-toggle"
+                aria-pressed="true" aria-label="Grid snap (on)">Snap&nbsp;<span id="hud-grid-toggle-val">On</span></button>
         <button class="hud-cell hud-snap-mode" id="hud-snap-mode"
                 aria-label="Snap precision (click to cycle)">Grid&nbsp;<span id="hud-snap-mode-val" aria-live="polite">Auto</span></button>
         <div class="hud-cell">
