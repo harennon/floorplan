@@ -68,9 +68,35 @@ export function init(refs) {
     });
   }
 
+  // Apply platform-correct chord text inside the cheat-sheet table (Edge Case 13).
+  // The HTML is authored with "Ctrl+…"; on Mac swap to "⌘…" / "⌘⇧…".
+  if (IS_MAC && _modal) {
+    _patchModalLabels(_modal);
+  }
+
   // Global keydown (remove any previous registration first so re-init is clean)
   window.removeEventListener("keydown", _onKeyDown);
   window.addEventListener("keydown", _onKeyDown);
+}
+
+/**
+ * Replace "Ctrl+Shift+Z" → "⌘⇧Z", "Ctrl+Z" → "⌘Z", "Ctrl+Y" → "⌘Y",
+ * "Ctrl+D" → "⌘D" in all <kbd> elements inside the modal.
+ * Only called on macOS.
+ * @param {HTMLElement} modal
+ */
+function _patchModalLabels(modal) {
+  for (const kbd of modal.querySelectorAll("kbd")) {
+    kbd.textContent = kbd.textContent
+      .replace(/Ctrl\+Shift\+Z/g, "⌘⇧Z")
+      .replace(/Ctrl\+Shift\+z/g, "⌘⇧Z")
+      .replace(/Ctrl\+Y/g, "⌘Y")
+      .replace(/Ctrl\+y/g, "⌘Y")
+      .replace(/Ctrl\+Z/g, "⌘Z")
+      .replace(/Ctrl\+z/g, "⌘Z")
+      .replace(/Ctrl\+D/g, "⌘D")
+      .replace(/Ctrl\+d/g, "⌘D");
+  }
 }
 
 /** True while the cheat-sheet modal is open (other shortcuts suppressed). */

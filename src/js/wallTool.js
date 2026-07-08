@@ -14,6 +14,7 @@ import { chooseGridStep } from "./grid.js";
 import { model, resolveSnap, placeVertex, closeRoom, finishChain, undoPoint } from "./walls.js";
 import { scheduleRender } from "./surface.js";
 import { commit as historyCommit } from "./history.js";
+import { isModalOpen } from "./shortcuts.js";
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -179,6 +180,9 @@ function _onKeyDown(e) {
   // Guard: ignore when focus is in an editable element
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  // Guard: suppress all non-chord keys while the shortcuts modal is open.
+  // shortcuts.js owns Esc (close modal) in that state; wallTool must not also react.
+  if (isModalOpen()) return;
 
   if (e.code === "AltLeft" || e.code === "AltRight") {
     _altHeld = true;

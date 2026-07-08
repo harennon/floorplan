@@ -21,6 +21,7 @@ import { scheduleRender } from "./surface.js";
 import { getRotateHandleScreen } from "./symbolRender.js";
 import { beginEdit as beginDimEdit, cancel as cancelDimEdit, isEditing as isDimEditing } from "./symbolDimEntry.js";
 import { commit as historyCommit, undo as historyUndo } from "./history.js";
+import { isModalOpen, IS_MAC } from "./shortcuts.js";
 
 /** Callback injected from main.js — avoids circular dependency with actions.js. */
 let _showToast = null;
@@ -115,6 +116,14 @@ export function init(refs) {
     if (btnDuplicate) btnDuplicate.addEventListener("click", _onDuplicate);
     if (btnDelete)    btnDelete.addEventListener("click",    _onDelete);
     if (btnLock)      btnLock.addEventListener("click",      _onToggleLockAspect);
+
+    // Apply platform-correct chord text for the duplicate button (Edge Case 13)
+    if (btnDuplicate) {
+      const dupLabel = IS_MAC ? "Duplicate symbol (⌘D)" : "Duplicate symbol (Ctrl+D)";
+      const dupTitle = IS_MAC ? "Duplicate (⌘D)"        : "Duplicate (Ctrl+D)";
+      btnDuplicate.setAttribute("aria-label", dupLabel);
+      btnDuplicate.setAttribute("title",      dupTitle);
+    }
   }
 
   // Keyboard: Delete/Backspace for selected symbol
@@ -538,6 +547,9 @@ function _onKeyDown(e) {
   if (e.ctrlKey || e.metaKey) return;
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  // Guard: suppress all non-chord keys while the shortcuts modal is open.
+  // shortcuts.js owns Esc (close modal) in that state; symbolTool must not also react.
+  if (isModalOpen()) return;
 
   if ((e.key === "Delete" || e.key === "Backspace") && _selectedId) {
     // Only delete symbol if not in wall draw mode
