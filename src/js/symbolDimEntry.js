@@ -35,14 +35,18 @@ let _stage = null;
 /** @type {Element|null} */
 let _dimLabels = null;
 
+/** Getter injected from symbolTool — returns current lock-aspect state. */
+let _getLockAspect = () => false;
+
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 /**
- * @param {{ stage:Element, dimLabels:Element }} refs
+ * @param {{ stage:Element, dimLabels:Element, getLockAspect?:()=>boolean }} refs
  */
 export function init(refs) {
   _stage = refs.stage;
   _dimLabels = refs.dimLabels;
+  if (refs.getLockAspect) _getLockAspect = refs.getLockAspect;
 
   if (_input) {
     _input.style.display = "none";
@@ -165,7 +169,7 @@ export function commit() {
     return;
   }
 
-  resizeSymbol(sym, _editing.dim, targetM, false);
+  resizeSymbol(sym, _editing.dim, targetM, _getLockAspect());
   _closeInput();
   scheduleRender();
 }

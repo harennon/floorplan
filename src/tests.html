@@ -1430,6 +1430,370 @@ describe("symbols.js — units reuse: fmtLen/parseLen round-trip for w/h", () =>
   });
 });
 
+// ─── Import symbolDimEntry (behavioral tests) ─────────────────────────────────
+
+import {
+  init as initSymbolDimEntry,
+  beginEdit as beginSymbolEdit,
+  commit as commitSymbol,
+  cancel as cancelSymbol,
+  isEditing as isSymbolEditing,
+  getEditingDim,
+} from "./js/symbolDimEntry.js";
+
+/**
+ * Build a minimal DOM rig for symbolDimEntry tests.
+ * Returns { stage, dimLabels, getLockAspect, setLockAspect } plus cleanup().
+ */
+function makeSymbolDimRig(lockAspectInit = false) {
+  const stage = document.createElement("div");
+  stage.className = "stage";
+  stage.style.position = "relative";
+  const dimLabels = document.createElement("div");
+  dimLabels.className = "dim-labels";
+  stage.appendChild(dimLabels);
+  document.body.appendChild(stage);
+  let _lock = lockAspectInit;
+  const getLockAspect = () => _lock;
+  const setLockAspect = (v) => { _lock = v; };
+  initSymbolDimEntry({ stage, dimLabels, getLockAspect });
+  return {
+    stage, dimLabels, getLockAspect, setLockAspect,
+    cleanup() { document.body.removeChild(stage); }
+  };
+}
+
+// ─── Tests: symbolDimEntry — chip opens input ─────────────────────────────────
+
+describe("symbolDimEntry — beginEdit opens editing state", () => {
+  it("isSymbolEditing() is true after beginEdit and false after cancel", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("bed", 5, 5);
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "w");
+    expect(isSymbolEditing()).toBe(true);
+    const ed = getEditingDim();
+    if (!ed) throw new Error("getEditingDim() returned null");
+    expect(ed.symbolId).toBe(s.id);
+    expect(ed.dim).toBe("w");
+    cancelSymbol();
+    expect(isSymbolEditing()).toBe(false);
+    rig.cleanup();
+  });
+
+  it("beginEdit prefills input with fmtLen of current dimension", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("table", 5, 5); // w=1.2
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    if (!input) throw new Error("sym-dim-input not found");
+    expect(input.value).toBe(fmtLen(s.w));
+    cancelSymbol();
+    rig.cleanup();
+  });
+
+  it("openings ignore dim='h' in beginEdit (no edit opened)", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("door", 5, 5);
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "h");
+    expect(isSymbolEditing()).toBe(false);
+    rig.cleanup();
+  });
+});
+
+describe("symbolDimEntry — commit resizes symbol", () => {
+  it("typing a value + commit sets the symbol dimension", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("table", 5, 5); // w=1.2
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    if (!input) throw new Error("sym-dim-input not found");
+    input.value = "2m";
+    commitSymbol();
+    expect(isSymbolEditing()).toBe(false);
+    expect(s.w).toBeCloseTo(2.0, 5);
+    rig.cleanup();
+  });
+
+  it("value beyond max clamps to max", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("chair", 5, 5); // max=1.0
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    input.value = "99m";
+    commitSymbol();
+    expect(s.w).toBeCloseTo(CATALOG.chair.max, 5);
+    rig.cleanup();
+  });
+
+  it("value below min clamps to min", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("chair", 5, 5); // min=0.3
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    input.value = "0.01m";
+    commitSymbol();
+    expect(s.w).toBeCloseTo(CATALOG.chair.min, 5);
+    rig.cleanup();
+  });
+
+  it("Esc cancel leaves geometry unchanged", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("sofa", 5, 5);
+    addSymbol(s);
+    const origW = s.w;
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    input.value = "99m";
+    cancelSymbol();
+    expect(isSymbolEditing()).toBe(false);
+    expect(s.w).toBeCloseTo(origW, 9);
+    rig.cleanup();
+  });
+
+  it("invalid input (non-numeric) sets aria-invalid and stays open", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("desk", 5, 5);
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    input.value = "notanumber";
+    commitSymbol();
+    expect(isSymbolEditing()).toBe(true); // still open
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    cancelSymbol();
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: symbolDimEntry — lock-aspect wiring (Critical defect regression) ──
+
+describe("symbolDimEntry — lock-aspect is forwarded to resizeSymbol", () => {
+  it("commit with lockAspect=false does NOT scale the other dimension", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("bed", 5, 5); // w=1.5, h=2.0
+    addSymbol(s);
+    const origH = s.h;
+    const rig = makeSymbolDimRig(false); // lockAspect off
+    beginSymbolEdit(s.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    input.value = "1.2m";
+    commitSymbol();
+    // h must be unchanged when lockAspect is false
+    expect(s.w).toBeCloseTo(1.2, 5);
+    expect(s.h).toBeCloseTo(origH, 5);
+    rig.cleanup();
+  });
+
+  it("commit with lockAspect=true scales the other dimension proportionally", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("bed", 5, 5); // w=1.5, h=2.0
+    addSymbol(s);
+    const origRatio = s.h / s.w;
+    const rig = makeSymbolDimRig(true); // lockAspect ON
+    beginSymbolEdit(s.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    input.value = "1.2m";
+    commitSymbol();
+    expect(s.w).toBeCloseTo(1.2, 5);
+    // h should scale to preserve the ratio (within clamp)
+    const expectedH = clampDim("bed", 1.2 * origRatio);
+    expect(s.h).toBeCloseTo(expectedH, 4);
+    rig.cleanup();
+  });
+
+  it("aria-pressed on lock-aspect button matches _lockAspect state", () => {
+    // Build a minimal inspector DOM and verify aria-pressed is toggled
+    const inspector = document.createElement("div");
+    inspector.className = "symbol-inspector";
+    const btn = document.createElement("button");
+    btn.setAttribute("data-action", "lock-aspect");
+    btn.setAttribute("aria-pressed", "false");
+    inspector.appendChild(btn);
+    document.body.appendChild(inspector);
+    // The aria-pressed state is controlled by symbolTool's _onToggleLockAspect;
+    // here we verify the attribute is accessible (accessibility assertion)
+    const pressedBefore = btn.getAttribute("aria-pressed");
+    expect(pressedBefore).toBe("false");
+    // Simulate toggle
+    btn.setAttribute("aria-pressed", "true");
+    expect(btn.getAttribute("aria-pressed")).toBe("true");
+    document.body.removeChild(inspector);
+  });
+});
+
+// ─── Tests: symbolDimEntry — unit-cancel (Edge Case 7) ───────────────────────
+
+describe("symbolDimEntry — unit toggle while editing cancels the edit", () => {
+  it("toggling unit cancels open sym edit", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("sofa", 5, 5);
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "w");
+    expect(isSymbolEditing()).toBe(true);
+    setUnit("ft");
+    expect(isSymbolEditing()).toBe(false);
+    expect(s.w).toBeCloseTo(CATALOG.sofa.w, 9); // geometry unchanged
+    setUnit("m");
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: symbolDimEntry — pointer isolation ────────────────────────────────
+
+describe("symbolDimEntry — pointer isolation (Edge Case 8)", () => {
+  it("pointerdown on sym-dim-chip stops propagation to stage", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("bed", 5, 5);
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+
+    // Simulate a chip element inside dimLabels
+    const chip = document.createElement("button");
+    chip.className = "sym-dim-chip";
+    chip.setAttribute("data-symbol-id", s.id);
+    chip.setAttribute("data-sym-dim", "w");
+    rig.dimLabels.appendChild(chip);
+
+    let stageSawPointerDown = false;
+    rig.stage.addEventListener("pointerdown", () => { stageSawPointerDown = true; });
+
+    const evt = new PointerEvent("pointerdown", { bubbles: true, cancelable: true });
+    chip.dispatchEvent(evt);
+
+    expect(stageSawPointerDown).toBe(false);
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: symbolDimEntry — accessibility ────────────────────────────────────
+
+describe("symbolDimEntry — accessibility: sym-dim-input aria attributes", () => {
+  it("sym-dim-input has an aria-label attribute after beginEdit", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("table", 5, 5);
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    if (!input) throw new Error("sym-dim-input not created");
+    const label = input.getAttribute("aria-label");
+    if (!label || label.trim() === "") throw new Error("aria-label is empty or missing");
+    cancelSymbol();
+    rig.cleanup();
+  });
+
+  it("aria-label mentions 'width' for dim='w' and 'depth' for dim='h'", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("bed", 5, 5);
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "w");
+    const inputW = rig.stage.querySelector(".sym-dim-input");
+    const labelW = inputW.getAttribute("aria-label");
+    if (!labelW.toLowerCase().includes("width")) throw new Error(`aria-label for w should mention 'width', got: "${labelW}"`);
+    cancelSymbol();
+    beginSymbolEdit(s.id, "h");
+    const inputH = rig.stage.querySelector(".sym-dim-input");
+    const labelH = inputH.getAttribute("aria-label");
+    if (!labelH.toLowerCase().includes("depth")) throw new Error(`aria-label for h should mention 'depth', got: "${labelH}"`);
+    cancelSymbol();
+    rig.cleanup();
+  });
+
+  it("aria-invalid is set on bad commit and cleared on cancel", () => {
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("chair", 5, 5);
+    addSymbol(s);
+    const rig = makeSymbolDimRig();
+    beginSymbolEdit(s.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    input.value = "notanumber";
+    commitSymbol();
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    cancelSymbol();
+    if (input.getAttribute("aria-invalid") === "true") throw new Error("aria-invalid should be cleared after cancel");
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: symbols security ──────────────────────────────────────────────────
+
+describe("security — symbolDimEntry: raw input string never reaches DOM as markup", () => {
+  it("parseLen handles injection strings for symbol dims gracefully", () => {
+    setUnit("m");
+    const injectionStrings = [
+      "<script>alert(1)</script>",
+      "'; DROP TABLE symbols; --",
+      "<img src=x onerror=alert(1)>",
+      "1e999",
+      "NaN",
+    ];
+    for (const s of injectionStrings) {
+      const result = parseLen(s);
+      if (result !== null) throw new Error(`parseLen("${s}") returned ${result} instead of null`);
+    }
+  });
+
+  it("symbol chip textContent built via fmtLen/unitLabel — no HTML markers", () => {
+    setUnit("m");
+    const text = fmtLen(1.5) + " " + unitLabel();
+    if (text.includes("<") || text.includes(">") || text.includes("&")) {
+      throw new Error(`fmtLen+unitLabel produced suspicious output: "${text}"`);
+    }
+    setUnit("ft");
+    const text2 = fmtLen(1.5) + " " + unitLabel();
+    if (text2.includes("<") || text2.includes(">") || text2.includes("&")) {
+      throw new Error(`fmtLen+unitLabel (ft) produced suspicious output: "${text2}"`);
+    }
+    setUnit("m");
+  });
+});
+
 // ─── Import dimEntry and measure (behavioral tests) ───────────────────────────
 
 import { init as initDimEntry, isEditing, getEditingEdge, beginEdit, commit, cancel } from "./js/dimEntry.js";

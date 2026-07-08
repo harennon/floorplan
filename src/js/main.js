@@ -16,7 +16,7 @@ import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from
 import { init as initDimEntry, reposition as dimReposition, getEditingEdge } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim } from "./symbolDimEntry.js";
-import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter } from "./symbolTool.js";
+import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector } from "./symbolTool.js";
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
@@ -100,8 +100,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // dimEntry (handles its own pointer-isolation and unit-cancel binding internally)
   initDimEntry({ stage, dimLabels: dimLabelsEl });
 
-  // symbolDimEntry — mirrors dimEntry for symbol w/h chips
-  initSymbolDimEntry({ stage, dimLabels: dimLabelsEl });
+  // symbolDimEntry — mirrors dimEntry for symbol w/h chips; getLockAspect bridges lock-aspect state
+  initSymbolDimEntry({ stage, dimLabels: dimLabelsEl, getLockAspect });
 
   // symbolRender — reads symbols.model + selection/ghost state, appends to .dim-labels AFTER wall chips
   initSymbolRender(gSymbols, gSymOverlay, dimLabelsEl, getSelectedId, getPlacementGhost, getEditingDim);
@@ -135,9 +135,10 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Register post-render hooks
-  // Order: wallRender (in _wallRender) → symbolRenderFn → symbolDimReposition → dimReposition → measureUpdate
+  // Order: wallRender (in _wallRender) → symbolRenderFn → symbolDimReposition → repositionInspector → dimReposition → measureUpdate
   onRender(symbolRenderFn);
   onRender(symbolDimReposition);
+  onRender(repositionInspector);
   onRender(measureUpdate);
   onRender(dimReposition);
 

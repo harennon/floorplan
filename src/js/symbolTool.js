@@ -380,6 +380,21 @@ function _onToggleLockAspect() {
   }
 }
 
+/** Return the current lock-aspect state. Injected into symbolDimEntry so commit() can use it. */
+export function getLockAspect() {
+  return _lockAspect;
+}
+
+/**
+ * surface.onRender hook — reposition the inspector every frame so it tracks
+ * the selected symbol during pan, zoom, and move-drag (Edge Case 15).
+ */
+export function repositionInspector() {
+  if (!_selectedId || !_inspector || !_inspector.classList.contains("visible")) return;
+  const sym = getSymbol(_selectedId);
+  if (sym) _positionInspector(sym);
+}
+
 function _deleteSelected() {
   if (!_selectedId) return;
   if (isDimEditing()) cancelDimEdit();
