@@ -52,10 +52,11 @@ functional gap in the core editor.
    (see State Model / Edge Cases).
 
 4. **History drives the same persisted state; it does not fight autosave.** Undo/redo
-   mutate the live `walls`/`symbols` models via `hydrate*`, then call `render()`. The
-   existing `store.js` autosave `onRender` hook then debounce-persists the resulting
-   state exactly as for any other edit. No new persistence path. Any new committed action
-   clears the redo (`future`) stack.
+   mutate the live `walls`/`symbols` models via `hydrate*` and return; the **main.js
+   caller** then calls `scheduleRender()` (history itself is DOM-free — see Module plan /
+   Interfaces). The existing `store.js` autosave `onRender` hook then debounce-persists
+   the resulting state exactly as for any other edit. No new persistence path. Any new
+   committed action clears the redo (`future`) stack.
 
 5. **Selection semantics.** "Selected element" = the currently selected **symbol**
    (`symbolTool._selectedId`). There is no room/wall selection in MVP-5. Delete/duplicate
@@ -64,18 +65,35 @@ functional gap in the core editor.
 
 ### Module plan
 
-- **New `src/js/history.js`** — pure-ish snapshot stack core (imports `plan.js` only;
-  no DOM, no tool imports → acyclic). Exports `init`, `reset`, `commit`, `undo`, `redo`,
-  `canUndo`, `canRedo`, `onChange`.
+- **New `src/js/history.js`** — snapshot stack core. **DOM-free and tool-free**; imports
+  only the two geometry models it snapshots: `import { model as wallsModel, hydrate as
+  hydrateWalls } from "./walls.js"` and `import { model as symbolsModel, hydrate as
+  hydrateSymbols } from "./symbols.js"`. (These `hydrate`/`model` symbols live in
+  `walls.js` / `symbols.js`, **not** in `plan.js` — `plan.js` is only a *shape reference*
+  for the capture/apply payload, not an import.) No import of `surface.js`, `main.js`,
+  `symbolTool.js`, or `wallTool.js`, so the graph stays acyclic and the core is
+  unit-testable without a DOM. **`history` never calls `render()`** — `undo()`/`redo()`
+  mutate the models via `hydrate*` and return; the *caller* (the main.js rail/shortcut
+  handler) triggers `scheduleRender()`. Exports `init`, `reset`, `commit`, `undo`,
+  `redo`, `canUndo`, `canRedo`, `depth`, `onChange`.
 - **New `src/js/help.js`** — shortcuts cheat-sheet overlay controller (toggle on `?`
-  key + help button, dismiss on `Esc`/outside click). Static content, no state.
+  key + help button, dismiss on `Esc`/outside click). Static content, one boolean
+  `_open`; exports `isOpen()` (see Edge Case 15). Registers a **capture-phase** window
+  keydown listener so its `Esc` handling runs before the bubble-phase wall/symbol tool
+  listeners.
 - **`src/js/main.js`** — wires history into the app: injects `commit()` call sites,
-  registers the global editing-shortcut keydown handler, wires the new rail
-  undo/redo buttons + help button, sets platform-correct tooltips, and refreshes button
-  disabled state via `history.onChange`.
+  registers **the single global editing-shortcut keydown handler** (owns
+  `Ctrl/Cmd+Z`, `Ctrl+Shift+Z`/`Ctrl+Y`, `Ctrl/Cmd+D`, **and `Del`/`Backspace` for
+  symbol delete** — see GAP-1 resolution in Edge Case 5), calls `scheduleRender()` after
+  each `undo()`/`redo()`, wires the new rail undo/redo buttons + help button, sets
+  platform-correct tooltips, and refreshes button disabled state via `history.onChange`.
 - **`src/js/symbolTool.js`** — call `history.commit()` after add/move-end/rotate/
   duplicate/delete; show delete/duplicate toasts; expose `duplicateSelected()`,
-  `deleteSelected()`, `hasSelection()` for the global shortcut handler.
+  `deleteSelected()`, `hasSelection()` for the global shortcut handler. **Remove the
+  `Delete`/`Backspace` branch from the existing private `_onKeyDown` (lines 458-469)** so
+  keyboard delete is owned solely by the main.js global handler and always routes through
+  the committing `deleteSelected()` (see Edge Case 5). The `_onAltDown`/`_onAltUp` window
+  listeners are unaffected; the now-empty `_onKeyDown` listener registration is dropped.
 - **`src/js/wallTool.js`** — call `history.commit()` after a room is committed
   (`closeRoom` via `onClick`, and `finishChain` via Enter/Escape/tool-switch/button).
 - **`src/js/symbolDimEntry.js`** — call `history.commit()` after a committed w/h resize.
@@ -119,6 +137,10 @@ export function redo(): boolean
 export function canUndo(): boolean   // past.length > 0
 export function canRedo(): boolean   // future.length > 0
 
+/** Current undo depth (`_past.length`). Used by the delete toast to scope its
+ *  one-tap Undo to the step it created (see Edge Case 14). */
+export function depth(): number
+
 /** Register a listener fired after any stack change (for rail button state). */
 export function onChange(cb: () => void): void
 ```
@@ -131,7 +153,13 @@ let _future  = /** @type {GeomSnapshot[]} */ ([]); // redo stack
 const MAX_DEPTH = 100; // cap; drop oldest past entry beyond this (tiny data, generous)
 ```
 
-Capture / apply (reuses existing plumbing, chain-preserving):
+Imports (DOM-free, tool-free — see Module plan):
+```js
+import { model as wallsModel,   hydrate as hydrateWalls   } from "./walls.js";
+import { model as symbolsModel, hydrate as hydrateSymbols } from "./symbols.js";
+```
+
+Capture / apply (reuses existing `walls.hydrate`/`symbols.hydrate`, chain-preserving):
 ```js
 function _capture() {                    // deep clone geometry only
   return {
@@ -139,15 +167,18 @@ function _capture() {                    // deep clone geometry only
     symbols: JSON.parse(JSON.stringify(symbolsModel.symbols)),
   };
 }
-function _apply(snap) {                   // preserve live chain + view + unit
-  hydrateWalls({ rooms: snap.rooms, chain: [...wallsModel.chain] });
+function _apply(snap) {                   // mutate models only; NO render here
+  hydrateWalls({ rooms: snap.rooms, chain: [...wallsModel.chain] }); // preserve live chain
   hydrateSymbols({ symbols: snap.symbols });
-  // caller triggers render()
+  // history NEVER calls render(); the main.js caller triggers scheduleRender()
 }
 ```
 
-`undo()` = push `_present`→`_future`, pop `_past`→`_present`, `_apply(_present)`, render.
-`redo()` = push `_present`→`_past`, pop `_future`→`_present`, `_apply(_present)`, render.
+`undo()` = push `_present`→`_future`, pop `_past`→`_present`, `_apply(_present)`, notify
+onChange, return `true`. **No render call** — the main.js rail/shortcut handler calls
+`scheduleRender()` after a truthy return.
+`redo()` = push `_present`→`_past`, pop `_future`→`_present`, `_apply(_present)`, notify
+onChange, return `true`. Same caller-triggers-render contract.
 
 ### `actions.js` — toast with optional action
 
@@ -175,8 +206,12 @@ export function deleteSelected(): void          // = _deleteSelected + commit + 
 
 ```js
 export function init(refs: { button: Element, overlay: Element }): void
-export function toggle(): void   // show/hide cheat sheet
+export function toggle(): void     // show/hide cheat sheet
+export function isOpen(): boolean  // true while the overlay is shown (see Edge Case 15)
 ```
+`init` registers a **capture-phase** window keydown listener
+(`window.addEventListener("keydown", onKey, true)`) so `Esc` handling pre-empts the
+bubble-phase wall/symbol tool listeners.
 
 ## State Model
 
@@ -269,18 +304,36 @@ no new visual language):
    history entry (stable-stringify equal to baseline). Prevents "dead" undo steps.
 3. **Redo invalidation.** Any `commit()` clears `_future`. After undo→new edit, redo is
    unavailable (button disabled).
-4. **Delete via keyboard vs inspector.** Both route through `deleteSelected()` → single
-   commit + single Undo toast. Selection is cleared after delete; the Undo toast restores
-   geometry but **not** the prior selection (acceptable for MVP; symbol reappears
-   unselected).
-5. **`Backspace` collision.** In draw mode with an active chain, `Backspace` removes the
-   last chain vertex (existing `wallTool`), NOT a symbol delete and NOT a history undo.
-   In select mode with a selected symbol, `Backspace`/`Del` deletes the symbol. Guard
-   order: draw-mode chain handling wins when `isDrawMode() && chain.length>0`.
-6. **`Ctrl/Cmd+D` browser default.** The global handler must `preventDefault()` to stop
-   the browser "bookmark" action; it only acts when a symbol is selected, else no-op
-   (still `preventDefault` to avoid the bookmark dialog only when we handle it —
-   otherwise let it pass). Decision: `preventDefault` only when `hasSelection()`.
+4. **Delete via keyboard vs inspector.** Both route through the *same* committing
+   `symbolTool.deleteSelected()` → single commit + single Undo toast. The inspector's
+   Delete button calls `deleteSelected()` directly; keyboard Delete/Backspace reaches it
+   only via the main.js global handler (see Edge Case 5 for the single-owner mechanism).
+   Selection is cleared after delete; the Undo toast restores geometry but **not** the
+   prior selection (acceptable for MVP; symbol reappears unselected).
+5. **`Del`/`Backspace` ownership — exactly one handler fires (GAP-1 resolution).** There
+   are two window-level keydown listeners that historically reacted to Delete/Backspace:
+   `symbolTool._onKeyDown` (private `_deleteSelected`, no commit/toast) and
+   `wallTool._onKeyDown` (`undoPoint` in draw mode). To avoid double-handling:
+   - **Remove** the `Delete`/`Backspace` branch from `symbolTool._onKeyDown` (lines
+     458-469); that listener no longer handles delete at all (its remaining body is empty,
+     so the `window.addEventListener("keydown", _onKeyDown)` registration for it is
+     dropped). Symbol delete is now owned **solely** by the main.js global editing-shortcut
+     handler, which calls the committing `symbolTool.deleteSelected()` exactly once.
+   - The main.js handler guards draw mode first: **if `isDrawMode() && model.chain.length
+     > 0`, it does nothing on Delete/Backspace** and lets the event reach `wallTool`'s
+     listener, which removes the last chain vertex (`undoPoint`) as today. Otherwise, if
+     `symbolTool.hasSelection()`, it `preventDefault()`s and calls `deleteSelected()`.
+   - `wallTool._onKeyDown`'s `Backspace` branch is **unchanged** and still only fires when
+     `_tool === "wall" && model.chain.length > 0`; in select mode it is inert, so there is
+     no collision. Net effect: in draw mode with an active chain → vertex removal only; in
+     select mode with a selected symbol → committing symbol delete only; never both.
+6. **`Ctrl/Cmd+D` browser default.** Decision: the global handler calls `preventDefault()`
+   **only when `symbolTool.hasSelection()` is true**, and in that same branch duplicates
+   the selected symbol. When nothing is selected, the handler does **not** call
+   `preventDefault` and does **not** act — the keystroke passes through to the browser's
+   native bookmark behavior. (Rationale: we suppress the bookmark dialog only for
+   keystrokes we actually consume, so a stray Ctrl/Cmd+D with no selection behaves
+   normally.)
 7. **`Ctrl+Z` in an input field.** The dimension-entry inputs and any `INPUT/TEXTAREA/
    SELECT` must be exempt — the global handler returns early when
    `document.activeElement` is editable (mirrors existing guards), so browser-native
@@ -300,12 +353,32 @@ no new visual language):
     `history.reset()` so the restored plan is the baseline and undo can't cross the load.
 13. **Delete during an open dim edit.** `deleteSelected` cancels an in-progress dim edit
     first (existing `_deleteSelected` already calls `cancelDimEdit()`), then commits.
-14. **Toast Undo after further edits.** If the user makes another committed edit before
-    tapping the toast's Undo, tapping Undo still performs a normal `history.undo()` of the
-    latest step (may not be the delete). Acceptable; the toast auto-dismisses in 3.5s.
-15. **Help overlay + Esc.** When the cheat sheet is open, `Esc` closes it and must not
-    also fall through to the draw-mode `Esc` (finish-chain). The overlay handler
-    `stopPropagation`/handles first; document the ordering.
+14. **Toast Undo after further edits.** To avoid the one-tap Undo silently reversing a
+    *later, unrelated* committed step: when `deleteSelected()` shows the toast, capture the
+    delete's stack depth (e.g. `const at = history.canUndo() ? _pastLengthSnapshot : ...`
+    — concretely, expose a lightweight `history.depth()` returning `_past.length` and
+    record it at toast-creation time). The toast's Undo `onClick` calls `history.undo()`
+    **only if `history.depth()` still equals the recorded value** (i.e. the delete is still
+    the top of the undo stack); if the user committed another edit in the meantime the
+    stack has grown, so the toast Undo becomes a no-op (and may briefly flag "nothing to
+    undo" or simply do nothing). This keeps the affordance scoped to the delete it belongs
+    to. The toast still auto-dismisses in `TOAST_DURATION_MS` (~3.5s) regardless.
+15. **Help overlay + Esc — concrete ordering guarantee (GAP-3 resolution).** When the
+    cheat sheet is open, `Esc` must close *only* the overlay and must **not** fall through
+    to `wallTool._onKeyDown`'s draw-mode `Esc` (finish-chain), which is a bubble-phase
+    window listener with no overlay awareness. Two bubble-phase window listeners are not
+    ordered by `stopPropagation`, and the LLD drops focus-trap for MVP, so we cannot rely
+    on either. Guarantee instead by **both** of:
+    - `help.js` registers its keydown listener on `window` in the **capture phase**
+      (`addEventListener("keydown", handler, true)`). Capture-phase listeners run before
+      any bubble-phase listener regardless of registration order. When the overlay is open
+      and the key is `Esc`, `help.js` closes the overlay and calls
+      `e.stopPropagation()` + `e.preventDefault()`, so the event never reaches the
+      bubble-phase `wallTool`/`symbolTool` listeners.
+    - **Belt-and-suspenders:** `wallTool._onKeyDown`'s `Escape` branch adds a guard
+      `if (help.isOpen()) return;` before `finishChain()`. This keeps the guarantee even
+      if listener phases are ever refactored. (`help.isOpen()` is a cheap boolean read; no
+      new import cycle since `wallTool` already sits above `help` in the graph.)
 16. **Rapid undo/redo.** Each `undo`/`redo` calls `render()` synchronously (or
     `scheduleRender`), which coalesces; the autosave debounce (800ms) absorbs bursts.
 
@@ -319,9 +392,13 @@ Must exist before implementation (all already merged):
 - `store.js` — autosave `onRender` hook (history relies on it for persistence).
   **[present]**
 - `surface.js` — `render` / `scheduleRender`. **[present]**
-- `symbolTool.js` — `_selectedId`, `_onDuplicate`, `_deleteSelected`, dock drop.
+- `symbolTool.js` — `_selectedId`, `_onDuplicate`, `_deleteSelected`, dock drop, and the
+  existing private `_onKeyDown` Delete/Backspace branch (lines 458-469) **to be removed**
+  so delete is single-owned by the main.js handler. **[present, to be extended]**
+- `wallTool.js` — `closeRoom`/`finishChain` commit points; existing `_onKeyDown`
+  `Escape`/`Backspace` branches to gain the `help.isOpen()` guard (Escape).
   **[present, to be extended]**
-- `wallTool.js` — `closeRoom`/`finishChain` commit points. **[present, to be extended]**
+- `help.js` (new) — `isOpen()` consumed by `wallTool` Escape guard.
 - `symbolDimEntry.js` — resize commit point. **[present, to be extended]**
 - `actions.js` — `showToast` (to be extended with action arg). **[present]**
 - `index.html` — `.tool-rail`, `#symbol-inspector`, `#toast`, `.zoom-cluster`.
@@ -354,13 +431,21 @@ Add a `history.js` suite plus targeted cases for the wiring. Pure-logic first.
 - `Ctrl/Cmd+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` invoke undo/redo; ignored inside dim inputs.
 - `Ctrl/Cmd+D` duplicates the selected symbol and shows the "Duplicated" toast; no-op
   (and no bookmark) with nothing selected.
-- `Del`/`Backspace` in select mode deletes the selected symbol, shows "Deleted" + Undo
-  toast; the Undo button restores the symbol.
-- `Backspace` in draw mode with an active chain removes a vertex (not a delete/undo).
+- `Del`/`Backspace` in select mode deletes the selected symbol **exactly once** (single
+  commit, single "Deleted" + Undo toast — verifies the symbolTool `_onKeyDown` branch was
+  removed and only the main.js handler fires); the Undo button restores the symbol.
+- `Backspace` in draw mode with an active chain removes a vertex (not a delete/undo);
+  the main.js handler defers to `wallTool` (no symbol delete, no double-handling).
+- Toast Undo scoping: delete a symbol, then commit an unrelated edit, then tap the toast
+  Undo → it is a no-op (stack depth changed), not an undo of the unrelated edit.
+- `Ctrl/Cmd+D` with no selection does not call `preventDefault` (browser default allowed);
+  with a selection it duplicates and suppresses the bookmark dialog.
 - Autosave: after undo/redo the persisted `localStorage` plan matches the reverted state
   (history drives the same `onRender` path).
 - Help: `?` and the help button toggle the cheat sheet; `Esc`/outside-click dismiss;
-  `Esc` while open does not finish the wall chain.
+  `Esc` while open does not finish the wall chain (verifies capture-phase listener +
+  `wallTool` `help.isOpen()` guard — draw an active chain, open help, press `Esc`, assert
+  the chain is still in progress and only the overlay closed).
 
 **Regression:**
 - Existing `walls.undoPoint` mid-draw behavior and `#tool-undo` button unchanged.
