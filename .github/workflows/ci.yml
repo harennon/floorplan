@@ -62,7 +62,7 @@ jobs:
       # --max-retries 2 and --timeout 20 mitigate transient network issues.
       # --exclude-all-private keeps CI from hitting localhost/intranet false-positives.
       - name: Check links
-        uses: lycheeverse/lychee-action@f613c4a64e50d792e0b31ec34bbcbba12bcd98e5 # v2.4.1
+        uses: lycheeverse/lychee-action@82202e5e9c2f4ef1a55a3d02563e1cb6041e5332 # v2.4.1
         with:
           args: >-
             --no-progress
