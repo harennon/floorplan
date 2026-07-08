@@ -3562,6 +3562,10 @@ describe("history.js — depth() reflects _past.length", () => {
   });
 });
 
+// ─── Import hud.js (LLD-22 chip label tests) ─────────────────────────────────
+
+import { init as initHud, update as updateHud } from "./js/hud.js";
+
 // ─── Tests: LLD-22 — view.js MAX_ZOOM raised to 16 ───────────────────────────
 
 describe("LLD-22 — view.js: MAX_ZOOM is 16", () => {
@@ -3948,6 +3952,115 @@ describe("LLD-22 — snap mode is not persisted in plan / share hash", () => {
     view.zoom = 1;
     const step = snapStep();
     expect(step).toBe(chooseGridStep(56));
+  });
+});
+
+// ─── Tests: LLD-22 — HUD snap-mode chip label (0.025 m precision fix) ──────────
+
+/**
+ * Build a minimal HUD DOM rig for chip-label tests.
+ * Returns { snapModeBtn, snapModeVal, cleanup }.
+ */
+function makeHudRig() {
+  const elZoom   = document.createElement("span");
+  const elScale  = document.createElement("span");
+  const elCursor = document.createElement("span");
+  const elImp    = document.createElement("button");
+  const elMet    = document.createElement("button");
+  const snapModeBtn = document.createElement("button");
+  snapModeBtn.id = "hud-snap-mode";
+  const snapModeVal = document.createElement("span");
+  snapModeVal.id = "hud-snap-mode-val";
+  snapModeBtn.appendChild(snapModeVal);
+  document.body.append(elZoom, elScale, elCursor, elImp, elMet, snapModeBtn);
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  initHud(elZoom, elScale, elCursor, elImp, elMet, snapModeBtn);
+  return {
+    snapModeBtn,
+    snapModeVal,
+    cleanup() {
+      [elZoom, elScale, elCursor, elImp, elMet, snapModeBtn].forEach(el => {
+        if (el.parentNode) el.parentNode.removeChild(el);
+      });
+    },
+  };
+}
+
+describe("LLD-22 — HUD chip label: 0.025 m preset shows correct precision (bug fix)", () => {
+  it("mode 0.025 in metric shows '0.025 m', not '0.03 m'", () => {
+    setUnit("m");
+    setSnapMode(0.025);
+    const rig = makeHudRig();
+    updateHud();
+    const label = rig.snapModeVal.textContent;
+    if (label === "0.03 m") throw new Error(`Label shows factually wrong '0.03 m' — actual step is 0.025 m`);
+    if (!label.includes("0.025")) throw new Error(`Expected label to include '0.025', got: "${label}"`);
+    setSnapMode("auto");
+    setUnit("ft");
+    rig.cleanup();
+  });
+
+  it("mode 0.025 in imperial shows '~1 in', not '0.1 ft'", () => {
+    setUnit("ft");
+    setSnapMode(0.025);
+    const rig = makeHudRig();
+    updateHud();
+    const label = rig.snapModeVal.textContent;
+    if (label === "0.1 ft") throw new Error(`Label shows wrong '0.1 ft' — 0.025 m is ~1 inch, not 0.1 ft`);
+    if (!label.includes("~1 in")) throw new Error(`Expected label '~1 in', got: "${label}"`);
+    setSnapMode("auto");
+    rig.cleanup();
+  });
+
+  it("mode 0.1 in metric shows '0.10 m' (standard fmtLen, not affected)", () => {
+    setUnit("m");
+    setSnapMode(0.1);
+    const rig = makeHudRig();
+    updateHud();
+    const label = rig.snapModeVal.textContent;
+    if (!label.includes("0.10")) throw new Error(`Expected label to include '0.10', got: "${label}"`);
+    setSnapMode("auto");
+    setUnit("ft");
+    rig.cleanup();
+  });
+
+  it("mode 0.25 in metric shows '0.25 m' (standard fmtLen, not affected)", () => {
+    setUnit("m");
+    setSnapMode(0.25);
+    const rig = makeHudRig();
+    updateHud();
+    const label = rig.snapModeVal.textContent;
+    if (!label.includes("0.25")) throw new Error(`Expected label to include '0.25', got: "${label}"`);
+    setSnapMode("auto");
+    setUnit("ft");
+    rig.cleanup();
+  });
+
+  it("mode 'off' shows 'Off' regardless of unit", () => {
+    setUnit("m");
+    setSnapMode("off");
+    const rig = makeHudRig();
+    updateHud();
+    expect(rig.snapModeVal.textContent).toBe("Off");
+    setSnapMode("auto");
+    setUnit("ft");
+    rig.cleanup();
+  });
+
+  it("unit toggle from metric to imperial updates 0.025 label to '~1 in'", () => {
+    setUnit("m");
+    setSnapMode(0.025);
+    const rig = makeHudRig();
+    updateHud();
+    const metricLabel = rig.snapModeVal.textContent;
+    if (!metricLabel.includes("0.025")) throw new Error(`Metric label wrong: "${metricLabel}"`);
+    // Toggle to imperial — hud.update() is triggered via units.onChange wiring
+    setUnit("ft");
+    updateHud();
+    const imperialLabel = rig.snapModeVal.textContent;
+    if (!imperialLabel.includes("~1 in")) throw new Error(`Imperial label after toggle wrong: "${imperialLabel}"`);
+    setSnapMode("auto");
+    rig.cleanup();
   });
 });
 

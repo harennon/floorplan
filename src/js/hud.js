@@ -86,12 +86,27 @@ export function update() {
 
 /**
  * Human label for the snap-mode chip, unit-aware.
+ *
+ * Sub-0.1 m presets (specifically 0.025 m) cannot be formatted via the
+ * standard fmtLen() — metric rounds 0.025 to "0.03" at 2 dp, and imperial
+ * formats 0.025/0.3048 = 0.082 ft as "0.1 ft" at 1 dp.  Both are factually
+ * wrong and defeat the chip's purpose of making the active precision explicit.
+ * We use dedicated labels for these presets instead.
+ *
  * @param {"auto"|number|"off"} mode
  * @returns {string}
  */
 function _snapChipLabel(mode) {
   if (mode === "off")  return "Off";
   if (mode === "auto") return `Auto (${fmtLen(_scaleForHud())} ${unitLabel()})`;
+  // Fixed numeric preset: use fmtLen for values ≥ 0.1 m (formats correctly at
+  // 2 dp metric / 1 dp imperial).  For sub-0.1 m values, fmtLen rounds wrong;
+  // use a dedicated label that shows the true step.
+  if (mode < 0.1) {
+    // 0.025 m ≈ 1 inch exactly (25.4 mm).  Any future sub-0.1 m preset would
+    // need its own entry here; for now only 0.025 is defined.
+    return unit === "ft" ? "~1 in" : "0.025 m";
+  }
   return `${fmtLen(mode)} ${unitLabel()}`;
 }
 
