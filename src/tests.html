@@ -3545,7 +3545,10 @@ describe("history.js — _apply deep-clones snapshot (no aliasing)", () => {
     // in-place assignment above, commit() dirty-check would see no change, and
     // canRedo() would still be true — that is the bug.
     expect(canRedo()).toBe(false); // _future was cleared by commit()
-    expect(historyDepth()).toBe(1); // one undo step (A → C recorded)
+    // depth === _past.length === 2: init captured the empty baseline, then
+    // both the empty→A commit and the A→C commit survive the undo+recommit
+    // (past = [empty, A]). The primary assertion of this test is canRedo above.
+    expect(historyDepth()).toBe(2);
 
     // Undo should restore x=0 (state A), not x=9
     historyUndo();
@@ -3903,8 +3906,7 @@ describe("LLD-22 — gridSnap is never called with null (call sites guard step==
   it("gridSnap({x:1,y:2}, 0.025) produces valid finite coordinates", () => {
     const r = gridSnap({ x: 1.013, y: 2.019 }, 0.025);
     if (!isFinite(r.x) || !isFinite(r.y)) throw new Error(`NaN/Inf from gridSnap: ${r.x}, ${r.y}`);
-    expect(r.x).toBeCloseTo(1.0, 3);  // 1.013 / 0.025 = 40.52 → round to 41 → 1.025
-    // Actually 1.013 / 0.025 = 40.52 → Math.round(40.52) = 41 → 41 * 0.025 = 1.025
+    // 1.013 / 0.025 = 40.52 → Math.round(40.52) = 41 → 41 * 0.025 = 1.025
     expect(r.x).toBeCloseTo(1.025, 9);
   });
 
@@ -4085,11 +4087,17 @@ import {
 
 // ─── clearance.js helpers ─────────────────────────────────────────────────────
 
-/** Reset clearance session state to defaults. */
+/** Reset clearance session state to defaults.
+ * Also clears the shared walls model so clearance tests are order-independent:
+ * computeClearances() reads wallsModel.rooms for wall gaps, and an earlier
+ * suite (e.g. the serializePlan tests) can leave a room in it. Without this,
+ * phantom wall gaps leak into tests that only set up symbol neighbours. */
 function resetClearance() {
   setThreshold(DEFAULT_THRESHOLD);
   setDensity("flagged");
   setEnabled(true);
+  model.rooms.length = 0;
+  model.chain.length = 0;
 }
 
 /** Build a minimal unrotated Sym for testing. */
@@ -4649,7 +4657,10 @@ describe("clearanceRender — leader and pill append then clear on deselect", ()
     resetSymbolModel();
     setUnit("m");
     view.zoom = 1; view.panX = 0; view.panY = 0;
-    // Sofa inside a room — place it so it generates wall gaps
+    // Sofa centred in a room — all four wall gaps are large (~3.5–4m → "ok"),
+    // so density must be "all" for leaders to be drawn (flagged annotates only
+    // tight/bad gaps). This test verifies the append mechanism, not flagging.
+    setDensity("all");
     const room = mkRoom("r0", 0, 0, 10, 8);
     const sofa = mkSym("s0", "sofa", 5, 4, 2, 0.9, 0);
 
