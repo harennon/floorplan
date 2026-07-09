@@ -1451,6 +1451,123 @@ describe("symbols.js — units reuse: fmtLen/parseLen round-trip for w/h", () =>
   });
 });
 
+// ─── Tests: LLD-45 — new furniture types ─────────────────────────────────────
+
+const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer"];
+
+describe("LLD-45 — catalog integrity: all new types present and valid", () => {
+  it("every new type exists in CATALOG with category:'furniture'", () => {
+    for (const t of LLD45_TYPES) {
+      if (!(t in CATALOG)) throw new Error(`${t} missing from CATALOG`);
+      if (CATALOG[t].category !== "furniture") throw new Error(`${t} category not 'furniture'`);
+    }
+  });
+
+  it("every new type has a non-empty label", () => {
+    for (const t of LLD45_TYPES) {
+      const label = CATALOG[t].label;
+      if (!label || label.trim() === "") throw new Error(`${t} has empty label`);
+    }
+  });
+
+  it("every new type has finite w, h, min, max", () => {
+    for (const t of LLD45_TYPES) {
+      const cat = CATALOG[t];
+      for (const key of ["w", "h", "min", "max"]) {
+        if (!isFinite(cat[key])) throw new Error(`${t}.${key} is not finite: ${cat[key]}`);
+      }
+    }
+  });
+
+  it("min <= w <= max and min <= h <= max for every new type (single-range guard)", () => {
+    for (const t of LLD45_TYPES) {
+      const { w, h, min, max } = CATALOG[t];
+      if (w < min || w > max) throw new Error(`${t}: w=${w} not in [${min},${max}]`);
+      if (h < min || h > max) throw new Error(`${t}: h=${h} not in [${min},${max}]`);
+    }
+  });
+
+  it("no new type has openings:true", () => {
+    for (const t of LLD45_TYPES) {
+      if (CATALOG[t].openings) throw new Error(`${t} unexpectedly has openings:true`);
+    }
+  });
+});
+
+describe("LLD-45 — createSymbol: new types return correct Sym", () => {
+  it("createSymbol returns correct type, catalog defaults, rot:0, and string id", () => {
+    resetSymbolModel();
+    for (const t of LLD45_TYPES) {
+      const s = createSymbol(t, 1, 2);
+      if (s.type !== t) throw new Error(`${t}: type mismatch`);
+      if (Math.abs(s.w - CATALOG[t].w) > 1e-9) throw new Error(`${t}: w mismatch`);
+      if (Math.abs(s.h - CATALOG[t].h) > 1e-9) throw new Error(`${t}: h mismatch`);
+      if (s.rot !== 0) throw new Error(`${t}: rot should be 0`);
+      if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(`${t}: invalid id ${s.id}`);
+    }
+  });
+
+  it("bathtub JSON round-trip preserves all fields", () => {
+    resetSymbolModel();
+    const s = createSymbol("bathtub", 3, 4);
+    addSymbol(s);
+    const snap = JSON.parse(JSON.stringify(symbolModel));
+    const rt = snap.symbols[0];
+    if (rt.type !== "bathtub") throw new Error("type not preserved");
+    if (Math.abs(rt.w - s.w) > 1e-9) throw new Error("w not preserved");
+    if (Math.abs(rt.h - s.h) > 1e-9) throw new Error("h not preserved");
+    if (rt.rot !== s.rot) throw new Error("rot not preserved");
+    if (rt.id !== s.id) throw new Error("id not preserved");
+    resetSymbolModel();
+  });
+});
+
+describe("LLD-45 — clampDim: new types clamp at min and max", () => {
+  it("bathtub (asymmetric): clampDim below min clamps to min", () => {
+    const { min } = CATALOG.bathtub;
+    expect(clampDim("bathtub", min - 0.1)).toBeCloseTo(min, 9);
+  });
+  it("bathtub (asymmetric): clampDim above max clamps to max", () => {
+    const { max } = CATALOG.bathtub;
+    expect(clampDim("bathtub", max + 1)).toBeCloseTo(max, 9);
+  });
+  it("washer (symmetric): clampDim below min clamps to min", () => {
+    const { min } = CATALOG.washer;
+    expect(clampDim("washer", min - 0.1)).toBeCloseTo(min, 9);
+  });
+  it("washer (symmetric): clampDim above max clamps to max", () => {
+    const { max } = CATALOG.washer;
+    expect(clampDim("washer", max + 1)).toBeCloseTo(max, 9);
+  });
+});
+
+describe("LLD-45 — resizeSymbol: clamp on huge/tiny inputs", () => {
+  it("bathtub w huge clamps to max and returns changed=true", () => {
+    const s = createSymbol("bathtub", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG.bathtub.max, 9);
+    expect(changed).toBe(true);
+  });
+  it("bathtub h tiny clamps to min and returns changed=true", () => {
+    const s = createSymbol("bathtub", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG.bathtub.min, 9);
+    expect(changed).toBe(true);
+  });
+  it("washer w huge clamps to max and returns changed=true", () => {
+    const s = createSymbol("washer", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG.washer.max, 9);
+    expect(changed).toBe(true);
+  });
+  it("washer h tiny clamps to min and returns changed=true", () => {
+    const s = createSymbol("washer", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG.washer.min, 9);
+    expect(changed).toBe(true);
+  });
+});
+
 // ─── Import symbolDimEntry (behavioral tests) ─────────────────────────────────
 
 import {
@@ -2544,6 +2661,50 @@ describe("plan.js — serializePlan stability", () => {
     const s1 = serializePlan(p);
     const s2 = serializePlan(buildPlan());
     if (s1 !== s2) throw new Error("serializePlan not stable");
+  });
+});
+
+// ─── Tests: LLD-45 — plan round-trip with new types ──────────────────────────
+
+describe("LLD-45 — plan round-trip: new-type symbols validate and serialize", () => {
+  it("plan with new-type symbols passes validatePlan", () => {
+    resetAll();
+    for (const t of LLD45_TYPES) {
+      addSymbol(createSymbol(t, 1, 1));
+    }
+    const p = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(p)));
+    if (!v) throw new Error("validatePlan rejected plan containing new symbol types");
+    resetAll();
+  });
+
+  it("new-type symbols survive serializePlan → JSON.parse → validatePlan", () => {
+    resetAll();
+    addSymbol(createSymbol("bathtub", 2, 3));
+    addSymbol(createSymbol("toilet", 4, 5));
+    const p = buildPlan();
+    const serialized = serializePlan(p);
+    const reparsed = validatePlan(JSON.parse(serialized));
+    if (!reparsed) throw new Error("validatePlan rejected re-parsed plan");
+    if (reparsed.symbols.symbols.length !== 2) throw new Error("Symbol count mismatch after round-trip");
+    resetAll();
+  });
+
+  it("backwards compat: plan with only old types still validates after adding new CATALOG entries", () => {
+    resetAll();
+    addSymbol(createSymbol("bed", 0, 0));
+    addSymbol(createSymbol("fridge", 1, 1));
+    const p = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(p)));
+    if (!v) throw new Error("validatePlan rejected old-types-only plan");
+    resetAll();
+  });
+
+  it("backwards compat: empty plan (zero symbols) still validates", () => {
+    resetAll();
+    const p = buildPlan();
+    const v = validatePlan(p);
+    if (!v) throw new Error("validatePlan rejected empty plan");
   });
 });
 

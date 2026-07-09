@@ -301,6 +301,219 @@ function _renderInterior(parent, sym, cs) {
     parent.appendChild(handle);
     return;
   }
+
+  if (sym.type === "toilet") {
+    // Oval seat (ellipse ~70% width, upper 65% of depth) + tank rect across top edge (~20% depth)
+    // Tank: thin rectangle at the top
+    const tankH = sh * 0.20;
+    const tankW = sw * 0.85;
+    const t0 = lp(-tankW / 2, -sh / 2);
+    const t1 = lp( tankW / 2, -sh / 2);
+    const t2 = lp( tankW / 2, -sh / 2 + tankH);
+    const t3 = lp(-tankW / 2, -sh / 2 + tankH);
+    const tankPts = [t0, t1, t2, t3].map(p => `${p.x},${p.y}`).join(" ");
+    const tank = document.createElementNS(NS, "polygon");
+    tank.setAttribute("points", tankPts);
+    tank.setAttribute("fill", "rgba(201,168,76,0.1)");
+    tank.setAttribute("stroke", GOLD_STROKE);
+    tank.setAttribute("stroke-width", "0.8");
+    parent.appendChild(tank);
+    // Oval seat: ellipse centered slightly below tank
+    const seatCY = -sh / 2 + tankH + (sh - tankH) * 0.5;
+    const seatRX = sw * 0.35;
+    const seatRY = (sh - tankH) * 0.42;
+    const seatCenter = lp(0, seatCY);
+    const seat = document.createElementNS(NS, "ellipse");
+    seat.setAttribute("cx", String(seatCenter.x));
+    seat.setAttribute("cy", String(seatCenter.y));
+    // For rotated symbols, approximate with an ellipse at the rotated angle
+    seat.setAttribute("rx", String(seatRX));
+    seat.setAttribute("ry", String(seatRY));
+    seat.setAttribute("transform", `rotate(${sym.rot},${seatCenter.x},${seatCenter.y})`);
+    seat.setAttribute("fill", "none");
+    seat.setAttribute("stroke", GOLD_STROKE);
+    seat.setAttribute("stroke-width", "0.8");
+    seat.setAttribute("opacity", "0.7");
+    parent.appendChild(seat);
+    return;
+  }
+
+  if (sym.type === "bathtub") {
+    // Inner basin (rounded rect inset ~10%) + small drain circle near one short end
+    const insetX = sw * 0.10;
+    const insetY = sh * 0.10;
+    const basinW = sw - 2 * insetX;
+    const basinH = sh - 2 * insetY;
+    const b0 = lp(-basinW / 2, -basinH / 2);
+    const b1 = lp( basinW / 2, -basinH / 2);
+    const b2 = lp( basinW / 2,  basinH / 2);
+    const b3 = lp(-basinW / 2,  basinH / 2);
+    const basinPts = [b0, b1, b2, b3].map(p => `${p.x},${p.y}`).join(" ");
+    const basin = document.createElementNS(NS, "polygon");
+    basin.setAttribute("points", basinPts);
+    basin.setAttribute("fill", "rgba(201,168,76,0.08)");
+    basin.setAttribute("stroke", GOLD_STROKE);
+    basin.setAttribute("stroke-width", "0.8");
+    parent.appendChild(basin);
+    // Drain circle near bottom short end
+    const drainCenter = lp(0, basinH / 2 - sh * 0.12);
+    const drain = document.createElementNS(NS, "circle");
+    drain.setAttribute("cx", String(drainCenter.x));
+    drain.setAttribute("cy", String(drainCenter.y));
+    drain.setAttribute("r", String(Math.max(2, sw * 0.04)));
+    drain.setAttribute("fill", "none");
+    drain.setAttribute("stroke", GOLD_STROKE);
+    drain.setAttribute("stroke-width", "0.7");
+    drain.setAttribute("opacity", "0.7");
+    parent.appendChild(drain);
+    return;
+  }
+
+  if (sym.type === "sink") {
+    // Inner rounded basin centered + small faucet dot on back (top) edge
+    const insetX = sw * 0.12;
+    const insetY = sh * 0.12;
+    const basinW = sw - 2 * insetX;
+    const basinH = sh - 2 * insetY;
+    const s0 = lp(-basinW / 2, -basinH / 2);
+    const s1 = lp( basinW / 2, -basinH / 2);
+    const s2 = lp( basinW / 2,  basinH / 2);
+    const s3 = lp(-basinW / 2,  basinH / 2);
+    const basinPts = [s0, s1, s2, s3].map(p => `${p.x},${p.y}`).join(" ");
+    const basin = document.createElementNS(NS, "polygon");
+    basin.setAttribute("points", basinPts);
+    basin.setAttribute("fill", "rgba(201,168,76,0.08)");
+    basin.setAttribute("stroke", GOLD_STROKE);
+    basin.setAttribute("stroke-width", "0.8");
+    parent.appendChild(basin);
+    // Faucet dot on top (back) edge center
+    const faucetPt = lp(0, -sh / 2 + sh * 0.06);
+    const faucet = document.createElementNS(NS, "circle");
+    faucet.setAttribute("cx", String(faucetPt.x));
+    faucet.setAttribute("cy", String(faucetPt.y));
+    faucet.setAttribute("r", String(Math.max(1.5, sw * 0.05)));
+    faucet.setAttribute("fill", GOLD_STROKE);
+    faucet.setAttribute("opacity", "0.7");
+    parent.appendChild(faucet);
+    return;
+  }
+
+  if (sym.type === "stove") {
+    // 4 burner circles in a 2×2 grid
+    const bx = sw * 0.26;
+    const by = sh * 0.26;
+    const br = Math.min(sw, sh) * 0.12;
+    for (const [ox, oy] of [[-bx, -by], [bx, -by], [-bx, by], [bx, by]]) {
+      const bc = lp(ox, oy);
+      const burner = document.createElementNS(NS, "circle");
+      burner.setAttribute("cx", String(bc.x));
+      burner.setAttribute("cy", String(bc.y));
+      burner.setAttribute("r", String(br));
+      burner.setAttribute("fill", "none");
+      burner.setAttribute("stroke", GOLD_STROKE);
+      burner.setAttribute("stroke-width", "0.8");
+      burner.setAttribute("opacity", "0.7");
+      parent.appendChild(burner);
+    }
+    return;
+  }
+
+  if (sym.type === "wardrobe") {
+    // Vertical center divider (two doors) + two small handle dots
+    const divTop = lp(0, -sh / 2 + 2);
+    const divBot = lp(0,  sh / 2 - 2);
+    const divL = _makeLine(divTop.x, divTop.y, divBot.x, divBot.y);
+    divL.setAttribute("stroke", GOLD_STROKE);
+    divL.setAttribute("stroke-width", "0.8");
+    divL.setAttribute("opacity", "0.7");
+    parent.appendChild(divL);
+    // Handle dots on each door panel
+    for (const side of [-1, 1]) {
+      const hPt = lp(side * sw * 0.15, 0);
+      const hdot = document.createElementNS(NS, "circle");
+      hdot.setAttribute("cx", String(hPt.x));
+      hdot.setAttribute("cy", String(hPt.y));
+      hdot.setAttribute("r", "1.5");
+      hdot.setAttribute("fill", GOLD_STROKE);
+      hdot.setAttribute("opacity", "0.7");
+      parent.appendChild(hdot);
+    }
+    return;
+  }
+
+  if (sym.type === "bookshelf") {
+    // 3 evenly spaced shelf lines parallel to the long (width) axis
+    const nShelves = 3;
+    for (let i = 0; i < nShelves; i++) {
+      const t = (i + 1) / (nShelves + 1);
+      const lineY = -sh / 2 + sh * t;
+      const l0 = lp(-sw / 2 + 2, lineY);
+      const l1 = lp( sw / 2 - 2, lineY);
+      const shelf = _makeLine(l0.x, l0.y, l1.x, l1.y);
+      shelf.setAttribute("stroke", GOLD_STROKE);
+      shelf.setAttribute("stroke-width", "0.7");
+      shelf.setAttribute("opacity", "0.6");
+      parent.appendChild(shelf);
+    }
+    return;
+  }
+
+  if (sym.type === "tv") {
+    // Screen rect across top ~70% height + short center stand line to bottom edge
+    const screenH = sh * 0.65;
+    const screenW = sw * 0.88;
+    const sTopY = -sh / 2 + 2;
+    const sBotY = sTopY + screenH;
+    const sv0 = lp(-screenW / 2, sTopY);
+    const sv1 = lp( screenW / 2, sTopY);
+    const sv2 = lp( screenW / 2, sBotY);
+    const sv3 = lp(-screenW / 2, sBotY);
+    const screenPts = [sv0, sv1, sv2, sv3].map(p => `${p.x},${p.y}`).join(" ");
+    const screen = document.createElementNS(NS, "polygon");
+    screen.setAttribute("points", screenPts);
+    screen.setAttribute("fill", "rgba(201,168,76,0.08)");
+    screen.setAttribute("stroke", GOLD_STROKE);
+    screen.setAttribute("stroke-width", "0.8");
+    parent.appendChild(screen);
+    // Stand: short center line from bottom of screen to bottom edge
+    const standTop = lp(0, sBotY);
+    const standBot = lp(0, sh / 2 - 2);
+    const stand = _makeLine(standTop.x, standTop.y, standBot.x, standBot.y);
+    stand.setAttribute("stroke", GOLD_STROKE);
+    stand.setAttribute("stroke-width", "0.8");
+    stand.setAttribute("opacity", "0.6");
+    parent.appendChild(stand);
+    return;
+  }
+
+  if (sym.type === "washer") {
+    // Large center circle (drum door) + small detergent-tray rect on top edge
+    const drumR = Math.min(sw, sh) * 0.33;
+    const drumCenter = lp(0, sh * 0.06);
+    const drum = document.createElementNS(NS, "circle");
+    drum.setAttribute("cx", String(drumCenter.x));
+    drum.setAttribute("cy", String(drumCenter.y));
+    drum.setAttribute("r", String(drumR));
+    drum.setAttribute("fill", "none");
+    drum.setAttribute("stroke", GOLD_STROKE);
+    drum.setAttribute("stroke-width", "0.9");
+    parent.appendChild(drum);
+    // Detergent tray: small rect near top edge
+    const trayW = sw * 0.30;
+    const trayH = sh * 0.10;
+    const tray0 = lp(-trayW / 2, -sh / 2 + 2);
+    const tray1 = lp( trayW / 2, -sh / 2 + 2);
+    const tray2 = lp( trayW / 2, -sh / 2 + 2 + trayH);
+    const tray3 = lp(-trayW / 2, -sh / 2 + 2 + trayH);
+    const trayPts = [tray0, tray1, tray2, tray3].map(p => `${p.x},${p.y}`).join(" ");
+    const tray = document.createElementNS(NS, "polygon");
+    tray.setAttribute("points", trayPts);
+    tray.setAttribute("fill", "rgba(201,168,76,0.1)");
+    tray.setAttribute("stroke", GOLD_STROKE);
+    tray.setAttribute("stroke-width", "0.7");
+    parent.appendChild(tray);
+    return;
+  }
 }
 
 // ── Private: selection box ────────────────────────────────────────────────────
