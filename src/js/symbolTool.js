@@ -335,6 +335,10 @@ function _onDockPointerDown(e) {
   // Capture pointer on window so we can track outside the dock
   const cat = CATALOG[type];
 
+  // Build candidate AABB list at drag start — the ghost isn't in the model yet
+  // so nothing is excluded (LLD-34 Edge Case 9 / Interfaces ~line 224).
+  _candidateAABBs = model.symbols.map(s => symAabb(s));
+
   // Seed ghost at current pointer position (use a temp box matching catalog dims)
   const seedBox = { type, x: 0, y: 0, w: cat.w, h: cat.h, rot: 0 };
   const wp = _resolvePlacement(e.clientX, e.clientY, false, seedBox);
@@ -395,10 +399,13 @@ function _onDockPointerDown(e) {
       return;
     }
 
-    // Drop the symbol
+    // Drop the symbol — rebuild candidates for the final snap resolve (they were
+    // cleared above; ghost isn't in the model yet so exclude nothing).
+    _candidateAABBs = model.symbols.map(s => symAabb(s));
     const cat2 = CATALOG[typeWas];
     const dropBox = { type: typeWas, x: 0, y: 0, w: cat2.w, h: cat2.h, rot: 0 };
     const wp2 = _resolvePlacement(ev.clientX, ev.clientY, ev.altKey, dropBox);
+    _candidateAABBs = [];
     const sym = createSymbol(typeWas, wp2.x, wp2.y);
     addSymbol(sym);
     selectSymbol(sym.id);
@@ -1042,3 +1049,30 @@ export function repositionGuides() {
  * main.js currently imports this name; either can be used.
  */
 export { repositionGuides as repositionFlushGuide };
+
+/**
+ * Thin test wrapper around _resolvePlacement.
+ *
+ * Allows unit tests to call the resolver directly with injected candidate AABBs,
+ * bypassing the module-private `_candidateAABBs` state — identical to how LLD-26
+ * exposed `nearestWallFlush` as a pure export so it can be tested in isolation.
+ *
+ * The caller provides `candidateAABBs` explicitly (not via module state) so tests
+ * are fully self-contained.
+ *
+ * @param {number} sx  screen x
+ * @param {number} sy  screen y
+ * @param {boolean} altHeld
+ * @param {{ type:string, x:number, y:number, w:number, h:number, rot:number }} boxLike
+ * @param {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }[]} candidateAABBs
+ * @returns {{ x:number, y:number, snapType:"flush"|"align"|"grid"|"free", _flushActive:boolean, _alignX:import("./symbols.js").AlignAxisMatch|null, _alignY:import("./symbols.js").AlignAxisMatch|null }}
+ */
+export function resolvePlacementForTest(sx, sy, altHeld, boxLike, candidateAABBs) {
+  const prev = _candidateAABBs;
+  _candidateAABBs = candidateAABBs;
+  try {
+    return _resolvePlacement(sx, sy, altHeld, boxLike);
+  } finally {
+    _candidateAABBs = prev;
+  }
+}
