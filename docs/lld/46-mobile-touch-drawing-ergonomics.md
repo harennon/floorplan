@@ -14,8 +14,10 @@ never hides the snap point, and makes the furniture dock thumb-friendly.
   gets committed is offset to a floating crosshair rendered ~56px **above** the fingertip.
   Today's exact pointer model is unchanged: down → drag → up commits a vertex.
 - **Gesture disambiguation.** 1 finger = draw / move / pan; 2 fingers = pinch-zoom + pan.
-  A second finger touching down **cancels any in-flight one-finger draw** so no stray
-  vertex is committed. ~10px tap/drag threshold tuned for finger jitter (mouse keeps 6px).
+  A second finger touching down **cancels any in-flight one-finger gesture** — both an
+  in-flight **draw** (no stray vertex committed) and an in-flight **symbol move/rotate**
+  (finalized at its pre-pinch position, no spurious trailing commit at a zoomed
+  coordinate). ~10px tap/drag threshold tuned for finger jitter (mouse keeps 6px).
 - **Touch-sized hit targets.** Rotate/resize handle hit radii and the symbol pick
   tolerance grow to ≥44px effective (≈28px visual + invisible pad) **only** under a
   coarse-pointer device; the mouse path keeps today's small targets.
@@ -63,7 +65,20 @@ consistently, so preview and commit agree.
 Implementation choice: rather than sprinkle `- 56` at each call site, `interactions.js`
 computes an effective `(hx, hy)` for the active pointer once per event
 (`_effectiveDrawPoint(e)`), returning the raw point for mouse/pen and the offset point for
-touch. All three draw-hook calls use it. No change inside `wallTool.js` or `walls.js`.
+touch. All draw-hook calls use it. No change inside `wallTool.js` or `walls.js`.
+
+**Loupe must appear on `pointerdown`, not just on drag.** Touch devices have no pre-touch
+hover, and the current draw branch of `_onPointerDown` (lines 146-155) records the down
+point and returns **without** calling `onHover`. So a wall chain placed by quick taps
+would never render the crosshair 56px above the finger before the vertex commits — it
+would just land offset with no preview, undercutting the acceptance criterion "the snap
+crosshair is visible above the fingertip (loupe) throughout." Fix: when
+`e.pointerType === "touch"` in the draw branch of `_onPointerDown`, call
+`_drawHooks.onHover(...)` with `_effectiveDrawPoint(e)` immediately on down so the loupe
+crosshair renders the instant the finger lands. This means the interaction is
+**press → (see crosshair) → optionally slide to fine-tune → lift to commit**, and even a
+bare tap shows the preview for the duration of the touch. The mouse/pen path is unchanged
+(no `onHover` on down; hover already tracks the moving cursor).
 
 The loupe is *purely a coordinate offset* — no new UI element is strictly required because
 the existing snap glyph (`wallRender._renderSnapGlyph`) already renders a crosshair/diamond
@@ -75,21 +90,47 @@ render-only affordance and does not affect geometry.
 `interactions.js` already tracks pointers in `_pointers` Map and seeds pinch on the 2nd
 pointer. Two gaps to close:
 
-- **Second-finger cancels in-flight draw.** `_onPointerDown` already sets
-  `_drawPending = false` when `_pointers.size === 2`, but it does **not** clear the
-  wall tool's snap preview or guard the *up* that follows. Add: on entering pinch, call
-  `_drawHooks.onLeave()` to clear the snap glyph, and set a `_drawCancelled` flag so the
-  subsequent `pointerup` for either finger does **not** call `onClick` (no stray vertex).
-  The flag clears when `_pointers.size` returns to 0.
+- **Second-finger cancels in-flight one-finger gesture (draw AND move).** `_onPointerDown`
+  already sets `_drawPending = false` when `_pointers.size === 2`, but it does **not**
+  clear the wall tool's snap preview, guard the trailing draw *up*, or handle a
+  select-mode symbol move/rotate that is in flight. Two problems in the current code:
+  1. *Draw:* on entering pinch nothing calls `onLeave()` and the subsequent `pointerup`
+     for either finger would still call `onClick` (stray vertex).
+  2. *Move/rotate:* the `size === 2` branch (lines 135-142) returns early **without
+     clearing `_selectConsumed`**. Moves then route to `_handlePinch` (the `size >= 2`
+     early-return at lines 195-198 precedes the `_selectConsumed` check), so the symbol
+     freezes at its pre-pinch position while the view zooms — but on the final lift,
+     `_onPointerEnd` (lines 263-265) still fires `_selectHooks.onUp(clientX, clientY)`.
+     Because `onSelectUp` ignores its `sx,sy` (it only does `_dragMode = null` + a
+     dirty-checked `_historyCommit()`), the symbol does **not** jump to the zoomed
+     release coordinate; the concrete risk is instead a **spurious history commit** for a
+     move that was interrupted (and, if `onSelectUp` ever grew to consume its coordinate,
+     a jump). Either way the interrupted move must be finalized cleanly, not at the
+     pinch-release point.
+
+  **Fix (single mechanism for both):** introduce one transient flag `_gestureCancelled`.
+  In the `_pointers.size === 2` branch of `_onPointerDown`, when a one-finger gesture is
+  in flight:
+    - call `_drawHooks.onLeave()` to clear the snap glyph;
+    - if `_selectConsumed`, immediately finalize the move/rotate at its **current**
+      (pre-pinch) position by calling `_selectHooks.onUp(_lastX, _lastY)` (using the last
+      one-finger coordinate, not the second finger's), then set `_selectConsumed = false`;
+    - set `_gestureCancelled = true`.
+  In `_onPointerEnd`, when `_gestureCancelled` is set, skip **both** the draw `onClick`
+  branch and the select `onUp` / `onTapEmpty` branches (no stray vertex, no second
+  commit, no accidental deselect). `_gestureCancelled` clears when `_pointers.size`
+  returns to 0. This mirrors the draw-cancel path for the move path so the stated scope
+  "1 finger = draw/move/pan; 2 fingers = pinch" holds for every one-finger gesture.
+
 - **Touch threshold.** `DRAG_THRESHOLD = 6` is right for a mouse but too tight for a
   finger. Introduce `TOUCH_DRAG_THRESHOLD = 10` and select per-gesture based on the
   down event's `pointerType`. Used for both the draw-mode pan/commit split and the
   select-mode tap-vs-drag split.
 
-Move (1-finger drag of a selected symbol) and pan already work through the existing
-`_selectHooks` / `_dragging` paths; they need only the threshold change and the loupe is
-**not** applied to select/move (the user is dragging an object they can see, and the
-existing `_dragOffsetX/Y` grab-offset already keeps the object under the finger).
+Pan (1-finger drag of empty canvas) works through the existing `_dragging` path unchanged
+apart from the threshold. The loupe is **not** applied to select/move (the user is
+dragging an object they can see, and the existing `_dragOffsetX/Y` grab-offset already
+keeps the object under the finger).
 
 ### 3. Touch-sized hit targets
 `symbolTool.js` constants `ROTATE_HIT_R = 14` and `MIN_HIT_PX = 12` are too small for a
@@ -181,14 +222,20 @@ logic identical across `interactions.js`, `symbolTool.js`, `symbolRender.js`.
   gesture (new `_downPointerType`).
 - `_effectiveDrawPoint(e) → { x, y }` → for draw-mode hooks returns
   `{ x: e.clientX, y: e.clientY - LOUPE_OFFSET_PX }` when `e.pointerType === "touch"`,
-  else the raw point. All three draw-hook calls (`onHover`, `onClick`, threshold-preview
-  `onHover`) route through it. Note: the *threshold comparison* still uses the raw
-  `clientX/Y` vs the raw down point — only the coordinate handed to the draw hooks is
-  offset.
-- New transient flag `_drawCancelled: boolean` — set true when a 2nd pointer arrives during
-  a pending/active draw; blocks the trailing `onClick` in `_onPointerEnd`; reset when
-  `_pointers.size === 0`.
-- On entering pinch (`_pointers.size === 2`): additionally call `_drawHooks.onLeave()`.
+  else the raw point. All draw-hook calls (the new down-`onHover`, move-`onHover`,
+  `onClick`, threshold-preview `onHover`) route through it. Note: the *threshold
+  comparison* still uses the raw `clientX/Y` vs the raw down point — only the coordinate
+  handed to the draw hooks is offset.
+- `_onPointerDown` draw branch: when `e.pointerType === "touch"`, call
+  `_drawHooks.onHover(...)` with `_effectiveDrawPoint(e)` before returning, so the loupe
+  crosshair appears on touch-down (not just on drag). Mouse/pen: no down-hover.
+- New transient flag `_gestureCancelled: boolean` — set true when a 2nd pointer arrives
+  during an in-flight one-finger gesture (draw **or** select-move). Blocks the trailing
+  `onClick`, `onUp`, and `onTapEmpty` in `_onPointerEnd`; reset when `_pointers.size === 0`.
+- On entering pinch (`_pointers.size === 2`): call `_drawHooks.onLeave()`; if
+  `_selectConsumed`, finalize the move via `_selectHooks.onUp(_lastX, _lastY)` and clear
+  `_selectConsumed`; set `_gestureCancelled = true`. (Note `_lastX/_lastY` hold the last
+  one-finger position, updated on the move path before the second finger lands.)
 - `setDrawHooks` / `setSelectHooks` interfaces are **unchanged** — they still receive
   screen `(sx, sy)`; the offset is applied by the caller.
 
@@ -223,8 +270,9 @@ the loupe and thresholds are pure input-mapping concerns and do not touch geomet
 Per-gesture transient state (added to `interactions.js`):
 - `_downPointerType: "touch"|"mouse"|"pen"` — the pointerType of the primary pointer that
   started the current gesture; selects the drag threshold. Cleared when pointers reach 0.
-- `_drawCancelled: boolean` — true after a second finger cancels an in-flight draw; blocks
-  the trailing commit. Cleared when pointers reach 0.
+- `_gestureCancelled: boolean` — true after a second finger cancels an in-flight one-finger
+  gesture (draw or select-move); blocks the trailing `onClick`/`onUp`/`onTapEmpty` in
+  `_onPointerEnd`. Cleared when pointers reach 0.
 
 Static, evaluated once at module load:
 - `isCoarsePointer` (in `pointerEnv.js`) — device capability; drives handle sizing and dock
@@ -242,46 +290,57 @@ persisted; a plan drawn on touch and one drawn on desktop are indistinguishable 
 ## Edge Cases
 
 1. **Second finger lands mid-draw.** Pinch begins; the in-flight one-finger draw is
-   cancelled (`_drawCancelled = true`, `onLeave()` clears the snap glyph). Neither the
+   cancelled (`_gestureCancelled = true`, `onLeave()` clears the snap glyph). Neither the
    lift of the first nor the second finger commits a vertex. The chain built so far is
    preserved (not discarded) — the user can resume drawing after the pinch ends.
-2. **Second finger lifts, one finger remains.** Existing pinch teardown re-seeds; because
-   `_drawCancelled` stays set until *all* pointers lift, the remaining finger does not
-   spuriously commit. The user must lift fully and tap again to place the next vertex.
-   (Documented behavior; avoids ambiguous "was that a draw or a leftover pinch finger?")
-3. **Tap without drag (touch).** Movement under `TOUCH_DRAG_THRESHOLD` (10px) = a tap →
-   commit at the offset crosshair. Finger jitter below 10px does not turn a tap into a pan.
-4. **Very fast tap (down+up, no move event).** `onClick` fires at the down point's offset
-   coordinate; the offset is applied from the up event's `pointerType`/position, so a
-   move-less tap still lands 56px above the finger.
-5. **Loupe crosshair above the viewport top / behind HUD.** Drawing still resolves and
+2. **Second finger lands mid-move/rotate (select mode).** Pinch begins; the in-flight
+   symbol move/rotate is finalized at its **pre-pinch** position via
+   `_selectHooks.onUp(_lastX, _lastY)`, `_selectConsumed` is cleared, and
+   `_gestureCancelled = true`. The `_pointers.size >= 2` early-return in `_onPointerMove`
+   then routes to pinch, so the symbol stays put while the view zooms. On final lift,
+   `_onPointerEnd` skips the `onUp`/`onTapEmpty` branches (guarded by `_gestureCancelled`),
+   so there is no second, spurious history commit and no jump to the zoomed release point.
+3. **Second finger lifts, one finger remains.** Existing pinch teardown re-seeds; because
+   `_gestureCancelled` stays set until *all* pointers lift, the remaining finger does not
+   spuriously commit a vertex or move a symbol. The user must lift fully and tap again to
+   place the next vertex or start a new move. (Documented behavior; avoids ambiguous
+   "was that a draw/move or a leftover pinch finger?")
+4. **Tap without drag (touch).** Movement under `TOUCH_DRAG_THRESHOLD` (10px) = a tap →
+   commit at the offset crosshair. The loupe crosshair is already visible (shown on
+   pointerdown, see Approach), so the user sees where the tap will land before lifting.
+   Finger jitter below 10px does not turn a tap into a pan.
+5. **Very fast tap (down+up, no move event).** `onHover` on pointerdown renders the
+   crosshair immediately; `onClick` on the up fires at the down point's offset coordinate.
+   The offset is applied from the event's `pointerType`/position, so a move-less tap still
+   previews and lands 56px above the finger.
+6. **Loupe crosshair above the viewport top / behind HUD.** Drawing still resolves and
    commits at the offset world point (the world is pannable, nothing is clipped). The
    snap-tag label clamps into view via existing `_positionSnapTag` logic.
-6. **Hybrid device (touch + mouse, e.g. laptop w/ touchscreen).** `pointerType` per event
+7. **Hybrid device (touch + mouse, e.g. laptop w/ touchscreen).** `pointerType` per event
    keeps the mouse path exact (no loupe, 6px threshold) and gives touch events the loupe +
    10px threshold. `isCoarsePointer` may be true on such devices → handles render larger,
    which is acceptable and does not break mouse hit-testing (larger targets still work).
-7. **Pen/stylus.** Treated as non-touch for the loupe (a stylus tip is precise and visible),
-   `pointerType === "pen"` → raw point, mouse threshold. Handle sizing still follows
-   `isCoarsePointer`.
-8. **Dock swipe vs canvas draw.** The bottom-sheet dock owns its own pointer capture
+8. **Pen/stylus.** Treated as non-touch for the loupe (a stylus tip is precise and visible),
+   `pointerType === "pen"` → raw point, mouse threshold, no down-hover. Handle sizing still
+   follows `isCoarsePointer`.
+9. **Dock swipe vs canvas draw.** The bottom-sheet dock owns its own pointer capture
    (`_onDockPointerDown` already `setPointerCapture`s). A horizontal swipe inside the dock
    pages the sheet and never reaches the canvas; a draw gesture starts on the canvas
    outside the dock's bounds.
-9. **Dock over OS gesture zone.** Safe-area insets + extra bottom clearance keep the dock
-   above the iOS home indicator / Android nav; an OS edge-swipe does not land on a dock item.
-10. **Page pinch-zoom / double-tap zoom.** `touch-action: none` on `.stage` plus
+10. **Dock over OS gesture zone.** Safe-area insets + extra bottom clearance keep the dock
+    above the iOS home indicator / Android nav; an OS edge-swipe does not land on a dock item.
+11. **Page pinch-zoom / double-tap zoom.** `touch-action: none` on `.stage` plus
     `overscroll-behavior: none` suppress browser zoom/scroll inside the canvas; app pinch is
     handled in JS. Chrome outside the stage retains normal touch behavior.
-11. **Rotate handle vs move drag on touch.** With `ROTATE_HIT_R = 22`, the enlarged rotate
+12. **Rotate handle vs move drag on touch.** With `ROTATE_HIT_R = 22`, the enlarged rotate
     hit zone could overlap the symbol body for small symbols. Precedence is unchanged
     (`onSelectDown` checks the rotate handle first), so a tap in the overlap rotates. This
     matches desktop precedence; acceptable. If the symbol is smaller than the handle zone,
     the user pans/moves by grabbing the body center (handle is offset above the top edge).
-12. **Existing pinch drift.** No change to pinch math (`_seedPinch`/`_handlePinch`); the
-    only addition is the `onLeave()` call and cancel flag. Regression risk is limited to
-    those two lines.
-13. **Reduced motion.** The optional loupe tether is static (no animation); no special
+13. **Existing pinch drift.** No change to pinch math (`_seedPinch`/`_handlePinch`); the
+    additions are the `onLeave()`/`onUp` cancel calls and the `_gestureCancelled` flag.
+    Regression risk is limited to those lines.
+14. **Reduced motion.** The optional loupe tether is static (no animation); no special
     handling needed beyond hiding it when no snap is active.
 
 ## Dependencies
@@ -320,9 +379,17 @@ Deferrable follow-up (per issue): depends on none of the other Phase 2 sub-issue
 ### Integration (headless Chromium, synthetic pointer events via `dispatchEvent`)
 - **Draw commit with loupe:** dispatch touch pointerdown→up in draw mode; assert the
   committed vertex equals `resolveSnap` at `(x, y-56)`, not at `(x, y)`.
+- **Loupe visible on tap-to-place:** dispatch a touch pointerdown in draw mode with no
+  move; assert `onHover` was called with `(x, y-56)` on the down (crosshair renders before
+  commit), and that the subsequent up commits at the same offset point.
 - **Second-finger cancels draw:** touch pointerdown (draw) → second pointerdown → lift
   both; assert no vertex was committed and the chain length is unchanged, and the snap
-  glyph was cleared.
+  glyph was cleared (`onLeave` called).
+- **Second-finger cancels symbol move:** select a symbol, touch pointerdown on it, move it
+  partway (`onMove` fired), then a second pointerdown; assert the move is finalized once at
+  the pre-pinch position (`onSelectUp` called exactly once, `_selectConsumed` cleared) and
+  the final lift does **not** fire a second `onUp`/`onTapEmpty` (no duplicate commit, no
+  deselect, no jump to the release coordinate).
 - **Tap vs pan threshold on touch:** a move of 8px then up = commit (tap); a move of 15px =
   pan (no commit). Same test at 5px/8px for mouse to prove the 6px boundary is unchanged.
 - **Mouse regression:** mouse pointerdown→up in draw mode commits at the raw point (no 56px
