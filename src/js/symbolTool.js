@@ -20,6 +20,7 @@ import {
   createSymbol, addSymbol, removeSymbol, duplicateSymbol,
   getSymbol, pickSymbol, moveSymbol, rotateSymbol, resizeSymbol, corners,
   WALL_FLUSH_PX, PARALLEL_TOL_DEG, nearestWallFlush,
+  ALIGN_PX, aabb as symAabb, nearestObjectAlignment,
 } from "./symbols.js";
 import { gridSnap as prefsGridSnap } from "./prefs.js";
 import { scheduleRender } from "./surface.js";
@@ -90,6 +91,21 @@ let _dockDragType = null;
  * @type {import("./symbols.js").FlushCandidate|null}
  */
 let _flushGuide = null;
+
+/**
+ * Active transient guides for the current gesture (wall-flush + alignment).
+ * Each entry: { color:string, label:string, guide:{a,b} }
+ * Rebuilt on each pointer move; cleared on gesture end.
+ * @type {{ color:string, label:string, guide:{a:{x,y},b:{x,y}} }[]}
+ */
+let _activeGuides = [];
+
+/**
+ * Candidate AABBs for the current gesture (all symbols except the dragged one).
+ * Rebuilt at gesture start; refreshed lazily per-move only for the dragged AABB.
+ * @type {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }[]}
+ */
+let _candidateAABBs = [];
 
 // ── DOM refs ───────────────────────────────────────────────────────────────────
 
@@ -191,6 +207,10 @@ export function onSelectDown(sx, sy) {
     _dragMode = "move";
     _dragOffsetX = wp.x - hit.x;
     _dragOffsetY = wp.y - hit.y;
+    // Build candidate AABB list once at drag start (excluding the dragged symbol)
+    _candidateAABBs = model.symbols
+      .filter(s => s.id !== hit.id)
+      .map(s => symAabb(s));
     _showInspector(hit);
     scheduleRender();
     return true;
@@ -220,8 +240,8 @@ export function onSelectMove(sx, sy) {
     // convert it back to world (this round-trip is lossless).
     const scCenter = worldToScreen(rawCenterX, rawCenterY);
     const resolved = _resolvePlacement(scCenter.x, scCenter.y, _altHeld, sym);
-    _updateSnapTag(sx, sy, resolved.snapType);
-    _updateFlushGuide(resolved);
+    _updateSnapTag(sx, sy, resolved.snapType, { x: resolved._alignX, y: resolved._alignY });
+    _updateGuides(resolved);
 
     moveSymbol(sym, resolved.x, resolved.y);
     scheduleRender();
@@ -247,8 +267,10 @@ export function onSelectMove(sx, sy) {
 export function onSelectUp(sx, sy) {
   _dragMode = null;
   _flushGuide = null;
+  _activeGuides = [];
+  _candidateAABBs = [];
   _hideSnapTag();
-  _clearFlushGuideLine();
+  _clearGuides();
   // Commit move/rotate to history (dirty-check handles no-op)
   if (_historyCommit) _historyCommit();
 }
@@ -324,7 +346,7 @@ function _onDockPointerDown(e) {
     h: cat.h,
     rot: 0,
   };
-  _updateSnapTag(e.clientX, e.clientY, wp.snapType);
+  _updateSnapTag(e.clientX, e.clientY, wp.snapType, { x: wp._alignX, y: wp._alignY });
 
   // Mark dock item active
   _updateDockActive(type);
@@ -344,8 +366,8 @@ function _onDockPointerDown(e) {
       h: cat2.h,
       rot: 0,
     };
-    _updateSnapTag(ev.clientX, ev.clientY, wp2.snapType);
-    _updateFlushGuide(wp2);
+    _updateSnapTag(ev.clientX, ev.clientY, wp2.snapType, { x: wp2._alignX, y: wp2._alignY });
+    _updateGuides(wp2);
     scheduleRender();
   };
 
@@ -358,8 +380,10 @@ function _onDockPointerDown(e) {
     _dockDragType = null;
     _ghost = null;
     _flushGuide = null;
+    _activeGuides = [];
+    _candidateAABBs = [];
     _hideSnapTag();
-    _clearFlushGuideLine();
+    _clearGuides();
     _updateDockActive(null);
 
     // Check if the release was over the canvas (not the dock)
@@ -393,103 +417,172 @@ function _onDockPointerDown(e) {
 /**
  * Resolve a symbol's placement point for a given raw screen pointer.
  *
- * Precedence:
- *   1. Alt held → raw world point (transient bypass; independent of grid toggle)
- *   2. Wall-flush → if a wall face is within threshold, seat the near edge flush.
- *      - Perpendicular axis: flush-snapped.
- *      - Parallel axis: grid-snapped when gridSnap is on, otherwise raw.
- *   3. Grid → if prefs.gridSnap() on and snapStep() non-null, gridSnap(raw, step).
- *   4. Raw → else the raw world point.
+ * Per-axis precedence: Alt bypass > wall-flush > object alignment > grid > raw.
+ *
+ * Wall-flush is exempt from the gridSnap toggle (it is the hero "seat against wall"
+ * behavior). Object alignment and grid both obey prefs.gridSnap().
  *
  * @param {number} sx  screen x
  * @param {number} sy  screen y
  * @param {boolean} altHeld
  * @param {{ type:string, x:number, y:number, w:number, h:number, rot:number }} boxLike
  *   ghost or live symbol (for flush geometry)
- * @returns {{ x:number, y:number, snapType:"flush"|"grid"|"free" }}
+ * @returns {{ x:number, y:number, snapType:"flush"|"align"|"grid"|"free", _flushActive:boolean, _alignX:import("./symbols.js").AlignAxisMatch|null, _alignY:import("./symbols.js").AlignAxisMatch|null }}
  */
 function _resolvePlacement(sx, sy, altHeld, boxLike) {
   const raw = screenToWorld(sx, sy);
 
-  // 1. Alt held → raw
+  // 1. Alt held → raw on both axes; clear all guides
   if (altHeld) {
     _flushGuide = null;
-    return { x: raw.x, y: raw.y, snapType: "free" };
+    _activeGuides = [];
+    return { x: raw.x, y: raw.y, snapType: "free", _flushActive: false, _alignX: null, _alignY: null };
   }
 
-  // Compute symbol corners at the raw position (for flush geometry)
+  // Compute symbol at the raw position (for flush and alignment geometry)
   const tempSym = { ...boxLike, x: raw.x, y: raw.y };
   const symCorners = corners(tempSym);
 
-  // 2. Wall-flush
-  const thresholdM = WALL_FLUSH_PX / pxPerM();
+  // 2. Wall-flush (ungated — active regardless of gridSnap toggle)
+  const flushThreshM = WALL_FLUSH_PX / pxPerM();
   const segs = wallSegments();
-  const flush = nearestWallFlush(symCorners, segs, WALL_M, thresholdM, PARALLEL_TOL_DEG);
+  const flush = nearestWallFlush(symCorners, segs, WALL_M, flushThreshM, PARALLEL_TOL_DEG);
+
+  // Per-axis resolution state
+  let resolvedX = raw.x;
+  let resolvedY = raw.y;
+  let xClaimed = false; // true when wall-flush owns this axis
+  let yClaimed = false;
+  let snapTypeX = "free";
+  let snapTypeY = "free";
+  let flushActive = false;
+  let alignX = null;
+  let alignY = null;
 
   if (flush !== null) {
     _flushGuide = flush;
-
-    // flush.dx/dy is the perpendicular correction from raw to seat the near edge flush.
-    // The flushed center is (raw.x + flush.dx, raw.y + flush.dy).
-    // We must NOT re-snap the perpendicular axis — only the parallel axis is grid-snapped.
-    // Strategy:
-    //   1. Compute the flush result: flushedX = raw.x + flush.dx, flushedY = raw.y + flush.dy
-    //   2. If grid is on, decompose flushedX/Y into (t, n) components relative to the wall
-    //      that produced the flush candidate, grid-snap the t component, leave n untouched.
-    //
-    // We recover the wall direction from flush.guide: guide.a and guide.b are world points
-    // on the wall face, so t = normalize(guide.b - guide.a).
+    flushActive = true;
 
     const flushedX = raw.x + flush.dx;
     const flushedY = raw.y + flush.dy;
 
-    if (prefsGridSnap()) {
-      const step = snapStep();
-      if (step != null) {
-        // Recover wall direction t and normal n from the guide segment
-        const gDx = flush.guide.b.x - flush.guide.a.x;
-        const gDy = flush.guide.b.y - flush.guide.a.y;
-        const gLen = Math.sqrt(gDx * gDx + gDy * gDy);
-        if (gLen > 1e-9) {
-          const tx = gDx / gLen;
-          const ty = gDy / gLen;
-          // nx/ny are the normal (perpendicular to wall)
-          const nx = ty;
-          const ny = -tx;
+    // Determine which axis the wall is perpendicular to (axis-aligned wall check)
+    // Guide direction gives us the wall's tangent vector; normal = flush normal
+    const gDx = flush.guide.b.x - flush.guide.a.x;
+    const gDy = flush.guide.b.y - flush.guide.a.y;
+    const gLen = Math.sqrt(gDx * gDx + gDy * gDy);
 
-          // Project flushed center onto t and n
-          const tComp = flushedX * tx + flushedY * ty;
-          const nComp = flushedX * nx + flushedY * ny;
+    if (gLen > 1e-9) {
+      const tx = gDx / gLen;
+      const ty = gDy / gLen;
+      // Normal: 90° CW of tangent
+      const nx = ty;
+      const ny = -tx;
 
-          // Grid-snap only the t component
-          const tSnapped = Math.round(tComp / step) * step;
+      // Check if the wall is axis-aligned (normal is ≈ ±X or ≈ ±Y)
+      const EPS = Math.sin((5 * Math.PI) / 180); // ~5° tolerance
+      const nIsX = Math.abs(Math.abs(nx) - 1) < EPS; // normal ≈ ±X → flush corrects X
+      const nIsY = Math.abs(Math.abs(ny) - 1) < EPS; // normal ≈ ±Y → flush corrects Y
 
-          // Reconstruct: keep n component exact (flush), snap t component
-          return {
-            x: tSnapped * tx + nComp * nx,
-            y: tSnapped * ty + nComp * ny,
-            snapType: "flush",
-          };
+      if (nIsX) {
+        // Flush owns X; Y is free for alignment/grid
+        resolvedX = flushedX;
+        xClaimed = true;
+        snapTypeX = "flush";
+      } else if (nIsY) {
+        // Flush owns Y; X is free for alignment/grid
+        resolvedY = flushedY;
+        yClaimed = true;
+        snapTypeY = "flush";
+      } else {
+        // Angled wall: fall back to legacy (t, n) decomposition (Edge Case 8)
+        // Grid-snap the t component; flush the n component. Skip alignment for this gesture.
+        if (prefsGridSnap()) {
+          const step = snapStep();
+          if (step != null) {
+            const tComp = flushedX * tx + flushedY * ty;
+            const nComp = flushedX * nx + flushedY * ny;
+            const tSnapped = Math.round(tComp / step) * step;
+            return {
+              x: tSnapped * tx + nComp * nx,
+              y: tSnapped * ty + nComp * ny,
+              snapType: "flush",
+              _flushActive: true,
+              _alignX: null,
+              _alignY: null,
+            };
+          }
         }
+        return {
+          x: flushedX,
+          y: flushedY,
+          snapType: "flush",
+          _flushActive: true,
+          _alignX: null,
+          _alignY: null,
+        };
       }
+    } else {
+      // Degenerate guide — apply full flush delta
+      resolvedX = flushedX;
+      resolvedY = flushedY;
+      xClaimed = true;
+      yClaimed = true;
+      snapTypeX = "flush";
+      snapTypeY = "flush";
     }
-
-    return { x: flushedX, y: flushedY, snapType: "flush" };
+  } else {
+    _flushGuide = null;
   }
 
-  _flushGuide = null;
+  // 3. Object alignment (gated by prefs.gridSnap())
+  if (prefsGridSnap() && _candidateAABBs.length > 0) {
+    const alignThreshM = ALIGN_PX / pxPerM();
+    const dragAABBVal = symAabb(tempSym);
+    const alignResult = nearestObjectAlignment(dragAABBVal, _candidateAABBs, alignThreshM);
 
-  // 3. Grid
+    if (!xClaimed && alignResult.x !== null) {
+      resolvedX = raw.x + alignResult.x.delta;
+      xClaimed = true;
+      snapTypeX = "align";
+      alignX = alignResult.x;
+    }
+
+    if (!yClaimed && alignResult.y !== null) {
+      resolvedY = raw.y + alignResult.y.delta;
+      yClaimed = true;
+      snapTypeY = "align";
+      alignY = alignResult.y;
+    }
+  }
+
+  // 4. Grid (gated by prefs.gridSnap() and snapStep() non-null)
   if (prefsGridSnap()) {
     const step = snapStep();
     if (step != null) {
-      const snapped = gridSnap(raw, step);
-      return { x: snapped.x, y: snapped.y, snapType: "grid" };
+      if (!xClaimed) {
+        resolvedX = Math.round(raw.x / step) * step;
+        snapTypeX = "grid";
+      }
+      if (!yClaimed) {
+        resolvedY = Math.round(raw.y / step) * step;
+        snapTypeY = "grid";
+      }
     }
   }
 
-  // 4. Raw
-  return { x: raw.x, y: raw.y, snapType: "free" };
+  // Dominant snapType: flush > align > grid > free
+  const PRIORITY = { flush: 3, align: 2, grid: 1, free: 0 };
+  const snapType = PRIORITY[snapTypeX] >= PRIORITY[snapTypeY] ? snapTypeX : snapTypeY;
+
+  return {
+    x: resolvedX,
+    y: resolvedY,
+    snapType,
+    _flushActive: flushActive,
+    _alignX: alignX,
+    _alignY: alignY,
+  };
 }
 
 function _updateDockActive(type) {
@@ -675,6 +768,7 @@ function _onWindowBlur() {
 
 const _SNAP_TAG_COLORS = {
   flush: "#9cd67a",
+  align: "#b98bd9",   // violet — edge alignment dominant (may also be teal for center)
   grid:  "#7fd0c8",
   free:  "#8f8a78",
 };
@@ -684,15 +778,24 @@ const _SNAP_TAG_COLORS = {
  * Only active while a symbol gesture is in progress and we are NOT in draw mode.
  * @param {number} sx  screen x (cursor position)
  * @param {number} sy  screen y
- * @param {"flush"|"grid"|"free"} snapType
+ * @param {"flush"|"align"|"grid"|"free"} snapType
+ * @param {{ x:import("./symbols.js").AlignAxisMatch|null, y:import("./symbols.js").AlignAxisMatch|null } | undefined} [alignMatches]
  */
-function _updateSnapTag(sx, sy, snapType) {
+function _updateSnapTag(sx, sy, snapType, alignMatches) {
   if (!_snapTagEl) return;
   // Guard: only show in select/placement mode; wallTool owns it in draw mode
   if (_isDrawModeFn && _isDrawModeFn()) return;
 
+  let color = _SNAP_TAG_COLORS[snapType] || "#8f8a78";
+
+  // For align snap: use teal if all active matches are center-kind, violet if any edge
+  if (snapType === "align" && alignMatches) {
+    const matches = [alignMatches.x, alignMatches.y].filter(Boolean);
+    const allCenter = matches.length > 0 && matches.every(m => m.kind === "center");
+    color = allCenter ? _COLOR_CENTER : _COLOR_EDGE;
+  }
+
   const label = snapType;
-  const color = _SNAP_TAG_COLORS[snapType] || "#8f8a78";
   _snapTagEl.textContent = label;
   _snapTagEl.style.color = color;
   _snapTagEl.style.display = "block";
@@ -716,73 +819,226 @@ function _hideSnapTag() {
   if (_snapTagEl) _snapTagEl.style.display = "none";
 }
 
-// ── Flush guide line ──────────────────────────────────────────────────────────
+// ── Guide lines (wall-flush + alignment) ─────────────────────────────────────
 
 const NS_SVG = "http://www.w3.org/2000/svg";
-let _flushGuideLine = null;  // lazily created <line> element in #symbol-overlay
+
+// Colors
+const _COLOR_FLUSH  = "#9cd67a";  // green  — wall-flush (LLD 26)
+const _COLOR_EDGE   = "#b98bd9";  // violet — edge-to-edge alignment
+const _COLOR_CENTER = "#7fd0c8";  // teal   — center-to-center alignment
 
 /**
- * Update or clear the flush guide line in the symbol overlay.
- * @param {{ snapType:string, x:number, y:number }} resolved
+ * Cached SVG elements for guides: up to 1 flush + 2 alignment (X and Y).
+ * Each element is a <g> containing a <line>, <rect>, and <text>.
+ * Elements are lazily created; not in the DOM when no guide is active.
  */
-function _updateFlushGuide(resolved) {
+let _flushGuideLine = null;     // legacy <line> for wall-flush (style: dashed)
+let _alignGuideEls = [];        // up to 2 <g> elements for alignment guides
+
+/**
+ * Rebuild _activeGuides from the latest resolved placement result and
+ * update the guide DOM elements accordingly.
+ *
+ * @param {{ snapType:string, _flushActive:boolean, _alignX:import("./symbols.js").AlignAxisMatch|null, _alignY:import("./symbols.js").AlignAxisMatch|null }} resolved
+ */
+function _updateGuides(resolved) {
+  _activeGuides = [];
+
   if (!_gSymOverlay) return;
 
-  if (resolved.snapType !== "flush" || !_flushGuide) {
-    _clearFlushGuideLine();
-    return;
+  // Wall-flush guide (unchanged from LLD 26 — dashed green line only, no label chip)
+  if (resolved._flushActive && _flushGuide) {
+    _activeGuides.push({
+      kind: "flush",
+      color: _COLOR_FLUSH,
+      label: null,
+      guide: _flushGuide.guide,
+    });
   }
 
-  // Lazy-create the guide line element
+  // Alignment guides
+  if (resolved._alignX !== null) {
+    const color = resolved._alignX.kind === "center" ? _COLOR_CENTER : _COLOR_EDGE;
+    _activeGuides.push({
+      kind: "align",
+      color,
+      label: resolved._alignX.kind === "center" ? "centers" : "edges",
+      guide: resolved._alignX.guide,
+    });
+  }
+  if (resolved._alignY !== null) {
+    const color = resolved._alignY.kind === "center" ? _COLOR_CENTER : _COLOR_EDGE;
+    _activeGuides.push({
+      kind: "align",
+      color,
+      label: resolved._alignY.kind === "center" ? "centers" : "edges",
+      guide: resolved._alignY.guide,
+    });
+  }
+
+  // Flush guide — legacy dashed <line> (no chip, as LLD 26)
+  if (_activeGuides.some(g => g.kind === "flush")) {
+    _ensureFlushLine();
+  } else {
+    _removeFlushLine();
+  }
+
+  // Alignment guide <g> elements — ensure we have the right count
+  const alignGuides = _activeGuides.filter(g => g.kind === "align");
+  // Grow pool if needed
+  while (_alignGuideEls.length < alignGuides.length) {
+    _alignGuideEls.push(null);
+  }
+  // Remove extras
+  for (let i = alignGuides.length; i < _alignGuideEls.length; i++) {
+    if (_alignGuideEls[i] && _alignGuideEls[i].parentNode) {
+      _alignGuideEls[i].parentNode.removeChild(_alignGuideEls[i]);
+    }
+    _alignGuideEls[i] = null;
+  }
+  _alignGuideEls.length = alignGuides.length;
+}
+
+function _ensureFlushLine() {
   if (!_flushGuideLine) {
     _flushGuideLine = document.createElementNS(NS_SVG, "line");
     _flushGuideLine.setAttribute("class", "flush-guide");
-    _flushGuideLine.setAttribute("stroke", "#9cd67a");
+    _flushGuideLine.setAttribute("stroke", _COLOR_FLUSH);
     _flushGuideLine.setAttribute("stroke-width", "1");
     _flushGuideLine.setAttribute("stroke-dasharray", "4 3");
     _flushGuideLine.setAttribute("opacity", "0.55");
-    _gSymOverlay.appendChild(_flushGuideLine);
   }
-
-  // Convert guide endpoints to screen coords
-  const sa = worldToScreen(_flushGuide.guide.a.x, _flushGuide.guide.a.y);
-  const sb = worldToScreen(_flushGuide.guide.b.x, _flushGuide.guide.b.y);
-  _flushGuideLine.setAttribute("x1", String(sa.x));
-  _flushGuideLine.setAttribute("y1", String(sa.y));
-  _flushGuideLine.setAttribute("x2", String(sb.x));
-  _flushGuideLine.setAttribute("y2", String(sb.y));
-
-  // Ensure it is in the overlay (symbolRender clears overlay each frame, so we re-append)
-  if (!_gSymOverlay.contains(_flushGuideLine)) {
-    _gSymOverlay.appendChild(_flushGuideLine);
-  }
-}
-
-function _clearFlushGuideLine() {
-  if (_flushGuideLine && _flushGuideLine.parentNode) {
-    _flushGuideLine.parentNode.removeChild(_flushGuideLine);
-  }
-  // Keep the element cached; just not in the DOM
-}
-
-/**
- * Re-append the flush guide line into the overlay after symbolRender clears it.
- * Registered as a post-render hook (after symbolRenderFn) so the line survives
- * the per-frame _clearGroup that symbolRender runs on #symbol-overlay.
- * Called every frame; no-ops when no guide is active.
- */
-export function repositionFlushGuide() {
-  if (!_gSymOverlay || !_flushGuideLine || !_flushGuide) return;
-  // Only show during an active gesture in select/placement mode
-  if (_isDrawModeFn && _isDrawModeFn()) return;
   if (!_flushGuideLine.parentNode) {
     _gSymOverlay.appendChild(_flushGuideLine);
   }
-  // Recompute screen coords from world guide (view may have panned/zoomed)
-  const sa = worldToScreen(_flushGuide.guide.a.x, _flushGuide.guide.a.y);
-  const sb = worldToScreen(_flushGuide.guide.b.x, _flushGuide.guide.b.y);
+  // Recompute screen coords
+  const guide = _flushGuide.guide;
+  const sa = worldToScreen(guide.a.x, guide.a.y);
+  const sb = worldToScreen(guide.b.x, guide.b.y);
   _flushGuideLine.setAttribute("x1", String(sa.x));
   _flushGuideLine.setAttribute("y1", String(sa.y));
   _flushGuideLine.setAttribute("x2", String(sb.x));
   _flushGuideLine.setAttribute("y2", String(sb.y));
 }
+
+function _removeFlushLine() {
+  if (_flushGuideLine && _flushGuideLine.parentNode) {
+    _flushGuideLine.parentNode.removeChild(_flushGuideLine);
+  }
+}
+
+/**
+ * Build or update a single alignment guide <g> element.
+ * @param {number} idx  index into _alignGuideEls
+ * @param {{ kind:string, color:string, label:string, guide:{a,b} }} guide
+ */
+function _syncAlignGuideEl(idx, guide) {
+  let g = _alignGuideEls[idx];
+  if (!g) {
+    g = document.createElementNS(NS_SVG, "g");
+    g.setAttribute("class", "align-guide");
+    g.setAttribute("aria-hidden", "true");
+
+    const line = document.createElementNS(NS_SVG, "line");
+    line.setAttribute("class", "align-guide-line");
+    line.setAttribute("stroke-width", "1.4");
+    line.setAttribute("fill", "none");
+
+    const rect = document.createElementNS(NS_SVG, "rect");
+    rect.setAttribute("class", "align-guide-chip");
+    rect.setAttribute("rx", "3");
+    rect.setAttribute("ry", "3");
+    rect.setAttribute("height", "14");
+
+    const text = document.createElementNS(NS_SVG, "text");
+    text.setAttribute("class", "align-guide-label");
+    text.setAttribute("fill", "#14140f");
+    text.setAttribute("font-size", "9");
+    text.setAttribute("font-family", "var(--font-mono, monospace)");
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("dominant-baseline", "central");
+
+    g.appendChild(line);
+    g.appendChild(rect);
+    g.appendChild(text);
+    _alignGuideEls[idx] = g;
+  }
+
+  const line = g.querySelector(".align-guide-line");
+  const rect = g.querySelector(".align-guide-chip");
+  const text = g.querySelector(".align-guide-label");
+
+  // Update color
+  line.setAttribute("stroke", guide.color);
+  rect.setAttribute("fill", guide.color);
+
+  // Recompute screen coords
+  const sa = worldToScreen(guide.guide.a.x, guide.guide.a.y);
+  const sb = worldToScreen(guide.guide.b.x, guide.guide.b.y);
+  line.setAttribute("x1", String(sa.x));
+  line.setAttribute("y1", String(sa.y));
+  line.setAttribute("x2", String(sb.x));
+  line.setAttribute("y2", String(sb.y));
+
+  // Label chip at midpoint
+  const mx = (sa.x + sb.x) / 2;
+  const my = (sa.y + sb.y) / 2;
+  text.textContent = guide.label || "";
+  const labelW = (guide.label ? guide.label.length * 5.5 + 8 : 20);
+  rect.setAttribute("x", String(mx - labelW / 2));
+  rect.setAttribute("y", String(my - 7));
+  rect.setAttribute("width", String(labelW));
+  text.setAttribute("x", String(mx));
+  text.setAttribute("y", String(my));
+
+  // Ensure in overlay
+  if (!g.parentNode) {
+    _gSymOverlay.appendChild(g);
+  }
+}
+
+/**
+ * Clear all guide elements from the DOM.
+ */
+function _clearGuides() {
+  _removeFlushLine();
+  for (let i = 0; i < _alignGuideEls.length; i++) {
+    if (_alignGuideEls[i] && _alignGuideEls[i].parentNode) {
+      _alignGuideEls[i].parentNode.removeChild(_alignGuideEls[i]);
+    }
+    _alignGuideEls[i] = null;
+  }
+  _alignGuideEls.length = 0;
+  _activeGuides = [];
+}
+
+/**
+ * Re-append and reposition all active guides after symbolRender clears the overlay.
+ * Registered as a post-render hook (after symbolRenderFn).
+ * Called every frame; no-ops when no guide is active.
+ */
+export function repositionGuides() {
+  if (!_gSymOverlay) return;
+  if (_isDrawModeFn && _isDrawModeFn()) return;
+
+  // Flush guide
+  const flushEntry = _activeGuides.find(g => g.kind === "flush");
+  if (flushEntry && _flushGuide) {
+    _ensureFlushLine();
+  } else {
+    _removeFlushLine();
+  }
+
+  // Alignment guides
+  const alignGuides = _activeGuides.filter(g => g.kind === "align");
+  for (let i = 0; i < alignGuides.length; i++) {
+    _syncAlignGuideEl(i, alignGuides[i]);
+  }
+}
+
+/**
+ * Backward-compatible alias for repositionGuides.
+ * main.js currently imports this name; either can be used.
+ */
+export { repositionGuides as repositionFlushGuide };

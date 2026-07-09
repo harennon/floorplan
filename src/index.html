@@ -335,6 +335,31 @@
         .flush-guide { transition: none; }
       }
 
+      /* Alignment guide lines + label chips (LLD 34) */
+      :root {
+        --align-edge:   #b98bd9;  /* violet — edge-to-edge alignment */
+        --align-center: #7fd0c8;  /* teal   — center-to-center alignment */
+      }
+      .align-guide {
+        pointer-events: none;
+        transition: opacity 120ms ease;
+      }
+      .align-guide-line {
+        stroke-width: 1.4;
+        fill: none;
+      }
+      .align-guide-chip {
+        opacity: 0.9;
+      }
+      .align-guide-label {
+        fill: #14140f;
+        font-size: 9px;
+        font-family: var(--font-mono, monospace);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .align-guide { transition: none; }
+      }
+
       /* Hide cursor cell on narrow screens */
       @media (max-width: 560px) {
         .hud-cursor { display: none; }

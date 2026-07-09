@@ -382,6 +382,140 @@ export function nearestWallFlush(corners4, segments, wallM, thresholdM, parallel
   return best;
 }
 
+// ── Object alignment snapping (LLD 34) ───────────────────────────────────────
+
+/** Screen-px alignment threshold; converted to metres by the caller before use. */
+export const ALIGN_PX = 8;
+
+/**
+ * @typedef {{
+ *   delta: number,
+ *   line: number,
+ *   kind: "edge"|"center",
+ *   guide: { a: {x:number,y:number}, b: {x:number,y:number} }
+ * }} AlignAxisMatch
+ *
+ * @typedef {{ x: AlignAxisMatch|null, y: AlignAxisMatch|null }} AlignResult
+ */
+
+/**
+ * Compute the world-axis-aligned bounding box (AABB) of a symbol from its
+ * rotated corners. Returns { minX, maxX, cx, minY, maxY, cy }.
+ *
+ * @param {Sym} sym
+ * @returns {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }}
+ */
+export function aabb(sym) {
+  const cs = corners(sym);
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const c of cs) {
+    if (c.x < minX) minX = c.x;
+    if (c.x > maxX) maxX = c.x;
+    if (c.y < minY) minY = c.y;
+    if (c.y > maxY) maxY = c.y;
+  }
+  return { minX, maxX, cx: (minX + maxX) / 2, minY, maxY, cy: (minY + maxY) / 2 };
+}
+
+/**
+ * Find the nearest per-axis alignment of a dragged symbol's AABB to any
+ * candidate AABB.
+ *
+ * Pure: no global reads.
+ *
+ * @param {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }} dragAABB
+ * @param {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }[]} candidates
+ * @param {number} thresholdM  world-metre snap threshold
+ * @returns {AlignResult}
+ */
+export function nearestObjectAlignment(dragAABB, candidates, thresholdM) {
+  /** @type {AlignAxisMatch|null} */
+  let bestX = null;
+  let bestXGapAbs = Infinity;
+
+  /** @type {AlignAxisMatch|null} */
+  let bestY = null;
+  let bestYGapAbs = Infinity;
+
+  // Reference points for the dragged symbol on each axis
+  const dragXRefs = [dragAABB.minX, dragAABB.maxX, dragAABB.cx];
+  const dragYRefs = [dragAABB.minY, dragAABB.maxY, dragAABB.cy];
+
+  // Tiny epsilon for floating-point tie comparisons (avoids FP equality issues)
+  const TIE_EPS = 1e-9;
+
+  for (const cand of candidates) {
+    // Candidate lines for each axis
+    const candXLines = [cand.minX, cand.maxX, cand.cx];
+    const candYLines = [cand.minY, cand.maxY, cand.cy];
+
+    // ── X axis ──────────────────────────────────────────────────────────────
+    for (let ri = 0; ri < dragXRefs.length; ri++) {
+      for (let ci = 0; ci < candXLines.length; ci++) {
+        const gap = candXLines[ci] - dragXRefs[ri];
+        const gapAbs = Math.abs(gap);
+        if (gapAbs > thresholdM) continue;
+
+        // Prefer smaller gap; on tie (within epsilon) prefer center, then first-seen
+        const isCenterMatch = ri === 2 && ci === 2;
+        const existingIsCenterMatch = bestX !== null && bestX.kind === "center";
+        const strictlyBetter = gapAbs < bestXGapAbs - TIE_EPS;
+        const tieAndCenter = gapAbs <= bestXGapAbs + TIE_EPS && isCenterMatch && !existingIsCenterMatch;
+        if (strictlyBetter || tieAndCenter) {
+          bestXGapAbs = gapAbs;
+          const kind = isCenterMatch ? "center" : "edge";
+          // Vertical guide spanning both symbols' Y extents
+          const guideMinY = Math.min(dragAABB.minY, cand.minY);
+          const guideMaxY = Math.max(dragAABB.maxY, cand.maxY);
+          const lineX = candXLines[ci];
+          bestX = {
+            delta: gap,
+            line: lineX,
+            kind,
+            guide: {
+              a: { x: lineX, y: guideMinY },
+              b: { x: lineX, y: guideMaxY },
+            },
+          };
+        }
+      }
+    }
+
+    // ── Y axis ──────────────────────────────────────────────────────────────
+    for (let ri = 0; ri < dragYRefs.length; ri++) {
+      for (let ci = 0; ci < candYLines.length; ci++) {
+        const gap = candYLines[ci] - dragYRefs[ri];
+        const gapAbs = Math.abs(gap);
+        if (gapAbs > thresholdM) continue;
+
+        const isCenterMatch = ri === 2 && ci === 2;
+        const existingIsCenterMatch = bestY !== null && bestY.kind === "center";
+        const strictlyBetter = gapAbs < bestYGapAbs - TIE_EPS;
+        const tieAndCenter = gapAbs <= bestYGapAbs + TIE_EPS && isCenterMatch && !existingIsCenterMatch;
+        if (strictlyBetter || tieAndCenter) {
+          bestYGapAbs = gapAbs;
+          const kind = isCenterMatch ? "center" : "edge";
+          // Horizontal guide spanning both symbols' X extents
+          const guideMinX = Math.min(dragAABB.minX, cand.minX);
+          const guideMaxX = Math.max(dragAABB.maxX, cand.maxX);
+          const lineY = candYLines[ci];
+          bestY = {
+            delta: gap,
+            line: lineY,
+            kind,
+            guide: {
+              a: { x: guideMinX, y: lineY },
+              b: { x: guideMaxX, y: lineY },
+            },
+          };
+        }
+      }
+    }
+  }
+
+  return { x: bestX, y: bestY };
+}
+
 // ── Hydrate (LLD 16) ─────────────────────────────────────────────────────────
 
 /**

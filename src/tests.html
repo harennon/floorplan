@@ -5431,6 +5431,211 @@ describe("nearestWallFlush — edge cases", () => {
   });
 });
 
+// ─── Import LLD-34 modules ────────────────────────────────────────────────────
+
+import {
+  ALIGN_PX, aabb as symAabb34, nearestObjectAlignment,
+} from "./js/symbols.js";
+
+// ─── Helpers for LLD-34 tests ─────────────────────────────────────────────────
+
+/** Build an AABB directly from known min/max coordinates. */
+function mkAABB(minX, maxX, minY, maxY) {
+  return { minX, maxX, cx: (minX + maxX) / 2, minY, maxY, cy: (minY + maxY) / 2 };
+}
+
+// ─── Tests: nearestObjectAlignment — unit geometry ────────────────────────────
+
+describe("nearestObjectAlignment — edge-to-edge contact (right→left, 0-gap)", () => {
+  it("dragged right edge just inside threshold of candidate left edge → X match, edges coincide", () => {
+    // Drag: minX=-1, maxX=1, cx=0; Y far from cand so no Y match
+    const drag = mkAABB(-1, 1, 0, 1);
+    // Cand: minX=2, maxX=4, cx=3; cand.cy=5 (far from drag.cy=0.5)
+    // dragMaxX(1) → candMinX(2): gap=1, within threshold=1.5
+    // No center match: drag.cx=0, cand.cx=3 → gap=3, too far
+    const cand = mkAABB(2, 4, 4, 6);
+    const result = nearestObjectAlignment(drag, [cand], 1.5);
+    if (result.x === null) throw new Error("Expected x match");
+    expect(result.x.delta).toBeCloseTo(1, 6);
+    expect(result.x.kind).toBe("edge");
+    expect(result.y).toBe(null);
+  });
+
+  it("right→left contact: applying delta makes right edge of drag equal cand left edge", () => {
+    const drag = mkAABB(-1, 1, 0, 1);
+    const cand = mkAABB(2, 4, 4, 6);
+    const result = nearestObjectAlignment(drag, [cand], 1.5);
+    if (result.x === null) throw new Error("Expected x match");
+    const newMaxX = drag.maxX + result.x.delta;
+    expect(newMaxX).toBeCloseTo(cand.minX, 9);
+  });
+});
+
+describe("nearestObjectAlignment — left edge to left edge alignment", () => {
+  it("drag left edge near cand left edge → X match, kind:edge, no center ambiguity", () => {
+    // drag: minX=0, maxX=2, cx=1 | cand: minX=0.05, maxX=3, cx=1.525
+    // drag.minX vs cand.minX: gap=0.05 (edge) ← WINNER (smallest gap)
+    // drag.cx(1) vs cand.cx(1.525): gap=0.525 > threshold=0.15 (filtered)
+    // drag.maxX(2) vs cand.maxX(3): gap=1, too far
+    // → edge match at gap=0.05 < 0.15 threshold; center NOT in range
+    // Y: drag far from cand on Y axis (cand minY=5, drag maxY=1)
+    const drag = mkAABB(0, 2, 0, 1);
+    const cand = mkAABB(0.05, 3.0, 5, 6);
+    const result = nearestObjectAlignment(drag, [cand], 0.15);
+    if (result.x === null) throw new Error("Expected x match");
+    expect(result.x.kind).toBe("edge");
+    expect(drag.minX + result.x.delta).toBeCloseTo(cand.minX, 9);
+    expect(result.y).toBe(null);
+  });
+});
+
+describe("nearestObjectAlignment — center-to-center on X only", () => {
+  it("only center pair within threshold → X match, kind:center", () => {
+    // drag: minX=0, maxX=10, cx=5
+    // cand: minX=10.2, maxX=15, cx=12.6
+    // drag.maxX(10) vs cand.minX(10.2): gap=0.2, edge, within threshold=0.5
+    // drag.cx(5) vs cand.cx(12.6): gap=7.6, too far
+    // Hmm, still edge match... Let me use a cand that ONLY the center pair is in range.
+    // drag: minX=0, maxX=2, cx=1
+    // cand: minX=-5, maxX=-3, cx=-4
+    // drag.cx(1) vs cand.cx(-4): gap=-5, too far
+    // Let me instead just pick a fixture where cand.cx is near drag.cx but edges are far.
+    // drag: minX=0, maxX=2, cx=1 | cand: minX=-8, maxX=10, cx=1.05
+    // drag.cx(1) vs cand.cx(1.05): gap=0.05, center ← only center in threshold=0.1
+    // drag.minX(0) vs cand.minX(-8): gap=-8, too far
+    // drag.maxX(2) vs cand.maxX(10): gap=8, too far
+    // drag.minX(0) vs cand.cx(1.05): gap=1.05, too far
+    // drag.maxX(2) vs cand.cx(1.05): gap=-0.95, too far
+    // drag.cx(1) vs cand.minX(-8): gap=-9, too far; vs cand.maxX(10): gap=9, too far
+    // Y far from cand (cand minY=5)
+    const drag = mkAABB(0, 2, 0, 1);
+    const cand = mkAABB(-8, 10, 5, 6);  // cx=1 (same as drag.cx)
+    // Actually cand.cx = (-8+10)/2 = 1.0, exactly equal to drag.cx
+    // drag.cx(1) vs cand.cx(1): gap=0, center match within any threshold
+    const result = nearestObjectAlignment(drag, [cand], 0.1);
+    if (result.x === null) throw new Error("Expected x match");
+    expect(result.x.kind).toBe("center");
+    expect(drag.cx + result.x.delta).toBeCloseTo(cand.cx, 9);
+    expect(result.y).toBe(null);
+  });
+});
+
+describe("nearestObjectAlignment — center-to-center on both axes", () => {
+  it("only center pairs within threshold → both matches, both kind:center", () => {
+    // drag: cx=5, cy=5; cand: cx=5.05, cy=5.07 (only centers close, edges far)
+    // drag: minX=4, maxX=6, cx=5; minY=4, maxY=6, cy=5
+    // cand: minX=0, maxX=10.1, cx=5.05; minY=0, maxY=10.14, cy=5.07
+    // X: drag.cx(5) vs cand.cx(5.05): gap=0.05, center; no edge pair close
+    // Y: drag.cy(5) vs cand.cy(5.07): gap=0.07, center; no edge pair close
+    const drag = mkAABB(4, 6, 4, 6);
+    const cand = mkAABB(0, 10.1, 0, 10.14);
+    const result = nearestObjectAlignment(drag, [cand], 0.2);
+    if (result.x === null) throw new Error("Expected x match");
+    if (result.y === null) throw new Error("Expected y match");
+    expect(result.x.kind).toBe("center");
+    expect(result.y.kind).toBe("center");
+  });
+});
+
+describe("nearestObjectAlignment — beyond threshold on both axes → null", () => {
+  it("gap > threshold on both axes → {x:null, y:null}", () => {
+    const drag = mkAABB(0, 1, 0, 1);
+    const cand = mkAABB(5, 6, 5, 6); // far away
+    const result = nearestObjectAlignment(drag, [cand], 0.3);
+    expect(result.x).toBe(null);
+    expect(result.y).toBe(null);
+  });
+});
+
+describe("nearestObjectAlignment — multiple candidates, smallest gap wins; center preferred over edge on tie", () => {
+  it("two candidates on X: closer one wins", () => {
+    // drag: maxX=2; cand1 minX=2.4 (gap=0.4); cand2 minX=2.1 (gap=0.1) — cand2 wins
+    // Y: both candidates far from drag on Y axis
+    const drag = mkAABB(0, 2, 0, 0.5);
+    const cand1 = mkAABB(2.4, 4.4, 5, 6);
+    const cand2 = mkAABB(2.1, 4.1, 5, 6);
+    const result = nearestObjectAlignment(drag, [cand1, cand2], 0.5);
+    if (result.x === null) throw new Error("Expected x match");
+    expect(Math.abs(result.x.delta)).toBeCloseTo(0.1, 6);
+    expect(result.y).toBe(null);
+  });
+
+  it("tie in |gap|: center match wins over edge match (same candidate)", () => {
+    // Use a single candidate where we can control which pairs match.
+    // drag.cx = 1, cand has minX=1 (so drag.cx == cand.minX, both gap=0, edge)
+    // AND cand.cx = 1 (so drag.cx == cand.cx, gap=0, center).
+    // The center pair (ri=2,ci=2) should win over edge pair (ri=2, ci=0 → drag.cx vs cand.minX).
+    // Build a candidate where minX=cx=1:
+    const drag  = mkAABB(0, 2, 0, 1);   // cx=1
+    const cand  = mkAABB(1, 1, 5, 6);   // minX=1=maxX=1, cx=1 (degenerate, but valid AABB)
+    const result = nearestObjectAlignment(drag, [cand], 0.1);
+    if (result.x === null) throw new Error("Expected x match");
+    expect(result.x.kind).toBe("center");
+  });
+});
+
+describe("nearestObjectAlignment — guide span brackets both symbols", () => {
+  it("X match guide is vertical, spanning y extents of both drag and cand", () => {
+    // drag: maxX=2, Y=[1,3]; cand: minX=2 (gap=0, edge), Y=[0,2]
+    // cand.cx far from drag.cx on X → only edge match fires
+    const drag = mkAABB(0, 2, 1, 3);
+    const cand = mkAABB(2, 20, 0, 2);   // minX=2, cx=11 (far from drag.cx=1)
+    const result = nearestObjectAlignment(drag, [cand], 0.05);
+    if (result.x === null) throw new Error("Expected x match");
+    const g = result.x.guide;
+    expect(g.a.x).toBeCloseTo(g.b.x, 9); // vertical: same x
+    expect(Math.min(g.a.y, g.b.y)).toBeCloseTo(0, 9);
+    expect(Math.max(g.a.y, g.b.y)).toBeCloseTo(3, 9);
+  });
+
+  it("Y match guide is horizontal, spanning x extents of both drag and cand", () => {
+    // drag: maxY=2, X=[1,3]; cand: minY=2 (gap=0, edge), X=[0,2]
+    const drag = mkAABB(1, 3, 0, 2);
+    const cand = mkAABB(0, 2, 2, 20);   // minY=2, cy=11 (far from drag.cy=1)
+    const result = nearestObjectAlignment(drag, [cand], 0.05);
+    if (result.y === null) throw new Error("Expected y match");
+    const g = result.y.guide;
+    expect(g.a.y).toBeCloseTo(g.b.y, 9); // horizontal: same y
+    expect(Math.min(g.a.x, g.b.x)).toBeCloseTo(0, 9);
+    expect(Math.max(g.a.x, g.b.x)).toBeCloseTo(3, 9);
+  });
+});
+
+describe("nearestObjectAlignment — rotated symbol AABB", () => {
+  it("aabb of a 45° rotated 2×2 symbol is larger than the footprint", () => {
+    const sym = { id:"rr0", type:"table", x:0, y:0, w:2, h:2, rot:45 };
+    const box = symAabb34(sym);
+    // After 45° rotation, AABB should extend beyond ±1 (half of 2) toward sqrt(2) ≈ 1.41
+    if (box.maxX < 1.3) throw new Error(`Expected maxX > sqrt(2) ≈ 1.41, got ${box.maxX}`);
+    if (box.maxY < 1.3) throw new Error(`Expected maxY > sqrt(2) ≈ 1.41, got ${box.maxY}`);
+    expect(box.cx).toBeCloseTo(0, 6);
+    expect(box.cy).toBeCloseTo(0, 6);
+  });
+});
+
+describe("nearestObjectAlignment — empty candidates", () => {
+  it("no candidates → {x:null, y:null}", () => {
+    const drag = mkAABB(0, 2, 0, 1);
+    const result = nearestObjectAlignment(drag, [], 0.3);
+    expect(result.x).toBe(null);
+    expect(result.y).toBe(null);
+  });
+});
+
+// ─── Tests: LLD-34 regression — plan JSON unaffected ─────────────────────────
+
+describe("LLD-34 — alignment adds NO new keys to plan JSON", () => {
+  it("buildPlan() does not include alignment or guide state", () => {
+    resetAll();
+    const p = buildPlan();
+    const json = serializePlan(p);
+    if (json.includes("alignX"))     throw new Error("'alignX' leaked into plan JSON");
+    if (json.includes("alignY"))     throw new Error("'alignY' leaked into plan JSON");
+    if (json.includes("activeGuide"))throw new Error("'activeGuide' leaked into plan JSON");
+    if (json.includes("ALIGN_PX"))   throw new Error("'ALIGN_PX' leaked into plan JSON");
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 
