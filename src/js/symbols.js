@@ -387,12 +387,16 @@ export function nearestWallFlush(corners4, segments, wallM, thresholdM, parallel
 /** Screen-px alignment threshold; converted to metres by the caller before use. */
 export const ALIGN_PX = 8;
 
+/** Screen-px room-center threshold; converted to metres by the caller before use. */
+export const ROOM_CENTER_PX = 8;
+
 /**
  * @typedef {{
  *   delta: number,
  *   line: number,
- *   kind: "edge"|"center",
- *   guide: { a: {x:number,y:number}, b: {x:number,y:number} }
+ *   kind: "edge"|"center"|"room-center",
+ *   guide: { a: {x:number,y:number}, b: {x:number,y:number} },
+ *   center?: { x:number, y:number }
  * }} AlignAxisMatch
  *
  * @typedef {{ x: AlignAxisMatch|null, y: AlignAxisMatch|null }} AlignResult
@@ -514,6 +518,85 @@ export function nearestObjectAlignment(dragAABB, candidates, thresholdM) {
   }
 
   return { x: bestX, y: bestY };
+}
+
+// ── Room-center snapping (LLD 37) ─────────────────────────────────────────────
+
+/**
+ * Snap the dragged AABB CENTER to a SINGLE room's centroid / mid-lines.
+ *
+ * Selects one target room (min dx²+dy² among rooms with at least one axis in
+ * threshold; ties first-seen), then emits x and/or y matches from THAT room only,
+ * so both returned axes share one centroid (ring marker is unambiguous, full snap
+ * lands exactly on the centroid). Pure: no global reads. Only cx/cy of the drag
+ * AABB participate (center-only snap).
+ *
+ * @param {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }} dragAABB
+ * @param {{ cx:number, cy:number }[]} roomCenters
+ * @param {number} thresholdM
+ * @returns {AlignResult}   // { x:AlignAxisMatch|null, y:... }; both from same room
+ */
+export function nearestRoomCenter(dragAABB, roomCenters, thresholdM) {
+  // Find the eligible room with the smallest dx²+dy² from the drag center
+  let bestRoom = null;
+  let bestDistSq = Infinity;
+
+  for (const rc of roomCenters) {
+    const dx = rc.cx - dragAABB.cx;
+    const dy = rc.cy - dragAABB.cy;
+    // A room is eligible if at least one axis is within threshold
+    if (Math.abs(dx) > thresholdM && Math.abs(dy) > thresholdM) continue;
+    const distSq = dx * dx + dy * dy;
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      bestRoom = rc;
+    }
+  }
+
+  if (bestRoom === null) {
+    return { x: null, y: null };
+  }
+
+  // From the chosen room only, emit matches for in-range axes
+  const dx = bestRoom.cx - dragAABB.cx;
+  const dy = bestRoom.cy - dragAABB.cy;
+  const centerPt = { x: bestRoom.cx, y: bestRoom.cy };
+
+  let xMatch = null;
+  if (Math.abs(dx) <= thresholdM) {
+    // Vertical guide at x = room.cx, spanning y ∈ [min(dragAABB.minY, room.cy), max(dragAABB.maxY, room.cy)]
+    const guideMinY = Math.min(dragAABB.minY, bestRoom.cy);
+    const guideMaxY = Math.max(dragAABB.maxY, bestRoom.cy);
+    xMatch = {
+      delta: dx,
+      line: bestRoom.cx,
+      kind: "room-center",
+      guide: {
+        a: { x: bestRoom.cx, y: guideMinY },
+        b: { x: bestRoom.cx, y: guideMaxY },
+      },
+      center: centerPt,
+    };
+  }
+
+  let yMatch = null;
+  if (Math.abs(dy) <= thresholdM) {
+    // Horizontal guide at y = room.cy, spanning x ∈ [min(dragAABB.minX, room.cx), max(dragAABB.maxX, room.cx)]
+    const guideMinX = Math.min(dragAABB.minX, bestRoom.cx);
+    const guideMaxX = Math.max(dragAABB.maxX, bestRoom.cx);
+    yMatch = {
+      delta: dy,
+      line: bestRoom.cy,
+      kind: "room-center",
+      guide: {
+        a: { x: guideMinX, y: bestRoom.cy },
+        b: { x: guideMaxX, y: bestRoom.cy },
+      },
+      center: centerPt,
+    };
+  }
+
+  return { x: xMatch, y: yMatch };
 }
 
 // ── Hydrate (LLD 16) ─────────────────────────────────────────────────────────
