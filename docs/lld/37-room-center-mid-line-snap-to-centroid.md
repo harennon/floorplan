@@ -81,22 +81,48 @@ Cy = 1/(6A) · Σ (yᵢ + yᵢ₊₁)(xᵢ·yᵢ₊₁ − xᵢ₊₁·yᵢ)
 ### Match geometry — `symbols.js` `nearestRoomCenter()`
 
 The dragged symbol's reference points are its AABB center only — `cx` on X, `cy` on Y
-(room-center is a *center* snap; edges never participate). For each room center and each
-axis:
+(room-center is a *center* snap; edges never participate).
 
-- X: `gap = room.cx − dragAABB.cx`; if `|gap| ≤ thresholdM` it is a candidate translation.
-- Y: `gap = room.cy − dragAABB.cy`; symmetric.
+**Single-room selection (the key departure from `nearestObjectAlignment`).** Unlike object
+alignment — where `bestX` and `bestY` are chosen independently across all candidates —
+room-center commits to **one** target room per call and emits both axes from *that room
+only*. This is deliberate: a centroid is a single point, so allowing X to snap to roomA's
+centroid while Y snaps to roomB's centroid would land the symbol on **no** centroid at all
+and leave the ring marker (drawn at a room's `{cx,cy}`) floating away from the symbol center
+— a misleading "you are on the room center" cue. Committing to one room keeps the centroid
+snap coherent and the ring truthful.
 
-Keep the smallest `|gap|` per axis across all rooms. Every match is `kind:"room-center"`.
+Selection algorithm:
+
+1. For each closed room center, compute `dx = room.cx − dragAABB.cx`, `dy = room.cy −
+   dragAABB.cy`.
+2. A room is **eligible** if at least one axis is within threshold: `|dx| ≤ thresholdM`
+   **or** `|dy| ≤ thresholdM`.
+3. Among eligible rooms, pick the one minimizing squared distance `dx² + dy²` from the drag
+   center to the centroid. Ties → first-seen (documented, not load-bearing). This naturally
+   favors a room the symbol is near-centered in (both axes in range ⇒ small distance) over a
+   room offering only a distant mid-line.
+4. From the **chosen room only**, emit `x` match iff `|dx| ≤ thresholdM` and `y` match iff
+   `|dy| ≤ thresholdM`. Both matches carry that room's centroid in `center`.
+
+If no room is eligible, return `{x:null, y:null}`. Every emitted match is
+`kind:"room-center"`.
+
+Consequence: when both axes match, they come from the same room, so the symbol lands exactly
+on that centroid and the ring coincides with the symbol center (resolves Edge Case 8). When
+only one axis matches (mid-line snap), the symbol sits on that mid-line and the ring sits on
+the guide line at the room's true center — a correct "this line is the room's mid-line" cue,
+not a floating marker.
+
+Guides (per emitted match, centroid treated as a zero-size point à la LLD-34 span rule):
 
 - **X match → vertical guide** at `x = room.cx`, spanning `y ∈ [min(dragAABB.minY, room.cy),
-  max(dragAABB.maxY, room.cy)]` — bracketing symbol-to-centroid (Direction B), matching the
-  LLD-34 span rule with the centroid treated as a zero-size point.
+  max(dragAABB.maxY, room.cy)]`.
 - **Y match → horizontal guide** at `y = room.cy`, spanning `x ∈ [min(dragAABB.minX,
   room.cx), max(dragAABB.maxX, room.cx)]`.
-- The matched room's centroid `{cx, cy}` is carried on the match (new optional `center`
-  field) so the resolver can place the ring marker. On X/Y ties between rooms, first-seen
-  wins (documented, not load-bearing).
+- The chosen room's centroid `{cx, cy}` is carried on each match (new optional `center`
+  field). Because both axes (when present) come from the same room, the resolver has a single
+  unambiguous `{cx,cy}` for the ring marker regardless of which axis wins tier-4 contention.
 
 ### Resolver — tier 4 shared with object alignment (in `symbolTool.js`)
 
@@ -105,12 +131,25 @@ Tier 4 now contains **both** object alignment and room-center; they are peers. F
 **not already claimed by wall-flush**, when `prefs.gridSnap()` is on:
 
 1. Compute `objectMatch = nearestObjectAlignment(...)` (LLD 34, unchanged) and
-   `roomMatch = nearestRoomCenter(dragAABB, _roomCenters, roomThreshM)`.
+   `roomMatch = nearestRoomCenter(dragAABB, _roomCenters, roomThreshM)`. `roomMatch`'s X and
+   Y (when both present) are guaranteed to reference the **same** room (single-room selection,
+   see Match geometry), so the two axes never disagree about which centroid the ring marks.
 2. Per axis, among the available matches (either/both/neither), pick the one with the
    **smaller `|delta|`** ("nearer target wins the axis"). Apply its delta, mark the axis
-   `snapType = "align"`, and record the chosen match (with its `kind`) for the guide.
+   `snapType = "align"`, and record the chosen match (with its `kind`) for the guide. Note the
+   axes are resolved independently *here* only to arbitrate room-center vs. object-align on
+   each axis; the room-center candidate itself is already axis-coherent from step 1, so a
+   full centroid snap (both axes room-center) always lands the symbol on that one centroid.
 3. Ties (`|delta|` within `1e-9`): prefer object alignment (it is the finer, edge-aware snap
    and shipped first) — documented, not load-bearing.
+
+**On the two tie rules.** Inter-room ties inside `nearestRoomCenter` resolve first-seen
+(step 3 of Match geometry); tier-4 object-vs-room ties inside `_resolvePlacement` prefer
+object alignment (item 3 above). These are different scopes — one picks *which room*, the
+other picks *which snap class on an axis* — and both are deliberately arbitrary tie-breaks on
+exact-`|delta|` coincidences that are vanishingly rare with float world coordinates. Their
+interaction on a doubly-contested axis is intentional and not load-bearing: no correctness
+property depends on either choice.
 
 Grid then fills any still-unclaimed axis, exactly as today. The dominant `.snap-tag`
 `snapType` priority is unchanged (`flush > align > grid > free`); room-center reports as
@@ -161,12 +200,21 @@ Per active room-center match:
   as LLD 34: rounded `rect` filled rose, text ink `#14140f`, label `"room"` (short; refine
   later without a design change).
 - **Centroid ring marker (new, the only new visual):** a small hollow `<circle>` (r ≈ 4px,
-  `stroke = var(--room-center)`, `stroke-width 1.4`, `fill none`) centered at the matched
-  room's `{cx, cy}`, rendered into `#symbol-overlay`. It reads as a distinct "you are on the
-  room center" cue and disambiguates centroid snap from object-center snap. Drawn once when
-  either axis matches (use the axis match that carries `center`); reuse the same per-frame
-  clear/re-append path as the guides. It is `aria-hidden` decoration with `pointer-events:
-  none`.
+  `stroke = var(--room-center)`, `stroke-width 1.4`, `fill none`) centered at the **chosen
+  room's centroid `{cx, cy}`**, rendered into `#symbol-overlay`. Because `nearestRoomCenter`
+  commits to a single room, both emitted axis matches carry the *same* `{cx,cy}`, so the ring
+  position is unambiguous no matter which axis (or both) survives tier-4 contention. Drawn
+  once whenever any active align match has `kind:"room-center"` (read `center` from whichever
+  such match is present). Reuse the same per-frame clear/re-append path as the guides. It is
+  `aria-hidden` decoration with `pointer-events: none`.
+
+  **Semantics — the ring is a landmark, not a "symbol is here" dot.** It always sits at the
+  room's true centroid, which lies on the active room-center guide line(s). When both axes
+  snap to that room, the ring coincides with the symbol center (full centroid snap). When
+  only one axis is a room-center snap (mid-line snap, or the orthogonal axis went to
+  wall-flush / object-align), the ring still marks the room centroid on the active mid-line
+  guide — reinforcing "this line is the room's mid-line" rather than implying the symbol is
+  centered. This is intentional and consistent: the ring never floats off its own guide.
 
 Implement the ring by extending the guide `<g>` (append a `<circle class="room-center-ring">`)
 or as a sibling element in the same overlay group — implementer's choice; it must ride the
@@ -227,12 +275,16 @@ export const ROOM_CENTER_PX = 8;
  *   center?:{ x:number, y:number }
  * }} AlignAxisMatch
  *
- * Nearest per-axis snap of the dragged AABB CENTER to any room centroid / mid-line.
- * Pure: no global reads. Only cx/cy of the drag AABB participate (center-only snap).
+ * Snap of the dragged AABB CENTER to a SINGLE room's centroid / mid-lines.
+ * Selects one target room (min dx^2+dy^2 among rooms with at least one axis in
+ * threshold; ties first-seen), then emits x and/or y matches from THAT room only,
+ * so both returned axes share one centroid (ring marker is unambiguous, full snap
+ * lands exactly on the centroid). Pure: no global reads. Only cx/cy of the drag
+ * AABB participate (center-only snap).
  * @param {{minX,maxX,cx,minY,maxY,cy}} dragAABB
  * @param {{ cx:number, cy:number }[]} roomCenters
  * @param {number} thresholdM
- * @returns {import("./symbols.js").AlignResult}   // { x:AlignAxisMatch|null, y:... }
+ * @returns {import("./symbols.js").AlignResult}   // { x:AlignAxisMatch|null, y:... }; both from same room
  */
 export function nearestRoomCenter(dragAABB, roomCenters, thresholdM);
 ```
@@ -300,18 +352,34 @@ Keep `nearestRoomCenter` pure and exported so it is unit-tested directly, exactl
    guides render, colored per their own `kind` (rose room-center + violet/teal object).
 7. **Wall-flush claims an axis** → room-center (and object-align) skip that axis entirely;
    room-center may still claim the orthogonal axis.
-8. **Both axes match centroid** → symbol lands on the centroid; two rose guides (vertical +
-   horizontal L-bracket) + one ring marker at `{cx,cy}`.
-9. **Multiple rooms in range on an axis** → smallest `|gap|` wins; inter-room ties first-seen.
+8. **Both axes match centroid** → because `nearestRoomCenter` commits to a single room, both
+   axes reference the *same* centroid, so the symbol lands exactly on that centroid; two rose
+   guides (vertical + horizontal L-bracket) + one ring marker at that room's `{cx,cy}`, which
+   now coincides with the symbol center. (No X-from-roomA / Y-from-roomB hybrid is possible.)
+9. **Multiple rooms in range** → one room is chosen (min `dx²+dy²` from drag center to
+   centroid; ties first-seen), and both axes come from that room. A room in range on X and a
+   different room in range on Y can never split the two axes (single-room selection); the
+   nearer centroid overall wins the whole snap.
 10. **Dragged symbol is itself inside/over a room** → still snaps to that room's centroid;
     intended (centering a table in its own room is the headline use case).
 11. **Rotated furniture** → uses the AABB center (`cx`/`cy`), which equals the symbol center
     regardless of rotation, so a rotated table still centers correctly.
-12. **Nested / overlapping rooms** → each closed room yields its own centroid; nearest per
-    axis wins. Acceptable; the user is actively dragging.
-13. **Non-convex (L-shaped) room** → true polygon centroid may lie outside the floor area;
-    that is the mathematically correct centroid and matches "balance point" intuition. Noted;
-    not special-cased.
+12. **Nested / overlapping rooms** → each closed room yields its own centroid, but a single
+    room is chosen per frame (min `dx²+dy²`, Edge Case 9), so the symbol always snaps to one
+    coherent centroid and the ring marks that one room. No hybrid X-from-one / Y-from-another
+    landing. Acceptable; the user is actively dragging.
+13. **Non-convex (L-shaped) room** → the true polygon centroid can fall outside the floor
+    area (in the notch, or in a wall). We snap to it anyway — it is the mathematically correct
+    centroid / balance point. **Known UX wrinkle:** for the headline "center a table in its
+    own room" flow (Edge Case 10), this can place the table into a wall or notch, which reads
+    as wrong for a "does my couch fit" tool even though it is geometrically correct. We accept
+    this for v1 because (a) L-shaped rooms are a minority of the lowest-frequency snap case,
+    (b) the snap is only a suggestion during an active drag the user can override (Alt, or
+    just drag past threshold), and (c) computing a guaranteed-interior "visual center" (e.g.
+    pole-of-inaccessibility) is materially more code than this small, deferrable feature
+    warrants. If real usage shows this biting users, revisit with a visual-center algorithm.
+    **Flagged for CEO/CX:** confirm shipping the mathematical centroid for non-convex rooms is
+    acceptable, or whether the parent #23 flow needs the interior-point variant instead.
 14. **Zoom** → threshold is `ROOM_CENTER_PX (8)` converted via `pxPerM()` at resolve time,
     ~8px on screen at any zoom, `< WALL_FLUSH_PX (12)`.
 15. **Guide/ring left on canvas** → forbidden; `_clearGuides()` on every gesture-end path
@@ -353,7 +421,11 @@ Tests live in the existing `src/tests.html` harness (`describe`/`it`), run headl
   `cx` coincide, `kind:"room-center"`, `center` carries `{cx,cy}`; `y` null.
 - Center within threshold on both axes → both `x` and `y` matches, both `room-center`.
 - Beyond threshold on both axes → `{x:null, y:null}`.
-- Two rooms in range on one axis → smaller `|gap|` wins.
+- Two rooms in range → the room with smaller `dx²+dy²` is chosen; both emitted axes carry
+  that room's `center` (never a mix of two rooms' centroids).
+- **Single-room coherence:** roomA in range on X only, roomB in range on Y only → the chosen
+  room emits only its in-range axis; the other axis is `null` (no X-from-A / Y-from-B split).
+  When both axes match, both `center` values are identical.
 - Guide span brackets symbol-center to centroid on the orthogonal axis (spot-check `a`/`b`).
 - Only the AABB center participates (edges near a centroid do NOT match) — verify a symbol
   whose edge (not center) is near the centroid produces no match.
