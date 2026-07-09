@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Mobile touch drawing ergonomics — floorplan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:         #14140f;
+    --bg-deep:    #100f0b;
+    --ink:        #ece7d6;
+    --ink-dim:    rgba(236, 231, 214, 0.55);
+    --gold:       #c9a84c;
+    --gold-soft:  rgba(201, 168, 76, 0.55);
+    --grid-fine:  rgba(201, 168, 76, 0.055);
+    --grid-major: rgba(201, 168, 76, 0.14);
+    --grid-axis:  rgba(201, 168, 76, 0.34);
+    --panel:      rgba(20, 20, 15, 0.72);
+    --panel-solid:rgba(18, 18, 13, 0.95);
+    --hairline:   rgba(201, 168, 76, 0.18);
+    --teal:       #7fd0c8;
+    --green:      #9cd67a;
+    --font-ui:      "DM Sans", system-ui, sans-serif;
+    --font-mono:    "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg-deep);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    min-height: 100vh;
+    padding: 28px 20px 60px;
+  }
+  a { color: var(--gold); }
+
+  header.doc {
+    max-width: 880px;
+    margin: 0 auto 26px;
+  }
+  header.doc .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--gold-soft);
+    margin: 0 0 8px;
+  }
+  header.doc h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 27px;
+    line-height: 1.2;
+    margin: 0 0 12px;
+    color: var(--ink);
+  }
+  header.doc p {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--ink-dim);
+    max-width: 62ch;
+    margin: 0 0 6px;
+  }
+  header.doc .flag {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 8px 12px;
+    border-left: 2px solid var(--gold);
+    background: rgba(201, 168, 76, 0.08);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--ink);
+    line-height: 1.5;
+  }
+
+  .options {
+    max-width: 1120px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 26px;
+    align-items: start;
+  }
+  .opt {
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    padding: 20px 20px 22px;
+    backdrop-filter: blur(8px);
+  }
+  .opt.recommended {
+    border-color: var(--gold-soft);
+    box-shadow: 0 0 0 1px rgba(201,168,76,0.12), 0 18px 40px -24px rgba(0,0,0,0.8);
+  }
+  .opt h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 18px;
+    margin: 0 0 3px;
+  }
+  .opt .tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 999px;
+    margin-bottom: 12px;
+  }
+  .tag.rec  { background: rgba(201,168,76,0.16); color: var(--gold); border:1px solid var(--gold-soft); }
+  .tag.alt  { background: rgba(127,208,200,0.12); color: var(--teal); border:1px solid rgba(127,208,200,0.3); }
+  .tag.alt2 { background: rgba(156,214,122,0.12); color: var(--green); border:1px solid rgba(156,214,122,0.3); }
+  .opt p.desc {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--ink-dim);
+    margin: 0 0 16px;
+  }
+  .opt ul.notes {
+    margin: 14px 0 0;
+    padding: 0 0 0 16px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--ink-dim);
+  }
+  .opt ul.notes li { margin-bottom: 5px; }
+  .opt ul.notes b { color: var(--ink); font-weight: 600; }
+
+  /* ── Phone frame ─────────────────────────────────────────── */
+  .phone {
+    position: relative;
+    width: 100%;
+    max-width: 300px;
+    margin: 0 auto 14px;
+    aspect-ratio: 300 / 560;
+    border-radius: 30px;
+    border: 8px solid #05050a;
+    box-shadow: 0 22px 50px -22px rgba(0,0,0,0.9), inset 0 0 0 1px rgba(201,168,76,0.1);
+    overflow: hidden;
+    background: var(--bg);
+    touch-action: none;
+    user-select: none;
+  }
+  .phone .notch {
+    position: absolute; top: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 90px; height: 18px;
+    background: #05050a;
+    border-radius: 0 0 12px 12px;
+    z-index: 40;
+  }
+  .canvas {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(120% 90% at 30% 20%, var(--bg) 0%, var(--bg-deep) 100%);
+    overflow: hidden;
+  }
+  .canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; display:block; }
+  .grid line.fine  { stroke: var(--grid-fine);  stroke-width: 1; }
+  .grid line.major { stroke: var(--grid-major); stroke-width: 1; }
+  .grid line.axis  { stroke: var(--grid-axis);  stroke-width: 1.5; }
+  .wall { stroke: var(--ink); stroke-width: 3; stroke-linecap: round; fill: none; }
+  .wall-draft { stroke: var(--gold); stroke-width: 3; stroke-dasharray: 6 5; stroke-linecap: round; fill:none; opacity:0.9; }
+  .vertex { fill: var(--gold); }
+
+  /* HUD chip */
+  .hud {
+    position: absolute; top: 26px; left: 12px;
+    display: flex; gap: 6px; z-index: 30;
+  }
+  .hud .chip {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    padding: 4px 8px;
+    border-radius: 7px;
+    background: var(--panel-solid);
+    border: 1px solid var(--hairline);
+    color: var(--ink);
+    display: flex; gap: 5px; align-items: center;
+  }
+  .hud .chip .k { color: var(--ink-dim); }
+  .hud .chip .v { color: var(--teal); font-weight: 500; }
+
+  /* Finger disc (represents fingertip contact) */
+  .finger {
+    position: absolute;
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, rgba(236,231,214,0.28), rgba(236,231,214,0.08) 60%, transparent 72%);
+    border: 1px solid rgba(236,231,214,0.22);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 20;
+  }
+  .finger::after {
+    content: "";
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(236,231,214,0.12);
+    animation: fpulse 2.6s ease-in-out infinite;
+  }
+  @keyframes fpulse {
+    0%,100% { transform: scale(1);   opacity: 0.5; }
+    50%     { transform: scale(1.35);opacity: 0;   }
+  }
+
+  /* Snap glyph: teal diamond + dot (matches wallRender grid glyph) */
+  .snap-glyph { pointer-events: none; z-index: 22; }
+  .snap-glyph .diamond { fill:none; stroke: var(--teal); stroke-width: 2; }
+  .snap-glyph .dot { fill: var(--teal); }
+  .snap-glyph .ring { fill:none; stroke: var(--gold); stroke-width: 2; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .finger::after { animation: none; }
+  }
+
+  /* OPTION A: magnifier loupe — round bubble above finger showing zoomed snap
+     point. The commit point stays UNDER the finger (no offset). */
+  .loupe {
+    position: absolute;
+    width: 96px; height: 96px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    border: 2px solid var(--gold-soft);
+    box-shadow: 0 10px 26px -10px rgba(0,0,0,0.85), inset 0 0 0 3px rgba(20,20,15,0.6);
+    overflow: hidden;
+    background: var(--bg);
+    pointer-events: none;
+    z-index: 25;
+  }
+  .loupe svg { position:absolute; inset:0; width:100%; height:100%; }
+  .loupe .xh { stroke: var(--teal); stroke-width: 1.5; }
+  .loupe-stem {
+    position: absolute;
+    width: 2px;
+    background: linear-gradient(var(--gold-soft), transparent);
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: 24;
+  }
+
+  /* OPTION C: side-thumb HUD "nudge pad" — arrows to micro-adjust the
+     committed point after a coarse tap; commit point is under finger. */
+  .nudge {
+    position: absolute;
+    right: 10px; bottom: 96px;
+    display: grid;
+    grid-template-columns: repeat(3, 30px);
+    grid-template-rows: repeat(3, 30px);
+    gap: 3px;
+    z-index: 30;
+  }
+  .nudge button {
+    border: 1px solid var(--hairline);
+    background: var(--panel-solid);
+    color: var(--ink-dim);
+    border-radius: 7px;
+    font-size: 13px;
+    display:flex; align-items:center; justify-content:center;
+    font-family: var(--font-mono);
+  }
+  .nudge button.mid { background: rgba(127,208,200,0.14); color: var(--teal); border-color: rgba(127,208,200,0.4); }
+  .nudge .sp { visibility: hidden; }
+
+  /* Bottom-sheet furniture dock (shared, shown in the "select" phone) */
+  .dock {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    background: var(--panel-solid);
+    border-top: 1px solid var(--hairline);
+    backdrop-filter: blur(10px);
+    padding: 10px 12px calc(10px + 8px);
+    z-index: 35;
+  }
+  .dock .grabber {
+    width: 34px; height: 4px; border-radius: 2px;
+    background: var(--hairline);
+    margin: 0 auto 9px;
+  }
+  .dock .row {
+    display: flex; gap: 9px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    touch-action: pan-x;
+  }
+  .dock .row::-webkit-scrollbar { display: none; }
+  .dock-item {
+    flex: 0 0 auto;
+    width: 52px; height: 52px;
+    border-radius: 11px;
+    border: 1px solid var(--hairline);
+    background: rgba(20,20,15,0.6);
+    color: var(--ink-dim);
+    display: flex; align-items:center; justify-content:center;
+    font-size: 22px;
+  }
+  .dock-item.active { border-color: var(--gold-soft); color: var(--gold); background: rgba(201,168,76,0.1); }
+
+  /* Touch-sized selection + handles */
+  .sym-box { fill: rgba(201,168,76,0.06); stroke: var(--gold); stroke-width: 1.5; }
+  .rot-stem { stroke: var(--gold-soft); stroke-width: 1.5; }
+  .rot-knob-hit { fill: rgba(201,168,76,0.14); }
+  .rot-knob { fill: var(--bg); stroke: var(--gold); stroke-width: 2; }
+  .resize-hit { fill: rgba(201,168,76,0.14); }
+  .resize { fill: var(--gold); }
+  .cmp-mouse .rot-knob-hit, .cmp-mouse .resize-hit { display: none; }
+
+  /* Gesture legend */
+  .legend {
+    max-width: 1120px;
+    margin: 34px auto 0;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    padding: 20px 22px;
+  }
+  .legend h2 {
+    font-family: var(--font-display); font-weight: 400; font-size: 17px; margin: 0 0 14px;
+  }
+  .legend .grid2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px 26px;
+  }
+  .legend .g {
+    display: flex; gap: 12px; align-items: flex-start;
+    font-size: 12.5px; line-height: 1.5; color: var(--ink-dim);
+  }
+  .legend .g .ic {
+    flex: 0 0 34px; height: 34px; border-radius: 8px;
+    background: rgba(201,168,76,0.08); border: 1px solid var(--hairline);
+    display:flex; align-items:center; justify-content:center; font-size:16px;
+  }
+  .legend .g b { color: var(--ink); display:block; font-weight:600; font-size:12.5px; margin-bottom:1px; }
+</style>
+</head>
+<body>
+<header class="doc">
+  <p class="eyebrow">Floorplan · LLD 48 · mobile-touch drawing ergonomics</p>
+  <h1>Draw &amp; snap with a finger — without the point landing where you can't see it</h1>
+  <p>
+    Drawing walls on a phone has one hard problem: your fingertip covers the exact
+    grid point you're trying to snap to. LLD&nbsp;46 solved this by committing the
+    vertex <em>56&nbsp;px above</em> the finger (an "offset loupe"). Field feedback:
+    that snaps <em>too high</em> — the point lands away from where the finger is,
+    so it feels wrong.
+  </p>
+  <p>
+    These three directions all <b>keep the commit point directly under the finger
+    (no offset)</b> and solve occlusion a different way. Everything else in scope —
+    two-finger pinch/pan disambiguation, finger-sized handles, page-gesture
+    suppression, the bottom-sheet dock — is shared across all three and shown below.
+    Tap a phone to place vertices.
+  </p>
+  <span class="flag">Reverses the offset-loupe decision from LLD&nbsp;46 per the issue
+  comment "snaps too high, don't use offset." The vertex now commits under the fingertip.</span>
+</header>
+
+<section class="options">
+
+  <!-- ══ OPTION A ══ -->
+  <article class="opt recommended">
+    <span class="tag rec">Recommended · Option A</span>
+    <h2>In-place magnifier loupe</h2>
+    <p class="desc">
+      The snap point stays exactly under the fingertip. A round magnifier bubble
+      floats above the finger and shows a zoomed live view of that hidden point,
+      with the snap crosshair centred. You aim by watching the bubble; the vertex
+      commits where your finger actually is.
+    </p>
+    <div class="phone" data-mode="draw" data-opt="A" aria-label="Option A demo — tap to place vertices">
+      <div class="notch"></div>
+      <div class="canvas">
+        <svg class="gridsvg" viewBox="0 0 300 560" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <svg class="drawsvg" viewBox="0 0 300 560" preserveAspectRatio="none" aria-hidden="true"></svg>
+      </div>
+      <div class="hud">
+        <span class="chip"><span class="k">snap</span><span class="v">grid</span></span>
+        <span class="chip"><span class="k">seg</span><span class="v cnt">0</span></span>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><b>Occlusion solved</b> without moving the commit point — no "too high" feel.</li>
+      <li>Bubble only appears while a finger is down in draw mode; hidden for mouse/pen.</li>
+      <li>Reuses the existing snap glyph; the loupe is a render-only overlay.</li>
+      <li>Costs a second cheap redraw of the canvas region into the bubble.</li>
+    </ul>
+  </article>
+
+  <!-- ══ OPTION B ══ -->
+  <article class="opt">
+    <span class="tag alt">Option B</span>
+    <h2>Big glyph + tether (no magnifier)</h2>
+    <p class="desc">
+      Simplest change. Commit point stays under the finger; the snap glyph just
+      grows larger under a coarse pointer (a ~28&nbsp;px teal diamond instead of
+      10&nbsp;px) and pokes out from under the fingertip, with a short tether so
+      you can read which grid point it locked onto. No zoom, no extra render pass.
+    </p>
+    <div class="phone" data-mode="draw" data-opt="B" aria-label="Option B demo — tap to place vertices">
+      <div class="notch"></div>
+      <div class="canvas">
+        <svg class="gridsvg" viewBox="0 0 300 560" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <svg class="drawsvg" viewBox="0 0 300 560" preserveAspectRatio="none" aria-hidden="true"></svg>
+      </div>
+      <div class="hud">
+        <span class="chip"><span class="k">snap</span><span class="v">grid</span></span>
+        <span class="chip"><span class="k">seg</span><span class="v cnt">0</span></span>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><b>Cheapest to build</b> — a coarse-pointer glyph size bump, no new module.</li>
+      <li>The glyph edge peeks past the finger; fine points can still be partly hidden.</li>
+      <li>Best when paired with the higher default zoom on touch (bigger cells).</li>
+    </ul>
+  </article>
+
+  <!-- ══ OPTION C ══ -->
+  <article class="opt">
+    <span class="tag alt2">Option C</span>
+    <h2>Tap-then-nudge</h2>
+    <p class="desc">
+      A coarse tap places the vertex under the finger (no offset), then a small
+      thumb-reachable D-pad lets you nudge it one grid cell at a time to fine-tune
+      before the next point. Precision without needing to see under the finger at
+      all — good for one-handed use.
+    </p>
+    <div class="phone" data-mode="draw" data-opt="C" aria-label="Option C demo — tap to place, then nudge">
+      <div class="notch"></div>
+      <div class="canvas">
+        <svg class="gridsvg" viewBox="0 0 300 560" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <svg class="drawsvg" viewBox="0 0 300 560" preserveAspectRatio="none" aria-hidden="true"></svg>
+      </div>
+      <div class="hud">
+        <span class="chip"><span class="k">snap</span><span class="v">grid</span></span>
+        <span class="chip"><span class="k">seg</span><span class="v cnt">0</span></span>
+      </div>
+      <div class="nudge" aria-label="Nudge last point">
+        <span class="sp"></span><button data-nudge="U">↑</button><span class="sp"></span>
+        <button data-nudge="L">←</button><button class="mid">·</button><button data-nudge="R">→</button>
+        <span class="sp"></span><button data-nudge="D">↓</button><span class="sp"></span>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><b>Most precise</b> and fully one-handed, but adds a step and on-screen chrome.</li>
+      <li>The D-pad occupies a corner of the canvas; extra UI to learn.</li>
+      <li>Nudge acts on the <b>last-placed</b> point until the next tap.</li>
+    </ul>
+  </article>
+</section>
+
+<section class="legend">
+  <h2>Shared across all options — gesture model &amp; touch targets</h2>
+  <div class="grid2">
+    <div class="g"><div class="ic">☝</div><div><b>One finger = draw / move / pan</b>Tap or drag places a vertex or moves a selected object; on empty canvas it pans.</div></div>
+    <div class="g"><div class="ic">✌</div><div><b>Two fingers = pinch-zoom + pan</b>A second finger cancels any in-flight one-finger gesture cleanly — no stray vertex.</div></div>
+    <div class="g"><div class="ic">⤢</div><div><b>44&nbsp;px handles on touch</b>Rotate knob and resize corners grow to a finger-sized hit area (28&nbsp;px visual + pad).</div></div>
+    <div class="g"><div class="ic">⿴</div><div><b>Page gestures suppressed</b><code>touch-action:none</code> + <code>overscroll-behavior:none</code> so a draw never scrolls/zooms the page.</div></div>
+  </div>
+
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:26px; margin-top:22px; align-items:start;">
+    <div>
+      <p style="font-size:12.5px; color:var(--ink-dim); line-height:1.55; margin:0 0 12px;">
+        <b style="color:var(--ink)">Select mode:</b> touch-sized rotate/resize handles
+        (left = touch, right = desktop mouse) and the swipeable bottom-sheet dock.
+        Drag the selected chair; the handles are hittable with a thumb.
+      </p>
+      <div class="phone" data-mode="select" aria-label="Select-mode demo — touch handles and dock">
+        <div class="notch"></div>
+        <div class="canvas">
+          <svg class="gridsvg" viewBox="0 0 300 560" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <svg class="selsvg" viewBox="0 0 300 560" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="hud">
+          <span class="chip"><span class="k">tool</span><span class="v">select</span></span>
+        </div>
+        <div class="dock" aria-label="Furniture dock">
+          <div class="grabber"></div>
+          <div class="row">
+            <button class="dock-item active" title="Chair">🪑</button>
+            <button class="dock-item" title="Sofa">🛋️</button>
+            <button class="dock-item" title="Bed">🛏️</button>
+            <button class="dock-item" title="Table">🍽️</button>
+            <button class="dock-item" title="Plant">🪴</button>
+            <button class="dock-item" title="Door">🚪</button>
+            <button class="dock-item" title="Bath">🛁</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="notes" style="margin-top:34px;">
+      <li><b>Handle sizing</b> is gated by <code>matchMedia("(any-pointer:coarse)")</code>, evaluated once at load — mouse path keeps 12/14&nbsp;px targets.</li>
+      <li><b>Dock</b> becomes a full-width bottom sheet on coarse/narrow screens, sitting above the OS home-indicator via <code>env(safe-area-inset-bottom)</code>.</li>
+      <li><b>Dock swipe</b> (<code>touch-action:pan-x</code>) pages symbols horizontally and never reaches the canvas — it owns its own pointer capture.</li>
+      <li><b>Gesture disambiguation</b>: a <code>_gestureCancelled</code> flag blocks the trailing commit when a 2nd finger interrupts a draw or move.</li>
+    </ul>
+  </div>
+</section>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const STEP = 24;            // grid cell in px (world-locked for the mock)
+const VBW = 300, VBH = 560; // viewBox
+
+function el(name, attrs) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+// Snap a screen point (in viewBox coords) to the nearest grid intersection.
+function snapPt(x, y) {
+  return { x: Math.round(x / STEP) * STEP, y: Math.round(y / STEP) * STEP };
+}
+
+// Draw the graph-paper grid into a <svg>.
+function drawGrid(svg) {
+  svg.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (let x = 0, i = 0; x <= VBW; x += STEP, i++) {
+    const tier = (i % 5 === 0) ? "major" : "fine";
+    frag.appendChild(el("line", { x1:x, y1:0, x2:x, y2:VBH, class:tier }));
+  }
+  for (let y = 0, i = 0; y <= VBH; y += STEP, i++) {
+    const tier = (i % 5 === 0) ? "major" : "fine";
+    frag.appendChild(el("line", { x1:0, y1:y, x2:VBW, y2:y, class:tier }));
+  }
+  svg.appendChild(frag);
+}
+
+// Convert a client point to viewBox coords for a phone element.
+function toVB(phone, clientX, clientY) {
+  const r = phone.getBoundingClientRect();
+  return {
+    x: (clientX - r.left) / r.width  * VBW,
+    y: (clientY - r.top)  / r.height * VBH,
+    rectW: r.width, rectH: r.height, rect: r,
+  };
+}
+
+function setupDrawPhone(phone) {
+  const opt = phone.dataset.opt;
+  const canvas = phone.querySelector(".canvas");
+  const gridSvg = phone.querySelector(".gridsvg");
+  const drawSvg = phone.querySelector(".drawsvg");
+  const cnt = phone.querySelector(".cnt");
+  drawGrid(gridSvg);
+
+  let chain = [];            // committed vertices (viewBox coords)
+  let overlays = [];         // transient DOM overlays to clear each frame
+
+  function clearOverlays() { overlays.forEach(o => o.remove()); overlays = []; }
+
+  function renderChain(previewSnap) {
+    drawSvg.innerHTML = "";
+    const pts = [...chain];
+    if (previewSnap) pts.push(previewSnap);
+    if (pts.length >= 2) {
+      for (let i = 0; i < pts.length - 1; i++) {
+        const committed = i < chain.length - 1;
+        drawSvg.appendChild(el("line", {
+          x1:pts[i].x, y1:pts[i].y, x2:pts[i+1].x, y2:pts[i+1].y,
+          class: committed ? "wall" : "wall-draft"
+        }));
+      }
+    }
+    for (const p of chain) drawSvg.appendChild(el("circle", { cx:p.x, cy:p.y, r:3.2, class:"vertex" }));
+    cnt.textContent = String(Math.max(0, chain.length - 1));
+  }
+
+  // Renders the snap glyph at viewBox point s, sized per option.
+  function glyph(s) {
+    const big = (opt === "B");
+    const d = big ? 12 : 6;
+    const g = el("g", {});
+    g.appendChild(el("polygon", {
+      points:`${s.x},${s.y-d} ${s.x+d},${s.y} ${s.x},${s.y+d} ${s.x-d},${s.y}`,
+      fill:"none", stroke:"#7fd0c8", "stroke-width": big ? 2 : 1.5
+    }));
+    g.appendChild(el("circle", { cx:s.x, cy:s.y, r:2, fill:"#7fd0c8" }));
+    drawSvg.appendChild(g);
+  }
+
+  // pxScale: viewBox units -> css px
+  function scale() { const r = phone.getBoundingClientRect(); return r.width / VBW; }
+
+  // Show the fingertip disc + per-option occlusion aid at css point (fx,fy) local to phone.
+  function showFinger(fx, fy, sVB) {
+    clearOverlays();
+    const sc = scale();
+    const sCss = { x: sVB.x * sc, y: sVB.y * sc };
+
+    const disc = document.createElement("div");
+    disc.className = "finger";
+    disc.style.left = fx + "px"; disc.style.top = fy + "px";
+    canvas.appendChild(disc); overlays.push(disc);
+
+    glyph(sVB); // commit point UNDER the finger (no offset) in every option
+
+    if (opt === "A") {
+      // Magnifier bubble above finger; stem connects the two.
+      const bubbleY = fy - 74;
+      const stem = document.createElement("div");
+      stem.className = "loupe-stem";
+      stem.style.left = fx + "px";
+      stem.style.top = (bubbleY + 30) + "px";
+      stem.style.height = (fy - 24 - (bubbleY + 30)) + "px";
+      canvas.appendChild(stem); overlays.push(stem);
+
+      const loupe = document.createElement("div");
+      loupe.className = "loupe";
+      loupe.style.left = fx + "px"; loupe.style.top = bubbleY + "px";
+      // Zoomed grid centred on the snap intersection + snap crosshair + teal diamond.
+      loupe.innerHTML = loupeMarkup();
+      canvas.appendChild(loupe); overlays.push(loupe);
+    } else if (opt === "B") {
+      // Short tether from finger edge to the (larger) glyph so it's readable.
+      const tether = el("line", {
+        x1:sVB.x, y1:sVB.y, x2:sVB.x, y2:sVB.y + 22,
+        stroke:"#c9a84c", "stroke-width":1, "stroke-dasharray":"2 2", opacity:0.5
+      });
+      drawSvg.appendChild(tether);
+    }
+  }
+
+  // Loupe interior: a zoomed graph-paper grid centred at (48,48) with the
+  // snap intersection dead-centre, plus the teal diamond + crosshair.
+  function loupeMarkup() {
+    const cell = 30; // zoomed cell size in the 96x96 bubble
+    let lines = "";
+    for (let gx = 48 % cell; gx <= 96; gx += cell) lines += `<line x1="${gx}" y1="0" x2="${gx}" y2="96" stroke="rgba(201,168,76,0.22)" stroke-width="0.8"/>`;
+    for (let gy = 48 % cell; gy <= 96; gy += cell) lines += `<line x1="0" y1="${gy}" x2="96" y2="${gy}" stroke="rgba(201,168,76,0.22)" stroke-width="0.8"/>`;
+    return `<svg viewBox="0 0 96 96">${lines}`
+      + `<polygon points="48,38 58,48 48,58 38,48" fill="none" stroke="#7fd0c8" stroke-width="2"/>`
+      + `<circle cx="48" cy="48" r="2.4" fill="#7fd0c8"/>`
+      + `<line class="xh" x1="48" y1="30" x2="48" y2="66" opacity="0.5"/>`
+      + `<line class="xh" x1="30" y1="48" x2="66" y2="48" opacity="0.5"/></svg>`;
+  }
+
+  let holding = false;
+
+  function onDown(e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    holding = true;
+    phone.setPointerCapture && phone.setPointerCapture(e.pointerId);
+    const p = toVB(phone, e.clientX, e.clientY);
+    const s = snapPt(p.x, p.y);
+    const r = phone.getBoundingClientRect();
+    renderChain(s);
+    showFinger(e.clientX - r.left, e.clientY - r.top, s);
+    e.preventDefault();
+  }
+  function onMove(e) {
+    if (!holding) return;
+    const p = toVB(phone, e.clientX, e.clientY);
+    const s = snapPt(p.x, p.y);
+    const r = phone.getBoundingClientRect();
+    renderChain(s);
+    showFinger(e.clientX - r.left, e.clientY - r.top, s);
+  }
+  function onUp(e) {
+    if (!holding) return;
+    holding = false;
+    const p = toVB(phone, e.clientX, e.clientY);
+    const s = snapPt(p.x, p.y);
+    // Commit the vertex at the snap point directly under the finger.
+    if (!(s.x < 4 || s.y < 4)) chain.push(s);
+    clearOverlays();
+    renderChain(null);
+    if (opt === "B") { /* glyph is in-chain now */ }
+  }
+
+  phone.addEventListener("pointerdown", onDown);
+  phone.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+
+  // Option C: nudge the last-placed point by one grid cell.
+  if (opt === "C") {
+    phone.querySelectorAll(".nudge [data-nudge]").forEach(b => {
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (!chain.length) return;
+        const last = chain[chain.length - 1];
+        const dir = b.dataset.nudge;
+        if (dir === "U") last.y -= STEP;
+        if (dir === "D") last.y += STEP;
+        if (dir === "L") last.x -= STEP;
+        if (dir === "R") last.x += STEP;
+        renderChain(null);
+      });
+    });
+  }
+
+  renderChain(null);
+}
+
+// ── Select-mode phone: touch handles + drag ──────────────────────────────
+function setupSelectPhone(phone) {
+  const gridSvg = phone.querySelector(".gridsvg");
+  const sel = phone.querySelector(".selsvg");
+  drawGrid(gridSvg);
+
+  // Chair centred; touch handles (left) vs mouse comparison (right).
+  let cx = 150, cy = 240, rot = 0;
+
+  function render() {
+    sel.innerHTML = "";
+    const w = 60, h = 60;
+    // Touch selection (this symbol)
+    sel.appendChild(el("rect", { x:cx-w/2, y:cy-h/2, width:w, height:h, rx:6, class:"sym-box" }));
+    // body glyph
+    const t = el("text", { x:cx, y:cy+8, "text-anchor":"middle", "font-size":"30" });
+    t.textContent = "🪑"; sel.appendChild(t);
+    // rotate stem + touch knob (44px hit, 28px visual)
+    sel.appendChild(el("line", { x1:cx, y1:cy-h/2, x2:cx, y2:cy-h/2-26, class:"rot-stem" }));
+    sel.appendChild(el("circle", { cx:cx, cy:cy-h/2-26, r:22, class:"rot-knob-hit" }));
+    sel.appendChild(el("circle", { cx:cx, cy:cy-h/2-26, r:11, class:"rot-knob" }));
+    // resize corners: big touch pad + visible knob
+    for (const [dx,dy] of [[-1,-1],[1,-1],[-1,1],[1,1]]) {
+      const hx = cx + dx*w/2, hy = cy + dy*h/2;
+      sel.appendChild(el("circle", { cx:hx, cy:hy, r:18, class:"resize-hit" }));
+      sel.appendChild(el("circle", { cx:hx, cy:hy, r:6, class:"resize" }));
+    }
+  }
+
+  let drag = null;
+  phone.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".dock")) return;
+    const p = toVB(phone, e.clientX, e.clientY);
+    if (Math.abs(p.x-cx) < 40 && Math.abs(p.y-cy) < 40) {
+      drag = { ox: p.x - cx, oy: p.y - cy };
+      phone.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }
+  });
+  phone.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const p = toVB(phone, e.clientX, e.clientY);
+    const s = snapPt(p.x - drag.ox, p.y - drag.oy);
+    cx = Math.max(40, Math.min(260, s.x));
+    cy = Math.max(60, Math.min(430, s.y));
+    render();
+  });
+  window.addEventListener("pointerup", () => { drag = null; });
+
+  // dock item active toggle
+  phone.querySelectorAll(".dock-item").forEach(it => {
+    it.addEventListener("click", () => {
+      phone.querySelectorAll(".dock-item").forEach(x => x.classList.remove("active"));
+      it.classList.add("active");
+    });
+  });
+
+  render();
+}
+
+document.querySelectorAll('.phone[data-mode="draw"]').forEach(setupDrawPhone);
+document.querySelectorAll('.phone[data-mode="select"]').forEach(setupSelectPhone);
+</script>
+</body>
+</html>
