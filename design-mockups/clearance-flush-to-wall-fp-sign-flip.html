@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Clearance — flush-to-wall verdict fix</title>
+<style>
+  :root {
+    --bg:#14140f; --bg-deep:#100f0b; --ink:#ece7d6; --muted:#8f8a78;
+    --gold:#c9a84c; --gold-soft:rgba(201,168,76,0.55);
+    --grid-fine:rgba(201,168,76,0.055); --grid-major:rgba(201,168,76,0.14);
+    --panel:rgba(20,20,15,0.72); --hairline:rgba(201,168,76,0.18);
+    --font-ui:"DM Sans",system-ui,sans-serif;
+    --font-mono:"DM Mono","Courier New",monospace;
+    --font-display:"Libre Baskerville",Georgia,serif;
+    --wall-body:rgba(201,168,76,0.30); --wall-line:#d9be6e;
+    --room-fill:rgba(201,168,76,0.07);
+    --clr-ok:#7fd0c8; --clr-tight:#e0b64f; --clr-bad:#e57373;
+    --clr-ok-fill:rgba(127,208,200,0.14); --clr-tight-fill:rgba(224,182,79,0.16);
+    --clr-bad-fill:rgba(229,115,115,0.18);
+    --clr-flush:#9cd67a; --clr-flush-fill:rgba(156,214,122,0.16);
+  }
+  *,*::before,*::after{box-sizing:border-box;}
+  body{margin:0;background:var(--bg-deep);color:var(--ink);
+    font-family:var(--font-ui);line-height:1.5;
+    background-image:
+      radial-gradient(ellipse 90% 80% at 50% 30%,var(--bg) 0%,var(--bg-deep) 100%);
+    min-height:100vh;}
+  .wrap{max-width:1180px;margin:0 auto;padding:2.4rem 1.4rem 4rem;}
+  h1{font-family:var(--font-display);font-weight:700;font-size:1.6rem;
+    margin:0 0 0.3rem;letter-spacing:0.01em;}
+  .sub{color:var(--muted);font-size:0.9rem;margin:0 0 2rem;max-width:60ch;}
+  h2{font-family:var(--font-display);font-weight:400;font-size:1.05rem;
+    margin:2.6rem 0 0.4rem;color:var(--gold);}
+  .note{color:var(--muted);font-size:0.8rem;margin:0 0 1.2rem;max-width:70ch;}
+  .mono{font-family:var(--font-mono);}
+
+  /* Comparison grid */
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;}
+  @media(max-width:820px){.cmp{grid-template-columns:1fr;}}
+  .card{border:1px solid var(--hairline);border-radius:10px;
+    background:var(--panel);overflow:hidden;}
+  .card-hd{display:flex;align-items:center;gap:0.5rem;
+    padding:0.6rem 0.9rem;border-bottom:1px solid var(--hairline);
+    font-size:0.8rem;font-weight:700;}
+  .tag{font-family:var(--font-mono);font-size:0.62rem;font-weight:400;
+    padding:0.1rem 0.45rem;border-radius:100px;border:1px solid var(--hairline);
+    color:var(--muted);margin-left:auto;}
+  .tag.bad{color:var(--clr-bad);border-color:rgba(229,115,115,0.4);}
+  .tag.good{color:var(--clr-flush);border-color:rgba(156,214,122,0.4);}
+
+  /* Mini stage */
+  .stage{position:relative;height:230px;
+    background:
+      linear-gradient(var(--grid-fine) 1px,transparent 1px) 0 0/22px 22px,
+      linear-gradient(90deg,var(--grid-fine) 1px,transparent 1px) 0 0/22px 22px,
+      radial-gradient(ellipse 90% 80% at 50% 50%,var(--bg) 0%,var(--bg-deep) 100%);}
+  .room{position:absolute;inset:34px 40px;border:7px solid var(--wall-body);
+    background:var(--room-fill);}
+  .sym{position:absolute;width:74px;height:52px;
+    border:1.5px solid var(--wall-line);background:rgba(217,190,110,0.10);
+    border-radius:2px;display:flex;align-items:center;justify-content:center;
+    font-size:0.55rem;color:var(--gold-soft);font-family:var(--font-mono);}
+
+  /* Clearance band + chip + pill (mirror src) */
+  .band{position:absolute;pointer-events:none;}
+  .chip{position:absolute;transform:translate(-50%,-50%);
+    font-family:var(--font-mono);font-size:0.6rem;padding:0.08rem 0.28rem;
+    border-radius:3px;white-space:nowrap;background:var(--panel);
+    border:1px solid var(--hairline);line-height:1.4;}
+  .pill{position:absolute;transform:translate(-50%,0);
+    font-family:var(--font-mono);font-size:0.64rem;padding:0.15rem 0.6rem;
+    border-radius:100px;white-space:nowrap;background:var(--panel);
+    border:1px solid var(--hairline);line-height:1.5;}
+  .pill.bad{color:var(--clr-bad);border-color:rgba(229,115,115,0.4);}
+  .pill.tight{color:var(--clr-tight);border-color:rgba(224,182,79,0.4);}
+  .pill.flush{color:var(--clr-flush);border-color:rgba(156,214,122,0.4);}
+
+  /* Side panel replica */
+  .panel{border:1px solid var(--hairline);border-radius:10px;
+    background:var(--panel);overflow:hidden;max-width:340px;margin-top:0.4rem;}
+  .p-hd{display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0.8rem;
+    border-bottom:1px solid var(--hairline);font-size:0.72rem;
+    text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);}
+  .p-dot{width:8px;height:8px;border-radius:50%;}
+  .clr-row{display:grid;grid-template-columns:10px 1fr auto;align-items:center;
+    gap:0.35rem;padding:0.28rem 0.8rem;
+    border-bottom:1px solid rgba(201,168,76,0.07);}
+  .clr-dot{width:7px;height:7px;border-radius:50%;background:var(--muted);}
+  .d-ok{background:var(--clr-ok);}.d-tight{background:var(--clr-tight);}
+  .d-bad{background:var(--clr-bad);}.d-flush{background:var(--clr-flush);}
+  .clr-label{color:var(--muted);font-size:0.66rem;}
+  .clr-val{font-size:0.66rem;text-align:right;font-family:var(--font-mono);}
+  .verdict{padding:0.4rem 0.8rem;font-size:0.68rem;font-weight:500;
+    border-top:1px solid var(--hairline);text-align:center;}
+
+  /* Option toggle */
+  .opts{display:flex;gap:0.4rem;margin:0.6rem 0 0;flex-wrap:wrap;}
+  .opt-btn{font-family:var(--font-mono);font-size:0.66rem;cursor:pointer;
+    padding:0.32rem 0.7rem;border-radius:100px;background:transparent;
+    border:1px solid var(--hairline);color:var(--muted);}
+  .opt-btn[aria-pressed="true"]{color:var(--bg-deep);background:var(--gold);
+    border-color:var(--gold);font-weight:700;}
+  .legend{font-size:0.72rem;color:var(--muted);margin:1rem 0 0;}
+  .legend b{color:var(--ink);font-weight:700;}
+  .swatch{display:inline-block;width:10px;height:10px;border-radius:2px;
+    vertical-align:middle;margin-right:4px;}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+  rel="stylesheet"
+/>
+</head>
+<body>
+<div class="wrap">
+  <h1>Clearance — flush-to-wall verdict</h1>
+  <p class="sub">When a symbol is seated <b>flush against a wall face</b> (the LLD 26
+    "seat against the wall" gesture), the fit verdict must read the same on every
+    wall. Today a floating-point sign flip at gap = 0 makes the right wall say
+    "Won't fit" while the top wall says "0.0m fits." These mockups show the fix and
+    a copy decision.</p>
+
+  <h2>1 · The bug today</h2>
+  <p class="note">Same physical situation — the couch edge touching the inner wall
+    face — read two different ways depending on which wall it snaps to.</p>
+  <div class="cmp">
+    <div class="card">
+      <div class="card-hd">Flush to RIGHT wall
+        <span class="tag bad">reads: Won't fit</span></div>
+      <div class="stage">
+        <div class="room"></div>
+        <!-- symbol seated against right inner face -->
+        <div class="sym" style="right:44px;top:88px;">couch</div>
+        <div class="band" style="right:40px;top:88px;width:8px;height:52px;
+          background:var(--clr-bad-fill);border-left:2px solid var(--clr-bad);"></div>
+        <div class="chip" style="right:20px;top:114px;color:var(--clr-bad);">overlap</div>
+        <div class="pill bad" style="right:20px;top:150px;transform:translate(50%,0);">Won't fit — overlap</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd">Flush to TOP wall
+        <span class="tag good">reads: 0.0m fits</span></div>
+      <div class="stage">
+        <div class="room"></div>
+        <div class="sym" style="left:120px;top:36px;">couch</div>
+        <div class="band" style="left:120px;top:28px;width:74px;height:8px;
+          background:var(--clr-tight-fill);border-bottom:2px solid var(--clr-tight);"></div>
+        <div class="chip" style="left:157px;top:34px;color:var(--clr-tight);">0.0m</div>
+        <div class="pill tight" style="left:157px;top:96px;">Tight — under 0.6m walkway</div>
+      </div>
+    </div>
+  </div>
+  <p class="note mono" style="margin-top:0.9rem;">right wall: rawGap − wallHalf = −4e-17 → max(0,·)=0 → classify(0)=bad &nbsp;·&nbsp;
+    top wall: +5.55e-17 → tight. Same touch, opposite verdict.</p>
+
+  <h2>2 · After the fix — pick the copy</h2>
+  <p class="note">A 0.1mm flush epsilon collapses the FP noise so touching the wall
+    face always classifies as <b>tight (0.0m), never bad</b> — consistent on all four
+    walls. The remaining choice is <b>how it reads</b>. Toggle the options:</p>
+
+  <div class="opts" role="group" aria-label="Copy options">
+    <button class="opt-btn" data-opt="A" aria-pressed="true">Option A — reuse "tight" copy</button>
+    <button class="opt-btn" data-opt="B" aria-pressed="false">Option B — distinct "flush" copy + green</button>
+  </div>
+
+  <div class="cmp" style="margin-top:0.9rem;">
+    <div class="card">
+      <div class="card-hd">Flush to RIGHT wall
+        <span class="tag good">reads: fits, 0.0m</span></div>
+      <div class="stage">
+        <div class="room"></div>
+        <div class="sym" style="right:44px;top:88px;">couch</div>
+        <div class="band js-band" style="right:40px;top:88px;width:8px;height:52px;"></div>
+        <div class="chip js-chip" style="right:20px;top:114px;">0.0m</div>
+        <div class="pill js-pill" style="right:20px;top:150px;transform:translate(50%,0);"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd">Flush to TOP wall
+        <span class="tag good">reads: fits, 0.0m</span></div>
+      <div class="stage">
+        <div class="room"></div>
+        <div class="sym" style="left:120px;top:36px;">couch</div>
+        <div class="band js-band" style="left:120px;top:28px;width:74px;height:8px;"></div>
+        <div class="chip js-chip" style="left:157px;top:34px;">0.0m</div>
+        <div class="pill js-pill" style="left:157px;top:96px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>3 · Side panel — gap list &amp; verdict banner</h2>
+  <p class="note">The Clearance panel row + verdict banner for the flush case,
+    under the selected copy option.</p>
+  <div class="panel">
+    <div class="p-hd"><span class="p-dot js-pdot"></span>Clearance</div>
+    <div class="clr-row">
+      <span class="clr-dot js-pdot2"></span>
+      <span class="clr-label js-plabel">to right wall</span>
+      <span class="clr-val js-pval">0.0m</span>
+    </div>
+    <div class="clr-row">
+      <span class="clr-dot d-ok"></span>
+      <span class="clr-label">to left wall</span>
+      <span class="clr-val" style="color:var(--clr-ok);">4.9m</span>
+    </div>
+    <div class="clr-row">
+      <span class="clr-dot d-tight"></span>
+      <span class="clr-label">to top wall</span>
+      <span class="clr-val" style="color:var(--clr-tight);">0.4m</span>
+    </div>
+    <div class="verdict js-verdict"></div>
+  </div>
+
+  <h2>4 · Regression guard — genuinely inside the wall</h2>
+  <p class="note">A symbol whose edge is pushed <b>3cm past the inner face</b> (into
+    the wall body) must still read <span style="color:var(--clr-bad);">Won't fit —
+    overlap</span>. The epsilon is 0.1mm, far below 3cm, so this is untouched.</p>
+  <div class="cmp">
+    <div class="card" style="max-width:none;">
+      <div class="card-hd">Edge 3cm inside wall body
+        <span class="tag bad">reads: Won't fit</span></div>
+      <div class="stage">
+        <div class="room"></div>
+        <div class="sym" style="right:30px;top:88px;">couch</div>
+        <div class="band" style="right:30px;top:88px;width:16px;height:52px;
+          background:var(--clr-bad-fill);border-left:2px solid var(--clr-bad);"></div>
+        <div class="chip" style="right:14px;top:114px;color:var(--clr-bad);">overlap</div>
+        <div class="pill bad" style="right:14px;top:150px;transform:translate(50%,0);">Won't fit — overlap</div>
+      </div>
+    </div>
+    <div class="card" style="max-width:none;">
+      <div class="card-hd">Threshold map (the fix)</div>
+      <div class="stage" style="display:flex;align-items:center;justify-content:center;padding:1rem;">
+        <div style="font-family:var(--font-mono);font-size:0.66rem;line-height:1.9;color:var(--muted);">
+          faceGap &lt; <span style="color:var(--clr-bad);">−0.1mm</span> &nbsp;→&nbsp; <b style="color:var(--clr-bad);">bad</b> (inside wall)<br>
+          |faceGap| ≤ <span style="color:var(--clr-flush);">0.1mm</span> &nbsp;→&nbsp; <b style="color:var(--clr-flush);">flush/tight</b> (0.0m)<br>
+          faceGap &gt; 0.1mm &nbsp;→&nbsp; classify(faceGap)<br>
+          <span style="opacity:0.6;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ <b style="color:var(--clr-tight);">tight</b> / <b style="color:var(--clr-ok);">ok</b></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="legend">
+    <span class="swatch" style="background:var(--clr-flush);"></span><b>Option B green</b>
+    signals "seated on purpose" (matches the snap-close accent) ·
+    <span class="swatch" style="background:var(--clr-tight);"></span><b>Option A gold</b>
+    reuses the existing tight treatment (zero new tokens/copy).
+  </p>
+</div>
+<script>
+  const OPTS = {
+    A: {
+      pillText: "It fits — flush to wall", pillClass: "tight",
+      chipColor: "var(--clr-tight)", bandFill: "var(--clr-tight-fill)",
+      bandEdge: "var(--clr-tight)", dot: "d-tight", valColor: "var(--clr-tight)",
+      verdict: "Tight — flush against wall", verdictColor: "var(--clr-tight)",
+      label: "to right wall",
+    },
+    B: {
+      pillText: "Flush against wall", pillClass: "flush",
+      chipColor: "var(--clr-flush)", bandFill: "var(--clr-flush-fill)",
+      bandEdge: "var(--clr-flush)", dot: "d-flush", valColor: "var(--clr-flush)",
+      verdict: "Flush against wall — 0.0m", verdictColor: "var(--clr-flush)",
+      label: "flush · right wall",
+    },
+  };
+
+  function apply(key) {
+    const o = OPTS[key];
+    document.querySelectorAll(".js-pill").forEach(p => {
+      p.className = "pill js-pill " + o.pillClass;
+      p.textContent = o.pillText;
+    });
+    document.querySelectorAll(".js-chip").forEach(c => { c.style.color = o.chipColor; });
+    document.querySelectorAll(".js-band").forEach((b, i) => {
+      b.style.background = o.bandFill;
+      // vertical band on right (i=0), horizontal on top (i=1)
+      if (i === 0) b.style.borderLeft = "2px solid " + o.bandEdge;
+      else b.style.borderBottom = "2px solid " + o.bandEdge;
+    });
+    // panel
+    document.querySelector(".js-pdot").className = "p-dot js-pdot " + o.dot;
+    document.querySelector(".js-pdot2").className = "clr-dot js-pdot2 " + o.dot;
+    const pv = document.querySelector(".js-pval");
+    pv.textContent = "0.0m"; pv.style.color = o.valColor;
+    document.querySelector(".js-plabel").textContent = o.label;
+    const v = document.querySelector(".js-verdict");
+    v.textContent = o.verdict; v.style.color = o.verdictColor;
+    // buttons
+    document.querySelectorAll(".opt-btn").forEach(btn => {
+      btn.setAttribute("aria-pressed", String(btn.dataset.opt === key));
+    });
+  }
+
+  document.querySelectorAll(".opt-btn").forEach(btn => {
+    btn.addEventListener("click", () => apply(btn.dataset.opt));
+  });
+  apply("A");
+</script>
+</body>
+</html>
