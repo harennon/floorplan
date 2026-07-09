@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Starter templates — Variant B (inline strip) · floorplan</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg:#14140f; --bg-deep:#100f0b; --ink:#ece7d6; --muted:#8f8a78;
+        --gold:#c9a84c; --gold-soft:rgba(201,168,76,0.55);
+        --grid-fine:rgba(201,168,76,0.055); --grid-major:rgba(201,168,76,0.14);
+        --panel:rgba(20,20,15,0.72); --hairline:rgba(201,168,76,0.18);
+        --font-ui:"DM Sans",system-ui,sans-serif; --font-mono:"DM Mono","Courier New",monospace;
+        --font-display:"Libre Baskerville",Georgia,serif;
+        --wall-line:#d9be6e; --room-fill:rgba(201,168,76,0.07); --error:#e57373;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body { height:100%; margin:0; }
+      body {
+        font-family: var(--font-ui); color: var(--ink);
+        background: radial-gradient(ellipse 90% 80% at 50% 45%, var(--bg) 0%, var(--bg-deep) 100%);
+        overflow: hidden;
+      }
+      .stage { position: fixed; inset: 0; }
+      .backdrop {
+        position: fixed; inset: 0; z-index: 0; pointer-events: none;
+        background-image:
+          linear-gradient(var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(var(--grid-major) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+        background-size: 24px 24px, 24px 24px, 120px 120px, 120px 120px;
+      }
+      .grain {
+        position: fixed; inset: 0; pointer-events: none; z-index: 1;
+        mix-blend-mode: overlay; opacity: 0.035;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+        background-size: 200px 200px;
+      }
+
+      /* Brand (context) */
+      .brand { position: fixed; top: 1.25rem; left: 1.25rem; z-index: 3; pointer-events: none; }
+      .brand-name { font-family: var(--font-display); font-weight: 700; color: var(--gold); font-size: 1.1rem; }
+      .brand-sub { font-family: var(--font-mono); font-size: 0.65rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+
+      /* Mock toolbar */
+      .mock-toolbar { position: fixed; top: 1.25rem; right: 1.25rem; z-index: 5; display: flex; gap: 0.5rem; }
+      .mock-toolbar button {
+        background: var(--panel); border: 1px solid var(--hairline); color: var(--ink);
+        font-family: var(--font-mono); font-size: 0.7rem; padding: 0.35rem 0.7rem;
+        border-radius: 100px; cursor: pointer; transition: color .15s, border-color .15s;
+      }
+      .mock-toolbar button:hover { color: var(--gold); border-color: var(--gold-soft); }
+
+      /* ── Inline starter panel (centered over empty grid) ─────────────── */
+      .starter {
+        position: fixed; z-index: 4; left: 50%; top: 50%;
+        transform: translate(-50%, -50%);
+        width: min(48rem, calc(100vw - 2.5rem));
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 14px; padding: 1.3rem 1.4rem 1.5rem;
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+        animation: st-rise 0.3s ease;
+      }
+      @keyframes st-rise {
+        from { opacity: 0; transform: translate(-50%, calc(-50% + 10px)); }
+        to   { opacity: 1; transform: translate(-50%, -50%); }
+      }
+      .starter.is-dismissed { display: none; }
+      .starter-head { text-align: center; margin-bottom: 1.1rem; }
+      .starter-head h2 {
+        font-family: var(--font-display); font-weight: 700; color: var(--ink);
+        font-size: 1.25rem; margin: 0 0 0.3rem;
+      }
+      .starter-head p {
+        font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); margin: 0;
+      }
+
+      /* Horizontal scroll row of thumbnails */
+      .starter-row {
+        display: grid; grid-auto-flow: column; grid-auto-columns: 8.5rem;
+        gap: 0.75rem; overflow-x: auto; padding-bottom: 0.4rem;
+        scrollbar-width: thin; scroll-snap-type: x proximity;
+      }
+      .starter-row::-webkit-scrollbar { height: 6px; }
+      .starter-row::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 3px; }
+      @media (max-width: 560px) {
+        .starter { top: 45%; }
+        .starter-row { grid-auto-columns: 7rem; }
+      }
+
+      .st-card {
+        scroll-snap-align: start; background: rgba(20,20,15,0.5);
+        border: 1px solid var(--hairline); border-radius: 10px; overflow: hidden;
+        cursor: pointer; padding: 0; text-align: left; display: flex; flex-direction: column;
+        transition: border-color .14s, transform .14s, background .14s;
+      }
+      .st-card:hover, .st-card:focus-visible {
+        border-color: var(--gold-soft); background: rgba(201,168,76,0.06);
+        transform: translateY(-2px); outline: none;
+      }
+      .st-card:focus-visible { box-shadow: 0 0 0 2px var(--gold-soft); }
+      .tpl-thumb {
+        aspect-ratio: 4 / 3; width: 100%; display: block;
+        background:
+          linear-gradient(rgba(201,168,76,0.05) 1px, transparent 1px) 0 0 / 12px 12px,
+          linear-gradient(90deg, rgba(201,168,76,0.05) 1px, transparent 1px) 0 0 / 12px 12px,
+          var(--bg-deep);
+        border-bottom: 1px solid var(--hairline);
+      }
+      .st-meta { padding: 0.45rem 0.55rem 0.55rem; }
+      .st-name { font-family: var(--font-ui); font-weight: 700; font-size: 0.75rem; color: var(--ink); margin: 0 0 0.1rem; }
+      .st-stats { font-family: var(--font-mono); font-size: 0.58rem; color: var(--muted); }
+      .st-stats b { color: var(--gold); font-weight: 500; }
+
+      .starter-foot {
+        margin-top: 1rem; text-align: center;
+        font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted);
+      }
+      .starter-foot button {
+        background: transparent; border: none; color: var(--gold);
+        font-family: var(--font-mono); font-size: 0.68rem; cursor: pointer;
+        text-decoration: underline; text-underline-offset: 3px; padding: 0;
+      }
+
+      /* Reopen affordance once dismissed */
+      .reopen-pill {
+        position: fixed; z-index: 4; left: 50%; bottom: 5.5rem;
+        transform: translateX(-50%); display: none;
+        background: var(--panel); border: 1px solid var(--gold-soft); color: var(--gold);
+        font-family: var(--font-mono); font-size: 0.7rem; padding: 0.35rem 0.9rem;
+        border-radius: 100px; cursor: pointer;
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      }
+      .reopen-pill.is-shown { display: inline-flex; }
+
+      /* Replace-confirm dialog + toast (shared with Variant A) */
+      .tpl-confirm-backdrop {
+        display: none; position: fixed; inset: 0; z-index: 50;
+        background: rgba(16,15,11,0.7); align-items: center; justify-content: center;
+        padding: 1.5rem; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      }
+      .tpl-confirm-backdrop.is-open { display: flex; }
+      .tpl-confirm {
+        background: var(--panel); border: 1px solid var(--hairline); border-radius: 10px;
+        padding: 1.25rem 1.4rem; max-width: 26rem; box-shadow: 0 6px 32px rgba(0,0,0,0.6);
+      }
+      .tpl-confirm h3 { font-family: var(--font-display); font-weight: 700; color: var(--ink); font-size: 1rem; margin: 0 0 0.5rem; }
+      .tpl-confirm p { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); line-height: 1.5; margin: 0 0 1.1rem; }
+      .tpl-confirm p b { color: var(--gold); font-weight: 500; }
+      .tpl-confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+      .tpl-confirm-actions button {
+        font-family: var(--font-mono); font-size: 0.72rem; padding: 0.4rem 0.9rem;
+        border-radius: 100px; cursor: pointer; border: 1px solid var(--hairline);
+        background: transparent; color: var(--ink); transition: color .12s, border-color .12s, background .12s;
+      }
+      .tpl-confirm-actions .btn-cancel:hover { border-color: var(--ink); }
+      .tpl-confirm-actions .btn-replace { color: var(--gold); border-color: var(--gold-soft); background: rgba(201,168,76,0.1); }
+      .tpl-confirm-actions .btn-replace:hover { background: rgba(201,168,76,0.2); }
+
+      .toast {
+        position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%) translateY(0.5rem);
+        background: var(--panel); border: 1px solid var(--hairline); border-radius: 100px;
+        padding: 0.45rem 1.1rem; font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink);
+        opacity: 0; pointer-events: none; z-index: 60; transition: opacity .2s, transform .2s;
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      }
+      .toast.is-visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+    </style>
+  </head>
+  <body>
+    <div class="stage" aria-hidden="true"></div>
+    <div class="backdrop" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+
+    <div class="brand" aria-hidden="true">
+      <div class="brand-name">floorplan</div>
+      <div class="brand-sub">warm blueprint</div>
+    </div>
+
+    <div class="mock-toolbar">
+      <button id="mock-reopen">Reopen starter</button>
+      <button id="mock-dirty">Plan: <span id="mock-dirty-label">empty</span></button>
+    </div>
+
+    <!-- Inline starter panel — appears centered on the empty grid -->
+    <section class="starter" id="starter" aria-label="Starter templates">
+      <div class="starter-head">
+        <h2>Start from a template</h2>
+        <p>Pick a furnished, to-scale room and edit it — or dismiss and draw your own.</p>
+      </div>
+      <div class="starter-row" id="starter-row"><!-- cards injected --></div>
+      <div class="starter-foot">
+        <button id="starter-dismiss">Start from a blank grid instead →</button>
+      </div>
+    </section>
+
+    <button class="reopen-pill" id="reopen-pill">＋ Start from a template</button>
+
+    <!-- Replace-confirm dialog -->
+    <div class="tpl-confirm-backdrop" id="confirm-backdrop" role="dialog" aria-modal="true" aria-label="Replace current plan?">
+      <div class="tpl-confirm">
+        <h3>Replace your current plan?</h3>
+        <p>Loading <b id="confirm-name">this template</b> will replace what's on the
+           canvas. You can undo right after.</p>
+        <div class="tpl-confirm-actions">
+          <button class="btn-cancel" id="confirm-cancel">Keep mine</button>
+          <button class="btn-replace" id="confirm-replace">Replace</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script>
+      const TEMPLATES = [
+        { id:"studio", name:"Studio apartment", area:"28 m²", perim:"21.4 m", items:"8 items",
+          room:[[0,0],[6,0],[6,4.6],[0,4.6]],
+          symbols:[{x:1.2,y:1.2,w:1.5,h:2.0},{x:4.6,y:1.0,w:0.7,h:0.7},{x:4.4,y:3.4,w:2.0,h:0.9},{x:1.4,y:3.6,w:1.2,h:0.8}],
+          openings:[{x:3,y:0},{x:0,y:2.3}] },
+        { id:"onebed", name:"1-bedroom", area:"46 m²", perim:"31 m", items:"11 items",
+          room:[[0,0],[8,0],[8,6],[4.6,6],[4.6,3.6],[0,3.6]],
+          symbols:[{x:1.6,y:1.6,w:1.5,h:2.0},{x:6.2,y:1.2,w:2.0,h:0.9},{x:6.6,y:4.6,w:1.2,h:0.8},{x:2,y:2.8,w:0.5,h:0.5}],
+          openings:[{x:4,y:0},{x:4.6,y:4.8}] },
+        { id:"rect", name:"Rectangular room", area:"20 m²", perim:"18 m", items:"0 items",
+          room:[[0,0],[5,0],[5,4],[0,4]], symbols:[], openings:[{x:2.5,y:0}] },
+        { id:"openplan", name:"Open-plan K/L", area:"38 m²", perim:"26 m", items:"9 items",
+          room:[[0,0],[7.5,0],[7.5,5],[0,5]],
+          symbols:[{x:5.8,y:1.0,w:0.7,h:0.7},{x:2,y:3.6,w:2.0,h:0.9},{x:2,y:2.2,w:1.2,h:0.8},{x:5.5,y:3.6,w:1.4,h:0.7}],
+          openings:[{x:3.75,y:0},{x:7.5,y:2.5}] },
+        { id:"lshape", name:"L-shaped room", area:"32 m²", perim:"26 m", items:"5 items",
+          room:[[0,0],[6,0],[6,3],[3,3],[3,6],[0,6]],
+          symbols:[{x:1.4,y:1.4,w:2.0,h:0.9},{x:4.4,y:1.4,w:1.2,h:0.8}], openings:[{x:0,y:3}] },
+      ];
+
+      function thumbSvg(t) {
+        const xs = t.room.map(p=>p[0]), ys = t.room.map(p=>p[1]);
+        const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+        const w=maxX-minX, h=maxY-minY, pad=0.6, VW=100, VH=75;
+        const s=Math.min((VW-2*pad*10)/w,(VH-2*pad*10)/h);
+        const ox=(VW-w*s)/2-minX*s, oy=(VH-h*s)/2-minY*s;
+        const X=v=>(v*s+ox).toFixed(1), Y=v=>(v*s+oy).toFixed(1);
+        const poly=t.room.map(p=>`${X(p[0])},${Y(p[1])}`).join(" ");
+        let furn=""; for(const f of t.symbols)
+          furn+=`<rect x="${X(f.x-f.w/2)}" y="${Y(f.y-f.h/2)}" width="${(f.w*s).toFixed(1)}" height="${(f.h*s).toFixed(1)}" rx="0.8" fill="rgba(201,168,76,0.16)" stroke="var(--wall-line)" stroke-width="0.6"/>`;
+        let ops=""; for(const o of (t.openings||[]))
+          ops+=`<circle cx="${X(o.x)}" cy="${Y(o.y)}" r="1.6" fill="var(--bg-deep)" stroke="var(--wall-line)" stroke-width="0.8"/>`;
+        return `<svg class="tpl-thumb" viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+          <polygon points="${poly}" fill="var(--room-fill)" stroke="var(--wall-line)" stroke-width="1.4" stroke-linejoin="round"/>${furn}${ops}</svg>`;
+      }
+
+      const row = document.getElementById("starter-row");
+      row.innerHTML = TEMPLATES.map((t,i)=>`
+        <button class="st-card" data-idx="${i}" aria-label="Load ${t.name}">
+          ${thumbSvg(t)}
+          <div class="st-meta">
+            <p class="st-name">${t.name}</p>
+            <div class="st-stats"><b>${t.area}</b> · ${t.items}</div>
+          </div>
+        </button>`).join("");
+
+      let planDirty = false, pendingIdx = null;
+      const starter    = document.getElementById("starter");
+      const reopenPill  = document.getElementById("reopen-pill");
+      const confirmBd   = document.getElementById("confirm-backdrop");
+      const confirmName = document.getElementById("confirm-name");
+      const toast       = document.getElementById("toast");
+      const dirtyLabel  = document.getElementById("mock-dirty-label");
+
+      function showToast(msg){ toast.textContent=msg; toast.classList.add("is-visible");
+        clearTimeout(showToast._t); showToast._t=setTimeout(()=>toast.classList.remove("is-visible"),2600); }
+
+      function dismissStarter(){ starter.classList.add("is-dismissed"); reopenPill.classList.add("is-shown"); }
+      function openStarter(){ starter.classList.remove("is-dismissed"); reopenPill.classList.remove("is-shown"); }
+
+      function loadTemplate(idx){
+        const t = TEMPLATES[idx];
+        // App: validatePlan(DOC) → applyPlan → historyReset → render + fitToContent
+        planDirty = true; setDirty(true);
+        confirmBd.classList.remove("is-open");
+        starter.classList.add("is-dismissed"); reopenPill.classList.add("is-shown");
+        showToast(`Loaded "${t.name}"`);
+      }
+
+      row.addEventListener("click", e=>{
+        const card = e.target.closest(".st-card"); if(!card) return;
+        const idx = +card.dataset.idx;
+        if(planDirty){ pendingIdx=idx; confirmName.textContent=`"${TEMPLATES[idx].name}"`; confirmBd.classList.add("is-open"); }
+        else loadTemplate(idx);
+      });
+
+      document.getElementById("starter-dismiss").addEventListener("click", dismissStarter);
+      reopenPill.addEventListener("click", openStarter);
+      document.getElementById("mock-reopen").addEventListener("click", openStarter);
+      document.getElementById("confirm-cancel").addEventListener("click", ()=>confirmBd.classList.remove("is-open"));
+      document.getElementById("confirm-replace").addEventListener("click", ()=>{ if(pendingIdx!=null) loadTemplate(pendingIdx); });
+
+      function setDirty(v){ planDirty=v; dirtyLabel.textContent = v ? "has work (dirty)" : "empty"; }
+      document.getElementById("mock-dirty").addEventListener("click", ()=>setDirty(!planDirty));
+
+      document.addEventListener("keydown", e=>{
+        if(e.key!=="Escape") return;
+        if(confirmBd.classList.contains("is-open")) confirmBd.classList.remove("is-open");
+        else if(!starter.classList.contains("is-dismissed")) dismissStarter();
+      });
+    </script>
+  </body>
+</html>
