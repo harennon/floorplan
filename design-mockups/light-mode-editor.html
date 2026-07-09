@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>floorplan · light mode directions</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ══ THEME TOKENS ═══════════════════════════════════════════════════ */
+
+      /* Dark — current shipped "warm blueprint" (for side-by-side reference) */
+      [data-theme="dark"] {
+        --bg:#14140f; --bg-deep:#100f0b;
+        --ink:#ece7d6; --muted:#8f8a78;
+        --accent:#c9a84c; --accent-soft:rgba(201,168,76,.55);
+        --grid-fine:rgba(201,168,76,.055);
+        --grid-major:rgba(201,168,76,.14);
+        --grid-axis:rgba(201,168,76,.34);
+        --panel:rgba(20,20,15,.72); --hairline:rgba(201,168,76,.18);
+        --wall-body:rgba(201,168,76,.30); --wall-line:#d9be6e;
+        --room-fill:rgba(201,168,76,.07);
+        --sym-fill:rgba(201,168,76,.12); --sym-line:#d9be6e;
+        --chip-ink:#14140f; --shadow:0 4px 24px rgba(0,0,0,.5);
+        --grain-blend:overlay; --grain-op:.035;
+        --brand-sub:"warm blueprint";
+      }
+
+      /* P1 — Warm drafting paper (daytime twin of the warm blueprint) */
+      [data-theme="paper"] {
+        --bg:#f3ecda; --bg-deep:#e7dcc2;
+        --ink:#33301f; --muted:#8d846c;
+        --accent:#a07615; --accent-soft:rgba(160,118,21,.5);
+        --grid-fine:rgba(90,70,25,.07);
+        --grid-major:rgba(90,70,25,.16);
+        --grid-axis:rgba(90,70,25,.34);
+        --panel:rgba(250,245,233,.82); --hairline:rgba(120,95,40,.24);
+        --wall-body:rgba(120,95,40,.22); --wall-line:#5c4a1e;
+        --room-fill:rgba(160,118,21,.08);
+        --sym-fill:rgba(160,118,21,.12); --sym-line:#7a5f26;
+        --chip-ink:#f3ecda; --shadow:0 6px 26px rgba(90,70,30,.16);
+        --grain-blend:multiply; --grain-op:.05;
+        --brand-sub:"drafting paper";
+      }
+
+      /* P2 — Cool blueprint (classic cyanotype: cool white ground, indigo ink) */
+      [data-theme="blueprint"] {
+        --bg:#eef2f6; --bg-deep:#dde5ee;
+        --ink:#1c2b3a; --muted:#7286a0;
+        --accent:#2f6fb0; --accent-soft:rgba(47,111,176,.5);
+        --grid-fine:rgba(40,80,130,.07);
+        --grid-major:rgba(40,80,130,.16);
+        --grid-axis:rgba(40,80,130,.36);
+        --panel:rgba(248,251,254,.85); --hairline:rgba(47,111,176,.24);
+        --wall-body:rgba(47,111,176,.20); --wall-line:#204d7a;
+        --room-fill:rgba(47,111,176,.07);
+        --sym-fill:rgba(47,111,176,.12); --sym-line:#2f6fb0;
+        --chip-ink:#eef2f6; --shadow:0 6px 26px rgba(30,60,100,.16);
+        --grain-blend:multiply; --grain-op:.04;
+        --brand-sub:"cyanotype";
+      }
+
+      /* P3 — Neutral graph paper (near-white, ink-black, high contrast, print-clean) */
+      [data-theme="graph"] {
+        --bg:#fbfaf7; --bg-deep:#f1efe8;
+        --ink:#20201c; --muted:#8a887e;
+        --accent:#b8892b; --accent-soft:rgba(184,137,43,.5);
+        --grid-fine:rgba(30,30,25,.055);
+        --grid-major:rgba(30,30,25,.13);
+        --grid-axis:rgba(30,30,25,.30);
+        --panel:rgba(255,255,255,.86); --hairline:rgba(40,40,35,.16);
+        --wall-body:rgba(40,40,35,.18); --wall-line:#2a2a24;
+        --room-fill:rgba(184,137,43,.07);
+        --sym-fill:rgba(184,137,43,.11); --sym-line:#4a463a;
+        --chip-ink:#fbfaf7; --shadow:0 6px 26px rgba(40,40,30,.12);
+        --grain-blend:multiply; --grain-op:.03;
+        --brand-sub:"graph paper";
+      }
+
+      /* ══ RESET + LAB CHROME (the mockup harness, not the app) ═══════════ */
+      *,*::before,*::after{box-sizing:border-box;}
+      html,body{margin:0;height:100%;}
+      body{
+        font-family:"DM Sans",system-ui,sans-serif;
+        background:#0c0c0a;color:#ddd;
+        display:flex;flex-direction:column;min-height:100vh;
+      }
+      .lab-bar{
+        position:sticky;top:0;z-index:100;
+        display:flex;align-items:center;gap:1rem;flex-wrap:wrap;
+        padding:.7rem 1.1rem;
+        background:#151513;border-bottom:1px solid #2a2a24;
+      }
+      .lab-title{
+        font-family:"Libre Baskerville",serif;font-size:.95rem;
+        color:#c9a84c;margin-right:.5rem;
+      }
+      .lab-note{font-family:"DM Mono",monospace;font-size:.66rem;color:#7c786c;max-width:34rem;line-height:1.5;}
+      .seg{display:flex;gap:.25rem;background:#0c0c0a;border:1px solid #2a2a24;border-radius:100px;padding:.2rem;}
+      .seg button{
+        background:transparent;border:none;color:#8a887e;
+        font-family:"DM Mono",monospace;font-size:.68rem;letter-spacing:.04em;
+        padding:.35rem .8rem;border-radius:100px;cursor:pointer;transition:.15s;
+      }
+      .seg button[aria-pressed="true"]{background:#c9a84c;color:#161510;font-weight:500;}
+      .seg button:hover:not([aria-pressed="true"]){color:#e6e2d4;}
+
+      /* ══ THEMED EDITOR SCENE ═══════════════════════════════════════════ */
+      .scene{
+        flex:1;position:relative;overflow:hidden;
+        color:var(--ink);
+        background:radial-gradient(ellipse 90% 80% at 50% 50%,var(--bg) 0%,var(--bg-deep) 100%);
+        transition:background .35s ease,color .35s ease;
+        min-height:640px;
+      }
+      .scene *{transition:color .25s,border-color .25s,background .25s,fill .25s,stroke .25s;}
+      .grain{
+        position:absolute;inset:0;pointer-events:none;
+        mix-blend-mode:var(--grain-blend);opacity:var(--grain-op);
+        background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+        background-size:200px 200px;
+      }
+      #canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
+      .g-fine{stroke:var(--grid-fine);stroke-width:1;}
+      .g-major{stroke:var(--grid-major);stroke-width:1;}
+      .g-axis{stroke:var(--grid-axis);stroke-width:1.5;}
+
+      /* floating chrome shared look */
+      .panel{
+        background:var(--panel);border:1px solid var(--hairline);
+        border-radius:8px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+      }
+      .brand{position:absolute;top:1.1rem;left:1.1rem;user-select:none;}
+      .brand-name{font-family:"Libre Baskerville",serif;font-weight:700;font-size:1.05rem;color:var(--accent);}
+      .brand-sub{font-family:"DM Mono",monospace;font-size:.62rem;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;}
+      .brand-sub::before{content:var(--brand-sub);}
+
+      /* tool rail */
+      .rail{position:absolute;left:1.1rem;top:50%;transform:translateY(-50%);
+        display:flex;flex-direction:column;gap:.15rem;padding:.4rem .3rem;z-index:5;}
+      .rail button{background:transparent;border:1px solid transparent;color:var(--muted);
+        width:2.4rem;height:2.4rem;border-radius:6px;cursor:pointer;
+        display:flex;align-items:center;justify-content:center;}
+      .rail button:hover{color:var(--ink);border-color:var(--hairline);}
+      .rail button[aria-pressed="true"]{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);border-color:var(--accent-soft);}
+      .rail .sep{height:1px;background:var(--hairline);margin:.15rem .2rem;}
+
+      /* top-right cluster */
+      .topright{position:absolute;top:1.1rem;right:1.1rem;display:flex;gap:.5rem;align-items:flex-start;z-index:6;}
+      .pillbtn{background:var(--panel);border:1px solid var(--hairline);color:var(--ink);
+        font-family:"DM Mono",monospace;font-size:.68rem;padding:.32rem .7rem;border-radius:100px;
+        cursor:pointer;display:flex;align-items:center;gap:.35rem;
+        backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
+      .pillbtn:hover{color:var(--accent);border-color:var(--accent-soft);}
+      .unit{display:flex;gap:.25rem;}
+      .unit button{background:var(--panel);border:1px solid var(--hairline);color:var(--muted);
+        font-family:"DM Mono",monospace;font-size:.66rem;letter-spacing:.06em;
+        padding:.3rem .65rem;border-radius:100px;cursor:pointer;
+        backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
+      .unit button[aria-pressed="true"]{color:var(--accent);border-color:var(--accent-soft);}
+
+      /* THEME TOGGLE affordance — the star of this feature */
+      .theme-toggle{
+        position:relative;width:3.4rem;height:1.7rem;border-radius:100px;
+        background:var(--panel);border:1px solid var(--hairline);cursor:pointer;
+        display:flex;align-items:center;padding:0 .2rem;
+        backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);flex-shrink:0;
+      }
+      .theme-toggle .knob{
+        position:absolute;width:1.25rem;height:1.25rem;border-radius:50%;
+        background:var(--accent);transition:transform .28s cubic-bezier(.4,1.3,.5,1);
+        display:flex;align-items:center;justify-content:center;
+        left:.2rem;
+      }
+      .theme-toggle .knob svg{width:12px;height:12px;stroke:var(--chip-ink);fill:none;stroke-width:1.5;}
+      .scene[data-mode="light"] .theme-toggle .knob{transform:translateX(1.7rem);}
+      .theme-toggle .ico{position:absolute;top:50%;transform:translateY(-50%);
+        color:var(--muted);width:12px;height:12px;}
+      .theme-toggle .ico.sun{right:.42rem;}
+      .theme-toggle .ico.moon{left:.42rem;}
+
+      /* measure inspector */
+      .measure{position:absolute;top:4.2rem;right:1.1rem;width:13rem;overflow:hidden;
+        font-family:"DM Mono",monospace;font-size:.7rem;z-index:5;}
+      .measure-head{display:flex;align-items:center;justify-content:space-between;padding:.5rem .7rem .35rem;}
+      .measure-head .lbl{color:var(--muted);font-size:.6rem;letter-spacing:.07em;text-transform:uppercase;}
+      .measure-head .val{color:var(--accent);font-size:.9rem;}
+      .measure-body{border-top:1px solid var(--hairline);}
+      .mrow{display:flex;justify-content:space-between;padding:.3rem .7rem;border-bottom:1px solid var(--hairline);}
+      .mrow:last-child{border-bottom:none;}
+      .mrow .rlbl{color:var(--muted);}
+      .mrow .rval{color:var(--ink);}
+
+      /* HUD */
+      .hud{position:absolute;bottom:1.1rem;right:1.1rem;display:flex;flex-direction:column;
+        align-items:flex-end;gap:.15rem;font-family:"DM Mono",monospace;font-size:.68rem;}
+      .hud .cell{background:var(--panel);border:1px solid var(--hairline);color:var(--muted);
+        padding:.2rem .55rem;border-radius:4px;}
+      .hud .cell b{color:var(--ink);font-weight:400;}
+      .hud .cell .on{color:var(--accent);}
+
+      /* zoom */
+      .zoom{position:absolute;bottom:1.1rem;left:1.1rem;display:flex;flex-direction:column;gap:.2rem;}
+      .zoom button{background:var(--panel);border:1px solid var(--hairline);color:var(--ink);
+        font-family:"DM Mono",monospace;width:2.2rem;height:2.2rem;border-radius:6px;cursor:pointer;}
+      .zoom button:hover{color:var(--accent);border-color:var(--accent-soft);}
+
+      /* symbol dock */
+      .dock{position:absolute;bottom:1.1rem;left:50%;transform:translateX(-50%);
+        display:flex;align-items:center;gap:.1rem;padding:.35rem .5rem;z-index:8;}
+      .dock .glabel{font-family:"DM Mono",monospace;font-size:.5rem;color:var(--muted);
+        letter-spacing:.08em;text-transform:uppercase;padding:0 .3rem;}
+      .dock .dsep{width:1px;height:2.2rem;background:var(--hairline);margin:0 .35rem;}
+      .dock .item{background:transparent;border:1px solid transparent;color:var(--muted);
+        font-family:"DM Mono",monospace;font-size:.52rem;width:2.5rem;height:2.5rem;border-radius:7px;
+        cursor:grab;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.1rem;}
+      .dock .item:hover{color:var(--accent);border-color:var(--accent-soft);
+        background:color-mix(in srgb,var(--accent) 8%,transparent);}
+
+      /* length chips on canvas */
+      .chip{position:absolute;transform:translate(-50%,-50%);font-family:"DM Mono",monospace;
+        font-size:.64rem;padding:.1rem .35rem;border-radius:3px;white-space:nowrap;}
+      .chip.live{background:var(--wall-line);color:var(--chip-ink);}
+      .chip.placed{background:var(--panel);border:1px solid var(--hairline);color:var(--muted);}
+
+      /* export preview card */
+      .exportcard{position:absolute;left:50%;top:1.1rem;transform:translateX(-50%);
+        z-index:7;display:flex;flex-direction:column;align-items:center;gap:.3rem;
+        font-family:"DM Mono",monospace;}
+      .exportcard .cap{font-size:.6rem;color:var(--muted);letter-spacing:.05em;}
+      .export-frame{width:12rem;height:8rem;border-radius:6px;overflow:hidden;
+        box-shadow:var(--shadow);border:1px solid var(--hairline);}
+    </style>
+  </head>
+  <body>
+    <div class="lab-bar">
+      <span class="lab-title">floorplan · light mode</span>
+      <div class="seg" id="theme-seg" role="group" aria-label="Theme direction">
+        <button data-theme="paper" aria-pressed="true">P1 · Paper</button>
+        <button data-theme="blueprint" aria-pressed="false">P2 · Cyanotype</button>
+        <button data-theme="graph" aria-pressed="false">P3 · Graph</button>
+        <button data-theme="dark" aria-pressed="false">Dark (shipped)</button>
+      </div>
+      <span class="lab-note">Pick a light direction. The in-canvas toggle (top-right, sun/moon) flips this scene between the chosen light theme and the current dark theme — the real editor behaviour. Export preview (top-center) shows the exported PNG ground follows the active theme.</span>
+    </div>
+
+    <main class="scene" id="scene" data-theme="paper" data-mode="light">
+      <svg id="canvas" aria-hidden="true"><g id="grid"></g></svg>
+
+      <!-- brand -->
+      <div class="brand">
+        <div class="brand-name">floorplan</div>
+        <div class="brand-sub"></div>
+      </div>
+
+      <!-- tool rail -->
+      <nav class="rail panel" aria-label="Tools">
+        <button aria-label="Select" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 2 L4 13 L7 10 L9 14 L11 13 L9 9 L13 9 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        </button>
+        <button aria-label="Wall" aria-pressed="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="sep"></div>
+        <button aria-label="Undo"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M5 4 L1 8 L5 12 M1 8 H10 Q14 8 14 5 Q14 2 10 2 H7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button aria-label="Redo"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M11 4 L15 8 L11 12 M15 8 H6 Q2 8 2 5 Q2 2 6 2 H9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </nav>
+
+      <!-- top-right cluster: theme toggle + share/export + units -->
+      <div class="topright">
+        <button class="theme-toggle" id="theme-toggle" role="switch" aria-checked="false" aria-label="Toggle light / dark">
+          <svg class="ico moon" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M9 7A4 4 0 1 1 5 3a3 3 0 0 0 4 4Z"/></svg>
+          <svg class="ico sun" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="6" cy="6" r="2.2"/><path d="M6 .8V2M6 10v1.2M.8 6H2M10 6h1.2M2.3 2.3l.9.9M8.8 8.8l.9.9M9.7 2.3l-.9.9M3.2 8.8l-.9.9"/></svg>
+          <span class="knob">
+            <svg viewBox="0 0 12 12" class="knob-ico"><circle cx="6" cy="6" r="2.4"/><path d="M6 1v1.4M6 9.6V11M1 6h1.4M9.6 6H11"/></svg>
+          </span>
+        </button>
+        <button class="pillbtn" aria-label="Share">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="11" cy="2.5" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="11" cy="11.5" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="3" cy="7" r="1.5" stroke="currentColor" stroke-width="1.3"/><line x1="9.6" y1="3.3" x2="4.4" y2="6.2" stroke="currentColor" stroke-width="1.2"/><line x1="4.4" y1="7.8" x2="9.6" y2="10.7" stroke="currentColor" stroke-width="1.2"/></svg>
+          Share
+        </button>
+        <div class="unit">
+          <button aria-pressed="true">IMPERIAL</button>
+          <button aria-pressed="false">METRIC</button>
+        </div>
+      </div>
+
+      <!-- measure inspector -->
+      <aside class="measure panel">
+        <div class="measure-head"><span class="lbl">Floor Area</span><span class="val">218.4 ft²</span></div>
+        <div class="measure-body">
+          <div class="mrow"><span class="rlbl">Living</span><span class="rval">152.0 ft²</span></div>
+          <div class="mrow"><span class="rlbl">Bedroom</span><span class="rval">66.4 ft²</span></div>
+        </div>
+      </aside>
+
+      <!-- export preview -->
+      <div class="exportcard">
+        <div class="export-frame" id="export-frame"></div>
+        <span class="cap">PNG export preview · ground follows theme</span>
+      </div>
+
+      <!-- HUD -->
+      <div class="hud">
+        <div class="cell">Snap <span class="on">On</span></div>
+        <div class="cell">Scale <b>1:50</b></div>
+        <div class="cell">Zoom <b>100%</b></div>
+      </div>
+
+      <!-- zoom -->
+      <div class="zoom">
+        <button aria-label="Zoom in">+</button>
+        <button aria-label="Zoom out">−</button>
+      </div>
+
+      <!-- symbol dock -->
+      <nav class="dock panel" aria-label="Symbols">
+        <span class="glabel">Openings</span>
+        <button class="item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3" y="3" width="12" height="13" rx="1" stroke="currentColor" stroke-width="1.3"/><path d="M3 7 A10 10 0 0 0 13 7" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2" opacity=".6"/></svg><span>Door</span></button>
+        <button class="item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="7" width="14" height="4" rx=".8" stroke="currentColor" stroke-width="1.3"/><line x1="9" y1="7" x2="9" y2="11" stroke="currentColor" stroke-width="1" opacity=".6"/></svg><span>Window</span></button>
+        <div class="dsep"></div>
+        <span class="glabel">Furniture</span>
+        <button class="item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3" y="3" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="4" y="4" width="10" height="3.5" rx=".8" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity=".15"/></svg><span>Bed</span></button>
+        <button class="item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3" y="5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="3" y="5" width="12" height="3" rx="1" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity=".15"/></svg><span>Sofa</span></button>
+        <button class="item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3" y="5" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.3"/><line x1="3" y1="5" x2="15" y2="13" stroke="currentColor" stroke-width=".8" opacity=".4"/></svg><span>Table</span></button>
+      </nav>
+
+      <!-- canvas length chips -->
+      <div class="chip placed" style="left:32%;top:34%">12'-6"</div>
+      <div class="chip placed" style="left:53%;top:58%">9'-0"</div>
+      <div class="chip live" style="left:44%;top:47%">7'-3"</div>
+
+      <div class="grain"></div>
+    </main>
+
+    <script>
+      const NS = "http://www.w3.org/2000/svg";
+      const scene = document.getElementById("scene");
+      const svg = document.getElementById("canvas");
+      const grid = document.getElementById("grid");
+      const cs = () => getComputedStyle(scene);
+
+      // pick the light theme chosen in the lab bar; toggle swaps to "dark"
+      let lightTheme = "paper";
+
+      function drawGrid(){
+        const r = svg.getBoundingClientRect();
+        const W = r.width, H = r.height;
+        svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+        while (grid.firstChild) grid.removeChild(grid.firstChild);
+        const step = 26;                     // px fine spacing
+        const ox = W/2 % step, oy = H/2 % step;
+        const axisX = W/2, axisY = H/2;
+        const frag = document.createDocumentFragment();
+        const line = (x1,y1,x2,y2,cls) => {
+          const l = document.createElementNS(NS,"line");
+          l.setAttribute("x1",x1);l.setAttribute("y1",y1);
+          l.setAttribute("x2",x2);l.setAttribute("y2",y2);
+          l.setAttribute("class",cls);frag.appendChild(l);
+        };
+        for(let x=ox;x<=W;x+=step){
+          const near = Math.abs(x-axisX)<1;
+          const major = Math.round((x-axisX)/step)%5===0;
+          line(x,0,x,H, near?"g-axis":major?"g-major":"g-fine");
+        }
+        for(let y=oy;y<=H;y+=step){
+          const near = Math.abs(y-axisY)<1;
+          const major = Math.round((y-axisY)/step)%5===0;
+          line(0,y,W,y, near?"g-axis":major?"g-major":"g-fine");
+        }
+        grid.appendChild(frag);
+      }
+      window.addEventListener("resize", drawGrid);
+
+      // ── sample plan geometry drawn into the live canvas ──────────────────
+      let planG = null;
+      function drawPlan(){
+        const r = svg.getBoundingClientRect();
+        const cx = r.width/2, cy = r.height/2;
+        if (planG) planG.remove();
+        planG = document.createElementNS(NS,"g");
+        const s = cs();
+        const wallBody = s.getPropertyValue("--wall-body");
+        const wallLine = s.getPropertyValue("--wall-line");
+        const roomFill = s.getPropertyValue("--room-fill");
+        const symFill  = s.getPropertyValue("--sym-fill");
+        const symLine  = s.getPropertyValue("--sym-line");
+
+        // main L-shaped room (offset around center)
+        const P = (dx,dy)=>`${cx+dx},${cy+dy}`;
+        const outline = [P(-200,-120),P(160,-120),P(160,40),P(60,40),P(60,140),P(-200,140)].join(" ");
+        const add = (tag,attrs)=>{const e=document.createElementNS(NS,tag);
+          for(const k in attrs)e.setAttribute(k,attrs[k]);planG.appendChild(e);return e;};
+        add("polygon",{points:outline,fill:roomFill,stroke:"none"});
+        add("polygon",{points:outline,fill:"none",stroke:wallBody,"stroke-width":"12","stroke-linejoin":"round"});
+        add("polygon",{points:outline,fill:"none",stroke:wallLine,"stroke-width":"1.6","stroke-linejoin":"round"});
+        // interior divider
+        add("line",{x1:cx+60,y1:cy+40,x2:cx-40,y2:cy+40,stroke:wallLine,"stroke-width":"1.6"});
+        add("line",{x1:cx-40,y1:cy+40,x2:cx-40,y2:cy+140,stroke:wallLine,"stroke-width":"1.6"});
+
+        // furniture: bed + sofa + table
+        add("rect",{x:cx-190,y:cy-110,width:70,height:100,rx:3,fill:symFill,stroke:symLine,"stroke-width":"1.4"});
+        add("rect",{x:cx-190,y:cy-110,width:70,height:26,rx:2,fill:symFill,stroke:symLine,"stroke-width":".8"});
+        add("rect",{x:cx+70,y:cy-100,width:80,height:34,rx:4,fill:symFill,stroke:symLine,"stroke-width":"1.4"});
+        add("circle",{cx:cx-100,cy:cy+90,r:34,fill:symFill,stroke:symLine,"stroke-width":"1.4"});
+
+        // a door swing on the bottom wall
+        add("path",{d:`M${cx-10} ${cy+140} A44 44 0 0 1 ${cx+34} ${cy+96}`,fill:"none",stroke:symLine,"stroke-width":"1","stroke-dasharray":"3 2"});
+
+        svg.appendChild(planG);
+      }
+
+      // ── export preview (mini exported PNG using export palette) ──────────
+      const exportFrame = document.getElementById("export-frame");
+      function drawExport(){
+        const s = cs();
+        const bg = s.getPropertyValue("--bg-deep").trim();
+        const wallBody = s.getPropertyValue("--wall-body").trim();
+        const wallLine = s.getPropertyValue("--wall-line").trim();
+        const roomFill = s.getPropertyValue("--room-fill").trim();
+        const dim = s.getPropertyValue("--muted").trim();
+        exportFrame.innerHTML = `
+          <svg viewBox="0 0 240 160" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+            <rect width="240" height="160" fill="${bg}"/>
+            <polygon points="40,30 200,30 200,90 130,90 130,130 40,130"
+              fill="${roomFill}" stroke="${wallBody}" stroke-width="9" stroke-linejoin="round"/>
+            <polygon points="40,30 200,30 200,90 130,90 130,130 40,130"
+              fill="none" stroke="${wallLine}" stroke-width="1.4" stroke-linejoin="round"/>
+            <text x="120" y="24" font-family="DM Mono,monospace" font-size="8"
+              fill="${dim}" text-anchor="middle">12'-6"</text>
+            <text x="120" y="146" font-family="DM Mono,monospace" font-size="8"
+              fill="${dim}" text-anchor="middle">exported ground = paper</text>
+          </svg>`;
+      }
+
+      // ── theme controls ───────────────────────────────────────────────────
+      function applyTheme(){
+        drawGrid(); drawPlan(); drawExport();
+      }
+
+      const seg = document.getElementById("theme-seg");
+      seg.addEventListener("click", e => {
+        const b = e.target.closest("button"); if(!b) return;
+        [...seg.children].forEach(x=>x.setAttribute("aria-pressed", x===b));
+        const t = b.dataset.theme;
+        if (t === "dark"){
+          scene.dataset.theme = "dark"; scene.dataset.mode = "dark";
+          toggle.setAttribute("aria-checked","true");
+        } else {
+          lightTheme = t;
+          scene.dataset.theme = t; scene.dataset.mode = "light";
+          toggle.setAttribute("aria-checked","false");
+        }
+        requestAnimationFrame(applyTheme);
+      });
+
+      const toggle = document.getElementById("theme-toggle");
+      toggle.addEventListener("click", () => {
+        const goingDark = scene.dataset.mode === "light";
+        scene.dataset.mode = goingDark ? "dark" : "light";
+        scene.dataset.theme = goingDark ? "dark" : lightTheme;
+        toggle.setAttribute("aria-checked", String(goingDark));
+        // keep lab segment roughly in sync
+        [...seg.children].forEach(x=>x.setAttribute("aria-pressed",
+          x.dataset.theme === scene.dataset.theme));
+        requestAnimationFrame(applyTheme);
+      });
+
+      requestAnimationFrame(applyTheme);
+    </script>
+  </body>
+</html>
