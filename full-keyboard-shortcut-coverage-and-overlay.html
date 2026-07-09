@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Keyboard Shortcuts Overlay — Design Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&family=Libre+Baskerville:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:         #14140f;
+    --bg-deep:    #100f0b;
+    --ink:        #ece7d6;
+    --muted:      #8f8a78;
+    --gold:       #c9a84c;
+    --gold-soft:  rgba(201, 168, 76, 0.55);
+    --grid-fine:  rgba(201, 168, 76, 0.055);
+    --grid-major: rgba(201, 168, 76, 0.14);
+    --panel:      rgba(20, 20, 15, 0.72);
+    --hairline:   rgba(201, 168, 76, 0.18);
+    --font-ui:      "DM Sans", system-ui, sans-serif;
+    --font-mono:    "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+    --wall-line:  #d9be6e;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-ui);
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 800px at 30% -10%, var(--bg) 0%, var(--bg-deep) 100%);
+    min-height: 100vh;
+    /* graph-paper wash so mockup reads on the real backdrop */
+    background-image:
+      linear-gradient(var(--grid-fine) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+      radial-gradient(1200px 800px at 30% -10%, var(--bg) 0%, var(--bg-deep) 100%);
+    background-size: 24px 24px, 24px 24px, 100% 100%;
+  }
+  /* ── Mockup scaffold (not part of the app) ─────────────────────────── */
+  .doc {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  .doc-head h1 {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    color: var(--gold);
+    margin: 0 0 0.35rem;
+    font-weight: 700;
+  }
+  .doc-head p { color: var(--muted); font-size: 0.9rem; max-width: 62ch; line-height: 1.6; margin: 0.2rem 0; }
+  .doc-note { font-family: var(--font-mono); font-size: 0.72rem; color: var(--gold-soft); }
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--gold);
+    border-bottom: 1px solid var(--hairline);
+    padding-bottom: 0.4rem;
+    margin: 3rem 0 1.4rem;
+  }
+  .caption { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); margin: 0.9rem 0 0; }
+
+  /* ── Platform toggle ───────────────────────────────────────────────── */
+  .platform-toggle {
+    display: inline-flex;
+    gap: 0;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 1rem 0 0;
+  }
+  .platform-toggle button {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    padding: 0.4rem 1rem;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+  }
+  .platform-toggle button[aria-pressed="true"] {
+    background: rgba(201,168,76,0.16);
+    color: var(--gold);
+  }
+
+  /* ── Shared overlay chrome (mirrors src/index.html .help-overlay) ──── */
+  .stage-frame {
+    position: relative;
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    overflow: hidden;
+    background: rgba(16,15,11,0.35);
+    min-height: 560px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* the '?' launcher, as it sits in the app zoom cluster (bottom-left) */
+  .help-launcher {
+    position: absolute;
+    left: 1rem;
+    bottom: 1rem;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    width: 2.2rem; height: 2.2rem;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color 0.15s, border-color 0.15s;
+    z-index: 2;
+  }
+  .help-launcher:hover, .help-launcher[aria-pressed="true"] {
+    border-color: var(--gold-soft); color: var(--gold);
+  }
+  .help-overlay {
+    position: absolute; inset: 0;
+    background: rgba(16,15,11,0.62);
+    z-index: 3;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    padding: 1.5rem;
+  }
+  .help-overlay-panel {
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 6px 32px rgba(0,0,0,0.6);
+    max-height: 100%;
+    overflow: auto;
+  }
+  .help-overlay-title {
+    font-family: var(--font-display);
+    color: var(--gold);
+    font-weight: 700;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+  }
+  .help-esc-hint { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); font-weight: 400; }
+  kbd {
+    font-family: var(--font-mono);
+    background: rgba(201,168,76,0.12);
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    padding: 0.05rem 0.4rem;
+    color: var(--gold);
+    font-style: normal;
+    white-space: nowrap;
+    line-height: 1.7;
+  }
+  .key-sep { color: var(--muted); padding: 0 0.15rem; font-family: var(--font-mono); font-size: 0.7rem; }
+
+  /* ── Direction A: grouped single column (evolves the current table) ── */
+  .panel-a { width: 26rem; max-width: 100%; padding: 1.25rem 1.5rem; }
+  .panel-a .help-overlay-title { font-size: 1rem; margin-bottom: 1rem; }
+  .grp-title {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--gold-soft);
+    margin: 0.95rem 0 0.35rem;
+  }
+  .grp-title:first-of-type { margin-top: 0; }
+  .krow {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: 0.32rem 0;
+    border-bottom: 1px solid rgba(201,168,76,0.06);
+    font-size: 0.82rem;
+  }
+  .krow:last-child { border-bottom: none; }
+  .krow-label { color: var(--ink); }
+  .krow-keys { font-family: var(--font-mono); font-size: 0.68rem; white-space: nowrap; flex-shrink: 0; }
+
+  /* ── Direction B: two-column grouped card grid (scales to many keys) ─ */
+  .panel-b { width: 46rem; max-width: 100%; padding: 1.4rem 1.6rem; }
+  .panel-b .help-overlay-title { font-size: 1.05rem; margin-bottom: 1.1rem; }
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem 1.6rem;
+  }
+  .kcard { break-inside: avoid; }
+  .kcard-head {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .kcard-head .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+  .kcard .krow { font-size: 0.78rem; padding: 0.26rem 0; border-bottom: none; }
+  .kcard .krow-keys { color: var(--muted); }
+  .kcard .krow-keys kbd { line-height: 1.9; }
+
+  @media (max-width: 720px) {
+    .panel-b { width: 26rem; }
+    .card-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ── Live demo: nudge / rotate on a selected symbol ────────────────── */
+  .demo-wrap { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; }
+  .demo-canvas {
+    position: relative;
+    flex: 1 1 340px;
+    min-height: 300px;
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    background:
+      linear-gradient(var(--grid-fine) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+      rgba(16,15,11,0.4);
+    background-size: 20px 20px, 20px 20px, 100% 100%;
+    overflow: hidden;
+  }
+  .sym {
+    position: absolute;
+    left: 140px; top: 120px;
+    width: 90px; height: 54px;
+    transition: left 0.11s ease, top 0.11s ease, transform 0.16s ease;
+  }
+  .sym-body {
+    width: 100%; height: 100%;
+    border: 1.6px solid var(--wall-line);
+    background: rgba(201,168,76,0.12);
+    border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-size: 0.6rem; color: var(--gold); letter-spacing: 0.1em;
+  }
+  .sym.selected .sym-body {
+    outline: 1.5px dashed var(--gold-soft);
+    outline-offset: 4px;
+  }
+  .sel-handle {
+    position: absolute; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--bg-deep); border: 1.5px solid var(--gold);
+  }
+  .sel-handle.tl { left: -4px; top: -4px; }
+  .sel-handle.tr { right: -4px; top: -4px; }
+  .sel-handle.bl { left: -4px; bottom: -4px; }
+  .sel-handle.br { right: -4px; bottom: -4px; }
+  .demo-controls { flex: 0 0 280px; }
+  .demo-pad { display: grid; grid-template-columns: repeat(3, 2.4rem); grid-auto-rows: 2.4rem; gap: 0.3rem; margin: 0.6rem 0; }
+  .demo-pad button, .demo-row button {
+    background: var(--panel); border: 1px solid var(--hairline); color: var(--ink);
+    font-family: var(--font-mono); font-size: 0.8rem; border-radius: 6px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .demo-pad button:hover, .demo-row button:hover { border-color: var(--gold-soft); color: var(--gold); }
+  .demo-pad .empty { visibility: hidden; }
+  .demo-pad .up { grid-column: 2; } .demo-pad .left { grid-column: 1; grid-row: 2; }
+  .demo-pad .down { grid-column: 2; grid-row: 2; } .demo-pad .right { grid-column: 3; grid-row: 2; }
+  .demo-row { display: flex; gap: 0.4rem; margin: 0.5rem 0; flex-wrap: wrap; }
+  .demo-row button { padding: 0.4rem 0.7rem; white-space: nowrap; }
+  .demo-readout {
+    font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+    background: rgba(16,15,11,0.5); border: 1px solid var(--hairline); border-radius: 6px;
+    padding: 0.55rem 0.7rem; margin-top: 0.7rem; line-height: 1.6;
+  }
+  .demo-readout b { color: var(--gold); font-weight: 500; }
+  .fine-tag {
+    display: inline-block; margin-left: 0.4rem; font-size: 0.6rem;
+    color: var(--gold); border: 1px solid var(--gold-soft); border-radius: 4px; padding: 0 0.35rem;
+  }
+</style>
+</head>
+<body>
+<div class="doc">
+  <div class="doc-head">
+    <h1>Keyboard Shortcuts — full coverage + overlay</h1>
+    <p>Rounds out keyboard control (tool switching, symbol picks, nudge, rotate, zoom /
+      zoom-to-fit, snap toggle, select / deselect) and makes every active shortcut
+      discoverable in the <kbd>?</kbd> overlay, grouped and labelled, with correct
+      Mac (⌘) vs non-Mac (Ctrl) rendering.</p>
+    <p class="doc-note">Throwaway mockup — reuses the app's blueprint tokens. The overlay is the only
+      new visual surface; the rest of the shortcuts are keyboard-only and appear here only
+      inside the overlay + the nudge/rotate demo.</p>
+    <div class="platform-toggle" role="group" aria-label="Preview platform">
+      <button id="pf-mac" aria-pressed="true">macOS (⌘)</button>
+      <button id="pf-win" aria-pressed="false">Windows / Linux (Ctrl)</button>
+    </div>
+  </div>
+  <div class="section-label">Direction A — Grouped single column (evolves the current table)</div>
+  <p class="caption">Keeps the existing centered card, but replaces the flat 12-row table with
+    labelled groups so the now-longer list stays scannable. Best on narrow / mobile widths.
+    Shown open over the stage; the <kbd>?</kbd> launcher sits bottom-left in the zoom cluster.</p>
+  <div class="stage-frame">
+    <button class="help-launcher" aria-pressed="true" title="Keyboard shortcuts (?)">?</button>
+    <div class="help-overlay">
+      <div class="help-overlay-panel panel-a">
+        <div class="help-overlay-title">
+          Keyboard Shortcuts
+          <span class="help-esc-hint">Esc / ? to close</span>
+        </div>
+        <div data-kb-groups="a"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-label">Direction B — Two-column grouped card grid (recommended)</div>
+  <p class="caption">A wider card lays the groups out in two columns so all ~30 shortcuts fit
+    without scrolling on desktop. Group headers with a gold dot give strong visual anchors.
+    Collapses to a single column under 720px, so mobile still gets Direction A's ergonomics.</p>
+  <div class="stage-frame">
+    <button class="help-launcher" aria-pressed="true" title="Keyboard shortcuts (?)">?</button>
+    <div class="help-overlay">
+      <div class="help-overlay-panel panel-b">
+        <div class="help-overlay-title">
+          Keyboard Shortcuts
+          <span class="help-esc-hint">Esc / ? to close · shortcuts ignored while typing dimensions</span>
+        </div>
+        <div class="card-grid" data-kb-groups="b"></div>
+      </div>
+    </div>
+  </div>
+  <div class="section-label">Interaction — arrow-key nudge &amp; rotate on a selected symbol</div>
+  <p class="caption">Select the symbol, then use the arrow keys (or the pad) to nudge. Default step
+    is one grid cell (0.25&nbsp;m); hold <kbd>Shift</kbd> for a fine 0.025&nbsp;m step. <kbd>R</kbd> rotates
+    90°. Each committed nudge / rotate is a single undoable step (dirty-checked so a no-move is ignored).</p>
+  <div class="demo-wrap">
+    <div class="demo-canvas" id="demo-canvas" tabindex="0" aria-label="Nudge demo canvas">
+      <div class="sym selected" id="demo-sym">
+        <div class="sym-body">SOFA</div>
+        <span class="sel-handle tl"></span><span class="sel-handle tr"></span>
+        <span class="sel-handle bl"></span><span class="sel-handle br"></span>
+      </div>
+    </div>
+    <div class="demo-controls">
+      <div class="demo-pad">
+        <button class="up" data-nudge="up" aria-label="Nudge up">↑</button>
+        <button class="left" data-nudge="left" aria-label="Nudge left">←</button>
+        <button class="down" data-nudge="down" aria-label="Nudge down">↓</button>
+        <button class="right" data-nudge="right" aria-label="Nudge right">→</button>
+      </div>
+      <div class="demo-row">
+        <button id="demo-fine" aria-pressed="false">Fine step (Shift)</button>
+        <button data-rotate="1" aria-label="Rotate 90 degrees">Rotate 90° (R)</button>
+      </div>
+      <div class="demo-readout" id="demo-readout">
+        Step: <b id="ro-step">0.25 m</b><span class="fine-tag" id="ro-fine" style="display:none">FINE</span><br />
+        Position: <b id="ro-pos">x 3.50 m · y 3.00 m</b><br />
+        Rotation: <b id="ro-rot">0°</b><br />
+        Last: <b id="ro-last">—</b>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-label">Notes for the LLD</div>
+  <p class="caption">
+    · Every row above is a live shortcut; nothing listed is dead and nothing active is missing (acceptance criterion).<br />
+    · All handlers share the existing guard: suppressed while focus is in <kbd>input</kbd> / <kbd>textarea</kbd> / <kbd>select</kbd>.<br />
+    · Snap-toggle shortcut coordinates with the snapping cluster (#29) — toggles the persistent grid-snap pref shown on the HUD grid chip.<br />
+    · Zoom / zoom-to-fit reuse <kbd>view.js</kbd> (<kbd>zoomAbout</kbd>, <kbd>fitToContent</kbd>, <kbd>resetView</kbd>); not undoable (view is out of history scope).
+  </p>
+</div>
+<script>
+  // ── Platform state ─────────────────────────────────────────────────
+  let isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+
+  // Key token: { mac, win } strings, rendered as <kbd>. Plain keys share both.
+  const K = (mac, win) => ({ mac, win: win === undefined ? mac : win });
+
+  // Shortcut model — grouped. keys is an array of alternatives joined by " / ".
+  // Each alternative is an array of key tokens rendered as consecutive <kbd>.
+  const GROUPS = [
+    { title: "Tools", items: [
+      { label: "Draw wall", alts: [[K("W")]] },
+      { label: "Select / move", alts: [[K("V")]] },
+      { label: "Deselect / cancel", alts: [[K("Esc")]] },
+    ]},
+    { title: "Add symbol", items: [
+      { label: "Door", alts: [[K("D")]] },
+      { label: "wiNdow", alts: [[K("N")]] },
+      { label: "Bed", alts: [[K("B")]] },
+      { label: "Sofa", alts: [[K("S")]] },
+      { label: "Table", alts: [[K("T")]] },
+      { label: "Chair", alts: [[K("C")]] },
+      { label: "dEsk", alts: [[K("E")]] },
+      { label: "Fridge", alts: [[K("F")]] },
+    ]},
+    { title: "Edit selection", items: [
+      { label: "Nudge", alts: [[K("←")],[K("↑")],[K("→")],[K("↓")]] },
+      { label: "Nudge (fine step)", alts: [[K("⇧","Shift"),K("←")]] },
+      { label: "Rotate 90°", alts: [[K("R")]] },
+      { label: "Duplicate", alts: [[K("⌘","Ctrl"),K("D")]] },
+      { label: "Delete", alts: [[K("Del")],[K("⌫","Backspace")]] },
+    ]},
+    { title: "History", items: [
+      { label: "Undo", alts: [[K("⌘","Ctrl"),K("Z")]] },
+      { label: "Redo", alts: [[K("⇧","Shift"),K("⌘","Ctrl"),K("Z")],[K("⌘","Ctrl"),K("Y")]] },
+    ]},
+    { title: "View", items: [
+      { label: "Zoom in", alts: [[K("+")],[K("=")]] },
+      { label: "Zoom out", alts: [[K("−")],[K("_")]] },
+      { label: "Zoom to fit", alts: [[K("⇧","Shift"),K("1")]] },
+      { label: "Reset zoom (100%)", alts: [[K("0")]] },
+    ]},
+    { title: "Wall drawing", items: [
+      { label: "Finish chain", alts: [[K("Enter")]] },
+      { label: "Remove last point", alts: [[K("⌫","Backspace")]] },
+      { label: "Free snap (hold)", alts: [[K("Alt")]] },
+    ]},
+    { title: "Snapping", items: [
+      { label: "Toggle grid snap", alts: [[K("G")]] },
+      { label: "Cycle snap precision", raw: "Grid chip · Auto → 0.25 → 0.1 → 0.025 → Off" },
+    ]},
+    { title: "Help", items: [
+      { label: "Toggle this help", alts: [[K("?")]] },
+      { label: "Close overlay", alts: [[K("Esc")]] },
+    ]},
+  ];
+
+  // ── Rendering ──────────────────────────────────────────────────────
+  function kbd(tok) {
+    const el = document.createElement("kbd");
+    el.textContent = isMac ? tok.mac : tok.win;
+    return el;
+  }
+  function keysHtml(item) {
+    const span = document.createElement("span");
+    span.className = "krow-keys";
+    if (item.raw) { span.textContent = item.raw; span.style.color = "var(--muted)"; return span; }
+    item.alts.forEach((alt, ai) => {
+      if (ai > 0) {
+        const s = document.createElement("span");
+        s.className = "key-sep"; s.textContent = "/";
+        span.appendChild(s);
+      }
+      alt.forEach((tok) => span.appendChild(kbd(tok)));
+    });
+    return span;
+  }
+  function krow(item) {
+    const row = document.createElement("div");
+    row.className = "krow";
+    const lbl = document.createElement("span");
+    lbl.className = "krow-label"; lbl.textContent = item.label;
+    row.appendChild(lbl);
+    row.appendChild(keysHtml(item));
+    return row;
+  }
+
+  function renderA(mount) {
+    mount.innerHTML = "";
+    GROUPS.forEach((g) => {
+      const h = document.createElement("div");
+      h.className = "grp-title"; h.textContent = g.title;
+      mount.appendChild(h);
+      g.items.forEach((it) => mount.appendChild(krow(it)));
+    });
+  }
+  function renderB(mount) {
+    mount.innerHTML = "";
+    GROUPS.forEach((g) => {
+      const card = document.createElement("div");
+      card.className = "kcard";
+      const head = document.createElement("div");
+      head.className = "kcard-head";
+      const dot = document.createElement("span"); dot.className = "dot";
+      head.appendChild(dot);
+      head.appendChild(document.createTextNode(g.title));
+      card.appendChild(head);
+      g.items.forEach((it) => card.appendChild(krow(it)));
+      mount.appendChild(card);
+    });
+  }
+  function renderAll() {
+    document.querySelectorAll('[data-kb-groups="a"]').forEach(renderA);
+    document.querySelectorAll('[data-kb-groups="b"]').forEach(renderB);
+  }
+  renderAll();
+
+  // ── Platform toggle ────────────────────────────────────────────────
+  const pfMac = document.getElementById("pf-mac");
+  const pfWin = document.getElementById("pf-win");
+  function setPlatform(mac) {
+    isMac = mac;
+    pfMac.setAttribute("aria-pressed", String(mac));
+    pfWin.setAttribute("aria-pressed", String(!mac));
+    renderAll();
+  }
+  pfMac.addEventListener("click", () => setPlatform(true));
+  pfWin.addEventListener("click", () => setPlatform(false));
+  setPlatform(isMac);
+
+  // ── Nudge / rotate demo ────────────────────────────────────────────
+  const PX_PER_M = 40;      // matches view.BASE_PX_PER_M at zoom 1
+  const COARSE_M = 0.25;    // one grid cell
+  const FINE_M   = 0.025;   // shift step
+  const canvas   = document.getElementById("demo-canvas");
+  const sym      = document.getElementById("demo-sym");
+  const fineBtn  = document.getElementById("demo-fine");
+  let fine = false;
+  // world position in metres (origin at symbol's initial left/top)
+  const state = { x: 3.5, y: 3.0, rot: 0, left: 140, top: 120 };
+
+  const roStep = document.getElementById("ro-step");
+  const roFine = document.getElementById("ro-fine");
+  const roPos  = document.getElementById("ro-pos");
+  const roRot  = document.getElementById("ro-rot");
+  const roLast = document.getElementById("ro-last");
+
+  function paint(last) {
+    sym.style.left = state.left + "px";
+    sym.style.top  = state.top + "px";
+    sym.style.transform = "rotate(" + state.rot + "deg)";
+    roStep.textContent = (fine ? FINE_M : COARSE_M).toFixed(3).replace(/0+$/,"").replace(/\.$/,"") + " m";
+    roFine.style.display = fine ? "inline-block" : "none";
+    roPos.textContent = "x " + state.x.toFixed(2) + " m · y " + state.y.toFixed(2) + " m";
+    roRot.textContent = ((state.rot % 360) + 360) % 360 + "°";
+    if (last) roLast.textContent = last;
+  }
+  function nudge(dir) {
+    const stepM = fine ? FINE_M : COARSE_M;
+    const stepPx = stepM * PX_PER_M;
+    if (dir === "left")  { state.x -= stepM; state.left -= stepPx; }
+    if (dir === "right") { state.x += stepM; state.left += stepPx; }
+    if (dir === "up")    { state.y -= stepM; state.top  -= stepPx; }
+    if (dir === "down")  { state.y += stepM; state.top  += stepPx; }
+    paint("Nudge " + dir + " " + stepM + " m  (1 undo step)");
+  }
+  function rotate() { state.rot += 90; paint("Rotate 90°  (1 undo step)"); }
+  function setFine(on) { fine = on; fineBtn.setAttribute("aria-pressed", String(on)); paint(); }
+
+  document.querySelectorAll("[data-nudge]").forEach((b) =>
+    b.addEventListener("click", () => nudge(b.getAttribute("data-nudge"))));
+  document.querySelectorAll("[data-rotate]").forEach((b) =>
+    b.addEventListener("click", rotate));
+  fineBtn.addEventListener("click", () => setFine(!fine));
+
+  // Real keyboard drive when the canvas has focus (demonstrates the guard:
+  // arrow keys only act here, never while typing in an input elsewhere).
+  canvas.addEventListener("keydown", (e) => {
+    const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+    if (map[e.key]) { e.preventDefault(); setFine(e.shiftKey); nudge(map[e.key]); return; }
+    if (e.key === "r" || e.key === "R") { e.preventDefault(); rotate(); }
+  });
+  paint("—");
+</script>
+</body>
+
+</html>
