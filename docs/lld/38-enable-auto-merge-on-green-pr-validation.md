@@ -8,9 +8,10 @@ floorplan; the same pattern rolls out to sibling danbing projects later (out of 
 
 **Covers (this LLD):**
 1. **Branch protection** on `harennon/floorplan` `main`: add `required_status_checks =
-   ["validate"]` (strict) so a PR cannot merge while the CI `validate` job (LLD 13,
-   `.github/workflows/ci.yml`) is red or absent. This is the trust anchor — auto-merge fires
-   only on this GitHub-side check, never on the pipeline's own QA agent self-report.
+   ["validate"]` **with `strict: false`** so a PR cannot merge while the CI `validate` job
+   (LLD 13, `.github/workflows/ci.yml`) is red or absent. This is the trust anchor — auto-merge
+   fires only on this GitHub-side check, never on the pipeline's own QA agent self-report.
+   `strict: false` is a deliberate choice driven by batch shipping — see Approach §1.
 2. **Enable repo auto-merge** (`allow_auto_merge = true`) and a **Ship-phase step** in
    `ship-issue.js` that turns on auto-merge for the PR it just opened
    (`gh pr merge --auto --squash --delete-branch`).
@@ -45,11 +46,34 @@ floorplan; the same pattern rolls out to sibling danbing projects later (out of 
 
 ### §1 Gate on the GitHub-side check, never the pipeline's self-report (the safety core)
 Auto-merge is only safe because *GitHub* enforces the gate. We set on `main`:
-`required_status_checks = { strict: true, contexts: ["validate"] }`. Strict = branch must be
-up to date with `main` before merging, so the green result reflects the merged tree, not a
-stale one. Because the gate lives in **branch protection** (server-side), the pipeline's own
-QA/code-review agents physically cannot merge a red PR — even if they wanted to. This is what
-prevents "the agent merging itself": the agent has no path around GitHub's required check.
+`required_status_checks = { strict: false, contexts: ["validate"] }`. Because the gate lives
+in **branch protection** (server-side), the pipeline's own QA/code-review agents physically
+cannot merge a red PR — even if they wanted to. This is what prevents "the agent merging
+itself": the agent has no path around GitHub's required check.
+
+**Why `strict: false` (not `true`) — the batch-shipping constraint (resolves review BLOCKER).**
+`strict: true` means "the PR branch must be up to date with `main` before the green check
+counts." That directly breaks the primary entry point. `ship-batch.js` ships 2–3 issues
+**sequentially** (`workflows/ship-batch.js` Phase 4 loop), and `ship-issue.js` **hands off
+after arming `--auto` without waiting for the merge** (Phase 9). So a batch arms PR1, then arms
+PR2. When PR1 squash-merges, `main` advances; under `strict: true` PR2 is now "not up to date,"
+GitHub refuses to auto-merge it, and nothing in this design updates the branch — so N−1 of
+every batch's PRs would stall open forever, requiring a human "Update branch" click. That
+contradicts the issue's core "merges with no human action" criterion. `strict: false` lets
+each armed PR merge on its own green check regardless of intervening merges to `main`.
+
+**The staleness risk this accepts, and why it's acceptable here.** With `strict: false` a PR's
+green `validate` reflects the tree *at its branch point*, not the post-merge `main`. Two PRs
+that pass independently but conflict *semantically* (not textually) could both merge and break
+`main`. This is bounded and tolerable for floorplan because: (a) it is a low-volume,
+single-maintainer repo with a small module surface, so concurrent PRs touching interdependent
+logic are rare; (b) textual conflicts are still caught — GitHub blocks a mergeable-state
+conflict regardless of `strict`; (c) `main` is not release-critical (Cloudflare Pages
+redeploys on every push and is trivially revertable); and (d) the kill switch (§5) plus a red
+post-merge `validate` on `main` surface any breakage immediately. We explicitly prefer this
+small, self-healing risk over the guaranteed batch-stall that `strict: true` produces. If the
+repo ever becomes high-volume, the correct fix is GitHub's **merge queue** (out of scope,
+noted in §Scope), not `strict: true` with a bespoke auto-update step.
 
 **Remove the human review requirement.** Full autonomy means no required human PR review.
 Set `required_pull_request_reviews = null` (drop the `required_approving_review_count: 1`).
@@ -93,14 +117,30 @@ a clipped HUD. floorplan is a visual tool, so this gap is material.
 Implemented as a decision in ship-issue's Ship phase, keyed off the PR's changed file set:
 
 - **Render/layout paths (human-gated — do NOT enable auto-merge):** any changed file matching
-  the render/layout surface. For floorplan this is `src/js/*Render.js`
-  (`wallRender.js`, `symbolRender.js`, `clearanceRender.js`), `src/js/grid.js`,
-  `src/js/view.js`, `src/js/surface.js`, `src/js/hud.js`, `src/js/clearancePanel.js`,
-  `src/js/help.js`, any `src/*.html`, and any `src/**/*.css`. These files draw or lay out UI;
-  a green suite does not prove they look right.
+  the render/layout surface. For floorplan this is:
+  - `src/js/*Render.js` (`wallRender.js`, `symbolRender.js`, `clearanceRender.js`),
+  - `src/js/grid.js`, `src/js/view.js`, `src/js/surface.js`, `src/js/hud.js`,
+    `src/js/clearancePanel.js`, `src/js/help.js`,
+  - **`src/js/exportImg.js`** — the standalone SVG/PNG rasteriser. It has its own palette,
+    fonts, scale and layout (verified) and produces floorplan's **stated product wedge** (the
+    shareable PNG/SVG export, per CLAUDE.md). The headless `validate` suite checks geometry,
+    not appearance, so a visual regression here would auto-merge unseen. It is render-critical
+    and MUST be human-gated.
+  - **`src/js/dimEntry.js`** and **`src/js/symbolDimEntry.js`** — these position floating
+    `<input>` overlays on the stage (screen-space layout via `worldToScreen`); a mispositioned
+    or clipped inline editor is a visual/layout defect a unit test won't catch. Gated.
+  - any `src/*.html`, and any `src/**/*.css`.
+
+  These files draw or lay out UI; a green suite does not prove they look right.
 - **Logic-only PRs (auto-merge eligible):** every changed file is outside the render/layout
   set above (e.g. `walls.js`, `measure.js`, `units.js`, `store.js`, `plan.js`, `share.js`,
   `exportJson.js`, `history.js`, `prefs.js`, docs, `.github/`, tests).
+
+  **Accepted residual (behavioral-visual, not gated):** `src/js/interactions.js` owns
+  pan/zoom/cursor state. It is behavioral-visual — a regression there degrades *feel*
+  (e.g. jumpy zoom) but not correctness, and it draws nothing. It is intentionally left
+  logic-classified (auto-merge eligible); this is accepted residual risk, consistent with
+  Edge Case 5. Reversible via the kill switch if it bites.
 
 When a PR is render-touching, ship-issue **skips** `gh pr merge --auto` and instead comments
 on the PR that it needs a human visual check before merge, leaving it open. When it is
@@ -146,12 +186,12 @@ gh api -X PATCH repos/harennon/floorplan \
   -F delete_branch_on_merge=true \
   -F allow_squash_merge=true
 
-# 2. Make `validate` a required, strict status check on main, and drop the
+# 2. Make `validate` a required (non-strict) status check on main, and drop the
 #    human-review requirement (full autonomy). Uses the full protection PUT.
 gh api -X PUT repos/harennon/floorplan/branches/main/protection \
   --input - <<'JSON'
 {
-  "required_status_checks": { "strict": true, "contexts": ["validate"] },
+  "required_status_checks": { "strict": false, "contexts": ["validate"] },
   "enforce_admins": false,
   "required_pull_request_reviews": null,
   "restrictions": null,
@@ -202,7 +242,9 @@ New optional block (kill switch + policy data):
     "src/**/*.html", "src/**/*.css",
     "src/js/*Render.js",
     "src/js/grid.js", "src/js/view.js", "src/js/surface.js",
-    "src/js/hud.js", "src/js/clearancePanel.js", "src/js/help.js"
+    "src/js/hud.js", "src/js/clearancePanel.js", "src/js/help.js",
+    "src/js/exportImg.js",           // SVG/PNG export rasteriser (product wedge)
+    "src/js/dimEntry.js", "src/js/symbolDimEntry.js"  // floating-input layout
   ]
 }
 ```
@@ -211,6 +253,17 @@ Absent `autoMerge` block → treated as `enabled: false` (safe default; existing
 unaffected). Editing `project.json` is a floorplan-repo change; it lives under `.claude/`,
 which is a gated path — so this specific edit must be made by a human, not the autonomous
 agent (the workflow's own `requiresHuman` gate covers this).
+
+**Two human edits, one paired step (the pipeline cannot enable its own merge gate — by
+design).** Turning auto-merge on requires *two* human-made changes that the autonomous
+pipeline cannot make itself: (i) the gated `project.json` `autoMerge.enabled` flag here, and
+(ii) the GitHub-side branch protection + repo settings in §A (the `ship-issue.js` step itself
+lives in the `danbing-automation` repo, also outside floorplan's autonomy). These MUST be
+applied as a **paired step, GitHub-side first**: enable the strict `validate` required check
+and repo `allow_auto_merge` (§A) *before* flipping `autoMerge.enabled: true`. Flipping the
+flag first would let ship-issue arm `--auto` on PRs with no server-side gate in place — the
+exact "agent merges itself" failure this LLD exists to prevent. This mirrors the (b)-before-(c)
+ordering warning in Dependencies.
 
 ## State Model
 
@@ -233,8 +286,8 @@ No application state. The relevant state is GitHub-side configuration and per-PR
 ## Edge Cases
 
 1. **CI check absent (never reported).** If a PR head commit produces no `validate` check at
-   all (e.g. workflow file broken on that branch, Actions disabled), a `strict`
-   required-status gate treats "missing" as not-satisfied → auto-merge does **not** fire, PR
+   all (e.g. workflow file broken on that branch, Actions disabled), a required-status gate
+   treats "missing" as not-satisfied → auto-merge does **not** fire, PR
    stays open. This is the desired fail-closed behavior and directly satisfies the acceptance
    criterion "a PR with a failing/absent check does NOT merge."
 2. **CI red.** `validate` concludes `failure` → GitHub keeps the PR armed but unmerged. When a
@@ -256,10 +309,14 @@ No application state. The relevant state is GitHub-side configuration and per-PR
 7. **Auto-merge armed but branch protection later tightened.** If a human re-adds a required
    review after arming, GitHub simply won't merge until that condition is met too. No
    corruption; the PR waits.
-8. **Merge conflict / not up-to-date (`strict`).** With `strict: true`, if `main` advances the
-   PR must be rebased/updated before the green check counts. GitHub will not auto-merge a stale
-   branch; someone (or a future auto-update step) must update it. For a low-volume single-repo
-   this is rare; documented, not automated here.
+8. **Branch behind `main` after a batch merge (the batch-concurrency case).** `ship-batch.js`
+   arms 2–3 PRs, then earlier PRs merge and advance `main`, leaving later PRs behind. We use
+   **`strict: false`** precisely so this does NOT block auto-merge: a behind-but-mergeable PR
+   still merges on its own green `validate`, with no human "Update branch" click. See Approach
+   §1 for the full rationale and the accepted semantic-staleness risk. The one case still
+   blocked is a **textual merge conflict** — GitHub reports the PR "dirty"/not mergeable
+   regardless of `strict`, so it stays open and armed until someone rebases; this is correct
+   fail-safe behavior and expected to be rare on a low-volume repo.
 9. **Kill switch mid-flight.** Disabling `allow_auto_merge` at the repo level does **not**
    auto-disarm already-armed PRs on all GitHub plans; to be certain, also run
    `gh pr merge <pr> --disable-auto` on any in-flight PR. Documented in the runbook.
@@ -317,9 +374,11 @@ and deliberately-broken PRs, validated on scratch/throwaway PRs before trusting 
    still blocks merge — the branch-protection gate is authoritative.
 
 **Policy / classification:**
-5. **Render-touching PR is human-gated.** A PR changing `src/js/wallRender.js` (or any HTML/CSS
-   or a `renderPaths` entry) → ship-issue withholds `--auto` and comments the visual-check
-   notice; PR stays open.
+5. **Render-touching PR is human-gated.** A PR changing `src/js/wallRender.js`,
+   **`src/js/exportImg.js`**, `src/js/dimEntry.js` (or any HTML/CSS or a `renderPaths` entry)
+   → ship-issue withholds `--auto` and comments the visual-check notice; PR stays open.
+   Include an explicit `exportImg.js`-only case, since the export image is the product wedge
+   and the headless suite tests geometry, not appearance.
 6. **Logic-only PR is auto-merge eligible.** A PR touching only `measure.js`/`units.js` → auto-
    merge armed. Confirm the classifier reads `git diff --name-only origin/base...HEAD` and the
    glob match is correct (including mixed-PR → treated as render-touching).
@@ -331,7 +390,7 @@ and deliberately-broken PRs, validated on scratch/throwaway PRs before trusting 
    disarms an in-flight PR.
 
 **Guardrails / invariants (by inspection):**
-9. Only `validate` is in `required_status_checks.contexts`; `strict: true`.
+9. Only `validate` is in `required_status_checks.contexts`; `strict: false` (batch-safe, §1).
 10. `enforce_admins: false` (maintainer break-glass preserved).
 11. No change to `ci.yml`, the app, or the Cloudflare deploy path.
 12. Squash is the merge method; branch auto-deletes on merge.
