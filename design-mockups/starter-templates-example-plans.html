@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Starter templates — Variant A (modal gallery) · floorplan</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ── Tokens (mirror src/index.html) ─────────────────────────────── */
+      :root {
+        --bg:         #14140f;
+        --bg-deep:    #100f0b;
+        --ink:        #ece7d6;
+        --muted:      #8f8a78;
+        --gold:       #c9a84c;
+        --gold-soft:  rgba(201, 168, 76, 0.55);
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --panel:      rgba(20, 20, 15, 0.72);
+        --hairline:   rgba(201, 168, 76, 0.18);
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+        --wall-line:  #d9be6e;
+        --room-fill:  rgba(201,168,76,0.07);
+        --error:      #e57373;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        font-family: var(--font-ui);
+        color: var(--ink);
+        background:
+          radial-gradient(ellipse 90% 80% at 50% 45%, var(--bg) 0%, var(--bg-deep) 100%);
+        min-height: 100vh;
+      }
+
+      /* Faux graph-paper backdrop so the mockup reads as "over the canvas" */
+      .backdrop {
+        position: fixed; inset: 0; z-index: 0; pointer-events: none;
+        background-image:
+          linear-gradient(var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(var(--grid-major) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+        background-size: 24px 24px, 24px 24px, 120px 120px, 120px 120px;
+      }
+      .grain {
+        position: fixed; inset: 0; pointer-events: none; z-index: 1;
+        mix-blend-mode: overlay; opacity: 0.035;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+        background-size: 200px 200px;
+      }
+
+      /* ── Mockup scaffolding (not part of the app) ───────────────────── */
+      .mock-note {
+        position: relative; z-index: 2;
+        max-width: 62rem; margin: 0 auto; padding: 2rem 1.5rem 0.5rem;
+        font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+      }
+      .mock-note b { color: var(--gold); font-weight: 500; }
+      .mock-toolbar {
+        position: relative; z-index: 2;
+        max-width: 62rem; margin: 0 auto 1.5rem; padding: 0 1.5rem;
+        display: flex; gap: 0.5rem; flex-wrap: wrap;
+      }
+      .mock-toolbar button {
+        background: var(--panel); border: 1px solid var(--hairline);
+        color: var(--ink); font-family: var(--font-mono); font-size: 0.72rem;
+        padding: 0.4rem 0.8rem; border-radius: 100px; cursor: pointer;
+        transition: color .15s, border-color .15s;
+      }
+      .mock-toolbar button:hover { color: var(--gold); border-color: var(--gold-soft); }
+
+      /* ── Entry point A1: "Templates" pill in the actions cluster ─────── */
+      .actions-cluster {
+        position: relative; z-index: 2;
+        max-width: 62rem; margin: 0 auto 0.75rem; padding: 0 1.5rem;
+        display: flex; align-items: center; justify-content: flex-end; gap: 0.35rem;
+      }
+      .actions-cluster .pill {
+        background: var(--panel); border: 1px solid var(--hairline);
+        color: var(--ink); font-family: var(--font-mono); font-size: 0.7rem;
+        padding: 0.3rem 0.7rem; border-radius: 100px; cursor: pointer;
+        display: inline-flex; align-items: center; gap: 0.35rem;
+        transition: color .15s, border-color .15s;
+      }
+      .actions-cluster .pill:hover { color: var(--gold); border-color: var(--gold-soft); }
+      .actions-cluster .pill--accent {
+        color: var(--gold); border-color: var(--gold-soft);
+        background: rgba(201,168,76,0.08);
+      }
+
+      /* ── Entry point A2: empty-canvas hint that opens the picker ─────── */
+      .empty-hero {
+        position: relative; z-index: 2;
+        max-width: 62rem; margin: 0 auto; padding: 1.5rem 1.5rem 3rem;
+        text-align: center;
+      }
+      .empty-hero .eh-frame {
+        border: 1px dashed var(--hairline); border-radius: 14px;
+        padding: 3rem 1.5rem; background: rgba(20,20,15,0.35);
+      }
+      .empty-hero h2 {
+        font-family: var(--font-display); font-weight: 700; color: var(--ink);
+        font-size: 1.4rem; margin: 0 0 0.4rem;
+      }
+      .empty-hero p {
+        font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted);
+        margin: 0 0 1.4rem;
+      }
+      .empty-hero .eh-cta {
+        background: rgba(201,168,76,0.12); border: 1px solid var(--gold-soft);
+        color: var(--gold); font-family: var(--font-mono); font-size: 0.8rem;
+        padding: 0.55rem 1.3rem; border-radius: 100px; cursor: pointer;
+        transition: background .15s;
+      }
+      .empty-hero .eh-cta:hover { background: rgba(201,168,76,0.2); }
+      .empty-hero .eh-or {
+        font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted);
+        margin-top: 0.9rem; opacity: 0.8;
+      }
+
+      /* ── Template picker overlay (mirrors .help-overlay) ─────────────── */
+      .tpl-overlay {
+        display: none; position: fixed; inset: 0; z-index: 40;
+        background: rgba(16,15,11,0.62);
+        align-items: center; justify-content: center;
+        backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+        padding: 1.5rem;
+      }
+      .tpl-overlay.is-open { display: flex; }
+      .tpl-panel {
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 12px; width: min(56rem, 100%);
+        max-height: calc(100vh - 3rem); overflow: hidden;
+        display: flex; flex-direction: column;
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+        animation: tpl-rise 0.22s ease;
+      }
+      @keyframes tpl-rise {
+        from { opacity: 0; transform: translateY(10px) scale(0.985); }
+        to   { opacity: 1; transform: none; }
+      }
+      .tpl-head {
+        display: flex; align-items: baseline; justify-content: space-between;
+        gap: 1rem; padding: 1.1rem 1.4rem 0.9rem;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .tpl-head-titles h2 {
+        font-family: var(--font-display); font-weight: 700; color: var(--gold);
+        font-size: 1.05rem; margin: 0 0 0.15rem;
+      }
+      .tpl-head-titles p {
+        font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted); margin: 0;
+      }
+      .tpl-close {
+        background: transparent; border: 1px solid transparent; color: var(--muted);
+        font-family: var(--font-mono); font-size: 1rem; line-height: 1;
+        width: 2rem; height: 2rem; border-radius: 6px; cursor: pointer; flex-shrink: 0;
+        transition: color .12s, border-color .12s;
+      }
+      .tpl-close:hover { color: var(--ink); border-color: var(--hairline); }
+
+      /* Card grid */
+      .tpl-grid {
+        display: grid; gap: 0.9rem; padding: 1.2rem 1.4rem;
+        grid-template-columns: repeat(3, 1fr);
+        overflow-y: auto; scrollbar-width: thin;
+      }
+      @media (max-width: 720px) { .tpl-grid { grid-template-columns: repeat(2, 1fr); } }
+      @media (max-width: 460px) { .tpl-grid { grid-template-columns: 1fr; } }
+
+      /* Template card */
+      .tpl-card {
+        background: rgba(20,20,15,0.5); border: 1px solid var(--hairline);
+        border-radius: 10px; overflow: hidden; cursor: pointer; text-align: left;
+        display: flex; flex-direction: column; padding: 0;
+        transition: border-color .14s, transform .14s, background .14s;
+      }
+      .tpl-card:hover, .tpl-card:focus-visible {
+        border-color: var(--gold-soft); background: rgba(201,168,76,0.06);
+        transform: translateY(-2px); outline: none;
+      }
+      .tpl-card:focus-visible { box-shadow: 0 0 0 2px var(--gold-soft); }
+      .tpl-thumb {
+        aspect-ratio: 4 / 3; width: 100%; display: block;
+        background:
+          linear-gradient(rgba(201,168,76,0.05) 1px, transparent 1px) 0 0 / 14px 14px,
+          linear-gradient(90deg, rgba(201,168,76,0.05) 1px, transparent 1px) 0 0 / 14px 14px,
+          var(--bg-deep);
+        border-bottom: 1px solid var(--hairline);
+      }
+      .tpl-meta { padding: 0.6rem 0.75rem 0.7rem; }
+      .tpl-name {
+        font-family: var(--font-ui); font-weight: 700; font-size: 0.85rem;
+        color: var(--ink); margin: 0 0 0.15rem;
+      }
+      .tpl-stats {
+        font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted);
+        display: flex; gap: 0.6rem; flex-wrap: wrap;
+      }
+      .tpl-stats b { color: var(--gold); font-weight: 500; }
+
+      /* ── Replace-confirmation dialog (dirty-plan guard) ──────────────── */
+      .tpl-confirm-backdrop {
+        display: none; position: fixed; inset: 0; z-index: 50;
+        background: rgba(16,15,11,0.7);
+        align-items: center; justify-content: center; padding: 1.5rem;
+        backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      }
+      .tpl-confirm-backdrop.is-open { display: flex; }
+      .tpl-confirm {
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 10px; padding: 1.25rem 1.4rem; max-width: 26rem;
+        box-shadow: 0 6px 32px rgba(0,0,0,0.6);
+      }
+      .tpl-confirm h3 {
+        font-family: var(--font-display); font-weight: 700; color: var(--ink);
+        font-size: 1rem; margin: 0 0 0.5rem;
+      }
+      .tpl-confirm p {
+        font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+        line-height: 1.5; margin: 0 0 1.1rem;
+      }
+      .tpl-confirm p b { color: var(--gold); font-weight: 500; }
+      .tpl-confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+      .tpl-confirm-actions button {
+        font-family: var(--font-mono); font-size: 0.72rem;
+        padding: 0.4rem 0.9rem; border-radius: 100px; cursor: pointer;
+        border: 1px solid var(--hairline); background: transparent; color: var(--ink);
+        transition: color .12s, border-color .12s, background .12s;
+      }
+      .tpl-confirm-actions .btn-cancel:hover { border-color: var(--ink); }
+      .tpl-confirm-actions .btn-replace {
+        color: var(--gold); border-color: var(--gold-soft);
+        background: rgba(201,168,76,0.1);
+      }
+      .tpl-confirm-actions .btn-replace:hover { background: rgba(201,168,76,0.2); }
+
+      /* ── Toast (mirror app) ──────────────────────────────────────────── */
+      .toast {
+        position: fixed; bottom: 2rem; left: 50%;
+        transform: translateX(-50%) translateY(0.5rem);
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 100px; padding: 0.45rem 1.1rem;
+        font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink);
+        opacity: 0; pointer-events: none; z-index: 60;
+        transition: opacity .2s, transform .2s;
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      }
+      .toast.is-visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+    </style>
+  </head>
+  <body>
+    <div class="backdrop" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+
+    <div class="mock-note">
+      <b>Variant A — Modal gallery picker.</b> A "Templates" pill lives in the top-right
+      actions cluster and is always reachable; when the canvas is empty an inline hero
+      also promotes it. Selecting a card runs it through validatePlan → applyPlan.
+      Toggle a "dirty" plan below to see the replace-confirmation guard.
+    </div>
+
+    <div class="mock-toolbar">
+      <button id="mock-open">Open picker</button>
+      <button id="mock-dirty">Plan state: <span id="mock-dirty-label">empty</span></button>
+    </div>
+
+    <!-- Entry point A1: actions-cluster pill (always available) -->
+    <div class="actions-cluster">
+      <button class="pill pill--accent" id="pill-templates" aria-haspopup="dialog">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+          <rect x="1.5" y="1.5" width="4.5" height="4.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
+          <rect x="8" y="1.5" width="4.5" height="4.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
+          <rect x="1.5" y="8" width="4.5" height="4.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
+          <rect x="8" y="8" width="4.5" height="4.5" rx="1" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+        Templates
+      </button>
+      <button class="pill">Share</button>
+      <button class="pill">Export</button>
+    </div>
+
+    <!-- Entry point A2: empty-canvas hero (only shown when plan is empty) -->
+    <div class="empty-hero" id="empty-hero">
+      <div class="eh-frame">
+        <h2>Start with a room, not a blank grid</h2>
+        <p>Pick a furnished starter plan and edit it — or just start drawing.</p>
+        <button class="eh-cta" id="hero-cta">Browse starter templates</button>
+        <div class="eh-or">or press <b>W</b> and draw your own walls</div>
+      </div>
+    </div>
+
+    <!-- Template picker overlay -->
+    <div class="tpl-overlay" id="tpl-overlay" role="dialog" aria-modal="true" aria-label="Starter templates">
+      <div class="tpl-panel">
+        <div class="tpl-head">
+          <div class="tpl-head-titles">
+            <h2>Starter templates</h2>
+            <p>Curated, to-scale, furnished. Load one and start editing.</p>
+          </div>
+          <button class="tpl-close" id="tpl-close" aria-label="Close">✕</button>
+        </div>
+        <div class="tpl-grid" id="tpl-grid"><!-- cards injected by JS --></div>
+      </div>
+    </div>
+
+    <!-- Replace-confirmation dialog -->
+    <div class="tpl-confirm-backdrop" id="confirm-backdrop" role="dialog" aria-modal="true" aria-label="Replace current plan?">
+      <div class="tpl-confirm">
+        <h3>Replace your current plan?</h3>
+        <p>Loading <b id="confirm-name">this template</b> will replace what's on the
+           canvas. Your current plan isn't saved anywhere else — you can undo right after.</p>
+        <div class="tpl-confirm-actions">
+          <button class="btn-cancel" id="confirm-cancel">Keep mine</button>
+          <button class="btn-replace" id="confirm-replace">Replace</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script>
+      // ── Template catalog (mockup stand-in for pre-authored Plan docs) ──────
+      // Each has room verts (metres) + symbols so the thumbnail is representative.
+      const TEMPLATES = [
+        {
+          id: "studio", name: "Studio apartment",
+          area: "28 m²", perim: "21.4 m", items: "8 items",
+          room: [[0,0],[6,0],[6,4.6],[0,4.6]],
+          symbols: [
+            {x:1.2,y:1.2,w:1.5,h:2.0}, {x:4.6,y:1.0,w:0.7,h:0.7},
+            {x:4.4,y:3.4,w:2.0,h:0.9}, {x:1.4,y:3.6,w:1.2,h:0.8},
+          ],
+          openings: [{x:3,y:0},{x:0,y:2.3}],
+        },
+        {
+          id: "onebed", name: "1-bedroom",
+          area: "46 m²", perim: "31 m", items: "11 items",
+          room: [[0,0],[8,0],[8,6],[4.6,6],[4.6,3.6],[0,3.6]],
+          symbols: [
+            {x:1.6,y:1.6,w:1.5,h:2.0}, {x:6.2,y:1.2,w:2.0,h:0.9},
+            {x:6.6,y:4.6,w:1.2,h:0.8}, {x:2,y:2.8,w:0.5,h:0.5},
+          ],
+          openings: [{x:4,y:0},{x:4.6,y:4.8}],
+        },
+        {
+          id: "rect", name: "Rectangular room",
+          area: "20 m²", perim: "18 m", items: "0 items",
+          room: [[0,0],[5,0],[5,4],[0,4]],
+          symbols: [],
+          openings: [{x:2.5,y:0}],
+        },
+        {
+          id: "openplan", name: "Open-plan kitchen / living",
+          area: "38 m²", perim: "26 m", items: "9 items",
+          room: [[0,0],[7.5,0],[7.5,5],[0,5]],
+          symbols: [
+            {x:5.8,y:1.0,w:0.7,h:0.7}, {x:2,y:3.6,w:2.0,h:0.9},
+            {x:2,y:2.2,w:1.2,h:0.8}, {x:5.5,y:3.6,w:1.4,h:0.7},
+          ],
+          openings: [{x:3.75,y:0},{x:7.5,y:2.5}],
+        },
+        {
+          id: "lshape", name: "L-shaped room",
+          area: "32 m²", perim: "26 m", items: "5 items",
+          room: [[0,0],[6,0],[6,3],[3,3],[3,6],[0,6]],
+          symbols: [{x:1.4,y:1.4,w:2.0,h:0.9},{x:4.4,y:1.4,w:1.2,h:0.8}],
+          openings: [{x:0,y:3}],
+        },
+      ];
+
+      // ── Blueprint thumbnail: walls + furniture rects into an SVG ───────────
+      function thumbSvg(t) {
+        const xs = t.room.map(p => p[0]), ys = t.room.map(p => p[1]);
+        const minX = Math.min(...xs), maxX = Math.max(...xs);
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+        const w = maxX - minX, h = maxY - minY;
+        const pad = 0.6, VW = 100, VH = 75;
+        const s = Math.min((VW - 2*pad*10) / w, (VH - 2*pad*10) / h);
+        const ox = (VW - w*s) / 2 - minX*s;
+        const oy = (VH - h*s) / 2 - minY*s;
+        const X = v => (v*s + ox).toFixed(1);
+        const Y = v => (v*s + oy).toFixed(1);
+        const poly = t.room.map(p => `${X(p[0])},${Y(p[1])}`).join(" ");
+        let furn = "";
+        for (const f of t.symbols) {
+          furn += `<rect x="${X(f.x - f.w/2)}" y="${Y(f.y - f.h/2)}" width="${(f.w*s).toFixed(1)}" height="${(f.h*s).toFixed(1)}" rx="0.8" fill="rgba(201,168,76,0.16)" stroke="var(--wall-line)" stroke-width="0.6"/>`;
+        }
+        let ops = "";
+        for (const o of t.openings || []) {
+          ops += `<circle cx="${X(o.x)}" cy="${Y(o.y)}" r="1.6" fill="var(--bg-deep)" stroke="var(--wall-line)" stroke-width="0.8"/>`;
+        }
+        return `<svg class="tpl-thumb" viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+          <polygon points="${poly}" fill="var(--room-fill)" stroke="var(--wall-line)" stroke-width="1.4" stroke-linejoin="round"/>
+          ${furn}${ops}
+        </svg>`;
+      }
+
+      // ── Build cards ────────────────────────────────────────────────────────
+      const grid = document.getElementById("tpl-grid");
+      grid.innerHTML = TEMPLATES.map((t, i) => `
+        <button class="tpl-card" data-idx="${i}" aria-label="Load ${t.name}">
+          ${thumbSvg(t)}
+          <div class="tpl-meta">
+            <p class="tpl-name">${t.name}</p>
+            <div class="tpl-stats"><span><b>${t.area}</b></span><span>${t.perim}</span><span>${t.items}</span></div>
+          </div>
+        </button>`).join("");
+
+      // ── State + element refs ────────────────────────────────────────────────
+      let planDirty = false;      // mockup toggle: is there work on the canvas?
+      let pendingIdx = null;      // template awaiting confirmation
+
+      const overlay   = document.getElementById("tpl-overlay");
+      const confirmBd  = document.getElementById("confirm-backdrop");
+      const confirmName = document.getElementById("confirm-name");
+      const hero       = document.getElementById("empty-hero");
+      const toast      = document.getElementById("toast");
+      const dirtyLabel = document.getElementById("mock-dirty-label");
+
+      const openPicker  = () => overlay.classList.add("is-open");
+      const closePicker = () => overlay.classList.remove("is-open");
+
+      function showToast(msg) {
+        toast.textContent = msg;
+        toast.classList.add("is-visible");
+        clearTimeout(showToast._t);
+        showToast._t = setTimeout(() => toast.classList.remove("is-visible"), 2600);
+      }
+
+      // Simulate the validate → apply → render pipeline
+      function loadTemplate(idx) {
+        const t = TEMPLATES[idx];
+        // In the app: validatePlan(TEMPLATE_DOC) → applyPlan → historyReset → render + fitToContent
+        planDirty = true;
+        setDirty(planDirty);
+        closePicker();
+        confirmBd.classList.remove("is-open");
+        hero.style.display = "none";
+        showToast(`Loaded "${t.name}"`);
+      }
+
+      // ── Entry points ────────────────────────────────────────────────────────
+      document.getElementById("pill-templates").addEventListener("click", openPicker);
+      document.getElementById("hero-cta").addEventListener("click", openPicker);
+      document.getElementById("mock-open").addEventListener("click", openPicker);
+      document.getElementById("tpl-close").addEventListener("click", closePicker);
+      overlay.addEventListener("click", e => { if (e.target === overlay) closePicker(); });
+
+      // ── Card selection → guard when dirty ────────────────────────────────────
+      grid.addEventListener("click", e => {
+        const card = e.target.closest(".tpl-card");
+        if (!card) return;
+        const idx = +card.dataset.idx;
+        if (planDirty) {
+          pendingIdx = idx;
+          confirmName.textContent = `"${TEMPLATES[idx].name}"`;
+          confirmBd.classList.add("is-open");
+        } else {
+          loadTemplate(idx);
+        }
+      });
+
+      document.getElementById("confirm-cancel").addEventListener("click",
+        () => confirmBd.classList.remove("is-open"));
+      document.getElementById("confirm-replace").addEventListener("click",
+        () => { if (pendingIdx != null) loadTemplate(pendingIdx); });
+
+      // ── Mockup helpers ────────────────────────────────────────────────────────
+      function setDirty(v) {
+        planDirty = v;
+        dirtyLabel.textContent = v ? "has work (dirty)" : "empty";
+        hero.style.display = v ? "none" : "";
+      }
+      document.getElementById("mock-dirty").addEventListener("click", () => setDirty(!planDirty));
+
+      // Esc closes topmost layer
+      document.addEventListener("keydown", e => {
+        if (e.key !== "Escape") return;
+        if (confirmBd.classList.contains("is-open")) confirmBd.classList.remove("is-open");
+        else if (overlay.classList.contains("is-open")) closePicker();
+      });
+    </script>
+  </body>
+</html>
