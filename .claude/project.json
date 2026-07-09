@@ -12,14 +12,40 @@
     "baseUrl": "https://harennon.github.io/floorplan/"
   },
   "defaultBranch": "main",
-  "frontendPaths": ["src/"],
+  "frontendPaths": [
+    "src/"
+  ],
   "commands": {
     "install": "npm install --no-save --prefix {dir} playwright@1.49.1 && npx --prefix {dir} playwright install chromium",
     "test": "node {dir}/.github/run-tests.mjs"
   },
   "proposal": {
     "mode": "improve",
-    "references": ["neal.fun", "pudding.cool", "floorplancreator.net", "excalidraw.com"],
-    "focus": "Polish and features for the floor-plan sketcher — the drawing/snapping UX, live area/perimeter, furniture + clearance checks, and the PNG/SVG/URL-hash share artifacts. Client-side only in v1, no backend, deploy cheap."
+    "references": [
+      "neal.fun",
+      "pudding.cool",
+      "floorplancreator.net",
+      "excalidraw.com"
+    ],
+    "focus": "Polish and features for the floor-plan sketcher \u2014 the drawing/snapping UX, live area/perimeter, furniture + clearance checks, and the PNG/SVG/URL-hash share artifacts. Client-side only in v1, no backend, deploy cheap."
+  },
+  "autoMerge": {
+    "enabled": true,
+    "mergeMethod": "squash",
+    "deleteBranch": true,
+    "renderPaths": [
+      "src/**/*.html",
+      "src/**/*.css",
+      "src/js/*Render.js",
+      "src/js/grid.js",
+      "src/js/view.js",
+      "src/js/surface.js",
+      "src/js/hud.js",
+      "src/js/clearancePanel.js",
+      "src/js/help.js",
+      "src/js/exportImg.js",
+      "src/js/dimEntry.js",
+      "src/js/symbolDimEntry.js"
+    ]
   }
 }
