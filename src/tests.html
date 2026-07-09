@@ -6788,6 +6788,593 @@ describe("LLD-37 integration — room-center guide and ring cleared on drop", ()
   });
 });
 
+// ─── Tests: LLD 46 — pointerEnv.js ───────────────────────────────────────────
+
+import {
+  isCoarsePointer, LOUPE_OFFSET_PX,
+  MOUSE_DRAG_THRESHOLD, TOUCH_DRAG_THRESHOLD,
+  effectiveDrawPoint, dragThreshold, handleSizes,
+} from "./js/pointerEnv.js";
+
+describe("pointerEnv — constants", () => {
+  it("LOUPE_OFFSET_PX is 56", () => {
+    expect(LOUPE_OFFSET_PX).toBe(56);
+  });
+  it("MOUSE_DRAG_THRESHOLD is 6", () => {
+    expect(MOUSE_DRAG_THRESHOLD).toBe(6);
+  });
+  it("TOUCH_DRAG_THRESHOLD is 10", () => {
+    expect(TOUCH_DRAG_THRESHOLD).toBe(10);
+  });
+  it("isCoarsePointer is a boolean", () => {
+    expect(typeof isCoarsePointer).toBe("boolean");
+  });
+});
+
+describe("pointerEnv — effectiveDrawPoint (loupe offset)", () => {
+  it("touch: subtracts LOUPE_OFFSET_PX from y", () => {
+    const p = effectiveDrawPoint("touch", 100, 300);
+    expect(p.x).toBe(100);
+    expect(p.y).toBe(300 - LOUPE_OFFSET_PX);
+  });
+  it("touch: x is unchanged", () => {
+    const p = effectiveDrawPoint("touch", 200, 400);
+    expect(p.x).toBe(200);
+  });
+  it("mouse: returns raw coordinates unchanged", () => {
+    const p = effectiveDrawPoint("mouse", 150, 250);
+    expect(p.x).toBe(150);
+    expect(p.y).toBe(250);
+  });
+  it("pen: returns raw coordinates unchanged (stylus is precise)", () => {
+    const p = effectiveDrawPoint("pen", 80, 120);
+    expect(p.x).toBe(80);
+    expect(p.y).toBe(120);
+  });
+  it("unknown type: returns raw coordinates unchanged", () => {
+    const p = effectiveDrawPoint("", 10, 20);
+    expect(p.x).toBe(10);
+    expect(p.y).toBe(20);
+  });
+  it("touch offset applied to negative y produces negative result", () => {
+    const p = effectiveDrawPoint("touch", 0, 0);
+    expect(p.y).toBe(-LOUPE_OFFSET_PX);
+  });
+});
+
+describe("pointerEnv — dragThreshold", () => {
+  it("returns TOUCH_DRAG_THRESHOLD for touch", () => {
+    expect(dragThreshold("touch")).toBe(TOUCH_DRAG_THRESHOLD);
+  });
+  it("returns MOUSE_DRAG_THRESHOLD for mouse", () => {
+    expect(dragThreshold("mouse")).toBe(MOUSE_DRAG_THRESHOLD);
+  });
+  it("returns MOUSE_DRAG_THRESHOLD for pen", () => {
+    expect(dragThreshold("pen")).toBe(MOUSE_DRAG_THRESHOLD);
+  });
+  it("returns MOUSE_DRAG_THRESHOLD for unknown type", () => {
+    expect(dragThreshold("")).toBe(MOUSE_DRAG_THRESHOLD);
+  });
+  it("touch threshold is strictly larger than mouse threshold", () => {
+    expect(TOUCH_DRAG_THRESHOLD > MOUSE_DRAG_THRESHOLD).toBe(true);
+  });
+});
+
+describe("pointerEnv — handleSizes", () => {
+  it("coarse=true: rotateHitR is 22", () => {
+    expect(handleSizes(true).rotateHitR).toBe(22);
+  });
+  it("coarse=true: minHitPx is 44", () => {
+    expect(handleSizes(true).minHitPx).toBe(44);
+  });
+  it("coarse=true: rotateHandleR is 14", () => {
+    expect(handleSizes(true).rotateHandleR).toBe(14);
+  });
+  it("coarse=false: rotateHitR is 14", () => {
+    expect(handleSizes(false).rotateHitR).toBe(14);
+  });
+  it("coarse=false: minHitPx is 12", () => {
+    expect(handleSizes(false).minHitPx).toBe(12);
+  });
+  it("coarse=false: rotateHandleR is 6", () => {
+    expect(handleSizes(false).rotateHandleR).toBe(6);
+  });
+  it("coarse hit radii are larger than fine hit radii", () => {
+    const coarse = handleSizes(true);
+    const fine   = handleSizes(false);
+    expect(coarse.rotateHitR    > fine.rotateHitR).toBe(true);
+    expect(coarse.minHitPx      > fine.minHitPx).toBe(true);
+    expect(coarse.rotateHandleR > fine.rotateHandleR).toBe(true);
+  });
+});
+
+// ─── Tests: LLD 46 — interactions.js integration ─────────────────────────────
+// These tests drive the interaction module with synthetic pointer events to
+// verify loupe offset, gesture cancellation, and threshold behaviour.
+
+import { setDrawHooks, setSelectHooks, init as initInteractions } from "./js/interactions.js";
+import { model as wallModel, placeVertex as wallPlaceVertex, finishChain as wallFinishChain } from "./js/walls.js";
+
+describe("interactions — loupe commit (touch pointerdown→up commits at y-56)", () => {
+  it("touch up in draw mode commits at offsetY, not raw y", () => {
+    // Set up a minimal stage
+    const stage = document.createElement("div");
+    stage.setPointerCapture = () => {};
+    document.body.appendChild(stage);
+
+    const hoverCalls = [];
+    const clickCalls = [];
+    let isDrawModeVal = true;
+
+    const drawHooks = {
+      isDrawMode: () => isDrawModeVal,
+      onHover: (sx, sy) => hoverCalls.push({ sx, sy }),
+      onClick: (sx, sy) => clickCalls.push({ sx, sy }),
+      onLeave: () => {},
+    };
+    setDrawHooks(drawHooks);
+    setSelectHooks(null);
+
+    // We only call the handlers directly rather than going through DOM events
+    // because jsdom doesn't support pointer capture on div elements well.
+    // Instead, import and call the event handlers via the public module API
+    // by dispatching real pointer events to the stage.
+
+    // Dispatch a touch pointerdown at (200, 300)
+    const downEvt = new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true,
+      pointerId: 1,
+      clientX: 200, clientY: 300,
+      pointerType: "touch",
+      buttons: 1,
+    });
+    const upEvt = new PointerEvent("pointerup", {
+      bubbles: true, cancelable: true,
+      pointerId: 1,
+      clientX: 200, clientY: 300,
+      pointerType: "touch",
+    });
+
+    // Re-init interactions with our stage
+    const hint = document.createElement("div");
+    const btnZoomIn = document.createElement("button");
+    const btnZoomOut = document.createElement("button");
+    const btnReset = document.createElement("button");
+    document.body.appendChild(hint);
+    initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
+
+    hoverCalls.length = 0;
+    clickCalls.length = 0;
+
+    stage.dispatchEvent(downEvt);
+    stage.dispatchEvent(upEvt);
+
+    // onHover should have been called on touch-down at the offset point
+    const hasOffsetHover = hoverCalls.some(c => c.sy === 300 - LOUPE_OFFSET_PX);
+    if (!hasOffsetHover) {
+      throw new Error(`Expected onHover called with y=${300 - LOUPE_OFFSET_PX} on touch-down, got: ${JSON.stringify(hoverCalls)}`);
+    }
+
+    // onClick should be called at offset y
+    if (clickCalls.length !== 1) {
+      throw new Error(`Expected 1 onClick, got ${clickCalls.length}`);
+    }
+    if (clickCalls[0].sy !== 300 - LOUPE_OFFSET_PX) {
+      throw new Error(`Expected onClick at y=${300 - LOUPE_OFFSET_PX}, got y=${clickCalls[0].sy}`);
+    }
+
+    document.body.removeChild(stage);
+    document.body.removeChild(hint);
+    setDrawHooks(null);
+  });
+});
+
+describe("interactions — mouse draw commits at raw coordinates (no offset)", () => {
+  it("mouse up in draw mode commits at raw y, not y-56", () => {
+    const stage = document.createElement("div");
+    stage.setPointerCapture = () => {};
+    document.body.appendChild(stage);
+
+    const clickCalls = [];
+    let isDrawModeVal = true;
+
+    setDrawHooks({
+      isDrawMode: () => isDrawModeVal,
+      onHover: () => {},
+      onClick: (sx, sy) => clickCalls.push({ sx, sy }),
+      onLeave: () => {},
+    });
+    setSelectHooks(null);
+
+    const hint = document.createElement("div");
+    const btnZoomIn = document.createElement("button");
+    const btnZoomOut = document.createElement("button");
+    const btnReset = document.createElement("button");
+    document.body.appendChild(hint);
+    initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
+
+    clickCalls.length = 0;
+
+    stage.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 2,
+      clientX: 150, clientY: 200, pointerType: "mouse", buttons: 1,
+    }));
+    stage.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true, cancelable: true, pointerId: 2,
+      clientX: 150, clientY: 200, pointerType: "mouse",
+    }));
+
+    if (clickCalls.length !== 1) {
+      throw new Error(`Expected 1 onClick, got ${clickCalls.length}`);
+    }
+    // Mouse: no loupe offset applied
+    if (clickCalls[0].sy !== 200) {
+      throw new Error(`Expected mouse onClick at raw y=200, got y=${clickCalls[0].sy}`);
+    }
+
+    document.body.removeChild(stage);
+    document.body.removeChild(hint);
+    setDrawHooks(null);
+  });
+});
+
+describe("interactions — second finger cancels in-flight draw", () => {
+  it("second touch pointer cancels draw; no vertex committed", () => {
+    const stage = document.createElement("div");
+    stage.setPointerCapture = () => {};
+    document.body.appendChild(stage);
+
+    const clickCalls = [];
+    const leaveCalls = [];
+    let isDrawModeVal = true;
+
+    setDrawHooks({
+      isDrawMode: () => isDrawModeVal,
+      onHover: () => {},
+      onClick: (sx, sy) => clickCalls.push({ sx, sy }),
+      onLeave: () => leaveCalls.push(true),
+    });
+    setSelectHooks(null);
+
+    const hint = document.createElement("div");
+    const btnZoomIn = document.createElement("button");
+    const btnZoomOut = document.createElement("button");
+    const btnReset = document.createElement("button");
+    document.body.appendChild(hint);
+    initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
+
+    clickCalls.length = 0;
+    leaveCalls.length = 0;
+
+    // First finger down (draw pending)
+    stage.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 3,
+      clientX: 100, clientY: 200, pointerType: "touch", buttons: 1,
+    }));
+
+    // Second finger down (pinch — should cancel draw)
+    stage.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 4,
+      clientX: 200, clientY: 200, pointerType: "touch", buttons: 1,
+    }));
+
+    // Lift both fingers
+    stage.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true, cancelable: true, pointerId: 3,
+      clientX: 100, clientY: 200, pointerType: "touch",
+    }));
+    stage.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true, cancelable: true, pointerId: 4,
+      clientX: 200, clientY: 200, pointerType: "touch",
+    }));
+
+    // onLeave should have been called to clear snap glyph
+    if (leaveCalls.length === 0) {
+      throw new Error("Expected onLeave to be called on second finger down");
+    }
+
+    // No vertex should have been committed
+    if (clickCalls.length !== 0) {
+      throw new Error(`Expected 0 onClick after second-finger cancel, got ${clickCalls.length}`);
+    }
+
+    document.body.removeChild(stage);
+    document.body.removeChild(hint);
+    setDrawHooks(null);
+  });
+});
+
+describe("interactions — touch tap threshold (10px) vs mouse threshold (6px)", () => {
+  it("touch move of 8px (< 10px) keeps draw pending → commits on up", () => {
+    const stage = document.createElement("div");
+    stage.setPointerCapture = () => {};
+    document.body.appendChild(stage);
+
+    const clickCalls = [];
+    setDrawHooks({
+      isDrawMode: () => true,
+      onHover: () => {},
+      onClick: (sx, sy) => clickCalls.push({ sx, sy }),
+      onLeave: () => {},
+    });
+    setSelectHooks(null);
+
+    const hint = document.createElement("div");
+    const btnZoomIn = document.createElement("button");
+    const btnZoomOut = document.createElement("button");
+    const btnReset = document.createElement("button");
+    document.body.appendChild(hint);
+    initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
+
+    clickCalls.length = 0;
+
+    stage.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 5,
+      clientX: 100, clientY: 200, pointerType: "touch", buttons: 1,
+    }));
+    // Move 8px — below TOUCH_DRAG_THRESHOLD=10, should stay pending
+    stage.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true, cancelable: true, pointerId: 5,
+      clientX: 108, clientY: 200, pointerType: "touch", buttons: 1,
+    }));
+    stage.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true, cancelable: true, pointerId: 5,
+      clientX: 108, clientY: 200, pointerType: "touch",
+    }));
+
+    if (clickCalls.length !== 1) {
+      throw new Error(`Expected 1 onClick (8px touch tap), got ${clickCalls.length}`);
+    }
+
+    document.body.removeChild(stage);
+    document.body.removeChild(hint);
+    setDrawHooks(null);
+  });
+
+  it("touch move of 15px (> 10px) starts pan → no commit on up", () => {
+    const stage = document.createElement("div");
+    stage.setPointerCapture = () => {};
+    document.body.appendChild(stage);
+
+    const clickCalls = [];
+    setDrawHooks({
+      isDrawMode: () => true,
+      onHover: () => {},
+      onClick: (sx, sy) => clickCalls.push({ sx, sy }),
+      onLeave: () => {},
+    });
+    setSelectHooks(null);
+
+    const hint = document.createElement("div");
+    const btnZoomIn = document.createElement("button");
+    const btnZoomOut = document.createElement("button");
+    const btnReset = document.createElement("button");
+    document.body.appendChild(hint);
+    initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
+
+    clickCalls.length = 0;
+
+    stage.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 6,
+      clientX: 100, clientY: 200, pointerType: "touch", buttons: 1,
+    }));
+    stage.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true, cancelable: true, pointerId: 6,
+      clientX: 115, clientY: 200, pointerType: "touch", buttons: 1,
+    }));
+    stage.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true, cancelable: true, pointerId: 6,
+      clientX: 115, clientY: 200, pointerType: "touch",
+    }));
+
+    if (clickCalls.length !== 0) {
+      throw new Error(`Expected 0 onClick (15px touch drag = pan), got ${clickCalls.length}`);
+    }
+
+    document.body.removeChild(stage);
+    document.body.removeChild(hint);
+    setDrawHooks(null);
+  });
+
+  it("mouse move of 5px (< 6px) keeps draw pending → commits on up", () => {
+    const stage = document.createElement("div");
+    stage.setPointerCapture = () => {};
+    document.body.appendChild(stage);
+
+    const clickCalls = [];
+    setDrawHooks({
+      isDrawMode: () => true,
+      onHover: () => {},
+      onClick: (sx, sy) => clickCalls.push({ sx, sy }),
+      onLeave: () => {},
+    });
+    setSelectHooks(null);
+
+    const hint = document.createElement("div");
+    const btnZoomIn = document.createElement("button");
+    const btnZoomOut = document.createElement("button");
+    const btnReset = document.createElement("button");
+    document.body.appendChild(hint);
+    initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
+
+    clickCalls.length = 0;
+
+    stage.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 7,
+      clientX: 100, clientY: 200, pointerType: "mouse", buttons: 1,
+    }));
+    // Move 5px — below MOUSE_DRAG_THRESHOLD=6, should stay pending
+    stage.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true, cancelable: true, pointerId: 7,
+      clientX: 105, clientY: 200, pointerType: "mouse", buttons: 1,
+    }));
+    stage.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true, cancelable: true, pointerId: 7,
+      clientX: 105, clientY: 200, pointerType: "mouse",
+    }));
+
+    if (clickCalls.length !== 1) {
+      throw new Error(`Expected 1 onClick (5px mouse = tap), got ${clickCalls.length}`);
+    }
+
+    document.body.removeChild(stage);
+    document.body.removeChild(hint);
+    setDrawHooks(null);
+  });
+
+  it("mouse move of 8px (> 6px) starts pan → no commit on up", () => {
+    const stage = document.createElement("div");
+    stage.setPointerCapture = () => {};
+    document.body.appendChild(stage);
+
+    const clickCalls = [];
+    setDrawHooks({
+      isDrawMode: () => true,
+      onHover: () => {},
+      onClick: (sx, sy) => clickCalls.push({ sx, sy }),
+      onLeave: () => {},
+    });
+    setSelectHooks(null);
+
+    const hint = document.createElement("div");
+    const btnZoomIn = document.createElement("button");
+    const btnZoomOut = document.createElement("button");
+    const btnReset = document.createElement("button");
+    document.body.appendChild(hint);
+    initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
+
+    clickCalls.length = 0;
+
+    stage.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 8,
+      clientX: 100, clientY: 200, pointerType: "mouse", buttons: 1,
+    }));
+    stage.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true, cancelable: true, pointerId: 8,
+      clientX: 108, clientY: 200, pointerType: "mouse", buttons: 1,
+    }));
+    stage.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true, cancelable: true, pointerId: 8,
+      clientX: 108, clientY: 200, pointerType: "mouse",
+    }));
+
+    if (clickCalls.length !== 0) {
+      throw new Error(`Expected 0 onClick (8px mouse drag = pan), got ${clickCalls.length}`);
+    }
+
+    document.body.removeChild(stage);
+    document.body.removeChild(hint);
+    setDrawHooks(null);
+  });
+});
+
+describe("interactions — loupe hover on touch-down (crosshair appears before lift)", () => {
+  it("touch pointerdown alone triggers onHover at offset point", () => {
+    const stage = document.createElement("div");
+    stage.setPointerCapture = () => {};
+    document.body.appendChild(stage);
+
+    const hoverCalls = [];
+    setDrawHooks({
+      isDrawMode: () => true,
+      onHover: (sx, sy) => hoverCalls.push({ sx, sy }),
+      onClick: () => {},
+      onLeave: () => {},
+    });
+    setSelectHooks(null);
+
+    const hint = document.createElement("div");
+    const btnZoomIn = document.createElement("button");
+    const btnZoomOut = document.createElement("button");
+    const btnReset = document.createElement("button");
+    document.body.appendChild(hint);
+    initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
+
+    hoverCalls.length = 0;
+
+    stage.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 9,
+      clientX: 150, clientY: 400, pointerType: "touch", buttons: 1,
+    }));
+
+    // onHover should have been called on down with the offset y
+    const offsetHover = hoverCalls.find(c => c.sy === 400 - LOUPE_OFFSET_PX);
+    if (!offsetHover) {
+      throw new Error(`Expected onHover(150, ${400 - LOUPE_OFFSET_PX}) on touch-down, got: ${JSON.stringify(hoverCalls)}`);
+    }
+
+    // Clean up (lift the finger)
+    stage.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true, cancelable: true, pointerId: 9,
+      clientX: 150, clientY: 400, pointerType: "touch",
+    }));
+
+    document.body.removeChild(stage);
+    document.body.removeChild(hint);
+    setDrawHooks(null);
+  });
+});
+
+describe("interactions — symbol move touch does not apply loupe offset to move path", () => {
+  it("select-mode onMove receives raw coordinates (no loupe offset)", () => {
+    const stage = document.createElement("div");
+    stage.setPointerCapture = () => {};
+    document.body.appendChild(stage);
+
+    const moveCalls = [];
+    const upCalls = [];
+    setDrawHooks({
+      isDrawMode: () => false,
+      onHover: () => {},
+      onClick: () => {},
+      onLeave: () => {},
+    });
+    setSelectHooks({
+      onDown: () => true,  // always consume (symbol is always hit)
+      onMove: (sx, sy) => moveCalls.push({ sx, sy }),
+      onUp:   (sx, sy) => upCalls.push({ sx, sy }),
+      onTapEmpty: () => {},
+    });
+
+    const hint = document.createElement("div");
+    const btnZoomIn = document.createElement("button");
+    const btnZoomOut = document.createElement("button");
+    const btnReset = document.createElement("button");
+    document.body.appendChild(hint);
+    initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
+
+    moveCalls.length = 0;
+    upCalls.length = 0;
+
+    stage.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 10,
+      clientX: 100, clientY: 200, pointerType: "touch", buttons: 1,
+    }));
+    stage.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true, cancelable: true, pointerId: 10,
+      clientX: 120, clientY: 220, pointerType: "touch", buttons: 1,
+    }));
+    stage.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true, cancelable: true, pointerId: 10,
+      clientX: 120, clientY: 220, pointerType: "touch",
+    }));
+
+    // onMove should receive raw coordinates (no loupe offset for select/move)
+    if (moveCalls.length === 0) {
+      throw new Error("Expected onMove to be called");
+    }
+    const m = moveCalls[0];
+    if (m.sx !== 120 || m.sy !== 220) {
+      throw new Error(`Expected onMove(120, 220), got (${m.sx}, ${m.sy})`);
+    }
+
+    document.body.removeChild(stage);
+    document.body.removeChild(hint);
+    setDrawHooks(null);
+    setSelectHooks(null);
+  });
+});
+
 // ─── LLD-43: Starter templates ────────────────────────────────────────────────
 
 import {
