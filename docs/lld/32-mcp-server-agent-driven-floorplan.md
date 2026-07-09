@@ -13,7 +13,7 @@ changes, so it is explicitly **deferred to a later productionization phase** (se
 questions Q6/Q7).
 
 **The end goal this server serves.** An AI agent is given a natural-language design brief
-with requirements (e.g. *"design a 4×5 m studio with a bed, a desk, and a couch, all with
+with requirements (e.g. *"design a 5×7 m studio with a bed, a desk, and a couch, all with
 60 cm walkways"*). The agent interfaces with floorplan and produces a plan that
 **satisfies those requirements**. The operative word is *satisfying*: this is a **closed
 feedback loop** — agent proposes geometry → server evaluates it against the requirements →
@@ -256,7 +256,7 @@ the agent can read and correct.
 ### Evaluator tools (the loop closers — this is the whole point)
 
 **`get_metrics`** → per-room `{ id, areaM2, perimeterM, closed }` + totals. Backed by
-`roomMetrics`. Lets the agent verify "4×5 m ⇒ ~20 m²" after `add_room`/`set_edge_length`.
+`roomMetrics`. Lets the agent verify "5×7 m ⇒ ~35 m²" after `add_room`/`set_edge_length`.
 
 **`check_clearance`** → the couch-fit evaluator, the reason this server is differentiated.
 Args `{ id?, minWalkwayM? }`: with `id`, evaluates one symbol; without, evaluates **every**
@@ -409,8 +409,8 @@ by its **axis-aligned bounding box**: for the (single, MVP) closed room, `w = ma
 `h = max(y) − min(y)` over its verts. Match tolerance is **±0.025 m** (the app's finest snap
 step; `SNAP_PRESETS = ["auto", 0.25, 0.1, 0.025, "off"]`, grid.js:50 — a rebuilt room snaps to
 that grid, so anything finer would be permanently unsatisfiable). Orientation is not enforced
-(a 4×5 room and a 5×4 room both match a `{w:4,h:5}` brief by matching the sorted dimension
-pair). The `unmet` string reports the measured bbox: `"room is 3.80×5.00 m; brief asked 4×5 m
+(a 5×7 room and a 7×5 room both match a `{w:5,h:7}` brief by matching the sorted dimension
+pair). The `unmet` string reports the measured bbox: `"room is 4.80×7.00 m; brief asked 5×7 m
 (±0.025 m)"`.
 
 **M2 — closing the room-size requirement without a destructive footgun.** There is
@@ -420,7 +420,7 @@ which *deforms* a rectangle into a non-rectangle rather than scaling it to w×h.
 add a room-scaling geometry primitive (new surface area, and room editing is not where the
 agent-ergonomics risk lies), the loop is **sequenced so room dims are locked first**: when
 `check_brief` reports a room-size mismatch, its `unmet` message explicitly instructs
-`"rebuild the room to 4×5 m via new_plan + add_room BEFORE placing furniture"`. The
+`"rebuild the room to 5×7 m via new_plan + add_room BEFORE placing furniture"`. The
 convergence harness and the `design_room` prompt both establish the room (via
 `add_room {rect}` at exact brief dims) as **step 1**, before any `place_symbol`, so the
 destructive rebuild path is only hit if the agent mis-sized the room initially and costs
@@ -430,12 +430,12 @@ rectangle-deforming operation, not a resize.
 
 ### Why this shape works as a loop (worked trace)
 
-1. `set_brief {room:{w:4,h:5}, furniture:[{type:"bed"},{type:"desk"},{type:"sofa"}], minWalkwayM:0.6}`
-2. `add_room {rect:{x:0,y:0,w:4,h:5}}` → `{room:"w0", metrics:{areaM2:20,…}}`
+1. `set_brief {room:{w:5,h:7}, furniture:[{type:"bed"},{type:"desk"},{type:"sofa"}], minWalkwayM:0.6}`
+2. `add_room {rect:{x:0,y:0,w:5,h:7}}` → `{room:"w0", metrics:{areaM2:35,…}}`
 3. `place_symbol {type:"bed", …}` ×3 (bed/desk/sofa) → each returns its own clearance readout.
 4. `check_brief` → `satisfied:false`, with a violation carrying a `suggestedMove` target for
-   Sofa (e.g. `~(0.68, 3.20) m`) — a resolved vector, not just "42 cm apart".
-5. Agent applies the suggestion directly: `move_symbol {id:"s3", x:0.68, y:3.20}`.
+   Sofa (e.g. `~(1.76, 3.81) m`) — a resolved vector, not just "42 cm apart".
+5. Agent applies the suggestion directly: `move_symbol {id:"s3", x:1.76, y:3.81}`.
 6. `check_brief` → `satisfied:true`. Loop ends. (If a symbol is *boxed in*, step 4 instead
    returns `boxedInAxes` + a structural instruction, and the agent widens the room or resizes
    a piece rather than nudging — see the reconciliation rules.)
@@ -782,15 +782,45 @@ Playwright/Chromium; they are pure Node, so this adds negligible CI cost.)
   round-trips through `decodeHashToPlan` back to an equal plan.
 
 ### Integration — the convergence loop (the headline test)
+
+There are **two distinct integration briefs** here and they must not be conflated: (a) the
+**feasible happy-path brief**, which the loop MUST drive to `satisfied:true`, and (b) the
+**deliberately-infeasible boxed-in brief**, which the loop MUST recognise as infeasible and
+refuse to oscillate on. They exercise opposite ends of the design.
+
+**(a) Feasible happy-path brief (must converge to `satisfied:true`).**
 - A **scripted "agent"** (deterministic, not an LLM) drives the tools to satisfy a fixed
-  brief ("4×5 m studio; bed + desk + sofa; 60 cm walkways"): `set_brief` → `add_room {rect}`
+  brief ("**5×7 m** studio; bed + desk + sofa; 60 cm walkways"): `set_brief` → `add_room {rect}`
   at exact brief dims **first** (M2 sequencing) → `place_symbol`×3 (deliberately too close) →
   poll `check_brief` → on each violation, apply the report's **`suggestedMove`** directly via
   `move_symbol {id, x:toX, y:toY}` (not a hand-derived magnitude) → re-poll. **Assert the loop
   terminates** in a bounded iteration count with `check_brief.satisfied === true`.
 - Assert the final `get_plan` document passes `validatePlan()` and `check_clearance` over all
   furniture reports `worstStatus:"ok"`.
-- **Boxed-in / infeasible-by-translation case (adversarial start):** a subject in an x-span
+
+**M5 — why the happy-path brief is 5×7 m, not 4×5 m (feasibility is a hard constraint on
+this test).** The scripted harness is a *direct applier* of `suggestedMove`, not an optimizer,
+so the chosen brief must be **feasible by translation of the DEFAULT footprints** or the loop
+can never reach `satisfied:true` (or thrashes near the boundary). An exhaustive brute-force
+against the real `src/js` core (`computeClearances` + `worstStatus` at threshold 0.60,
+placing bed 1.5×2.0, sofa 2.0×0.9, desk 1.4×0.7 at `rot:0` by translation on a 0.10 m grid)
+established:
+  - **4×5 m: INFEASIBLE** — 15,593,760 arrangements tried, **zero** clear 60 cm from all walls
+    *and* from each other (a 4×5 room at 0.60 m clearance + 0.06 m half-wall leaves only a
+    ~2.68×3.68 m usable center-region; three pieces this size cannot mutually clear). The
+    original 4×5 headline brief was therefore **unsatisfiable** and is corrected here.
+  - **5×7 m: FEASIBLE (verified)** — sample satisfying placement (all `worstStatus:"ok"`):
+    bed (1.51, 1.76), sofa (1.76, 3.81), desk (1.36, 5.21). 5×7 is chosen over the
+    barely-feasible 5×6 m specifically for headroom: with generous slack the direct-apply
+    harness is far less prone to a flaky/looping test than one feasible only at a few exact
+    grid points. Bed + desk + sofa defaults and the 60 cm walkway are kept so the test stays
+    meaningful. The test still starts with pieces deliberately too close and converges via
+    `move_symbol` toward `suggestedMove`.
+
+**(b) Boxed-in / infeasible-by-translation case (adversarial start) — MUST stay infeasible.**
+This brief is *deliberately* unsatisfiable and is the anti-livelock proof; unlike the 5×7
+happy-path brief above, it must **never** reach `satisfied:true`.
+- A subject in an x-span
   too narrow to clear both a left wall and a right-side Desk at 60 cm, **started pinned flush
   against the left wall** (NOT centered). This is the exact livelock the reviewer
   constructed: from the pinned start only the wall gap violates, so a violated-only resolver
