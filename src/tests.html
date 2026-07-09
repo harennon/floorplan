@@ -5639,6 +5639,11 @@ describe("LLD-34 — alignment adds NO new keys to plan JSON", () => {
 // ─── Import LLD-34 resolver wrapper ──────────────────────────────────────────
 
 import {
+  init as initSymbolTool,
+  onSelectDown as symbolOnSelectDown,
+  onSelectMove as symbolOnSelectMove,
+  onSelectUp as symbolOnSelectUp,
+  repositionGuides,
   resolvePlacementForTest,
 } from "./js/symbolTool.js";
 
@@ -5857,85 +5862,156 @@ describe("resolver precedence — ALIGN_PX < WALL_FLUSH_PX: contested axis resol
 
 describe("LLD-34 integration — guide cleared on drop (Edge Case 15)", () => {
   it("no residual <g class='align-guide'> in #symbol-overlay after onSelectUp", () => {
+    // Set up known state
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    model.rooms.length = 0;
+    symbolModel.symbols.length = 0;
+    setGridSnap(true);
+    setSnapMode("off"); // disable grid so only alignment fires
+
     // Build a minimal DOM rig with an SVG overlay
-    const stage = document.createElement("div");
-    stage.className = "stage";
-    document.body.appendChild(stage);
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     const overlay = document.createElementNS("http://www.w3.org/2000/svg", "g");
     overlay.id = "symbol-overlay";
     svg.appendChild(overlay);
-    stage.appendChild(svg);
+    document.body.appendChild(svg);
 
-    const snapTag = document.createElement("div");
-    snapTag.className = "snap-tag";
-    snapTag.style.display = "none";
-    document.body.appendChild(snapTag);
+    const snapTagEl = document.createElement("div");
+    snapTagEl.className = "snap-tag";
+    snapTagEl.style.display = "none";
+    document.body.appendChild(snapTagEl);
 
-    // Initialize symbolTool with the rig (importing init from symbolTool.js)
-    // We need a minimal isDrawMode and setTool
+    const stage = document.createElement("div");
     const dock = document.createElement("div");
-    dock.className = "dock";
-    document.body.appendChild(dock);
     const inspector = document.createElement("div");
+    document.body.appendChild(stage);
+    document.body.appendChild(dock);
     document.body.appendChild(inspector);
 
-    // Import init from symbolTool.js (already imported above via resolvePlacementForTest module)
-    // We need to use the full symbolTool init here. Since we can't re-import, we
-    // can directly test the guide system by calling onSelectUp after placing symbols.
+    // Bind symbolTool to our rig so _gSymOverlay and _snapTagEl are set
+    initSymbolTool({
+      stage,
+      dock,
+      inspector,
+      setTool: () => {},
+      isDrawMode: () => false,
+      snapTag: snapTagEl,
+      symOverlay: overlay,
+    });
 
-    // For this integration test we verify that after gesture end, the overlay has
-    // no align-guide children using the DOM after a simulated drag.
-    // We simulate by directly checking that _clearGuides() removes elements.
-    // The test: place two symbols, simulate drag-move (which builds guides via
-    // _updateGuides), then simulate drop (onSelectUp), verify overlay is clean.
+    // Place two chair symbols:
+    //   sym1 at (5, 5): AABB x:[4.75, 5.25], y:[4.75, 5.25]  → screen center (200, 200)
+    //   sym2 at (5.35, 5): AABB x:[5.10, 5.60]
+    //   gap = sym1.maxX(5.25) to sym2.minX(5.10) = -0.15; |gap|=0.15 < alignThreshM=0.2 → X match
+    const sym1 = createSymbol("chair", 5, 5);
+    addSymbol(sym1);
+    const sym2 = createSymbol("chair", 5.35, 5);
+    addSymbol(sym2);
+
+    // Start drag on sym1 by clicking its center (sym1's center maps to screen (200,200))
+    symbolOnSelectDown(200, 200);
+
+    // Move at same position — _resolvePlacement fires with sym2 as an alignment candidate,
+    // _updateGuides builds the alignment guide <g> elements.
+    symbolOnSelectMove(200, 200);
+
+    // repositionGuides() is the post-render hook that appends <g class="align-guide">
+    // elements to the overlay. Call it directly to simulate the render cycle.
+    repositionGuides();
+
+    // Verify at least one align-guide was appended (proves the rig is working)
+    const guidesBefore = overlay.querySelectorAll(".align-guide");
+
+    // Drop — this MUST clear all guides from the overlay
+    symbolOnSelectUp(200, 200);
+
+    // Assert: overlay has no residual align-guide children (Edge Case 15 invariant)
+    const guidesAfter = overlay.querySelectorAll(".align-guide");
 
     // Clean up rig
+    document.body.removeChild(svg);
+    document.body.removeChild(snapTagEl);
     document.body.removeChild(stage);
-    document.body.removeChild(snapTag);
     document.body.removeChild(dock);
     document.body.removeChild(inspector);
-
-    // Since full DOM integration requires symbolTool.init() with all refs, and
-    // symbolTool is a module-singleton already initialized in the app, we verify
-    // the cleanup invariant by testing the exported functions directly:
-    // After onSelectUp, _activeGuides is [] and _candidateAABBs is [] (checked via
-    // the public API: a subsequent resolvePlacementForTest with empty candidates
-    // should show no alignment snap).
-    resetAll();
-    setGridSnap(true);
-    setSnapMode("off");
-    const box = makeBox(5, 5);
-    const cand = mkAABB(5.51, 7, 0, 10);
-    const r = resolvePlacementForTest(200, 200, false, box, [cand]);
-    // The wrapper correctly injects candidates regardless of module state
-    expect(r.snapType).toBe("align");
+    symbolModel.symbols.length = 0;
     setGridSnap(true);
     setSnapMode("auto");
+
+    if (guidesBefore.length === 0) {
+      throw new Error("No align-guide elements were created during drag — check alignment threshold or rig setup");
+    }
+    if (guidesAfter.length !== 0) {
+      throw new Error(`Expected 0 align-guide elements after onSelectUp, got ${guidesAfter.length}`);
+    }
   });
 });
 
 describe("LLD-34 integration — snap-tag hidden after gesture end", () => {
-  it("after onSelectUp, _candidateAABBs is reset to [] (no stale state)", () => {
-    // After onSelectUp the module resets _candidateAABBs.
-    // We verify this indirectly: resolvePlacementForTest takes candidates as a
-    // parameter and doesn't read module state, so the resolver always works
-    // correctly regardless of module _candidateAABBs state.
-    // The dock-placement fix ensures _candidateAABBs is built at drag start.
-    // This test is a regression guard: passing empty candidates to the resolver
-    // when no alignment is desired should yield no alignment result.
-    resetAll();
+  it("snap-tag display is 'none' after onSelectUp ends an aligning drag", () => {
+    // Set up known state
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    model.rooms.length = 0;
+    symbolModel.symbols.length = 0;
     setGridSnap(true);
-    setSnapMode("off");
-    const box = makeBox(5, 5);
-    // Pass empty candidates → no alignment possible
-    const r = resolvePlacementForTest(200, 200, false, box, []);
-    // No alignment snap when no candidates
-    if (r._alignX !== null || r._alignY !== null) {
-      throw new Error("Expected no alignment with empty candidates");
-    }
+    setSnapMode("off"); // disable grid so only alignment fires
+
+    // Minimal rig: we need a snap-tag element and an overlay bound via init
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const overlay = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    svg.appendChild(overlay);
+    document.body.appendChild(svg);
+
+    const snapTagEl = document.createElement("div");
+    snapTagEl.className = "snap-tag";
+    snapTagEl.style.display = "none";
+    document.body.appendChild(snapTagEl);
+
+    const stage = document.createElement("div");
+    const dock = document.createElement("div");
+    const inspector = document.createElement("div");
+    document.body.appendChild(stage);
+    document.body.appendChild(dock);
+    document.body.appendChild(inspector);
+
+    initSymbolTool({
+      stage,
+      dock,
+      inspector,
+      setTool: () => {},
+      isDrawMode: () => false,
+      snapTag: snapTagEl,
+      symOverlay: overlay,
+    });
+
+    // Same two-chair setup as the guide-cleared test: X alignment fires during move
+    const sym1 = createSymbol("chair", 5, 5);
+    addSymbol(sym1);
+    const sym2 = createSymbol("chair", 5.35, 5);
+    addSymbol(sym2);
+
+    // Start drag, move (snap-tag should become visible with snapType "align")
+    symbolOnSelectDown(200, 200);
+    symbolOnSelectMove(200, 200);
+
+    // Drop — _hideSnapTag() must set display to "none"
+    symbolOnSelectUp(200, 200);
+
+    const displayAfter = snapTagEl.style.display;
+
+    // Clean up
+    document.body.removeChild(svg);
+    document.body.removeChild(snapTagEl);
+    document.body.removeChild(stage);
+    document.body.removeChild(dock);
+    document.body.removeChild(inspector);
+    symbolModel.symbols.length = 0;
     setGridSnap(true);
     setSnapMode("auto");
+
+    if (displayAfter !== "none") {
+      throw new Error(`Expected snap-tag display to be 'none' after onSelectUp, got '${displayAfter}'`);
+    }
   });
 });
 
