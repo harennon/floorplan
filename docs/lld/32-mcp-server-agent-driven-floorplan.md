@@ -655,10 +655,13 @@ Prompt add cheap context. All are optional to the loop and small.
 10. **Empty plan evaluated.** `get_metrics` → empty rooms list; `check_clearance` → no items,
     `satisfied:true` vacuously *for clearance* — but `check_brief` returns `satisfied:false`
     with `unmet` listing all required furniture/room. The brief oracle is the real gate.
-11. **`save_plan` path traversal.** `filename` is sanitised to a basename (`path.basename`),
-    forced to `.json`, and joined onto the plans dir; any `..`/absolute path is rejected. The
-    resolved path is re-checked to be inside the plans dir (or a client-declared Root) before
-    writing. No writes outside the sandbox.
+11. **`save_plan` path traversal.** `filename` is sanitised to a safe basename via
+    `path.basename` (stripping any directory components, including `../` and absolute prefixes)
+    and forced to `.json`. The sanitised name is joined onto the plans dir and the resolved
+    path is re-verified to be a direct child of that dir before writing — so a traversal
+    filename is silently sanitised to a safe name rather than rejected (e.g. `../../etc/evil`
+    becomes `evil.json`, written inside the plans dir). Only a target whose resolved parent is
+    not the plans dir is refused with `{ ok:false }`. No writes outside the sandbox.
 12. **Plans dir missing.** Created on demand (`mkdir -p`) under the configured/Root dir; if
     creation fails, `save_plan` returns `{ ok:false, error }` rather than crashing the server.
 13. **`get_share_url` when `CompressionStream` unavailable.** `encodePlanToHash` already falls
@@ -803,8 +806,9 @@ Playwright/Chromium; they are pure Node, so this adds negligible CI cost.)
 
 ### Unit — I/O sandbox (`io.js`, security)
 - `save_plan` writes a `serializePlan()` file into the plans dir.
-- Path-traversal filenames (`../evil`, absolute paths, `..%2F`) are rejected; resolved path is
-  re-verified inside the plans dir (or declared Root) before any write.
+- Path-traversal filenames (`../evil`, absolute paths, `..%2F`) are sanitised to a safe
+  basename; the write still succeeds, but the resolved path is always a direct child of the
+  plans dir (or declared Root). A target whose parent resolves outside the dir is refused.
 - Missing plans dir is created; creation failure returns `{ok:false}` without crashing.
 
 ### Integration — headless import boundary

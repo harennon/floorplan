@@ -28,6 +28,34 @@ test("add_room with < 3 verts is rejected without throwing", () => {
   assert.equal(wallsModel.rooms.length, 0);
 });
 
+test("add_room with 3+ collinear verts is rejected, no sliver persisted (EC5)", () => {
+  session.newPlan();
+  // Three collinear points on the x-axis: area === 0 exactly (shoelace = 0).
+  const r = tools.tool_add_room({ verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }] });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /non-collinear/);
+  // No sliver room must remain in the model.
+  assert.equal(wallsModel.rooms.length, 0);
+});
+
+test("add_room collinear reject: 4+ collinear verts also rejected (EC5)", () => {
+  session.newPlan();
+  const r = tools.tool_add_room({ verts: [
+    { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }, { x: 3, y: 0 },
+  ] });
+  assert.equal(r.ok, false);
+  assert.equal(wallsModel.rooms.length, 0);
+});
+
+test("add_room accepts a non-rectangular but nonzero-area polygon (EC5 regression)", () => {
+  session.newPlan();
+  // L-shape triangle: clearly nonzero area.
+  const r = tools.tool_add_room({ verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 0, y: 4 }] });
+  assert.equal(r.ok, true);
+  assert.ok(r.metrics.area > 0);
+  assert.equal(wallsModel.rooms.length, 1);
+});
+
 test("set_edge_length hits the exact target; bad index / degenerate → {ok:false}", () => {
   session.newPlan();
   tools.tool_add_room({ rect: { x: 0, y: 0, w: 5, h: 7 } });

@@ -131,7 +131,15 @@ export function tool_add_room(args) {
     return { ok: false, reason: "a room needs at least 3 corners" };
   }
   const room = wallsModel.rooms[wallsModel.rooms.length - 1];
-  return { ok: true, roomId: room.id, metrics: roomMetrics(room) };
+  // EC5: a closed polygon with area === 0 is collinear; no epsilon — shoelace of
+  // collinear integer-ish coords is exactly zero, and any nonzero area is a real room.
+  const metrics = roomMetrics(room);
+  if (metrics.area === 0) {
+    wallsModel.rooms.pop();
+    wallsModel.chain.length = 0;
+    return { ok: false, reason: "a room needs 3+ non-collinear corners" };
+  }
+  return { ok: true, roomId: room.id, metrics };
 }
 
 /**
