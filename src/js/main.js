@@ -17,12 +17,13 @@ import { init as initDimEntry, reposition as dimReposition, getEditingEdge, setH
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim, setHistoryCommit as symDimSetHistoryCommit } from "./symbolDimEntry.js";
 import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, repositionFlushGuide, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast } from "./symbolTool.js";
-import { init as initStore, loadLocal } from "./store.js";
+import { init as initStore, loadLocal, saveNow } from "./store.js";
 import { readBootHash } from "./share.js";
 import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
 import { contentBounds } from "./exportImg.js";
 import { fitToContent } from "./view.js";
-import { init as initActions, showToast, showConflictBanner, setHistoryReset } from "./actions.js";
+import { init as initActions, showToast, showConflictBanner, setHistoryReset, setOpenTemplates } from "./actions.js";
+import { init as initTemplates, open as openTemplates } from "./templates.js";
 import { model as wallsModel } from "./walls.js";
 import { getSymbol } from "./symbols.js";
 import { init as initHistory, reset as historyReset, commit as historyCommit, undo as historyUndo, redo as historyRedo, canUndo, canRedo, depth as historyDepth, onChange as historyOnChange } from "./history.js";
@@ -332,6 +333,47 @@ document.addEventListener("DOMContentLoaded", () => {
   // ── Help overlay (LLD-21) ─────────────────────────────────────────────────
   if (btnHelp && helpOverlayEl) {
     initHelp({ button: btnHelp, overlay: helpOverlayEl });
+  }
+
+  // ── Template gallery (LLD-43) ──────────────────────────────────────────────
+  const templateOverlayEl = document.getElementById("template-overlay");
+  const templateGridEl    = templateOverlayEl?.querySelector(".template-grid");
+  const templateCloseBtnEl = templateOverlayEl?.querySelector(".template-overlay-close");
+  const emptyCtaEl        = document.getElementById("empty-cta");
+
+  if (templateOverlayEl && templateGridEl && templateCloseBtnEl) {
+    // The apply callback encapsulates the full load sequence so templates.js
+    // needs no direct imports of history/view/surface.
+    initTemplates({
+      overlay:  templateOverlayEl,
+      grid:     templateGridEl,
+      closeBtn: templateCloseBtnEl,
+      emptyCta: emptyCtaEl,
+      apply: (plan) => {
+        saveNow();
+        applyPlan(plan);
+        historyReset();
+        const bounds = contentBounds();
+        if (bounds) {
+          fitToContent(bounds, W, H);
+        } else {
+          resetView(W, H);
+        }
+        render();
+      },
+      isEmpty: isEmptyPlan,
+      toast:   showToast,
+    });
+  }
+
+  // Wire openTemplates into actions.js overflow handler
+  setOpenTemplates(openTemplates);
+
+  // Register onRender hook to keep #empty-cta visibility in sync
+  if (emptyCtaEl) {
+    onRender(() => {
+      emptyCtaEl.hidden = !isEmptyPlan();
+    });
   }
 
   // Default measure inspector to collapsed on narrow screens (Edge Case 13)

@@ -6627,6 +6627,367 @@ describe("LLD-37 integration — room-center guide and ring cleared on drop", ()
   });
 });
 
+// ─── LLD-43: Starter templates ────────────────────────────────────────────────
+
+import {
+  TEMPLATES, init as initTemplates, open as openTemplates, close as closeTemplates, isOpen as isTemplatesOpen,
+  applyTemplate,
+} from "./js/templates.js";
+
+// ─── LLD-43 helpers ───────────────────────────────────────────────────────────
+
+/** Minimal overlay DOM for templates tests */
+function _makeTemplateDOM() {
+  const overlay  = document.createElement("div");
+  overlay.id = "template-overlay";
+  const panel    = document.createElement("div");
+  panel.className = "template-overlay-panel";
+  const grid     = document.createElement("div");
+  grid.className = "template-grid";
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "template-overlay-close";
+  panel.appendChild(grid);
+  panel.appendChild(closeBtn);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  return { overlay, grid, closeBtn };
+}
+
+function _removeTemplateDOM(dom) {
+  if (dom.overlay.parentNode) dom.overlay.parentNode.removeChild(dom.overlay);
+}
+
+/** Snapshot + restore live model state for template tests */
+function _snapModels() {
+  return {
+    rooms:   JSON.parse(JSON.stringify(model.rooms)),
+    chain:   JSON.parse(JSON.stringify(model.chain)),
+    symbols: JSON.parse(JSON.stringify(symbolModel.symbols)),
+  };
+}
+function _restoreModels(snap) {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  model.rooms.push(...snap.rooms);
+  model.chain.push(...snap.chain);
+  symbolModel.symbols.push(...snap.symbols);
+}
+
+// ─── LLD-43 unit tests ────────────────────────────────────────────────────────
+
+describe("LLD-43 — TEMPLATES metadata integrity", () => {
+  it("has between 3 and 5 templates", () => {
+    if (TEMPLATES.length < 3 || TEMPLATES.length > 5) {
+      throw new Error(`Expected 3–5 templates, got ${TEMPLATES.length}`);
+    }
+  });
+
+  it("all ids are unique", () => {
+    const ids = TEMPLATES.map(t => t.id);
+    const set = new Set(ids);
+    if (set.size !== ids.length) throw new Error("Duplicate template ids found");
+  });
+
+  it("all ids are non-empty strings", () => {
+    for (const t of TEMPLATES) {
+      if (typeof t.id !== "string" || t.id.trim() === "") {
+        throw new Error(`Template with empty id: ${JSON.stringify(t)}`);
+      }
+    }
+  });
+
+  it("all names are non-empty strings", () => {
+    for (const t of TEMPLATES) {
+      if (typeof t.name !== "string" || t.name.trim() === "") {
+        throw new Error(`Template '${t.id}' has empty name`);
+      }
+    }
+  });
+
+  it("all descriptions are non-empty strings", () => {
+    for (const t of TEMPLATES) {
+      if (typeof t.description !== "string" || t.description.trim() === "") {
+        throw new Error(`Template '${t.id}' has empty description`);
+      }
+    }
+  });
+
+  it("all thumbs are non-empty strings", () => {
+    for (const t of TEMPLATES) {
+      if (typeof t.thumb !== "string" || t.thumb.trim() === "") {
+        throw new Error(`Template '${t.id}' has empty thumb`);
+      }
+    }
+  });
+
+  it("all plan units are valid", () => {
+    const VALID = ["ft", "m"];
+    for (const t of TEMPLATES) {
+      if (!VALID.includes(t.plan.unit)) {
+        throw new Error(`Template '${t.id}' has invalid unit: ${t.plan.unit}`);
+      }
+    }
+  });
+});
+
+describe("LLD-43 — every template passes validatePlan", () => {
+  it("each template.plan validates without error", () => {
+    for (const t of TEMPLATES) {
+      const result = validatePlan(t.plan);
+      if (result === null) {
+        throw new Error(`validatePlan returned null for template '${t.id}'`);
+      }
+    }
+  });
+});
+
+describe("LLD-43 — each template applies without error and is non-empty", () => {
+  it("applyPlan does not throw for any template", () => {
+    const snap = _snapModels();
+    try {
+      for (const t of TEMPLATES) {
+        const plan = validatePlan(t.plan);
+        if (!plan) throw new Error(`validatePlan null for '${t.id}'`);
+        applyPlan(plan);
+      }
+    } finally {
+      _restoreModels(snap);
+    }
+  });
+
+  it("plan is non-empty after each template apply (isEmptyPlan → false)", () => {
+    const snap = _snapModels();
+    const empties = [];
+    try {
+      for (const t of TEMPLATES) {
+        const plan = validatePlan(t.plan);
+        if (!plan) { empties.push(t.id + ": validatePlan null"); continue; }
+        applyPlan(plan);
+        if (isEmptyPlan()) empties.push(t.id);
+        _restoreModels(snap);
+      }
+    } finally {
+      _restoreModels(snap);
+    }
+    if (empties.length > 0) {
+      throw new Error(`Templates that loaded to empty plan: ${empties.join(", ")}`);
+    }
+  });
+
+  it("walls model reflects the template after apply", () => {
+    const snap = _snapModels();
+    try {
+      for (const t of TEMPLATES) {
+        const plan = validatePlan(t.plan);
+        if (!plan) throw new Error(`validatePlan null for '${t.id}'`);
+        applyPlan(plan);
+        const hasGeom = model.rooms.length > 0 || model.chain.length > 0;
+        if (!hasGeom) throw new Error(`Template '${t.id}': model has no rooms after apply`);
+        _restoreModels(snap);
+      }
+    } finally {
+      _restoreModels(snap);
+    }
+  });
+});
+
+describe("LLD-43 — template round-trip: serialize → re-validate succeeds", () => {
+  it("serializePlan(validatePlan(t.plan)) → re-validatePlan succeeds for each template", () => {
+    for (const t of TEMPLATES) {
+      const plan1 = validatePlan(t.plan);
+      if (!plan1) throw new Error(`First validatePlan null for '${t.id}'`);
+      const json  = serializePlan(plan1);
+      const plan2 = validatePlan(JSON.parse(json));
+      if (!plan2) throw new Error(`Re-validatePlan failed for '${t.id}'`);
+    }
+  });
+
+  it("serializePlan output is stable across two calls for each template", () => {
+    for (const t of TEMPLATES) {
+      const plan = validatePlan(t.plan);
+      if (!plan) throw new Error(`validatePlan null for '${t.id}'`);
+      const s1 = serializePlan(plan);
+      const s2 = serializePlan(validatePlan(t.plan));
+      if (s1 !== s2) throw new Error(`Unstable serializePlan for template '${t.id}'`);
+    }
+  });
+});
+
+describe("LLD-43 — applyTemplate: unknown id returns false, no mutation", () => {
+  it("unknown id returns false", () => {
+    // set up DOM first so applyTemplate can find toast
+    const dom = _makeTemplateDOM();
+    let lastToast = null;
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => {},
+      isEmpty: () => true,
+      toast: (msg) => { lastToast = msg; },
+    });
+    const snap = _snapModels();
+    try {
+      const result = applyTemplate("__no_such_id__");
+      if (result !== false) throw new Error("Expected false for unknown id");
+    } finally {
+      _restoreModels(snap);
+      _removeTemplateDOM(dom);
+    }
+  });
+
+  it("unknown id does not mutate the model", () => {
+    const dom = _makeTemplateDOM();
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => {},
+      isEmpty: () => true,
+      toast: () => {},
+    });
+    model.rooms.push({ id: "r-test", closed: true, verts: [{ x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}] });
+    const countBefore = model.rooms.length;
+    applyTemplate("__no_such_id__");
+    const countAfter = model.rooms.length;
+    model.rooms.length = 0;
+    _removeTemplateDOM(dom);
+    if (countAfter !== countBefore) throw new Error("Model mutated by unknown id");
+  });
+});
+
+describe("LLD-43 — applyTemplate: confirm gate", () => {
+  it("does NOT apply when confirm returns false (stubbed)", () => {
+    const dom = _makeTemplateDOM();
+    let applyCalled = false;
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => { applyCalled = true; },
+      isEmpty: () => false, // non-empty — triggers confirm
+      toast: () => {},
+    });
+
+    const origConfirm = window.confirm;
+    window.confirm = () => false; // stub: user cancels
+    const result = applyTemplate(TEMPLATES[0].id);
+    window.confirm = origConfirm;
+    _removeTemplateDOM(dom);
+
+    if (result !== false) throw new Error("Expected false when confirm returns false");
+    if (applyCalled)      throw new Error("apply() was called despite confirm false");
+  });
+
+  it("applies when confirm returns true (stubbed)", () => {
+    const dom = _makeTemplateDOM();
+    let appliedPlan = null;
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: (p) => { appliedPlan = p; },
+      isEmpty: () => false, // non-empty — triggers confirm
+      toast: () => {},
+    });
+
+    const origConfirm = window.confirm;
+    window.confirm = () => true; // stub: user confirms
+    const result = applyTemplate(TEMPLATES[0].id);
+    window.confirm = origConfirm;
+    _removeTemplateDOM(dom);
+
+    if (result !== true)    throw new Error("Expected true when confirm returns true");
+    if (!appliedPlan)       throw new Error("apply() was not called");
+  });
+
+  it("applies immediately when plan is empty (no confirm)", () => {
+    const dom = _makeTemplateDOM();
+    let applyCalled = false;
+    let confirmCalled = false;
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => { applyCalled = true; },
+      isEmpty: () => true, // empty — no confirm needed
+      toast: () => {},
+    });
+
+    const origConfirm = window.confirm;
+    window.confirm = () => { confirmCalled = true; return true; };
+    const result = applyTemplate(TEMPLATES[0].id);
+    window.confirm = origConfirm;
+    _removeTemplateDOM(dom);
+
+    if (!applyCalled)    throw new Error("apply() was not called for empty plan");
+    if (confirmCalled)   throw new Error("window.confirm was called for empty plan");
+    if (result !== true) throw new Error("Expected true for empty plan");
+  });
+});
+
+describe("LLD-43 — open/close/isOpen toggle --visible class", () => {
+  it("open() adds template-overlay--visible", () => {
+    const dom = _makeTemplateDOM();
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => {},
+      isEmpty: () => true,
+      toast: () => {},
+    });
+
+    openTemplates();
+    const hasClass = dom.overlay.classList.contains("template-overlay--visible");
+    closeTemplates();
+    _removeTemplateDOM(dom);
+
+    if (!hasClass) throw new Error("template-overlay--visible not added on open()");
+  });
+
+  it("close() removes template-overlay--visible", () => {
+    const dom = _makeTemplateDOM();
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => {},
+      isEmpty: () => true,
+      toast: () => {},
+    });
+
+    openTemplates();
+    closeTemplates();
+    const hasClass = dom.overlay.classList.contains("template-overlay--visible");
+    _removeTemplateDOM(dom);
+
+    if (hasClass) throw new Error("template-overlay--visible not removed on close()");
+  });
+
+  it("isOpen() returns true after open(), false after close()", () => {
+    const dom = _makeTemplateDOM();
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => {},
+      isEmpty: () => true,
+      toast: () => {},
+    });
+
+    openTemplates();
+    const openState = isTemplatesOpen();
+    closeTemplates();
+    const closedState = isTemplatesOpen();
+    _removeTemplateDOM(dom);
+
+    if (!openState)   throw new Error("isOpen() should be true after open()");
+    if (closedState)  throw new Error("isOpen() should be false after close()");
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 
