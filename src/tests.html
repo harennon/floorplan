@@ -6100,6 +6100,533 @@ describe("LLD-34 integration — drag beside another symbol, edges coincident on
   });
 });
 
+// ─── Import LLD-37 modules ───────────────────────────────────────────────────
+
+import {
+  roomCentroids,
+} from "./js/walls.js";
+
+import {
+  ROOM_CENTER_PX, nearestRoomCenter,
+} from "./js/symbols.js";
+
+// ─── Tests: roomCentroids (LLD 37) ───────────────────────────────────────────
+
+describe("roomCentroids — axis-aligned rectangle", () => {
+  it("2m×3m rectangle at (0,0)→(2,3) → centroid at (1, 1.5)", () => {
+    resetModel();
+    model.rooms.push({
+      id: "rc1", closed: true,
+      verts: [{ x:0, y:0 }, { x:2, y:0 }, { x:2, y:3 }, { x:0, y:3 }],
+    });
+    const cs = roomCentroids();
+    expect(cs.length).toBe(1);
+    expect(cs[0].cx).toBeCloseTo(1, 9);
+    expect(cs[0].cy).toBeCloseTo(1.5, 9);
+    resetModel();
+  });
+});
+
+describe("roomCentroids — triangle", () => {
+  it("triangle (0,0),(3,0),(0,4) → centroid at (1, 4/3)", () => {
+    resetModel();
+    model.rooms.push({
+      id: "tri1", closed: true,
+      verts: [{ x:0, y:0 }, { x:3, y:0 }, { x:0, y:4 }],
+    });
+    const cs = roomCentroids();
+    expect(cs.length).toBe(1);
+    // Triangle centroid = average of vertices = ((0+3+0)/3, (0+0+4)/3) = (1, 4/3)
+    expect(cs[0].cx).toBeCloseTo(1, 9);
+    expect(cs[0].cy).toBeCloseTo(4 / 3, 9);
+    resetModel();
+  });
+});
+
+describe("roomCentroids — winding order independent", () => {
+  it("CW and CCW wound rectangles give same centroid", () => {
+    resetModel();
+    // CCW
+    model.rooms.push({
+      id: "ccw", closed: true,
+      verts: [{ x:0, y:0 }, { x:4, y:0 }, { x:4, y:2 }, { x:0, y:2 }],
+    });
+    // CW
+    model.rooms.push({
+      id: "cw", closed: true,
+      verts: [{ x:0, y:0 }, { x:0, y:2 }, { x:4, y:2 }, { x:4, y:0 }],
+    });
+    const cs = roomCentroids();
+    expect(cs.length).toBe(2);
+    const ccwC = cs.find(c => c.id === "ccw");
+    const cwC  = cs.find(c => c.id === "cw");
+    if (!ccwC || !cwC) throw new Error("Missing centroid entry");
+    expect(ccwC.cx).toBeCloseTo(cwC.cx, 9);
+    expect(ccwC.cy).toBeCloseTo(cwC.cy, 9);
+    resetModel();
+  });
+});
+
+describe("roomCentroids — open room / <3 verts excluded", () => {
+  it("open room contributes nothing", () => {
+    resetModel();
+    model.rooms.push({ id: "open1", closed: false, verts: [{ x:0,y:0 }, { x:5,y:0 }] });
+    const cs = roomCentroids();
+    expect(cs.length).toBe(0);
+    resetModel();
+  });
+
+  it("closed room with <3 verts contributes nothing", () => {
+    resetModel();
+    model.rooms.push({ id: "tiny1", closed: true, verts: [{ x:0,y:0 }, { x:1,y:0 }] });
+    const cs = roomCentroids();
+    expect(cs.length).toBe(0);
+    resetModel();
+  });
+
+  it("no rooms → empty array", () => {
+    resetModel();
+    const cs = roomCentroids();
+    expect(cs.length).toBe(0);
+  });
+});
+
+describe("roomCentroids — degenerate polygon skipped, other rooms still returned", () => {
+  it("collinear closed room → skipped, no NaN/Infinity, valid room still present", () => {
+    resetModel();
+    // Degenerate: all verts on a line
+    model.rooms.push({
+      id: "deg1", closed: true,
+      verts: [{ x:0,y:0 }, { x:1,y:0 }, { x:2,y:0 }],
+    });
+    // Valid room
+    model.rooms.push({
+      id: "valid1", closed: true,
+      verts: [{ x:0,y:0 }, { x:2,y:0 }, { x:2,y:2 }, { x:0,y:2 }],
+    });
+    const cs = roomCentroids();
+    // Degenerate is skipped, valid room still returned
+    if (cs.some(c => !isFinite(c.cx) || !isFinite(c.cy))) {
+      throw new Error("NaN or Infinity in centroid result");
+    }
+    expect(cs.length).toBe(1);
+    expect(cs[0].id).toBe("valid1");
+    resetModel();
+  });
+});
+
+// ─── Tests: nearestRoomCenter (LLD 37) ───────────────────────────────────────
+
+/** Build an AABB from known min/max for room-center tests. */
+function mkRC_AABB(minX, maxX, minY, maxY) {
+  return { minX, maxX, cx: (minX + maxX) / 2, minY, maxY, cy: (minY + maxY) / 2 };
+}
+
+describe("nearestRoomCenter — X axis in range only → X match, y null", () => {
+  it("drag center just inside threshold of room centroid X → X match, kind room-center, y null", () => {
+    // room centroid at (5, 100), drag center at (5.05, 0) — X gap=0.05 < thresh=0.2; Y gap=100 >> thresh
+    const drag = mkRC_AABB(4.55, 5.55, -0.5, 0.5);  // cx=5.05, cy=0
+    const rc = [{ cx: 5, cy: 100 }];
+    const result = nearestRoomCenter(drag, rc, 0.2);
+    if (result.x === null) throw new Error("Expected x match");
+    expect(result.x.kind).toBe("room-center");
+    expect(result.x.delta).toBeCloseTo(5 - 5.05, 9);
+    if (result.x.center === undefined) throw new Error("Expected center on x match");
+    expect(result.x.center.x).toBeCloseTo(5, 9);
+    expect(result.x.center.y).toBeCloseTo(100, 9);
+    if (result.y !== null) throw new Error("Expected y null");
+  });
+});
+
+describe("nearestRoomCenter — both axes in range → both matches, same room", () => {
+  it("drag center close on both axes → x and y both room-center with same center", () => {
+    // room centroid at (5, 5), drag at (5.05, 4.95)
+    const drag = mkRC_AABB(4.55, 5.55, 4.45, 5.45);  // cx=5.05, cy=4.95
+    const rc = [{ cx: 5, cy: 5 }];
+    const result = nearestRoomCenter(drag, rc, 0.2);
+    if (result.x === null) throw new Error("Expected x match");
+    if (result.y === null) throw new Error("Expected y match");
+    expect(result.x.kind).toBe("room-center");
+    expect(result.y.kind).toBe("room-center");
+    // Both axes carry the same center
+    if (result.x.center === undefined || result.y.center === undefined) {
+      throw new Error("Expected center on both matches");
+    }
+    expect(result.x.center.x).toBeCloseTo(result.y.center.x, 9);
+    expect(result.x.center.y).toBeCloseTo(result.y.center.y, 9);
+  });
+});
+
+describe("nearestRoomCenter — beyond threshold on both axes → null,null", () => {
+  it("drag far from all rooms → {x:null, y:null}", () => {
+    const drag = mkRC_AABB(0, 1, 0, 1);  // cx=0.5, cy=0.5
+    const rc = [{ cx: 10, cy: 10 }];
+    const result = nearestRoomCenter(drag, rc, 0.2);
+    expect(result.x).toBe(null);
+    expect(result.y).toBe(null);
+  });
+});
+
+describe("nearestRoomCenter — no room centers → null,null", () => {
+  it("empty roomCenters → {x:null, y:null}", () => {
+    const drag = mkRC_AABB(0, 2, 0, 2);
+    const result = nearestRoomCenter(drag, [], 0.5);
+    expect(result.x).toBe(null);
+    expect(result.y).toBe(null);
+  });
+});
+
+describe("nearestRoomCenter — two rooms in range, nearer centroid wins", () => {
+  it("room with smaller dx²+dy² chosen; both axes from that room", () => {
+    // drag center at (5, 5)
+    const drag = mkRC_AABB(4.5, 5.5, 4.5, 5.5);  // cx=5, cy=5
+    // roomA: centroid at (5.1, 5.1) → dx²+dy²=0.01+0.01=0.02
+    // roomB: centroid at (5.05, 5.05) → dx²+dy²=0.0025+0.0025=0.005 (closer)
+    const rc = [
+      { cx: 5.1, cy: 5.1 },   // roomA
+      { cx: 5.05, cy: 5.05 }, // roomB (winner)
+    ];
+    const result = nearestRoomCenter(drag, rc, 0.2);
+    if (result.x === null) throw new Error("Expected x match");
+    if (result.y === null) throw new Error("Expected y match");
+    // Both axes should reference roomB's centroid
+    if (result.x.center === undefined) throw new Error("Missing center on x");
+    expect(result.x.center.x).toBeCloseTo(5.05, 9);
+    expect(result.x.center.y).toBeCloseTo(5.05, 9);
+    if (result.y.center === undefined) throw new Error("Missing center on y");
+    expect(result.y.center.x).toBeCloseTo(5.05, 9);
+    expect(result.y.center.y).toBeCloseTo(5.05, 9);
+  });
+});
+
+describe("nearestRoomCenter — single-room coherence: roomA on X only, roomB on Y only", () => {
+  it("roomA in range on X only, roomB in range on Y only → chosen room emits only its in-range axis", () => {
+    // drag center at (5, 5)
+    const drag = mkRC_AABB(4.5, 5.5, 4.5, 5.5);  // cx=5, cy=5
+    // roomA: cx=5.1 (X in range 0.2), cy=100 (Y out of range)    dx²+dy²≈0.01+9025
+    // roomB: cx=100 (X out of range), cy=5.05 (Y in range 0.2)   dx²+dy²≈9025+0.0025
+    // roomA wins because its total dist² is much smaller (via cx, both in threshold on x, cy far)
+    // Actually roomA eligible (|dx|=0.1 < 0.2), roomB eligible (|dy|=0.05 < 0.2)
+    // roomA dx²+dy²=0.01 + (100-5)²≈9025.01
+    // roomB dx²+dy²=(100-5)²+0.0025≈9025.0025 → roomB is slightly closer
+    // But roomA only has X in range; roomB only has Y in range
+    const rc = [
+      { cx: 5.1, cy: 100 },  // roomA: X in range, Y far
+      { cx: 100, cy: 5.05 }, // roomB: Y in range, X far
+    ];
+    const result = nearestRoomCenter(drag, rc, 0.2);
+    // The chosen room emits only its in-range axis; the other axis is null
+    // roomB (closer overall) is chosen; it has only Y in range
+    // (dx=100-5=95 >> threshold; dy=5.05-5=0.05 < threshold)
+    if (result.x !== null) throw new Error("Expected x null (chosen room has X out of range)");
+    if (result.y === null) throw new Error("Expected y match (chosen room has Y in range)");
+    // No X-from-roomA / Y-from-roomB split possible
+  });
+});
+
+describe("nearestRoomCenter — guide span brackets symbol-center to centroid", () => {
+  it("X match guide is vertical at room.cx, spanning y extents", () => {
+    // drag: cx=5.1, cy=0; room: cx=5, cy=10
+    const drag = mkRC_AABB(4.6, 5.6, -0.5, 0.5);  // cx=5.1, cy=0
+    const rc = [{ cx: 5, cy: 10 }];
+    const result = nearestRoomCenter(drag, rc, 0.2);
+    if (result.x === null) throw new Error("Expected x match");
+    const g = result.x.guide;
+    // Vertical guide: same x, spanning from min(drag.minY, room.cy) to max(drag.maxY, room.cy)
+    expect(g.a.x).toBeCloseTo(5, 9);
+    expect(g.b.x).toBeCloseTo(5, 9);
+    const minY = Math.min(-0.5, 10);
+    const maxY = Math.max(0.5, 10);
+    expect(Math.min(g.a.y, g.b.y)).toBeCloseTo(minY, 9);
+    expect(Math.max(g.a.y, g.b.y)).toBeCloseTo(maxY, 9);
+  });
+});
+
+describe("nearestRoomCenter — center-only: symbol edge near centroid does not match", () => {
+  it("symbol edge near room centroid but center is far → no match", () => {
+    // Room centroid at (5, 5). Drag: center at (3, 3), right-edge at 3+0.5=3.5 (far from cx=5).
+    // Only center participates; edge is not checked.
+    const drag = mkRC_AABB(2.5, 3.5, 2.5, 3.5);  // cx=3, cy=3; edges don't touch centroid
+    const rc = [{ cx: 5, cy: 5 }];  // centroid far from drag center
+    const result = nearestRoomCenter(drag, rc, 0.2);
+    expect(result.x).toBe(null);
+    expect(result.y).toBe(null);
+  });
+
+  it("symbol center exactly at room centroid → both match; edge position irrelevant", () => {
+    // drag cx=5, cy=5; room centroid at (5, 5)
+    const drag = mkRC_AABB(4, 6, 4, 6);  // cx=5, cy=5
+    const rc = [{ cx: 5, cy: 5 }];
+    const result = nearestRoomCenter(drag, rc, 0.2);
+    if (result.x === null) throw new Error("Expected x match when centers coincide");
+    if (result.y === null) throw new Error("Expected y match when centers coincide");
+    expect(result.x.delta).toBeCloseTo(0, 9);
+    expect(result.y.delta).toBeCloseTo(0, 9);
+  });
+});
+
+// ─── Tests: resolver with room-center (LLD 37) ────────────────────────────────
+
+describe("resolver room-center — Alt held → free, no room-center snap", () => {
+  it("altHeld=true with room centers in range: no align snap (toggle ON and OFF)", () => {
+    resetForResolver();
+    setGridSnap(true);
+    setSnapMode("off");
+    const box = makeBox(5, 5);
+    const rc = [{ cx: 5.05, cy: 5.05 }]; // very close to drag center
+    const r = resolvePlacementForTest(200, 200, true /* altHeld */, box, [], rc);
+    expect(r.snapType).toBe("free");
+    expect(r._alignX).toBe(null);
+    expect(r._alignY).toBe(null);
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+});
+
+describe("resolver room-center — toggle OFF, room center in range → NOT snapped", () => {
+  it("toggle OFF disables room-center snap", () => {
+    resetForResolver();
+    setGridSnap(false);
+    setSnapMode("off");
+    const box = makeBox(5, 5);
+    // Room centroid near drag center
+    const rc = [{ cx: 5.05, cy: 5.05 }];
+    const r = resolvePlacementForTest(200, 200, false, box, [], rc);
+    // toggle OFF → no align
+    if (r.snapType === "align") throw new Error("room-center snap must be gated by toggle");
+    expect(r._alignX).toBe(null);
+    setGridSnap(true);
+  });
+});
+
+describe("resolver room-center — toggle ON, room center in range, no wall/object → 'align'", () => {
+  it("room centroid X in range → snapType 'align', x snapped to centroid", () => {
+    resetForResolver();
+    setGridSnap(true);
+    setSnapMode("off");
+    // Drag box 1×1 centered at world(5, 5) — AABB cx=5, cy=5
+    // Room centroid at (5.05, 100) → dx=0.05 < ROOM_CENTER_PX/pxPerM=8/40=0.2; Y out of range
+    const box = makeBox(5, 5);
+    const rc = [{ cx: 5.05, cy: 100 }];
+    const r = resolvePlacementForTest(200, 200, false, box, [], rc);
+    expect(r.snapType).toBe("align");
+    if (r._alignX === null) throw new Error("Expected _alignX match");
+    expect(r._alignX.kind).toBe("room-center");
+    // x should be snapped to centroid x: raw(5) + delta(0.05) = 5.05
+    expect(r.x).toBeCloseTo(5.05, 5);
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+});
+
+describe("resolver room-center — tier-4 contention: nearer wins; tie prefers object", () => {
+  it("object-align closer on X → object-align wins", () => {
+    resetForResolver();
+    setGridSnap(true);
+    setSnapMode("off");
+    // Drag center at world(5,5).
+    // Object-align candidate: cand minX=5.51 → gap=0.01 (drag maxX=5.5 to cand.minX=5.51)
+    // Room center: cx=5.1 → dx=0.1 (larger than 0.01)
+    // Object-align |delta|=0.01 < room-center |delta|=0.1 → object wins
+    const box = makeBox(5, 5);
+    const cand = mkAABB(5.51, 7, 0, 10);  // edge gap = 0.01
+    const rc = [{ cx: 5.1, cy: 100 }];   // room-center dx=0.1
+    const r = resolvePlacementForTest(200, 200, false, box, [cand], rc);
+    expect(r.snapType).toBe("align");
+    if (r._alignX === null) throw new Error("Expected _alignX");
+    expect(r._alignX.kind).toBe("edge"); // object-align won
+    expect(r.x).toBeCloseTo(5.01, 5);
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+
+  it("room-center closer on X → room-center wins", () => {
+    resetForResolver();
+    setGridSnap(true);
+    setSnapMode("off");
+    // Drag center at world(5,5).
+    // Object-align candidate: gap=0.1 (larger)
+    // Room center: cx=5.02 → dx=0.02 (smaller → wins)
+    const box = makeBox(5, 5);
+    const cand = mkAABB(5.6, 7, 0, 10);  // edge gap = 0.1
+    const rc = [{ cx: 5.02, cy: 100 }];  // room-center dx=0.02
+    const r = resolvePlacementForTest(200, 200, false, box, [cand], rc);
+    expect(r.snapType).toBe("align");
+    if (r._alignX === null) throw new Error("Expected _alignX");
+    expect(r._alignX.kind).toBe("room-center"); // room-center won
+    expect(r.x).toBeCloseTo(5.02, 5);
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+
+  it("exact tie (|delta| equal within 1e-9) → object-align wins (documented tie-break)", () => {
+    resetForResolver();
+    setGridSnap(true);
+    setSnapMode("off");
+    // Drag center at world(5,5). AABB: x:[4.5,5.5], cx=5
+    // Object: cand.cx exactly=5.05 → center match delta=0.05
+    // Room: rc.cx exactly=5.05 → delta=0.05 — exact tie
+    const box = makeBox(5, 5);
+    // Build a candidate whose center is at exactly 5.05
+    const cand = mkAABB(0, 10.1, 0, 10); // cx=5.05
+    const rc = [{ cx: 5.05, cy: 100 }];  // room cx=5.05 same delta
+    const r = resolvePlacementForTest(200, 200, false, box, [cand], rc);
+    expect(r.snapType).toBe("align");
+    if (r._alignX === null) throw new Error("Expected _alignX");
+    // Tie → object-align wins
+    expect(r._alignX.kind).toBe("center"); // object center match
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+});
+
+describe("resolver room-center — cross-tier: wall-flush on Y + room-center on X", () => {
+  it("Y flush-seated, X centered by room-center, snapType 'flush'", () => {
+    resetForResolver();
+    setGridSnap(true);
+    setSnapMode("off");
+    // Horizontal wall at y=0 (normal ±Y → claims Y).
+    model.rooms.push({
+      id: "rcwall1", closed: true,
+      verts: [{ x:-20, y:0 }, { x:20, y:0 }, { x:20, y:0.12 }, { x:-20, y:0.12 }],
+    });
+    // Symbol 1×0.5 near wall; room centroid near X
+    // Center at (5, 0.15): top edge = -0.1; wall outer face = -0.06; gap=-0.04 → flush Y
+    // Room centroid at (5.05, 5): dx=0.05 in range → X aligned to room centroid
+    const box = { type: "sofa", x: 5, y: 0.15, w: 1, h: 0.5, rot: 0 };
+    const rc = [{ cx: 5.05, cy: 5 }];
+    const r = resolvePlacementForTest(200, 6, false, box, [], rc);
+    expect(r.snapType).toBe("flush");
+    expect(r._flushActive).toBe(true);
+    if (r._alignX === null) throw new Error("Expected _alignX room-center");
+    expect(r._alignX.kind).toBe("room-center");
+    expect(r.x).toBeCloseTo(5.05, 5);
+    resetModel();
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+});
+
+describe("resolver room-center — wall-flush wins over room-center on same axis", () => {
+  it("vertical wall claiming X → room-center does not snap X", () => {
+    resetForResolver();
+    setGridSnap(true);
+    setSnapMode("off");
+    // Vertical wall at x=5.5 (normal ±X → claims X)
+    model.rooms.push({
+      id: "rcwall2", closed: true,
+      verts: [{ x:5.5, y:-10 }, { x:5.62, y:-10 }, { x:5.62, y:10 }, { x:5.5, y:10 }],
+    });
+    const box = makeBox(5, 5); // 1×1, maxX=5.5 → flush candidate on X
+    const rc = [{ cx: 5.05, cy: 100 }]; // room centroid near X
+    const r = resolvePlacementForTest(200, 200, false, box, [], rc);
+    expect(r.snapType).toBe("flush");
+    // X is claimed by wall-flush → room-center must not apply on X
+    expect(r._alignX).toBe(null);
+    resetModel();
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+});
+
+// ─── Tests: LLD-37 regression — plan JSON unaffected ─────────────────────────
+
+describe("LLD-37 — room-center adds NO new keys to plan JSON", () => {
+  it("buildPlan() does not include room-center state", () => {
+    resetAll();
+    const p = buildPlan();
+    const json = serializePlan(p);
+    if (json.includes("roomCenter"))  throw new Error("'roomCenter' leaked into plan JSON");
+    if (json.includes("room-center")) throw new Error("'room-center' leaked into plan JSON");
+    if (json.includes("_roomCenters")) throw new Error("'_roomCenters' leaked into plan JSON");
+  });
+});
+
+// ─── Tests: LLD-37 integration — guide cleared on drop ───────────────────────
+
+describe("LLD-37 integration — room-center guide and ring cleared on drop", () => {
+  it("no residual .align-guide or .room-center-ring in #symbol-overlay after onSelectUp", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    model.rooms.length = 0;
+    symbolModel.symbols.length = 0;
+    setGridSnap(true);
+    setSnapMode("off");
+
+    // Closed room: 10m×10m centered at origin
+    model.rooms.push({
+      id: "rcIntRoom", closed: true,
+      verts: [{ x:-5, y:-5 }, { x:5, y:-5 }, { x:5, y:5 }, { x:-5, y:5 }],
+    });
+    // room centroid at (0, 0); place a symbol near the centroid so room-center fires
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const overlay = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    overlay.id = "symbol-overlay";
+    svg.appendChild(overlay);
+    document.body.appendChild(svg);
+
+    const snapTagEl = document.createElement("div");
+    snapTagEl.className = "snap-tag";
+    snapTagEl.style.display = "none";
+    document.body.appendChild(snapTagEl);
+
+    const stage = document.createElement("div");
+    const dock = document.createElement("div");
+    const inspector = document.createElement("div");
+    document.body.appendChild(stage);
+    document.body.appendChild(dock);
+    document.body.appendChild(inspector);
+
+    initSymbolTool({
+      stage, dock, inspector,
+      setTool: () => {},
+      isDrawMode: () => false,
+      snapTag: snapTagEl,
+      symOverlay: overlay,
+    });
+
+    // Symbol at world (0.05, 0.05) — very close to room centroid (0,0)
+    // At zoom=1, pan=0: world(0,0)=screen(0,0), world(0.05,0.05)=screen(2,2)
+    const sym1 = createSymbol("chair", 0.05, 0.05);
+    addSymbol(sym1);
+
+    // Start drag on the symbol
+    // screen(0.05*40=2, 0.05*40=2) → click center
+    symbolOnSelectDown(2, 2);
+
+    // Move — room-center snap should fire; _updateGuides builds the room-center guide + ring
+    symbolOnSelectMove(2, 2);
+
+    // repositionGuides — post-render hook appends guides to overlay
+    repositionGuides();
+
+    // Drop — MUST clear all guides + ring
+    symbolOnSelectUp(2, 2);
+
+    // Assert: no residual align-guide or room-center-ring
+    const guidesAfter = overlay.querySelectorAll(".align-guide");
+    const ringAfter   = overlay.querySelectorAll(".room-center-ring");
+
+    // Clean up
+    document.body.removeChild(svg);
+    document.body.removeChild(snapTagEl);
+    document.body.removeChild(stage);
+    document.body.removeChild(dock);
+    document.body.removeChild(inspector);
+    model.rooms.length = 0;
+    symbolModel.symbols.length = 0;
+    setGridSnap(true);
+    setSnapMode("auto");
+
+    if (guidesAfter.length !== 0) {
+      throw new Error(`Expected 0 align-guide after drop, got ${guidesAfter.length}`);
+    }
+    if (ringAfter.length !== 0) {
+      throw new Error(`Expected 0 room-center-ring after drop, got ${ringAfter.length}`);
+    }
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 

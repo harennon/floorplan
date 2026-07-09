@@ -385,3 +385,49 @@ export function rescaleEdge(room, edgeIndex, targetLenM) {
   verts[iB] = { x: a.x + ux * targetLenM, y: a.y + uy * targetLenM };
   return true;
 }
+
+// ── Room centroids (LLD 37) ──────────────────────────────────────────────────
+
+/**
+ * True polygon centroids of every CLOSED room (>=3 verts, non-degenerate).
+ * Pure: reads only model.rooms. Skips open rooms and degenerate (|area|<eps) polygons.
+ * Uses the standard signed-area centroid formula (winding-order-independent).
+ * @returns {{ id:string, cx:number, cy:number }[]}   // world metres
+ */
+export function roomCentroids() {
+  const out = [];
+  for (const room of model.rooms) {
+    if (!room.closed) continue;
+    const verts = room.verts;
+    const n = verts.length;
+    if (n < 3) continue;
+
+    // Signed area (shoelace): A = ½ Σ (xᵢ·yᵢ₊₁ − xᵢ₊₁·yᵢ)
+    let A = 0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      A += verts[i].x * verts[j].y - verts[j].x * verts[i].y;
+    }
+    A /= 2;
+
+    // Skip degenerate (collinear) polygons
+    if (Math.abs(A) < 1e-9) continue;
+
+    // Centroid: Cx = 1/(6A) Σ (xᵢ + xᵢ₊₁)(xᵢ·yᵢ₊₁ − xᵢ₊₁·yᵢ)
+    //           Cy = 1/(6A) Σ (yᵢ + yᵢ₊₁)(xᵢ·yᵢ₊₁ − xᵢ₊₁·yᵢ)
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const cross = verts[i].x * verts[j].y - verts[j].x * verts[i].y;
+      cx += (verts[i].x + verts[j].x) * cross;
+      cy += (verts[i].y + verts[j].y) * cross;
+    }
+    const inv6A = 1 / (6 * A);
+    cx *= inv6A;
+    cy *= inv6A;
+
+    out.push({ id: room.id, cx, cy });
+  }
+  return out;
+}

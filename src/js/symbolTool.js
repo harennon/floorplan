@@ -13,7 +13,7 @@
  */
 
 import { screenToWorld, worldToScreen, pxPerM } from "./view.js";
-import { gridSnap, wallSegments, WALL_M } from "./walls.js";
+import { gridSnap, wallSegments, WALL_M, roomCentroids } from "./walls.js";
 import { snapStep } from "./grid.js";
 import {
   model, CATALOG,
@@ -21,6 +21,7 @@ import {
   getSymbol, pickSymbol, moveSymbol, rotateSymbol, resizeSymbol, corners,
   WALL_FLUSH_PX, PARALLEL_TOL_DEG, nearestWallFlush,
   ALIGN_PX, aabb as symAabb, nearestObjectAlignment,
+  ROOM_CENTER_PX, nearestRoomCenter,
 } from "./symbols.js";
 import { gridSnap as prefsGridSnap } from "./prefs.js";
 import { scheduleRender } from "./surface.js";
@@ -106,6 +107,13 @@ let _activeGuides = [];
  * @type {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }[]}
  */
 let _candidateAABBs = [];
+
+/**
+ * Room centroids for the current gesture (all closed rooms).
+ * Rebuilt once at gesture start (rooms are static during a symbol drag).
+ * @type {{ cx:number, cy:number }[]}
+ */
+let _roomCenters = [];
 
 // ── DOM refs ───────────────────────────────────────────────────────────────────
 
@@ -211,6 +219,8 @@ export function onSelectDown(sx, sy) {
     _candidateAABBs = model.symbols
       .filter(s => s.id !== hit.id)
       .map(s => symAabb(s));
+    // Build room-center list once at drag start (rooms are static during a symbol drag)
+    _roomCenters = roomCentroids();
     _showInspector(hit);
     scheduleRender();
     return true;
@@ -269,6 +279,7 @@ export function onSelectUp(sx, sy) {
   _flushGuide = null;
   _activeGuides = [];
   _candidateAABBs = [];
+  _roomCenters = [];
   _hideSnapTag();
   _clearGuides();
   // Commit move/rotate to history (dirty-check handles no-op)
@@ -338,6 +349,8 @@ function _onDockPointerDown(e) {
   // Build candidate AABB list at drag start — the ghost isn't in the model yet
   // so nothing is excluded (LLD-34 Edge Case 9 / Interfaces ~line 224).
   _candidateAABBs = model.symbols.map(s => symAabb(s));
+  // Build room-center list at drag start (rooms are static during a symbol drag)
+  _roomCenters = roomCentroids();
 
   // Seed ghost at current pointer position (use a temp box matching catalog dims)
   const seedBox = { type, x: 0, y: 0, w: cat.w, h: cat.h, rot: 0 };
@@ -386,6 +399,7 @@ function _onDockPointerDown(e) {
     _flushGuide = null;
     _activeGuides = [];
     _candidateAABBs = [];
+    _roomCenters = [];
     _hideSnapTag();
     _clearGuides();
     _updateDockActive(null);
@@ -402,6 +416,7 @@ function _onDockPointerDown(e) {
     // Drop the symbol — rebuild candidates for the final snap resolve (they were
     // cleared above; ghost isn't in the model yet so exclude nothing).
     _candidateAABBs = model.symbols.map(s => symAabb(s));
+    _roomCenters = roomCentroids();
     const cat2 = CATALOG[typeWas];
     const dropBox = { type: typeWas, x: 0, y: 0, w: cat2.w, h: cat2.h, rot: 0 };
     const wp2 = _resolvePlacement(ev.clientX, ev.clientY, ev.altKey, dropBox);
@@ -542,24 +557,68 @@ function _resolvePlacement(sx, sy, altHeld, boxLike) {
     _flushGuide = null;
   }
 
-  // 3. Object alignment (gated by prefs.gridSnap())
-  if (prefsGridSnap() && _candidateAABBs.length > 0) {
-    const alignThreshM = ALIGN_PX / pxPerM();
+  // 3. Tier-4: Object alignment + Room-center (both gated by prefs.gridSnap())
+  if (prefsGridSnap()) {
     const dragAABBVal = symAabb(tempSym);
-    const alignResult = nearestObjectAlignment(dragAABBVal, _candidateAABBs, alignThreshM);
 
-    if (!xClaimed && alignResult.x !== null) {
-      resolvedX = raw.x + alignResult.x.delta;
-      xClaimed = true;
-      snapTypeX = "align";
-      alignX = alignResult.x;
+    // Object alignment
+    let objectAlignResult = { x: null, y: null };
+    if (_candidateAABBs.length > 0) {
+      const alignThreshM = ALIGN_PX / pxPerM();
+      objectAlignResult = nearestObjectAlignment(dragAABBVal, _candidateAABBs, alignThreshM);
     }
 
-    if (!yClaimed && alignResult.y !== null) {
-      resolvedY = raw.y + alignResult.y.delta;
-      yClaimed = true;
-      snapTypeY = "align";
-      alignY = alignResult.y;
+    // Room-center alignment
+    let roomCenterResult = { x: null, y: null };
+    if (_roomCenters.length > 0) {
+      const roomThreshM = ROOM_CENTER_PX / pxPerM();
+      roomCenterResult = nearestRoomCenter(dragAABBVal, _roomCenters, roomThreshM);
+    }
+
+    // Per axis: pick the nearer of object-align vs room-center by |delta|.
+    // Ties (within 1e-9) prefer object alignment (documented).
+    const TIE_EPS = 1e-9;
+
+    if (!xClaimed) {
+      const objX = objectAlignResult.x;
+      const rcX = roomCenterResult.x;
+      let winner = null;
+      if (objX !== null && rcX !== null) {
+        const objAbs = Math.abs(objX.delta);
+        const rcAbs = Math.abs(rcX.delta);
+        winner = (rcAbs < objAbs - TIE_EPS) ? rcX : objX;
+      } else if (objX !== null) {
+        winner = objX;
+      } else if (rcX !== null) {
+        winner = rcX;
+      }
+      if (winner !== null) {
+        resolvedX = raw.x + winner.delta;
+        xClaimed = true;
+        snapTypeX = "align";
+        alignX = winner;
+      }
+    }
+
+    if (!yClaimed) {
+      const objY = objectAlignResult.y;
+      const rcY = roomCenterResult.y;
+      let winner = null;
+      if (objY !== null && rcY !== null) {
+        const objAbs = Math.abs(objY.delta);
+        const rcAbs = Math.abs(rcY.delta);
+        winner = (rcAbs < objAbs - TIE_EPS) ? rcY : objY;
+      } else if (objY !== null) {
+        winner = objY;
+      } else if (rcY !== null) {
+        winner = rcY;
+      }
+      if (winner !== null) {
+        resolvedY = raw.y + winner.delta;
+        yClaimed = true;
+        snapTypeY = "align";
+        alignY = winner;
+      }
     }
   }
 
@@ -795,11 +854,20 @@ function _updateSnapTag(sx, sy, snapType, alignMatches) {
 
   let color = _SNAP_TAG_COLORS[snapType] || "#8f8a78";
 
-  // For align snap: use teal if all active matches are center-kind, violet if any edge
+  // For align snap: use rose if dominant is room-center; teal if all center; violet if any edge
   if (snapType === "align" && alignMatches) {
     const matches = [alignMatches.x, alignMatches.y].filter(Boolean);
+    const allRoomCenter = matches.length > 0 && matches.every(m => m.kind === "room-center");
     const allCenter = matches.length > 0 && matches.every(m => m.kind === "center");
-    color = allCenter ? _COLOR_CENTER : _COLOR_EDGE;
+    if (allRoomCenter) {
+      color = _COLOR_ROOM;
+    } else if (allCenter) {
+      color = _COLOR_CENTER;
+    } else {
+      // Mixed or edge-dominant: check if any edge exists; otherwise rose if any room-center
+      const hasEdge = matches.some(m => m.kind === "edge");
+      color = hasEdge ? _COLOR_EDGE : _COLOR_ROOM;
+    }
   }
 
   const label = snapType;
@@ -834,6 +902,7 @@ const NS_SVG = "http://www.w3.org/2000/svg";
 const _COLOR_FLUSH  = "#9cd67a";  // green  — wall-flush (LLD 26)
 const _COLOR_EDGE   = "#b98bd9";  // violet — edge-to-edge alignment
 const _COLOR_CENTER = "#7fd0c8";  // teal   — center-to-center alignment
+const _COLOR_ROOM   = "#e08fbf";  // rose   — room-center alignment (LLD 37)
 
 /**
  * Cached SVG elements for guides: up to 1 flush + 2 alignment (X and Y).
@@ -842,6 +911,7 @@ const _COLOR_CENTER = "#7fd0c8";  // teal   — center-to-center alignment
  */
 let _flushGuideLine = null;     // legacy <line> for wall-flush (style: dashed)
 let _alignGuideEls = [];        // up to 2 <g> elements for alignment guides
+let _roomCenterRing = null;     // <circle> ring marker for room-center centroid (LLD 37)
 
 /**
  * Rebuild _activeGuides from the latest resolved placement result and
@@ -864,24 +934,40 @@ function _updateGuides(resolved) {
     });
   }
 
-  // Alignment guides
+  // Alignment guides (object alignment + room-center)
   if (resolved._alignX !== null) {
-    const color = resolved._alignX.kind === "center" ? _COLOR_CENTER : _COLOR_EDGE;
-    _activeGuides.push({
-      kind: "align",
-      color,
-      label: resolved._alignX.kind === "center" ? "centers" : "edges",
-      guide: resolved._alignX.guide,
-    });
+    const m = resolved._alignX;
+    const color = m.kind === "room-center" ? _COLOR_ROOM
+                : m.kind === "center"      ? _COLOR_CENTER
+                :                            _COLOR_EDGE;
+    const label = m.kind === "room-center" ? "room"
+                : m.kind === "center"      ? "centers"
+                :                            "edges";
+    _activeGuides.push({ kind: "align", color, label, guide: m.guide });
   }
   if (resolved._alignY !== null) {
-    const color = resolved._alignY.kind === "center" ? _COLOR_CENTER : _COLOR_EDGE;
-    _activeGuides.push({
-      kind: "align",
-      color,
-      label: resolved._alignY.kind === "center" ? "centers" : "edges",
-      guide: resolved._alignY.guide,
-    });
+    const m = resolved._alignY;
+    const color = m.kind === "room-center" ? _COLOR_ROOM
+                : m.kind === "center"      ? _COLOR_CENTER
+                :                            _COLOR_EDGE;
+    const label = m.kind === "room-center" ? "room"
+                : m.kind === "center"      ? "centers"
+                :                            "edges";
+    _activeGuides.push({ kind: "align", color, label, guide: m.guide });
+  }
+
+  // Room-center ring marker: drawn when any active align match has kind:"room-center"
+  // Determine the ring's world position from whichever room-center match is present
+  let ringCenter = null;
+  if (resolved._alignX !== null && resolved._alignX.kind === "room-center") {
+    ringCenter = resolved._alignX.center;
+  } else if (resolved._alignY !== null && resolved._alignY.kind === "room-center") {
+    ringCenter = resolved._alignY.center;
+  }
+  if (ringCenter !== null) {
+    _activeGuides.push({ kind: "room-center-ring", center: ringCenter });
+  } else {
+    _removeRoomCenterRing();
   }
 
   // Flush guide — legacy dashed <line> (no chip, as LLD 26)
@@ -1006,6 +1092,39 @@ function _syncAlignGuideEl(idx, guide) {
 }
 
 /**
+ * Ensure the room-center ring marker exists and is positioned at the given world centroid.
+ * @param {{ x:number, y:number }} worldCenter
+ */
+function _syncRoomCenterRing(worldCenter) {
+  if (!_gSymOverlay) return;
+  if (!_roomCenterRing) {
+    _roomCenterRing = document.createElementNS(NS_SVG, "circle");
+    _roomCenterRing.setAttribute("class", "room-center-ring");
+    _roomCenterRing.setAttribute("r", "4");
+    _roomCenterRing.setAttribute("stroke", _COLOR_ROOM);
+    _roomCenterRing.setAttribute("stroke-width", "1.4");
+    _roomCenterRing.setAttribute("fill", "none");
+    _roomCenterRing.setAttribute("aria-hidden", "true");
+    _roomCenterRing.setAttribute("pointer-events", "none");
+  }
+  const sc = worldToScreen(worldCenter.x, worldCenter.y);
+  _roomCenterRing.setAttribute("cx", String(sc.x));
+  _roomCenterRing.setAttribute("cy", String(sc.y));
+  if (!_roomCenterRing.parentNode) {
+    _gSymOverlay.appendChild(_roomCenterRing);
+  }
+}
+
+/**
+ * Remove the room-center ring marker from the DOM.
+ */
+function _removeRoomCenterRing() {
+  if (_roomCenterRing && _roomCenterRing.parentNode) {
+    _roomCenterRing.parentNode.removeChild(_roomCenterRing);
+  }
+}
+
+/**
  * Clear all guide elements from the DOM.
  */
 function _clearGuides() {
@@ -1017,6 +1136,7 @@ function _clearGuides() {
     _alignGuideEls[i] = null;
   }
   _alignGuideEls.length = 0;
+  _removeRoomCenterRing();
   _activeGuides = [];
 }
 
@@ -1042,6 +1162,14 @@ export function repositionGuides() {
   for (let i = 0; i < alignGuides.length; i++) {
     _syncAlignGuideEl(i, alignGuides[i]);
   }
+
+  // Room-center ring marker
+  const ringEntry = _activeGuides.find(g => g.kind === "room-center-ring");
+  if (ringEntry) {
+    _syncRoomCenterRing(ringEntry.center);
+  } else {
+    _removeRoomCenterRing();
+  }
 }
 
 /**
@@ -1053,26 +1181,26 @@ export { repositionGuides as repositionFlushGuide };
 /**
  * Thin test wrapper around _resolvePlacement.
  *
- * Allows unit tests to call the resolver directly with injected candidate AABBs,
- * bypassing the module-private `_candidateAABBs` state — identical to how LLD-26
- * exposed `nearestWallFlush` as a pure export so it can be tested in isolation.
- *
- * The caller provides `candidateAABBs` explicitly (not via module state) so tests
- * are fully self-contained.
+ * Allows unit tests to call the resolver directly with injected candidate AABBs
+ * and optional room centers, bypassing the module-private state.
  *
  * @param {number} sx  screen x
  * @param {number} sy  screen y
  * @param {boolean} altHeld
  * @param {{ type:string, x:number, y:number, w:number, h:number, rot:number }} boxLike
  * @param {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }[]} candidateAABBs
+ * @param {{ cx:number, cy:number }[]} [roomCenters]  optional room centers (defaults to empty)
  * @returns {{ x:number, y:number, snapType:"flush"|"align"|"grid"|"free", _flushActive:boolean, _alignX:import("./symbols.js").AlignAxisMatch|null, _alignY:import("./symbols.js").AlignAxisMatch|null }}
  */
-export function resolvePlacementForTest(sx, sy, altHeld, boxLike, candidateAABBs) {
-  const prev = _candidateAABBs;
+export function resolvePlacementForTest(sx, sy, altHeld, boxLike, candidateAABBs, roomCenters) {
+  const prevAABBs = _candidateAABBs;
+  const prevRooms = _roomCenters;
   _candidateAABBs = candidateAABBs;
+  _roomCenters = roomCenters !== undefined ? roomCenters : [];
   try {
     return _resolvePlacement(sx, sy, altHeld, boxLike);
   } finally {
-    _candidateAABBs = prev;
+    _candidateAABBs = prevAABBs;
+    _roomCenters = prevRooms;
   }
 }
