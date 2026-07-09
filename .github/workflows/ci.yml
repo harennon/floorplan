@@ -71,6 +71,19 @@ jobs:
       - name: Run unit tests
         run: node .github/run-tests.mjs
 
+      # ── Step 3b: MCP server tests (pure Node, no Chromium) ───────────────────
+      # The mcp/ suite (node --test) is the import-boundary drift guard from LLD 32
+      # M4: it fails CI the moment a src/ edit leaks a top-level DOM reference into a
+      # module mcp/src/server.js imports. Runs in the validate job so it reports under
+      # the same load-bearing check-run name (LLD 13) — no branch-protection bookkeeping.
+      # npm ci installs the committed lockfile (mcp/package-lock.json); node_modules is
+      # gitignored. Only dep is @modelcontextprotocol/sdk — negligible cost, no Chromium.
+      - name: MCP server tests
+        working-directory: mcp
+        run: |
+          npm ci
+          node --test
+
       # ── Step 4: Dead-link check ──────────────────────────────────────────────
       # lychee is a fast single-binary Rust link checker (no npm tree).
       # External link failures (e.g. Google Fonts) must not flap the required check:
