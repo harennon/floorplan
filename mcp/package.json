@@ -1,0 +1,17 @@
+{
+  "name": "floorplan-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local, dev-only stdio MCP server exposing floorplan's geometry core as agent tools (LLD 32).",
+  "bin": {
+    "floorplan-mcp": "src/server.js"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

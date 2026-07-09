@@ -15,7 +15,7 @@
   "frontendPaths": ["src/"],
   "commands": {
     "install": "npm install --no-save --prefix {dir} playwright@1.49.1 && npx --prefix {dir} playwright install chromium",
-    "test": "node {dir}/.github/run-tests.mjs"
+    "test": "node {dir}/.github/run-tests.mjs && (cd {dir}/mcp && node --test)"
   },
   "proposal": {
     "mode": "improve",
