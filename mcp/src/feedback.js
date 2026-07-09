@@ -95,14 +95,14 @@ function isDiagonal(subjectAabb, other, aabbOf) {
  * @param {Gap} gap        the subject's gap defining this flank
  * @param {"+x"|"-x"|"+y"|"-y"} openDir  the flank's openDir (subject→neighbour side)
  */
-function classifyFlank(gap, openDir, thresholdM, world, getSymbolById) {
+function classifyFlank(gap, openDir, thresholdM, world, getSymbolById, clearancesFor) {
   if (gap.kind === "wall") return { fixed: true };
   const nb = gap.neighbourId ? getSymbolById(gap.neighbourId) : null;
   if (!nb) return { fixed: true }; // unknown → treat as fixed (conservative)
 
   // The neighbour's clearance BEHIND it is its own gap in the SAME openDir as the
   // subject's gap to it (the subject's escape direction points past the neighbour).
-  const nbClear = computeClearances(nb, world);
+  const nbClear = clearancesFor(nb);
   let roomBehindM = Infinity;
   for (const c of nbClear) {
     const cAxis = c.a.y === c.b.y ? "x" : "y";
@@ -131,7 +131,7 @@ function classifyFlank(gap, openDir, thresholdM, world, getSymbolById) {
  * @param {Gap[]} gaps
  * @param {number} thresholdM effective threshold
  */
-function reconcile(center, subjectW, subjectH, gaps, thresholdM, world, getSymbolById) {
+function reconcile(center, subjectW, subjectH, gaps, thresholdM, world, getSymbolById, clearancesFor) {
   const boxedInAxes = [];
   const comp = { x: 0, y: 0 };
   const spans = {};
@@ -156,8 +156,8 @@ function reconcile(center, subjectW, subjectH, gaps, thresholdM, world, getSymbo
         // is NOT boxed — that neighbour should move instead.
         const negGap = neg.reduce((a, b) => (b.gapM < a.gapM ? b : a));
         const posGap = pos.reduce((a, b) => (b.gapM < a.gapM ? b : a));
-        const negFlank = classifyFlank(negGap, `-${axis}`, thresholdM, world, getSymbolById);
-        const posFlank = classifyFlank(posGap, `+${axis}`, thresholdM, world, getSymbolById);
+        const negFlank = classifyFlank(negGap, `-${axis}`, thresholdM, world, getSymbolById, clearancesFor);
+        const posFlank = classifyFlank(posGap, `+${axis}`, thresholdM, world, getSymbolById, clearancesFor);
         if (negFlank.fixed && posFlank.fixed) {
           boxedInAxes.push(axis);
           spans[axis] = { spanM, neededM, gapNegM, gapPosM };
@@ -270,13 +270,23 @@ export function buildClearanceReport(world, thresholdM, onlyId, aabbOf, getSymbo
     return true;
   });
 
+  // Per-report clearance cache: keyed by symbol id. world is constant within one
+  // buildClearanceReport call, so caching by neighbour id is sound. Do NOT hoist
+  // to module scope — that risks staleness after a mutation between calls.
+  const clearanceCache = new Map();
+  const clearancesFor = (sym) => {
+    let c = clearanceCache.get(sym.id);
+    if (!c) { c = computeClearances(sym, world); clearanceCache.set(sym.id, c); }
+    return c;
+  };
+
   const items = [];
   const violations = [];
   let anyTight = false;
   let anyBad = false;
 
   for (const sym of subjects) {
-    const raw = computeClearances(sym, world);
+    const raw = clearancesFor(sym); // seeds the cache for this subject
     const box = aabbOf(sym);
     const subjectW = box.r - box.l;
     const subjectH = box.b - box.t;
@@ -293,7 +303,7 @@ export function buildClearanceReport(world, thresholdM, onlyId, aabbOf, getSymbo
     else if (itemWorst === "tight") anyTight = true;
 
     const { suggestedMove, boxedInAxes, spans, moveNeighbours } = reconcile(
-      center, subjectW, subjectH, gaps, effThr, world, getSymbolById
+      center, subjectW, subjectH, gaps, effThr, world, getSymbolById, clearancesFor
     );
 
     const label = CATALOG[sym.type]?.label || sym.type;
