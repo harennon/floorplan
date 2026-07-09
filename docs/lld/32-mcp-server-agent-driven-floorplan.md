@@ -375,6 +375,28 @@ Per axis (`x`, then `y`):
    sub-threshold** (or neither is) — closing the oscillation-between-single-violation-endpoints
    livelock, where the two gaps are never sub-threshold in the *same* report so a violated-only
    check would loop forever.
+
+   **M6 — a flank only bounds the span if it is FIXED (wall or wall-pinned piece).** The
+   feasibility test above is correct **only when both flanks are effectively immovable** — a
+   wall, or a neighbouring symbol that is *itself* pinned (has `< thresholdM` of clear space
+   behind it, away from the subject). A **movable** neighbour with open room behind it is **not**
+   a real span boundary: the subject isn't boxed, the *neighbour* just needs to move. Treating a
+   movable flank as fixed produces a **false-positive boxed-in** that tells the agent to "widen
+   the room" when a translation would resolve the layout — verified: a bed flush to the top wall
+   with a desk 1.3 m below it in a 5×7 m room was wrongly declared y-boxed, though the desk had
+   **3.99 m** of empty room beneath it (a manual spread satisfies the brief). So, before adding
+   an axis to `boxedInAxes`, classify each constraining flank:
+   - **Wall flank** (`kind:"wall"`) → fixed; counts toward the span bound.
+   - **Symbol flank** (`kind:"symbol"`) → fixed **iff** the neighbour's own clearance *behind it*
+     on this axis (its gap to the next wall/piece on the far side) is `< thresholdM` (it is
+     wall-pinned and cannot yield). Otherwise it is **movable**.
+   - The axis is genuinely `boxedIn` only if **both** flanks are fixed and `gapNegM + gapPosM <
+     2 × thresholdM`. If a violating flank is **movable**, the axis is **not** boxed; instead the
+     `violations[]` entry names that neighbour as the piece to move (see M6 instruction below),
+     and the subject gets no displacement component on this axis (the neighbour moves, not the
+     subject). The genuinely-infeasible wall-bounded case (e.g. the adversarial sofa flush-left
+     in a 4 m room, whose right-side desk sits **0.04 m** from the right wall → wall-pinned →
+     fixed) still reports `boxedInAxes` + structural instruction, unchanged.
 2. **Otherwise (feasible axis, or subject flanked on one side only): push.** Collect the
    violating gaps' required outward pushes as signed magnitudes (`deficitCm` in the `openDir`
    direction). All violating pushes on a feasible axis necessarily share one sign (opposing
@@ -384,13 +406,22 @@ Per axis (`x`, then `y`):
 3. `suggestedMove = { toX: center.x + dx, toY: center.y + dy }` from the per-axis components,
    **unless any axis was marked infeasible in step 1**, in which case `suggestedMove = null`.
 
-When an axis is infeasible, the `violations[]` entry steers the agent to a *structural* fix,
-quantified from the span so it is actionable: "Sofa is pinned on the x-axis: span between the
-left wall and Desk is 78 cm, but Sofa (60 cm) needs 60 + 2×60 = 180 cm to seat with 60 cm
-each side — widen the room or use a smaller Sofa/Desk." (Span = `gapNegM + subjectExtentM +
-gapPosM`; needed = `subjectExtentM + 2 × thresholdM`.) This is the anti-livelock signal: the
-agent is told the objective is *infeasible by translation* from a single report, so it stops
-nudging and changes the layout instead of oscillating.
+When an axis is infeasible **because both flanks are fixed** (walls or wall-pinned pieces), the
+`violations[]` entry steers the agent to a *structural* fix, quantified from the span so it is
+actionable: "Sofa is pinned on the x-axis: span between the left wall and Desk is 78 cm, but
+Sofa (60 cm) needs 60 + 2×60 = 180 cm to seat with 60 cm each side — widen the room or use a
+smaller Sofa/Desk." (Span = `gapNegM + subjectExtentM + gapPosM`; needed = `subjectExtentM +
+2 × thresholdM`.) This is the anti-livelock signal: the agent is told the objective is
+*infeasible by translation* from a single report, so it stops nudging and changes the layout
+instead of oscillating.
+
+**M6 instruction — movable flank.** When the constraining flank is instead a **movable**
+neighbour (open space behind it), the axis is not boxed and the instruction names the neighbour
+to reposition rather than telling the agent to widen the room: "Bed is tight to the Desk with no
+room to move (the top wall is 30 cm away); move the Desk down ~N cm to open space, then re-check."
+The convergence harness makes progress by then targeting that neighbour (which is itself a
+subject in the report and, having room behind it, gets a normal `suggestedMove`), so the loop
+still advances deterministically without the subject oscillating.
 
 Because symbol-to-symbol gaps are symmetric they appear under **both** items (Sofa's view of
 Desk and Desk's view of Sofa) with opposite `openDir`; the agent moves **one** endpoint
@@ -835,6 +866,28 @@ happy-path brief above, it must **never** reach `satisfied:true`.
 - This test is the executable proof that the feedback shape actually *closes the loop* — its
   failure means the tool/feedback design, not the code, is wrong (which is the whole reason
   the prototype exists).
+
+**(c) Movable-neighbour flank — MUST NOT false-positive as boxed-in (M6).** A subject flanked on
+an axis by a **movable** neighbour that has ample open room behind it (e.g. a bed flush to the
+top wall with a desk just below it in a tall, mostly-empty room) must **not** be reported as
+`boxedInAxes` on that axis, and must **not** be told to "widen the room." Assert the first report
+does **not** set `boxedInAxes` for that axis, and that the violation names the neighbour as the
+piece to move (not a room-rebuild instruction). This is the regression for the verified
+false-positive; it is the counterpart to (b), which keeps the genuinely wall-bounded case
+infeasible.
+
+**Known limitation — joint multi-body convergence is deferred (design iteration).** M6 removes
+the *misleading* signal (false boxed-in + "widen the room") and replaces it with an actionable
+"move neighbour X" instruction, but the scripted single-piece harness does **not** guarantee
+full convergence from every movable-neighbour deadlock. Some layouts are resolvable only by
+moving *two* pieces in a coordinated way (each piece is individually satisfied or locally
+infeasible, yet a joint move satisfies both) — e.g. a bed pinned to a wall whose neighbour is
+close enough that neither can yield alone. A greedy per-piece nudge cannot express that; it needs
+a joint/relaxation solve over the movable set. That solver is **out of scope for this prototype**
+(whose job is to *surface* this class of design learning, exactly as here) and is recorded as the
+first reconciliation upgrade to make when multi-piece packing is scoped. A capable LLM agent
+reading the "move neighbour X" instruction can still make progress by repositioning pieces with
+more latitude than the deterministic harness applies.
 
 ### Regression — handoff contract with the app
 - **No leakage:** a plan built via the tools and dumped with `save_plan`/`get_plan` has
