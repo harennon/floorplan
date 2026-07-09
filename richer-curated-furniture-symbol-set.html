@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Richer Furniture Palette — floorplan mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:         #14140f;
+    --bg-deep:    #100f0b;
+    --ink:        #ece7d6;
+    --muted:      #8f8a78;
+    --gold:       #c9a84c;
+    --gold-soft:  rgba(201, 168, 76, 0.55);
+    --panel:      rgba(20, 20, 15, 0.72);
+    --panel-solid:#191913;
+    --hairline:   rgba(201, 168, 76, 0.18);
+    --font-ui:      "DM Sans", system-ui, sans-serif;
+    --font-mono:    "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-ui);
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 800px at 70% -10%, #1b1b12 0%, transparent 60%),
+      linear-gradient(160deg, var(--bg) 0%, var(--bg-deep) 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
+    /* faint graph-paper grid */
+    background-image:
+      linear-gradient(rgba(201,168,76,0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(201,168,76,0.045) 1px, transparent 1px),
+      radial-gradient(1200px 800px at 70% -10%, #1b1b12 0%, transparent 60%),
+      linear-gradient(160deg, var(--bg) 0%, var(--bg-deep) 100%);
+    background-size: 28px 28px, 28px 28px, 100% 100%, 100% 100%;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 2.5rem 1.5rem 6rem; }
+
+  h1 { font-family: var(--font-display); font-weight: 400; color: var(--gold); font-size: 1.7rem; margin: 0 0 0.2rem; }
+  .sub { font-family: var(--font-mono); color: var(--muted); font-size: 0.8rem; margin: 0 0 2rem; letter-spacing: 0.02em; }
+
+  .section-title {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.66rem;
+    color: var(--gold);
+    border-bottom: 1px solid var(--hairline);
+    padding-bottom: 0.4rem;
+    margin: 3rem 0 0.4rem;
+  }
+  .section-note { font-family: var(--font-mono); color: var(--muted); font-size: 0.72rem; margin: 0 0 1.3rem; line-height: 1.5; max-width: 60ch; }
+
+  /* Simulated canvas frame for context */
+  .canvas-frame {
+    position: relative;
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    background:
+      linear-gradient(rgba(201,168,76,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(201,168,76,0.05) 1px, transparent 1px),
+      #12120d;
+    background-size: 24px 24px, 24px 24px;
+    height: 440px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+  }
+  .canvas-hint {
+    position: absolute; top: 12px; left: 14px;
+    font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted);
+    opacity: 0.7; letter-spacing: 0.05em;
+  }
+
+  /* ── Shared dock shell ─────────────────────────────────────────── */
+  .dock-shell {
+    position: absolute;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    z-index: 8;
+    max-width: calc(100% - 2rem);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+  }
+
+  /* Dock item (shared) */
+  .dock-item {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    letter-spacing: 0.03em;
+    width: 3rem; height: 3rem;
+    border-radius: 8px;
+    cursor: grab;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 0.15rem; padding: 0.2rem 0;
+    flex-shrink: 0;
+    transition: color 0.12s, border-color 0.12s, background 0.12s, transform 0.1s;
+  }
+  .dock-item svg { pointer-events: none; }
+  .dock-item span { white-space: nowrap; }
+  .dock-item:hover { color: var(--gold); border-color: var(--gold-soft); background: rgba(201,168,76,0.07); }
+  .dock-item:active, .dock-item.is-active {
+    color: var(--gold); border-color: var(--gold-soft);
+    background: rgba(201,168,76,0.14); cursor: grabbing; transform: scale(0.96);
+  }
+
+  /* ── OPTION A: categorized tabs + row ──────────────────────────── */
+  .dockA { padding: 0; width: 640px; }
+  .dockA-tabs {
+    display: flex; align-items: stretch;
+    border-bottom: 1px solid var(--hairline);
+    padding: 0.3rem 0.4rem 0;
+    gap: 0.15rem;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .dockA-tabs::-webkit-scrollbar { display: none; }
+  .dock-tab {
+    background: transparent; border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.62rem; letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.4rem 0.7rem 0.5rem;
+    cursor: pointer; white-space: nowrap;
+    display: flex; align-items: center; gap: 0.3rem;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .dock-tab .tab-glyph { width: 15px; height: 15px; opacity: 0.85; }
+  .dock-tab:hover { color: var(--ink); }
+  .dock-tab.is-active { color: var(--gold); border-bottom-color: var(--gold); }
+  .dockA-row {
+    display: flex; align-items: center; gap: 0.1rem;
+    padding: 0.4rem 0.55rem;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .dockA-row::-webkit-scrollbar { display: none; }
+  .dockA-panel { display: none; }
+  .dockA-panel.is-active { display: flex; }
+
+  /* ── OPTION B: single scroll strip with sticky group labels ────── */
+  .dockB {
+    display: flex; align-items: center; gap: 0;
+    padding: 0.35rem 0.5rem;
+    overflow-x: auto; scrollbar-width: none;
+    width: 720px;
+  }
+  .dockB::-webkit-scrollbar { display: none; }
+  .dockB .dock-group-label {
+    font-family: var(--font-mono); font-size: 0.52rem;
+    color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 0 0.3rem; white-space: nowrap; flex-shrink: 0;
+    writing-mode: vertical-lr; transform: rotate(180deg);
+    max-height: 2.6rem; align-self: center;
+  }
+  .dockB .dock-sep { width: 1px; height: 2.4rem; background: var(--hairline); flex-shrink: 0; margin: 0 0.4rem; }
+
+  /* ── OPTION C: compact bar + expandable grid drawer ────────────── */
+  .dockC { padding: 0.35rem 0.5rem; width: auto; }
+  .dockC-bar { display: flex; align-items: center; gap: 0.15rem; }
+  .dockC-more {
+    background: transparent; border: 1px dashed var(--gold-soft);
+    color: var(--gold);
+    font-family: var(--font-mono); font-size: 0.55rem;
+    width: 3rem; height: 3rem; border-radius: 8px;
+    cursor: pointer; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 0.15rem;
+    flex-shrink: 0; transition: background 0.12s;
+  }
+  .dockC-more:hover { background: rgba(201,168,76,0.08); }
+  .dockC-sep { width: 1px; height: 2.4rem; background: var(--hairline); margin: 0 0.35rem; flex-shrink: 0; }
+
+  /* the drawer that opens above the bar */
+  .dockC-drawer {
+    position: absolute;
+    bottom: calc(100% + 0.5rem);
+    left: 50%; transform: translateX(-50%) translateY(8px);
+    width: 460px; max-width: calc(100vw - 2rem);
+    background: var(--panel-solid);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 0.6rem;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.16s, transform 0.16s;
+  }
+  .dockC-drawer.is-open { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+  .dockC-cat { margin-bottom: 0.5rem; }
+  .dockC-cat:last-child { margin-bottom: 0; }
+  .dockC-cat-label {
+    font-family: var(--font-mono); font-size: 0.55rem; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--gold); margin: 0.2rem 0.3rem 0.35rem;
+  }
+  .dockC-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.2rem; }
+
+  /* toggle buttons for the mockup page itself */
+  .opt-toggle { display: flex; gap: 0.5rem; margin: 1rem 0 0; flex-wrap: wrap; }
+  .opt-toggle button {
+    background: var(--panel); border: 1px solid var(--hairline);
+    color: var(--ink); font-family: var(--font-mono); font-size: 0.7rem;
+    padding: 0.35rem 0.8rem; border-radius: 100px; cursor: pointer;
+  }
+  .opt-toggle button.on { color: var(--gold); border-color: var(--gold); background: rgba(201,168,76,0.1); }
+
+  /* glyph gallery */
+  .glyph-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.6rem; margin-top: 1rem; }
+  .glyph-card {
+    border: 1px solid var(--hairline); border-radius: 10px;
+    background: #12120d; padding: 0.7rem; text-align: center;
+  }
+  .glyph-card svg { display: block; margin: 0 auto 0.4rem; }
+  .glyph-card .g-label { font-family: var(--font-mono); font-size: 0.62rem; color: var(--ink); }
+  .glyph-card .g-dim { font-family: var(--font-mono); font-size: 0.56rem; color: var(--muted); margin-top: 0.15rem; }
+  .glyph-card .g-cat { font-family: var(--font-mono); font-size: 0.5rem; color: var(--gold); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 0.3rem; }
+
+  @media (max-width: 700px) {
+    .dockA, .dockB { width: calc(100vw - 2rem); }
+    .dockC-drawer { width: calc(100vw - 2rem); }
+    .dockC-grid { grid-template-columns: repeat(5, 1fr); }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Richer curated furniture &amp; symbol set</h1>
+    <p class="sub">floorplan · palette layout &amp; glyph exploration · issue #43</p>
+
+    <p class="section-note" style="max-width:74ch;">
+      Today's dock is a flat horizontal strip with 8 items in 2 groups. Growing to
+      ~20 curated household symbols across 5 categories needs a palette that stays
+      uncluttered on both desktop and a phone. Below: three dock layouts to choose
+      between, then the proposed glyph set with default sizes and clamp bounds.
+    </p>
+
+    <!-- ─────────── GLYPH GALLERY ─────────── -->
+    <div class="section-title">Proposed symbol set — glyphs, defaults &amp; clamp bounds</div>
+    <p class="section-note">
+      Existing 8 types are marked <span style="color:var(--gold)">●</span>. New types
+      render as recognizable, to-scale glyphs in <code>symbolRender.js</code> and gain a
+      label, category, default w×h, and min/max following the <code>clampDim</code> model.
+      Glyphs are shown to scale relative to each other (metres → px).
+    </p>
+    <div class="glyph-gallery" id="gallery"></div>
+
+    <!-- ─────────── OPTION A ─────────── -->
+    <div class="section-title">Option A — Category tabs (recommended)</div>
+    <p class="section-note">
+      A tab strip along the top of the dock; one category's items shown at a time in a
+      single row. Scales to any number of categories, always low visual density, and the
+      active category label is always visible. Tap a tab, then drag an item onto the
+      canvas. On mobile the tab strip and the item row each scroll horizontally if needed.
+    </p>
+    <div class="canvas-frame">
+      <span class="canvas-hint">select mode · drag an item onto the canvas</span>
+      <div class="dock-shell dockA" id="dockA">
+        <div class="dockA-tabs" id="dockA-tabs"></div>
+        <div id="dockA-panels"></div>
+      </div>
+    </div>
+
+    <!-- ─────────── OPTION B ─────────── -->
+    <div class="section-title">Option B — One long strip, grouped</div>
+    <p class="section-note">
+      The current pattern extended: every symbol in one horizontally-scrolling row with
+      vertical group dividers and rotated category labels. Zero new interaction to learn,
+      but ~20 items means a lot of scrolling on a phone and no way to jump to a category.
+    </p>
+    <div class="canvas-frame">
+      <span class="canvas-hint">select mode · scroll the strip, drag an item</span>
+      <div class="dock-shell dockB" id="dockB"></div>
+    </div>
+
+    <!-- ─────────── OPTION C ─────────── -->
+    <div class="section-title">Option C — Compact bar + &ldquo;More&rdquo; grid drawer</div>
+    <p class="section-note">
+      A short bar shows the most-used items (openings + a few staples) plus a
+      <em>More</em> button that opens a categorized grid drawer above the dock. Keeps the
+      resting footprint tiny — great on mobile — at the cost of one tap to reach less-common
+      items. Click <em>More</em> below to open the drawer.
+    </p>
+    <div class="canvas-frame">
+      <span class="canvas-hint">select mode · tap More for the full catalog</span>
+      <div class="dock-shell dockC" id="dockC">
+        <div class="dockC-drawer" id="dockC-drawer"></div>
+        <div class="dockC-bar" id="dockC-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ── Proposed catalog (existing 8 + curated new) ───────────────────────
+  // existing:true marks the current 8 types. cat = category key.
+  const CATALOG = [
+    // Openings
+    { type:"door",    label:"Door",    cat:"openings",  w:0.90, h:0.12, min:0.60, max:2.00, existing:true, opening:true },
+    { type:"window",  label:"Window",  cat:"openings",  w:1.00, h:0.12, min:0.30, max:3.00, existing:true, opening:true },
+    // Living
+    { type:"sofa",    label:"Sofa",    cat:"living",    w:2.00, h:0.90, min:0.30, max:3.50, existing:true },
+    { type:"table",   label:"Table",   cat:"living",    w:1.20, h:0.80, min:0.30, max:3.00, existing:true },
+    { type:"chair",   label:"Chair",   cat:"living",    w:0.50, h:0.50, min:0.30, max:1.00, existing:true },
+    { type:"tvstand", label:"TV unit", cat:"living",    w:1.40, h:0.40, min:0.40, max:3.00 },
+    { type:"bookshelf",label:"Shelf",  cat:"living",    w:0.90, h:0.30, min:0.30, max:3.00 },
+    { type:"rug",     label:"Rug",     cat:"living",    w:2.00, h:1.40, min:0.40, max:5.00 },
+    // Dining / kitchen
+    { type:"desk",    label:"Desk",    cat:"kitchen",   w:1.40, h:0.70, min:0.30, max:2.50, existing:true },
+    { type:"diningtable",label:"Dining",cat:"kitchen",  w:1.60, h:0.90, min:0.60, max:3.50 },
+    { type:"fridge",  label:"Fridge",  cat:"kitchen",   w:0.70, h:0.70, min:0.30, max:1.20, existing:true },
+    { type:"stove",   label:"Stove",   cat:"kitchen",   w:0.60, h:0.60, min:0.40, max:1.20 },
+    { type:"sink",    label:"Sink",    cat:"kitchen",   w:0.60, h:0.45, min:0.30, max:1.20 },
+    { type:"washer",  label:"Washer",  cat:"kitchen",   w:0.60, h:0.60, min:0.40, max:0.90 },
+    // Bedroom
+    { type:"bed",     label:"Bed",     cat:"bedroom",   w:1.50, h:2.00, min:0.30, max:2.50, existing:true },
+    { type:"wardrobe",label:"Wardrobe",cat:"bedroom",   w:1.20, h:0.60, min:0.40, max:3.00 },
+    { type:"nightstand",label:"Nightstd",cat:"bedroom", w:0.45, h:0.40, min:0.25, max:0.90 },
+    // Bathroom
+    { type:"toilet",  label:"Toilet",  cat:"bathroom",  w:0.40, h:0.70, min:0.35, max:0.80 },
+    { type:"bathtub", label:"Bath",    cat:"bathroom",  w:1.70, h:0.75, min:0.60, max:2.00 },
+    { type:"basin",   label:"Basin",   cat:"bathroom",  w:0.55, h:0.45, min:0.30, max:1.00 },
+  ];
+
+  const CATS = [
+    { key:"openings", label:"Openings" },
+    { key:"living",   label:"Living" },
+    { key:"kitchen",  label:"Kitchen" },
+    { key:"bedroom",  label:"Bedroom" },
+    { key:"bathroom", label:"Bath" },
+  ];
+
+  // Items surfaced on Option C's compact bar (most-used staples).
+  const QUICK = ["door","window","bed","sofa","table"];
+  </script>
+  <script>
+  // ── Glyph library ────────────────────────────────────────────────────
+  // Each returns inner SVG markup drawn in an 18×18 top-down viewBox,
+  // stroked in currentColor to match symbolRender.js's gold interior lines.
+  // These are the *dock icons*; the on-canvas glyph mirrors the same motif.
+  const S = 'stroke="currentColor" fill="none"';
+  const GLYPHS = {
+    door:  `<rect x="3" y="3" width="12" height="13" rx="1" ${S} stroke-width="1.3"/><path d="M3 7 A10 10 0 0 0 13 7" ${S} stroke-width="1" stroke-dasharray="2 2" opacity="0.6"/><line x1="12" y1="9.5" x2="14" y2="9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>`,
+    window:`<rect x="2" y="7" width="14" height="4" rx="0.8" ${S} stroke-width="1.3"/><line x1="9" y1="7" x2="9" y2="11" stroke="currentColor" stroke-width="1" opacity="0.6"/>`,
+    bed:   `<rect x="3" y="3" width="12" height="12" rx="1" ${S} stroke-width="1.3"/><rect x="4" y="4" width="10" height="3.5" rx="0.8" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity="0.15"/><line x1="9" y1="7.5" x2="9" y2="15" stroke="currentColor" stroke-width="0.8" opacity="0.5"/>`,
+    sofa:  `<rect x="3" y="5" width="12" height="9" rx="1" ${S} stroke-width="1.3"/><rect x="3" y="5" width="12" height="3" rx="1" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity="0.15"/><rect x="3" y="8" width="2.5" height="6" rx="0.6" ${S} stroke-width="0.8"/><rect x="12.5" y="8" width="2.5" height="6" rx="0.6" ${S} stroke-width="0.8"/>`,
+    table: `<rect x="3" y="5" width="12" height="8" rx="1" ${S} stroke-width="1.3"/><line x1="3" y1="5" x2="15" y2="13" stroke="currentColor" stroke-width="0.8" opacity="0.4"/><line x1="15" y1="5" x2="3" y2="13" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>`,
+    chair: `<circle cx="9" cy="9" r="5.5" ${S} stroke-width="1.3"/><circle cx="9" cy="9" r="3" ${S} stroke-width="0.8" opacity="0.5"/>`,
+    desk:  `<rect x="3" y="4" width="12" height="10" rx="1" ${S} stroke-width="1.3"/><polyline points="3,4 3,14 15,14" ${S} stroke-width="1.3" stroke-linejoin="round"/>`,
+    fridge:`<rect x="4" y="2" width="10" height="14" rx="1" ${S} stroke-width="1.3"/><line x1="4" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1" opacity="0.7"/><line x1="12" y1="4.5" x2="12" y2="6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>`,
+  };
+  </script>
+  <script>
+  // New curated glyphs
+  Object.assign(GLYPHS, {
+    // Living
+    tvstand:  `<rect x="2" y="8" width="14" height="6" rx="1" ${S} stroke-width="1.3"/><rect x="4" y="2.5" width="10" height="5" rx="0.6" ${S} stroke-width="1.1"/><line x1="6" y1="14" x2="6" y2="15.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><line x1="12" y1="14" x2="12" y2="15.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>`,
+    bookshelf:`<rect x="2" y="4" width="14" height="10" rx="1" ${S} stroke-width="1.3"/><line x1="2" y1="7.3" x2="16" y2="7.3" stroke="currentColor" stroke-width="0.9" opacity="0.7"/><line x1="2" y1="10.6" x2="16" y2="10.6" stroke="currentColor" stroke-width="0.9" opacity="0.7"/>`,
+    rug:      `<rect x="2.5" y="3.5" width="13" height="11" rx="1" ${S} stroke-width="1.3" stroke-dasharray="1 0"/><rect x="4.5" y="5.5" width="9" height="7" rx="0.6" ${S} stroke-width="0.8" stroke-dasharray="2 1.5" opacity="0.6"/>`,
+    // Kitchen
+    diningtable:`<rect x="3" y="4.5" width="12" height="9" rx="1.4" ${S} stroke-width="1.3"/><circle cx="5.2" cy="2.6" r="1.1" ${S} stroke-width="0.9" opacity="0.7"/><circle cx="12.8" cy="2.6" r="1.1" ${S} stroke-width="0.9" opacity="0.7"/><circle cx="5.2" cy="15.4" r="1.1" ${S} stroke-width="0.9" opacity="0.7"/><circle cx="12.8" cy="15.4" r="1.1" ${S} stroke-width="0.9" opacity="0.7"/>`,
+    stove:    `<rect x="3" y="3" width="12" height="12" rx="1" ${S} stroke-width="1.3"/><circle cx="7" cy="7" r="1.7" ${S} stroke-width="0.9"/><circle cx="11" cy="7" r="1.7" ${S} stroke-width="0.9"/><circle cx="7" cy="11" r="1.7" ${S} stroke-width="0.9"/><circle cx="11" cy="11" r="1.7" ${S} stroke-width="0.9"/>`,
+    sink:     `<rect x="3" y="4" width="12" height="10" rx="1.4" ${S} stroke-width="1.3"/><ellipse cx="9" cy="9.5" rx="3.4" ry="2.8" ${S} stroke-width="0.9"/><circle cx="9" cy="5.6" r="0.9" ${S} stroke-width="0.9"/>`,
+    washer:   `<rect x="3" y="2.5" width="12" height="13" rx="1.2" ${S} stroke-width="1.3"/><circle cx="9" cy="10" r="3.7" ${S} stroke-width="1"/><circle cx="9" cy="10" r="1.6" ${S} stroke-width="0.8" opacity="0.6"/><circle cx="5" cy="4.5" r="0.7" fill="currentColor" stroke="none"/>`,
+    // Bedroom
+    wardrobe: `<rect x="2.5" y="4" width="13" height="10" rx="1" ${S} stroke-width="1.3"/><line x1="9" y1="4" x2="9" y2="14" stroke="currentColor" stroke-width="1" opacity="0.7"/><circle cx="7.8" cy="9" r="0.6" fill="currentColor" stroke="none"/><circle cx="10.2" cy="9" r="0.6" fill="currentColor" stroke="none"/>`,
+    nightstand:`<rect x="4" y="4" width="10" height="10" rx="1" ${S} stroke-width="1.3"/><rect x="5.6" y="8.4" width="6.8" height="4.2" rx="0.6" ${S} stroke-width="0.8" opacity="0.7"/><circle cx="9" cy="10.5" r="0.55" fill="currentColor" stroke="none"/>`,
+    // Bathroom
+    toilet:   `<rect x="6" y="2.5" width="6" height="3" rx="0.8" ${S} stroke-width="1.1"/><ellipse cx="9" cy="10" rx="4" ry="4.6" ${S} stroke-width="1.3"/><ellipse cx="9" cy="10" rx="2.1" ry="2.7" ${S} stroke-width="0.8" opacity="0.6"/>`,
+    bathtub:  `<rect x="2" y="4" width="14" height="10" rx="3" ${S} stroke-width="1.3"/><rect x="4" y="6" width="10" height="6" rx="2.2" ${S} stroke-width="0.9" opacity="0.7"/><circle cx="13.2" cy="5.4" r="0.7" fill="currentColor" stroke="none"/>`,
+    basin:    `<ellipse cx="9" cy="9.5" rx="6" ry="4.6" ${S} stroke-width="1.3"/><ellipse cx="9" cy="9.8" rx="3.4" ry="2.5" ${S} stroke-width="0.8" opacity="0.6"/><circle cx="9" cy="4.6" r="0.9" ${S} stroke-width="0.9"/>`,
+  });
+
+  function iconSVG(type, size){
+    size = size || 18;
+    return `<svg width="${size}" height="${size}" viewBox="0 0 18 18" fill="none" aria-hidden="true">${GLYPHS[type]||''}</svg>`;
+  }
+  </script>
+  <script>
+  const byType = t => CATALOG.find(c => c.type === t);
+  const inCat  = k => CATALOG.filter(c => c.cat === k);
+
+  // ── Glyph gallery ────────────────────────────────────────────────────
+  (function buildGallery(){
+    const g = document.getElementById('gallery');
+    // scale metres → px so glyphs read to-scale relative to each other
+    const PPM = 26; const MAXPX = 92;
+    g.innerHTML = CATALOG.map(c => {
+      let w = c.w * PPM, h = c.h * PPM;
+      const s = Math.min(1, MAXPX / Math.max(w, h));
+      w *= s; h *= s;
+      // to-scale box with the glyph motif overlaid via a scaled 18-box icon
+      const dot = c.existing ? '<span style="color:var(--gold)">● </span>' : '';
+      return `<div class="glyph-card">
+        <svg width="${MAXPX}" height="${MAXPX}" viewBox="0 0 ${MAXPX} ${MAXPX}">
+          <g transform="translate(${(MAXPX-w)/2},${(MAXPX-h)/2})">
+            <rect x="0" y="0" width="${w}" height="${h}" rx="2"
+              fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1.3"/>
+            <g transform="translate(${w/2},${h/2}) scale(${Math.min(w,h)/18}) translate(-9,-9)">
+              ${GLYPHS[c.type]||''}
+            </g>
+          </g>
+        </svg>
+        <div class="g-label">${dot}${c.label}</div>
+        <div class="g-dim">${c.w.toFixed(2)}×${c.h.toFixed(2)}m · [${c.min}–${c.max}]</div>
+        <div class="g-cat">${c.cat}</div>
+      </div>`;
+    }).join('');
+  })();
+
+  function itemBtn(c){
+    return `<button class="dock-item" data-type="${c.type}" aria-label="Add ${c.label}">
+      ${iconSVG(c.type)}<span>${c.label}</span></button>`;
+  }
+  </script>
+  <script>
+  // ── Option A: tabs + per-category row ───────────────────────────────
+  (function buildA(){
+    const tabs = document.getElementById('dockA-tabs');
+    const panels = document.getElementById('dockA-panels');
+    tabs.innerHTML = CATS.map((cat,i) =>
+      `<button class="dock-tab${i===0?' is-active':''}" data-cat="${cat.key}">
+        <span class="tab-glyph">${iconSVG(inCat(cat.key)[0].type,15)}</span>${cat.label}</button>`
+    ).join('');
+    panels.innerHTML = CATS.map((cat,i) =>
+      `<div class="dockA-row dockA-panel${i===0?' is-active':''}" data-panel="${cat.key}">
+        ${inCat(cat.key).map(itemBtn).join('')}</div>`
+    ).join('');
+    tabs.addEventListener('click', e => {
+      const t = e.target.closest('.dock-tab'); if(!t) return;
+      tabs.querySelectorAll('.dock-tab').forEach(x=>x.classList.remove('is-active'));
+      t.classList.add('is-active');
+      const k = t.dataset.cat;
+      panels.querySelectorAll('.dockA-panel').forEach(p=>
+        p.classList.toggle('is-active', p.dataset.panel===k));
+    });
+  })();
+
+  // ── Option B: one strip, grouped ────────────────────────────────────
+  (function buildB(){
+    const b = document.getElementById('dockB');
+    b.innerHTML = CATS.map((cat,i) =>
+      `${i>0?'<div class="dock-sep"></div>':''}
+       <span class="dock-group-label">${cat.label}</span>
+       ${inCat(cat.key).map(itemBtn).join('')}`
+    ).join('');
+  })();
+
+  // ── Option C: compact bar + drawer ──────────────────────────────────
+  (function buildC(){
+    const bar = document.getElementById('dockC-bar');
+    const drawer = document.getElementById('dockC-drawer');
+    bar.innerHTML =
+      QUICK.map(t=>itemBtn(byType(t))).join('') +
+      `<div class="dockC-sep"></div>
+       <button class="dockC-more" id="dockC-more" aria-expanded="false">
+         ${iconSVG('table',16)}<span>More</span></button>`;
+    drawer.innerHTML = CATS.map(cat =>
+      `<div class="dockC-cat">
+        <div class="dockC-cat-label">${cat.label}</div>
+        <div class="dockC-grid">${inCat(cat.key).map(itemBtn).join('')}</div>
+      </div>`).join('');
+    const more = document.getElementById('dockC-more');
+    more.addEventListener('click', () => {
+      const open = drawer.classList.toggle('is-open');
+      more.setAttribute('aria-expanded', open ? 'true':'false');
+      more.classList.toggle('is-active', open);
+    });
+  })();
+
+  // ── Shared: simulate placement feedback (dock items) ────────────────
+  document.querySelectorAll('.dock-shell').forEach(shell => {
+    shell.addEventListener('pointerdown', e => {
+      const it = e.target.closest('.dock-item'); if(!it) return;
+      shell.querySelectorAll('.dock-item').forEach(x=>x.classList.remove('is-active'));
+      it.classList.add('is-active');
+    });
+  });
+  </script>
+</body>
+</html>
