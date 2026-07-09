@@ -1451,6 +1451,123 @@ describe("symbols.js — units reuse: fmtLen/parseLen round-trip for w/h", () =>
   });
 });
 
+// ─── Tests: LLD-45 — new furniture types ─────────────────────────────────────
+
+const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer"];
+
+describe("LLD-45 — catalog integrity: all new types present and valid", () => {
+  it("every new type exists in CATALOG with category:'furniture'", () => {
+    for (const t of LLD45_TYPES) {
+      if (!(t in CATALOG)) throw new Error(`${t} missing from CATALOG`);
+      if (CATALOG[t].category !== "furniture") throw new Error(`${t} category not 'furniture'`);
+    }
+  });
+
+  it("every new type has a non-empty label", () => {
+    for (const t of LLD45_TYPES) {
+      const label = CATALOG[t].label;
+      if (!label || label.trim() === "") throw new Error(`${t} has empty label`);
+    }
+  });
+
+  it("every new type has finite w, h, min, max", () => {
+    for (const t of LLD45_TYPES) {
+      const cat = CATALOG[t];
+      for (const key of ["w", "h", "min", "max"]) {
+        if (!isFinite(cat[key])) throw new Error(`${t}.${key} is not finite: ${cat[key]}`);
+      }
+    }
+  });
+
+  it("min <= w <= max and min <= h <= max for every new type (single-range guard)", () => {
+    for (const t of LLD45_TYPES) {
+      const { w, h, min, max } = CATALOG[t];
+      if (w < min || w > max) throw new Error(`${t}: w=${w} not in [${min},${max}]`);
+      if (h < min || h > max) throw new Error(`${t}: h=${h} not in [${min},${max}]`);
+    }
+  });
+
+  it("no new type has openings:true", () => {
+    for (const t of LLD45_TYPES) {
+      if (CATALOG[t].openings) throw new Error(`${t} unexpectedly has openings:true`);
+    }
+  });
+});
+
+describe("LLD-45 — createSymbol: new types return correct Sym", () => {
+  it("createSymbol returns correct type, catalog defaults, rot:0, and string id", () => {
+    resetSymbolModel();
+    for (const t of LLD45_TYPES) {
+      const s = createSymbol(t, 1, 2);
+      if (s.type !== t) throw new Error(`${t}: type mismatch`);
+      if (Math.abs(s.w - CATALOG[t].w) > 1e-9) throw new Error(`${t}: w mismatch`);
+      if (Math.abs(s.h - CATALOG[t].h) > 1e-9) throw new Error(`${t}: h mismatch`);
+      if (s.rot !== 0) throw new Error(`${t}: rot should be 0`);
+      if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(`${t}: invalid id ${s.id}`);
+    }
+  });
+
+  it("bathtub JSON round-trip preserves all fields", () => {
+    resetSymbolModel();
+    const s = createSymbol("bathtub", 3, 4);
+    addSymbol(s);
+    const snap = JSON.parse(JSON.stringify(symbolModel));
+    const rt = snap.symbols[0];
+    if (rt.type !== "bathtub") throw new Error("type not preserved");
+    if (Math.abs(rt.w - s.w) > 1e-9) throw new Error("w not preserved");
+    if (Math.abs(rt.h - s.h) > 1e-9) throw new Error("h not preserved");
+    if (rt.rot !== s.rot) throw new Error("rot not preserved");
+    if (rt.id !== s.id) throw new Error("id not preserved");
+    resetSymbolModel();
+  });
+});
+
+describe("LLD-45 — clampDim: new types clamp at min and max", () => {
+  it("bathtub (asymmetric): clampDim below min clamps to min", () => {
+    const { min } = CATALOG.bathtub;
+    expect(clampDim("bathtub", min - 0.1)).toBeCloseTo(min, 9);
+  });
+  it("bathtub (asymmetric): clampDim above max clamps to max", () => {
+    const { max } = CATALOG.bathtub;
+    expect(clampDim("bathtub", max + 1)).toBeCloseTo(max, 9);
+  });
+  it("washer (symmetric): clampDim below min clamps to min", () => {
+    const { min } = CATALOG.washer;
+    expect(clampDim("washer", min - 0.1)).toBeCloseTo(min, 9);
+  });
+  it("washer (symmetric): clampDim above max clamps to max", () => {
+    const { max } = CATALOG.washer;
+    expect(clampDim("washer", max + 1)).toBeCloseTo(max, 9);
+  });
+});
+
+describe("LLD-45 — resizeSymbol: clamp on huge/tiny inputs", () => {
+  it("bathtub w huge clamps to max and returns changed=true", () => {
+    const s = createSymbol("bathtub", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG.bathtub.max, 9);
+    expect(changed).toBe(true);
+  });
+  it("bathtub h tiny clamps to min and returns changed=true", () => {
+    const s = createSymbol("bathtub", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG.bathtub.min, 9);
+    expect(changed).toBe(true);
+  });
+  it("washer w huge clamps to max and returns changed=true", () => {
+    const s = createSymbol("washer", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG.washer.max, 9);
+    expect(changed).toBe(true);
+  });
+  it("washer h tiny clamps to min and returns changed=true", () => {
+    const s = createSymbol("washer", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG.washer.min, 9);
+    expect(changed).toBe(true);
+  });
+});
+
 // ─── Import symbolDimEntry (behavioral tests) ─────────────────────────────────
 
 import {
@@ -2544,6 +2661,50 @@ describe("plan.js — serializePlan stability", () => {
     const s1 = serializePlan(p);
     const s2 = serializePlan(buildPlan());
     if (s1 !== s2) throw new Error("serializePlan not stable");
+  });
+});
+
+// ─── Tests: LLD-45 — plan round-trip with new types ──────────────────────────
+
+describe("LLD-45 — plan round-trip: new-type symbols validate and serialize", () => {
+  it("plan with new-type symbols passes validatePlan", () => {
+    resetAll();
+    for (const t of LLD45_TYPES) {
+      addSymbol(createSymbol(t, 1, 1));
+    }
+    const p = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(p)));
+    if (!v) throw new Error("validatePlan rejected plan containing new symbol types");
+    resetAll();
+  });
+
+  it("new-type symbols survive serializePlan → JSON.parse → validatePlan", () => {
+    resetAll();
+    addSymbol(createSymbol("bathtub", 2, 3));
+    addSymbol(createSymbol("toilet", 4, 5));
+    const p = buildPlan();
+    const serialized = serializePlan(p);
+    const reparsed = validatePlan(JSON.parse(serialized));
+    if (!reparsed) throw new Error("validatePlan rejected re-parsed plan");
+    if (reparsed.symbols.symbols.length !== 2) throw new Error("Symbol count mismatch after round-trip");
+    resetAll();
+  });
+
+  it("backwards compat: plan with only old types still validates after adding new CATALOG entries", () => {
+    resetAll();
+    addSymbol(createSymbol("bed", 0, 0));
+    addSymbol(createSymbol("fridge", 1, 1));
+    const p = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(p)));
+    if (!v) throw new Error("validatePlan rejected old-types-only plan");
+    resetAll();
+  });
+
+  it("backwards compat: empty plan (zero symbols) still validates", () => {
+    resetAll();
+    const p = buildPlan();
+    const v = validatePlan(p);
+    if (!v) throw new Error("validatePlan rejected empty plan");
   });
 });
 
@@ -7211,6 +7372,367 @@ describe("interactions — symbol move touch does not apply loupe offset to move
     document.body.removeChild(hint);
     setDrawHooks(null);
     setSelectHooks(null);
+  });
+});
+
+// ─── LLD-43: Starter templates ────────────────────────────────────────────────
+
+import {
+  TEMPLATES, init as initTemplates, open as openTemplates, close as closeTemplates, isOpen as isTemplatesOpen,
+  applyTemplate,
+} from "./js/templates.js";
+
+// ─── LLD-43 helpers ───────────────────────────────────────────────────────────
+
+/** Minimal overlay DOM for templates tests */
+function _makeTemplateDOM() {
+  const overlay  = document.createElement("div");
+  overlay.id = "template-overlay";
+  const panel    = document.createElement("div");
+  panel.className = "template-overlay-panel";
+  const grid     = document.createElement("div");
+  grid.className = "template-grid";
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "template-overlay-close";
+  panel.appendChild(grid);
+  panel.appendChild(closeBtn);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  return { overlay, grid, closeBtn };
+}
+
+function _removeTemplateDOM(dom) {
+  if (dom.overlay.parentNode) dom.overlay.parentNode.removeChild(dom.overlay);
+}
+
+/** Snapshot + restore live model state for template tests */
+function _snapModels() {
+  return {
+    rooms:   JSON.parse(JSON.stringify(model.rooms)),
+    chain:   JSON.parse(JSON.stringify(model.chain)),
+    symbols: JSON.parse(JSON.stringify(symbolModel.symbols)),
+  };
+}
+function _restoreModels(snap) {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  model.rooms.push(...snap.rooms);
+  model.chain.push(...snap.chain);
+  symbolModel.symbols.push(...snap.symbols);
+}
+
+// ─── LLD-43 unit tests ────────────────────────────────────────────────────────
+
+describe("LLD-43 — TEMPLATES metadata integrity", () => {
+  it("has between 3 and 5 templates", () => {
+    if (TEMPLATES.length < 3 || TEMPLATES.length > 5) {
+      throw new Error(`Expected 3–5 templates, got ${TEMPLATES.length}`);
+    }
+  });
+
+  it("all ids are unique", () => {
+    const ids = TEMPLATES.map(t => t.id);
+    const set = new Set(ids);
+    if (set.size !== ids.length) throw new Error("Duplicate template ids found");
+  });
+
+  it("all ids are non-empty strings", () => {
+    for (const t of TEMPLATES) {
+      if (typeof t.id !== "string" || t.id.trim() === "") {
+        throw new Error(`Template with empty id: ${JSON.stringify(t)}`);
+      }
+    }
+  });
+
+  it("all names are non-empty strings", () => {
+    for (const t of TEMPLATES) {
+      if (typeof t.name !== "string" || t.name.trim() === "") {
+        throw new Error(`Template '${t.id}' has empty name`);
+      }
+    }
+  });
+
+  it("all descriptions are non-empty strings", () => {
+    for (const t of TEMPLATES) {
+      if (typeof t.description !== "string" || t.description.trim() === "") {
+        throw new Error(`Template '${t.id}' has empty description`);
+      }
+    }
+  });
+
+  it("all thumbs are non-empty strings", () => {
+    for (const t of TEMPLATES) {
+      if (typeof t.thumb !== "string" || t.thumb.trim() === "") {
+        throw new Error(`Template '${t.id}' has empty thumb`);
+      }
+    }
+  });
+
+  it("all plan units are valid", () => {
+    const VALID = ["ft", "m"];
+    for (const t of TEMPLATES) {
+      if (!VALID.includes(t.plan.unit)) {
+        throw new Error(`Template '${t.id}' has invalid unit: ${t.plan.unit}`);
+      }
+    }
+  });
+});
+
+describe("LLD-43 — every template passes validatePlan", () => {
+  it("each template.plan validates without error", () => {
+    for (const t of TEMPLATES) {
+      const result = validatePlan(t.plan);
+      if (result === null) {
+        throw new Error(`validatePlan returned null for template '${t.id}'`);
+      }
+    }
+  });
+});
+
+describe("LLD-43 — each template applies without error and is non-empty", () => {
+  it("applyPlan does not throw for any template", () => {
+    const snap = _snapModels();
+    try {
+      for (const t of TEMPLATES) {
+        const plan = validatePlan(t.plan);
+        if (!plan) throw new Error(`validatePlan null for '${t.id}'`);
+        applyPlan(plan);
+      }
+    } finally {
+      _restoreModels(snap);
+    }
+  });
+
+  it("plan is non-empty after each template apply (isEmptyPlan → false)", () => {
+    const snap = _snapModels();
+    const empties = [];
+    try {
+      for (const t of TEMPLATES) {
+        const plan = validatePlan(t.plan);
+        if (!plan) { empties.push(t.id + ": validatePlan null"); continue; }
+        applyPlan(plan);
+        if (isEmptyPlan()) empties.push(t.id);
+        _restoreModels(snap);
+      }
+    } finally {
+      _restoreModels(snap);
+    }
+    if (empties.length > 0) {
+      throw new Error(`Templates that loaded to empty plan: ${empties.join(", ")}`);
+    }
+  });
+
+  it("walls model reflects the template after apply", () => {
+    const snap = _snapModels();
+    try {
+      for (const t of TEMPLATES) {
+        const plan = validatePlan(t.plan);
+        if (!plan) throw new Error(`validatePlan null for '${t.id}'`);
+        applyPlan(plan);
+        const hasGeom = model.rooms.length > 0 || model.chain.length > 0;
+        if (!hasGeom) throw new Error(`Template '${t.id}': model has no rooms after apply`);
+        _restoreModels(snap);
+      }
+    } finally {
+      _restoreModels(snap);
+    }
+  });
+});
+
+describe("LLD-43 — template round-trip: serialize → re-validate succeeds", () => {
+  it("serializePlan(validatePlan(t.plan)) → re-validatePlan succeeds for each template", () => {
+    for (const t of TEMPLATES) {
+      const plan1 = validatePlan(t.plan);
+      if (!plan1) throw new Error(`First validatePlan null for '${t.id}'`);
+      const json  = serializePlan(plan1);
+      const plan2 = validatePlan(JSON.parse(json));
+      if (!plan2) throw new Error(`Re-validatePlan failed for '${t.id}'`);
+    }
+  });
+
+  it("serializePlan output is stable across two calls for each template", () => {
+    for (const t of TEMPLATES) {
+      const plan = validatePlan(t.plan);
+      if (!plan) throw new Error(`validatePlan null for '${t.id}'`);
+      const s1 = serializePlan(plan);
+      const s2 = serializePlan(validatePlan(t.plan));
+      if (s1 !== s2) throw new Error(`Unstable serializePlan for template '${t.id}'`);
+    }
+  });
+});
+
+describe("LLD-43 — applyTemplate: unknown id returns false, no mutation", () => {
+  it("unknown id returns false", () => {
+    // set up DOM first so applyTemplate can find toast
+    const dom = _makeTemplateDOM();
+    let lastToast = null;
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => {},
+      isEmpty: () => true,
+      toast: (msg) => { lastToast = msg; },
+    });
+    const snap = _snapModels();
+    try {
+      const result = applyTemplate("__no_such_id__");
+      if (result !== false) throw new Error("Expected false for unknown id");
+    } finally {
+      _restoreModels(snap);
+      _removeTemplateDOM(dom);
+    }
+  });
+
+  it("unknown id does not mutate the model", () => {
+    const dom = _makeTemplateDOM();
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => {},
+      isEmpty: () => true,
+      toast: () => {},
+    });
+    model.rooms.push({ id: "r-test", closed: true, verts: [{ x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}] });
+    const countBefore = model.rooms.length;
+    applyTemplate("__no_such_id__");
+    const countAfter = model.rooms.length;
+    model.rooms.length = 0;
+    _removeTemplateDOM(dom);
+    if (countAfter !== countBefore) throw new Error("Model mutated by unknown id");
+  });
+});
+
+describe("LLD-43 — applyTemplate: confirm gate", () => {
+  it("does NOT apply when confirm returns false (stubbed)", () => {
+    const dom = _makeTemplateDOM();
+    let applyCalled = false;
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => { applyCalled = true; },
+      isEmpty: () => false, // non-empty — triggers confirm
+      toast: () => {},
+    });
+
+    const origConfirm = window.confirm;
+    window.confirm = () => false; // stub: user cancels
+    const result = applyTemplate(TEMPLATES[0].id);
+    window.confirm = origConfirm;
+    _removeTemplateDOM(dom);
+
+    if (result !== false) throw new Error("Expected false when confirm returns false");
+    if (applyCalled)      throw new Error("apply() was called despite confirm false");
+  });
+
+  it("applies when confirm returns true (stubbed)", () => {
+    const dom = _makeTemplateDOM();
+    let appliedPlan = null;
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: (p) => { appliedPlan = p; },
+      isEmpty: () => false, // non-empty — triggers confirm
+      toast: () => {},
+    });
+
+    const origConfirm = window.confirm;
+    window.confirm = () => true; // stub: user confirms
+    const result = applyTemplate(TEMPLATES[0].id);
+    window.confirm = origConfirm;
+    _removeTemplateDOM(dom);
+
+    if (result !== true)    throw new Error("Expected true when confirm returns true");
+    if (!appliedPlan)       throw new Error("apply() was not called");
+  });
+
+  it("applies immediately when plan is empty (no confirm)", () => {
+    const dom = _makeTemplateDOM();
+    let applyCalled = false;
+    let confirmCalled = false;
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => { applyCalled = true; },
+      isEmpty: () => true, // empty — no confirm needed
+      toast: () => {},
+    });
+
+    const origConfirm = window.confirm;
+    window.confirm = () => { confirmCalled = true; return true; };
+    const result = applyTemplate(TEMPLATES[0].id);
+    window.confirm = origConfirm;
+    _removeTemplateDOM(dom);
+
+    if (!applyCalled)    throw new Error("apply() was not called for empty plan");
+    if (confirmCalled)   throw new Error("window.confirm was called for empty plan");
+    if (result !== true) throw new Error("Expected true for empty plan");
+  });
+});
+
+describe("LLD-43 — open/close/isOpen toggle --visible class", () => {
+  it("open() adds template-overlay--visible", () => {
+    const dom = _makeTemplateDOM();
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => {},
+      isEmpty: () => true,
+      toast: () => {},
+    });
+
+    openTemplates();
+    const hasClass = dom.overlay.classList.contains("template-overlay--visible");
+    closeTemplates();
+    _removeTemplateDOM(dom);
+
+    if (!hasClass) throw new Error("template-overlay--visible not added on open()");
+  });
+
+  it("close() removes template-overlay--visible", () => {
+    const dom = _makeTemplateDOM();
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => {},
+      isEmpty: () => true,
+      toast: () => {},
+    });
+
+    openTemplates();
+    closeTemplates();
+    const hasClass = dom.overlay.classList.contains("template-overlay--visible");
+    _removeTemplateDOM(dom);
+
+    if (hasClass) throw new Error("template-overlay--visible not removed on close()");
+  });
+
+  it("isOpen() returns true after open(), false after close()", () => {
+    const dom = _makeTemplateDOM();
+    initTemplates({
+      overlay:  dom.overlay,
+      grid:     dom.grid,
+      closeBtn: dom.closeBtn,
+      apply: () => {},
+      isEmpty: () => true,
+      toast: () => {},
+    });
+
+    openTemplates();
+    const openState = isTemplatesOpen();
+    closeTemplates();
+    const closedState = isTemplatesOpen();
+    _removeTemplateDOM(dom);
+
+    if (!openState)   throw new Error("isOpen() should be true after open()");
+    if (closedState)  throw new Error("isOpen() should be false after close()");
   });
 });
 

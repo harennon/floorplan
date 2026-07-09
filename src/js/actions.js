@@ -28,6 +28,17 @@ export function setHistoryReset(fn) {
   _historyReset = fn;
 }
 
+// openTemplates callback injected from main.js
+let _openTemplates = null;
+
+/**
+ * Inject the "open template gallery" callback from main.js.
+ * @param {()=>void} fn
+ */
+export function setOpenTemplates(fn) {
+  _openTemplates = fn;
+}
+
 /** Cached encoded hash for synchronous clipboard copy (Safari user-activation). */
 let _cachedHashUrl = null;
 
@@ -320,6 +331,8 @@ function _onOverflowAction(e) {
 
   if (action === "reset") {
     _confirmReset();
+  } else if (action === "open-templates") {
+    if (_openTemplates) _openTemplates();
   }
 }
 

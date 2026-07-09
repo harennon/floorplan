@@ -10,7 +10,8 @@
  *   rot  = degrees CW about center; normalised to [0,360)
  */
 
-/** @typedef {"door"|"window"|"bed"|"sofa"|"table"|"chair"|"desk"|"fridge"} SymbolType */
+/** @typedef {"door"|"window"|"bed"|"sofa"|"table"|"chair"|"desk"|"fridge"
+ *   |"toilet"|"bathtub"|"sink"|"stove"|"wardrobe"|"bookshelf"|"tv"|"washer"} SymbolType */
 /** @typedef {{ id:string, type:SymbolType, x:number, y:number, w:number, h:number, rot:number }} Sym */
 
 // ── In-memory model ───────────────────────────────────────────────────────────
@@ -39,7 +40,15 @@ export const CATALOG = {
   table:  { label: "Table",  category: "furniture",               w: 1.20, h: 0.80, min: 0.30, max: 3.00 },
   chair:  { label: "Chair",  category: "furniture",               w: 0.50, h: 0.50, min: 0.30, max: 1.00 },
   desk:   { label: "Desk",   category: "furniture",               w: 1.40, h: 0.70, min: 0.30, max: 2.50 },
-  fridge: { label: "Fridge", category: "furniture",               w: 0.70, h: 0.70, min: 0.30, max: 1.20 },
+  fridge:    { label: "Fridge",    category: "furniture", w: 0.70, h: 0.70, min: 0.30, max: 1.20 },
+  toilet:    { label: "Toilet",    category: "furniture", w: 0.40, h: 0.70, min: 0.30, max: 1.00 },
+  bathtub:   { label: "Bathtub",   category: "furniture", w: 1.70, h: 0.75, min: 0.30, max: 2.20 },
+  sink:      { label: "Sink",      category: "furniture", w: 0.60, h: 0.45, min: 0.30, max: 1.50 },
+  stove:     { label: "Stove",     category: "furniture", w: 0.60, h: 0.60, min: 0.30, max: 1.20 },
+  wardrobe:  { label: "Wardrobe",  category: "furniture", w: 1.00, h: 0.60, min: 0.30, max: 3.00 },
+  bookshelf: { label: "Bookshelf", category: "furniture", w: 0.80, h: 0.30, min: 0.30, max: 3.00 },
+  tv:        { label: "TV",        category: "furniture", w: 1.20, h: 0.40, min: 0.30, max: 2.50 },
+  washer:    { label: "Washer",    category: "furniture", w: 0.60, h: 0.60, min: 0.30, max: 1.00 },
 };
 
 // ── CRUD ───────────────────────────────────────────────────────────────────────
