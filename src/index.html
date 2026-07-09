@@ -1024,44 +1024,71 @@
         left: 50%;
         transform: translateX(-50%);
         display: flex;
-        align-items: center;
+        flex-direction: column;
+        align-items: stretch;
         gap: 0;
         background: var(--panel);
         border: 1px solid var(--hairline);
         border-radius: 10px;
-        padding: 0.35rem 0.5rem;
+        padding: 0;
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);
         z-index: 8;
-        overflow-x: auto;
         max-width: calc(100vw - 2rem);
-        /* Prevent horizontal scroll snap */
         scrollbar-width: none;
         user-select: none;
         touch-action: none;
+        overflow: hidden;
       }
       .symbol-dock::-webkit-scrollbar { display: none; }
 
-      /* Group label */
-      .dock-group-label {
+      /* Tab strip */
+      .dock-tabs {
+        display: flex;
+        overflow-x: auto;
+        scrollbar-width: none;
+        border-bottom: 1px solid var(--hairline);
+        flex-shrink: 0;
+      }
+      .dock-tabs::-webkit-scrollbar { display: none; }
+
+      /* Category tab buttons */
+      .dock-tab {
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--muted);
         font-family: var(--font-mono);
         font-size: 0.52rem;
-        color: var(--muted);
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        padding: 0 0.3rem;
+        padding: 0.5rem 0.65rem;
+        min-height: 2.75rem; /* ≥44px touch target */
         white-space: nowrap;
         flex-shrink: 0;
+        cursor: pointer;
+        transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .dock-tab:hover:not([aria-selected="true"]) {
+        color: var(--ink);
+      }
+      .dock-tab[aria-selected="true"] {
+        color: var(--gold);
+        border-bottom-color: var(--gold);
+        background: rgba(201,168,76,0.13);
       }
 
-      /* Divider between groups */
-      .dock-sep {
-        width: 1px;
-        height: 2.4rem;
-        background: var(--hairline);
-        flex-shrink: 0;
-        margin: 0 0.35rem;
+      /* Item row (tabpanel) — horizontal scroll */
+      .dock-row {
+        display: flex;
+        gap: 0;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding: 0.35rem 0.5rem;
+        touch-action: pan-x;
       }
+      .dock-row::-webkit-scrollbar { display: none; }
+      .dock-row[hidden] { display: none; }
 
       /* Each dock button */
       .dock-item {
@@ -1124,14 +1151,17 @@
           transform: none;
           border-radius: 10px 10px 0 0;
           max-width: 100%;
+          padding: 0;
+          padding-bottom: calc(env(safe-area-inset-bottom, 0px));
+        }
+        .dock-row {
           padding: 0.5rem 0.5rem;
-          padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
-          /* Extra clearance above the OS gesture bar / home indicator */
           padding-bottom: max(0.75rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem));
-          justify-content: flex-start;
-          /* Allow horizontal swipe through the dock without triggering canvas gestures */
-          touch-action: pan-x;
-          overflow-x: auto;
+        }
+        .dock-tab {
+          /* Minimum 44px touch target */
+          min-height: 2.75rem;
+          padding: 0.55rem 0.8rem;
         }
         .dock-item {
           /* Minimum 44px touch target */
@@ -1967,153 +1997,171 @@
 
       <!-- Symbol dock (bottom-center, always visible in select mode) -->
       <nav class="symbol-dock" id="symbol-dock" aria-label="Symbol palette">
-        <span class="dock-group-label" aria-hidden="true">Openings</span>
+        <!-- Category tab strip -->
+        <div class="dock-tabs" role="tablist" aria-label="Symbol categories">
+          <button class="dock-tab" role="tab" data-category="openings"
+                  id="tab-openings" aria-controls="row-openings" aria-selected="true">Openings</button>
+          <button class="dock-tab" role="tab" data-category="living"
+                  id="tab-living" aria-controls="row-living" aria-selected="false" tabindex="-1">Living</button>
+          <button class="dock-tab" role="tab" data-category="kitchen"
+                  id="tab-kitchen" aria-controls="row-kitchen" aria-selected="false" tabindex="-1">Kitchen</button>
+          <button class="dock-tab" role="tab" data-category="bedroom"
+                  id="tab-bedroom" aria-controls="row-bedroom" aria-selected="false" tabindex="-1">Bedroom</button>
+          <button class="dock-tab" role="tab" data-category="bath"
+                  id="tab-bath" aria-controls="row-bath" aria-selected="false" tabindex="-1">Bath</button>
+        </div>
 
-        <button class="dock-item" data-type="door" aria-label="Add door">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="3" y="3" width="12" height="13" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <path d="M3 7 A10 10 0 0 0 13 7" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2" fill="none" opacity="0.6"/>
-            <line x1="12" y1="9.5" x2="14" y2="9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-          </svg>
-          <span>Door</span>
-        </button>
+        <!-- Openings row -->
+        <div class="dock-row" role="tabpanel" data-category="openings" id="row-openings"
+             aria-labelledby="tab-openings">
+          <button class="dock-item" data-type="door" aria-label="Add door">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="3" y="3" width="12" height="13" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M3 7 A10 10 0 0 0 13 7" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2" fill="none" opacity="0.6"/>
+              <line x1="12" y1="9.5" x2="14" y2="9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+            <span>Door</span>
+          </button>
+          <button class="dock-item" data-type="window" aria-label="Add window">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="2" y="7" width="14" height="4" rx="0.8" stroke="currentColor" stroke-width="1.3"/>
+              <line x1="9" y1="7" x2="9" y2="11" stroke="currentColor" stroke-width="1" opacity="0.6"/>
+            </svg>
+            <span>Window</span>
+          </button>
+        </div>
 
-        <button class="dock-item" data-type="window" aria-label="Add window">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="2" y="7" width="14" height="4" rx="0.8" stroke="currentColor" stroke-width="1.3"/>
-            <line x1="9" y1="7" x2="9" y2="11" stroke="currentColor" stroke-width="1" opacity="0.6"/>
-          </svg>
-          <span>Window</span>
-        </button>
+        <!-- Living row -->
+        <div class="dock-row" role="tabpanel" data-category="living" id="row-living"
+             aria-labelledby="tab-living" hidden>
+          <button class="dock-item" data-type="sofa" aria-label="Add sofa">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="3" y="5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <rect x="3" y="5" width="12" height="3" rx="1" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity="0.15"/>
+              <rect x="3" y="8" width="2.5" height="6" rx="0.6" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
+              <rect x="12.5" y="8" width="2.5" height="6" rx="0.6" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
+            </svg>
+            <span>Sofa</span>
+          </button>
+          <button class="dock-item" data-type="table" aria-label="Add table">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="3" y="5" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <line x1="3" y1="5" x2="15" y2="13" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
+              <line x1="15" y1="5" x2="3" y2="13" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
+            </svg>
+            <span>Table</span>
+          </button>
+          <button class="dock-item" data-type="chair" aria-label="Add chair">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="0.8" opacity="0.5"/>
+            </svg>
+            <span>Chair</span>
+          </button>
+          <button class="dock-item" data-type="desk" aria-label="Add desk">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="3" y="4" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <polyline points="3,4 3,14 15,14" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
+            </svg>
+            <span>Desk</span>
+          </button>
+          <button class="dock-item" data-type="tv" aria-label="Add tv">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="2" y="4" width="14" height="9" rx="1" stroke="currentColor" stroke-width="1.3" fill="currentColor" fill-opacity="0.06"/>
+              <line x1="9" y1="13" x2="9" y2="16" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+            <span>TV</span>
+          </button>
+          <button class="dock-item" data-type="bookshelf" aria-label="Add bookshelf">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="2" y="5" width="14" height="8" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <line x1="3" y1="7.7"  x2="15" y2="7.7"  stroke="currentColor" stroke-width="0.8" opacity="0.6"/>
+              <line x1="3" y1="10.3" x2="15" y2="10.3" stroke="currentColor" stroke-width="0.8" opacity="0.6"/>
+            </svg>
+            <span>Shelf</span>
+          </button>
+        </div>
 
-        <div class="dock-sep" aria-hidden="true"></div>
-        <span class="dock-group-label" aria-hidden="true">Furniture</span>
+        <!-- Kitchen row -->
+        <div class="dock-row" role="tabpanel" data-category="kitchen" id="row-kitchen"
+             aria-labelledby="tab-kitchen" hidden>
+          <button class="dock-item" data-type="fridge" aria-label="Add fridge">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="4" y="2" width="10" height="14" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <line x1="4" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1" opacity="0.7"/>
+              <line x1="12" y1="4.5" x2="12" y2="6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+            <span>Fridge</span>
+          </button>
+          <button class="dock-item" data-type="stove" aria-label="Add stove">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="2" y="3" width="14" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="6"  cy="7.5" r="1.8" stroke="currentColor" stroke-width="0.9" fill="none"/>
+              <circle cx="12" cy="7.5" r="1.8" stroke="currentColor" stroke-width="0.9" fill="none"/>
+              <circle cx="6"  cy="12.5" r="1.8" stroke="currentColor" stroke-width="0.9" fill="none"/>
+              <circle cx="12" cy="12.5" r="1.8" stroke="currentColor" stroke-width="0.9" fill="none"/>
+            </svg>
+            <span>Stove</span>
+          </button>
+          <button class="dock-item" data-type="sink" aria-label="Add sink">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="3" y="5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <rect x="4.5" y="6.5" width="9" height="6" rx="0.8" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.08"/>
+              <circle cx="9" cy="5.5" r="1" fill="currentColor"/>
+            </svg>
+            <span>Sink</span>
+          </button>
+          <button class="dock-item" data-type="washer" aria-label="Add washer">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="2" y="2" width="14" height="14" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="9" cy="10" r="4" stroke="currentColor" stroke-width="1.1" fill="none"/>
+              <rect x="6" y="3" width="3.5" height="2" rx="0.5" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
+            </svg>
+            <span>Washer</span>
+          </button>
+        </div>
 
-        <button class="dock-item" data-type="bed" aria-label="Add bed">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="3" y="3" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <rect x="4" y="4" width="10" height="3.5" rx="0.8" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity="0.15"/>
-            <line x1="9" y1="7.5" x2="9" y2="15" stroke="currentColor" stroke-width="0.8" opacity="0.5"/>
-          </svg>
-          <span>Bed</span>
-        </button>
+        <!-- Bedroom row -->
+        <div class="dock-row" role="tabpanel" data-category="bedroom" id="row-bedroom"
+             aria-labelledby="tab-bedroom" hidden>
+          <button class="dock-item" data-type="bed" aria-label="Add bed">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="3" y="3" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <rect x="4" y="4" width="10" height="3.5" rx="0.8" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity="0.15"/>
+              <line x1="9" y1="7.5" x2="9" y2="15" stroke="currentColor" stroke-width="0.8" opacity="0.5"/>
+            </svg>
+            <span>Bed</span>
+          </button>
+          <button class="dock-item" data-type="wardrobe" aria-label="Add wardrobe">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="2" y="3" width="14" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <line x1="9" y1="3" x2="9" y2="15" stroke="currentColor" stroke-width="0.9" opacity="0.7"/>
+              <circle cx="7"  cy="9" r="1" fill="currentColor" opacity="0.7"/>
+              <circle cx="11" cy="9" r="1" fill="currentColor" opacity="0.7"/>
+            </svg>
+            <span>Wardrobe</span>
+          </button>
+        </div>
 
-        <button class="dock-item" data-type="sofa" aria-label="Add sofa">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="3" y="5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <rect x="3" y="5" width="12" height="3" rx="1" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity="0.15"/>
-            <rect x="3" y="8" width="2.5" height="6" rx="0.6" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
-            <rect x="12.5" y="8" width="2.5" height="6" rx="0.6" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
-          </svg>
-          <span>Sofa</span>
-        </button>
-
-        <button class="dock-item" data-type="table" aria-label="Add table">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="3" y="5" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <line x1="3" y1="5" x2="15" y2="13" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
-            <line x1="15" y1="5" x2="3" y2="13" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
-          </svg>
-          <span>Table</span>
-        </button>
-
-        <button class="dock-item" data-type="chair" aria-label="Add chair">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.3"/>
-            <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="0.8" opacity="0.5"/>
-          </svg>
-          <span>Chair</span>
-        </button>
-
-        <button class="dock-item" data-type="desk" aria-label="Add desk">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="3" y="4" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <polyline points="3,4 3,14 15,14" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
-          </svg>
-          <span>Desk</span>
-        </button>
-
-        <button class="dock-item" data-type="fridge" aria-label="Add fridge">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="4" y="2" width="10" height="14" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <line x1="4" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1" opacity="0.7"/>
-            <line x1="12" y1="4.5" x2="12" y2="6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-          </svg>
-          <span>Fridge</span>
-        </button>
-
-        <button class="dock-item" data-type="toilet" aria-label="Add toilet">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="4" y="2" width="10" height="3" rx="0.8" stroke="currentColor" stroke-width="1.2" fill="currentColor" fill-opacity="0.1"/>
-            <ellipse cx="9" cy="12" rx="5" ry="4" stroke="currentColor" stroke-width="1.3" fill="none"/>
-          </svg>
-          <span>Toilet</span>
-        </button>
-
-        <button class="dock-item" data-type="bathtub" aria-label="Add bathtub">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="2" y="4" width="14" height="10" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <rect x="3.5" y="5.5" width="11" height="7" rx="0.8" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.08"/>
-            <circle cx="9" cy="11" r="1" stroke="currentColor" stroke-width="0.8"/>
-          </svg>
-          <span>Bathtub</span>
-        </button>
-
-        <button class="dock-item" data-type="sink" aria-label="Add sink">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="3" y="5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <rect x="4.5" y="6.5" width="9" height="6" rx="0.8" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.08"/>
-            <circle cx="9" cy="5.5" r="1" fill="currentColor"/>
-          </svg>
-          <span>Sink</span>
-        </button>
-
-        <button class="dock-item" data-type="stove" aria-label="Add stove">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="2" y="3" width="14" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <circle cx="6"  cy="7.5" r="1.8" stroke="currentColor" stroke-width="0.9" fill="none"/>
-            <circle cx="12" cy="7.5" r="1.8" stroke="currentColor" stroke-width="0.9" fill="none"/>
-            <circle cx="6"  cy="12.5" r="1.8" stroke="currentColor" stroke-width="0.9" fill="none"/>
-            <circle cx="12" cy="12.5" r="1.8" stroke="currentColor" stroke-width="0.9" fill="none"/>
-          </svg>
-          <span>Stove</span>
-        </button>
-
-        <button class="dock-item" data-type="wardrobe" aria-label="Add wardrobe">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="2" y="3" width="14" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <line x1="9" y1="3" x2="9" y2="15" stroke="currentColor" stroke-width="0.9" opacity="0.7"/>
-            <circle cx="7"  cy="9" r="1" fill="currentColor" opacity="0.7"/>
-            <circle cx="11" cy="9" r="1" fill="currentColor" opacity="0.7"/>
-          </svg>
-          <span>Wardrobe</span>
-        </button>
-
-        <button class="dock-item" data-type="bookshelf" aria-label="Add bookshelf">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="2" y="5" width="14" height="8" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <line x1="3" y1="7.7"  x2="15" y2="7.7"  stroke="currentColor" stroke-width="0.8" opacity="0.6"/>
-            <line x1="3" y1="10.3" x2="15" y2="10.3" stroke="currentColor" stroke-width="0.8" opacity="0.6"/>
-          </svg>
-          <span>Shelf</span>
-        </button>
-
-        <button class="dock-item" data-type="tv" aria-label="Add tv">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="2" y="4" width="14" height="9" rx="1" stroke="currentColor" stroke-width="1.3" fill="currentColor" fill-opacity="0.06"/>
-            <line x1="9" y1="13" x2="9" y2="16" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-          </svg>
-          <span>TV</span>
-        </button>
-
-        <button class="dock-item" data-type="washer" aria-label="Add washer">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="2" y="2" width="14" height="14" rx="1" stroke="currentColor" stroke-width="1.3"/>
-            <circle cx="9" cy="10" r="4" stroke="currentColor" stroke-width="1.1" fill="none"/>
-            <rect x="6" y="3" width="3.5" height="2" rx="0.5" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
-          </svg>
-          <span>Washer</span>
-        </button>
+        <!-- Bath row -->
+        <div class="dock-row" role="tabpanel" data-category="bath" id="row-bath"
+             aria-labelledby="tab-bath" hidden>
+          <button class="dock-item" data-type="toilet" aria-label="Add toilet">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="4" y="2" width="10" height="3" rx="0.8" stroke="currentColor" stroke-width="1.2" fill="currentColor" fill-opacity="0.1"/>
+              <ellipse cx="9" cy="12" rx="5" ry="4" stroke="currentColor" stroke-width="1.3" fill="none"/>
+            </svg>
+            <span>Toilet</span>
+          </button>
+          <button class="dock-item" data-type="bathtub" aria-label="Add bathtub">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="2" y="4" width="14" height="10" rx="1" stroke="currentColor" stroke-width="1.3"/>
+              <rect x="3.5" y="5.5" width="11" height="7" rx="0.8" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.08"/>
+              <circle cx="9" cy="11" r="1" stroke="currentColor" stroke-width="0.8"/>
+            </svg>
+            <span>Bathtub</span>
+          </button>
+        </div>
       </nav>
     </div>
 
