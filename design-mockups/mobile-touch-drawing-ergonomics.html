@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mobile Touch Drawing Ergonomics — floorplan mockups</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:         #14140f;
+      --bg-deep:    #100f0b;
+      --ink:        #ece7d6;
+      --muted:      #8f8a78;
+      --gold:       #c9a84c;
+      --gold-soft:  rgba(201, 168, 76, 0.55);
+      --grid-fine:  rgba(201, 168, 76, 0.055);
+      --grid-major: rgba(201, 168, 76, 0.14);
+      --grid-axis:  rgba(201, 168, 76, 0.34);
+      --panel:      rgba(20, 20, 15, 0.72);
+      --panel-solid:rgba(24, 24, 18, 0.94);
+      --hairline:   rgba(201, 168, 76, 0.18);
+      --font-ui:      "DM Sans", system-ui, sans-serif;
+      --font-mono:    "DM Mono", "Courier New", monospace;
+      --font-display: "Libre Baskerville", Georgia, serif;
+      --wall-line:     #d9be6e;
+      --draft:         #d9be6e;
+      --snap-grid:     #7fd0c8;
+      --snap-point:    #e0b64f;
+      --snap-close:    #9cd67a;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--bg-deep);
+      color: var(--ink);
+      font-family: var(--font-ui);
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      min-height: 100vh;
+      padding: 2.5rem clamp(1rem, 4vw, 3rem) 4rem;
+    }
+    a { color: var(--gold); }
+
+    /* ── Page header / intro ─────────────────────────────────── */
+    .page-head { max-width: 60rem; margin: 0 auto 2.5rem; }
+    .kicker {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin: 0 0 0.75rem;
+    }
+    .page-head h1 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-size: clamp(1.7rem, 4vw, 2.5rem);
+      line-height: 1.15;
+      margin: 0 0 0.9rem;
+    }
+    .page-head p {
+      max-width: 44rem;
+      line-height: 1.6;
+      color: var(--muted);
+      margin: 0.4rem 0;
+      font-size: 0.95rem;
+    }
+    .page-head strong { color: var(--ink); font-weight: 500; }
+
+    /* ── Section framing ─────────────────────────────────────── */
+    .section { max-width: 60rem; margin: 0 auto 3.5rem; }
+    .section-tag {
+      display: flex; align-items: baseline; gap: 0.75rem;
+      border-bottom: 1px solid var(--hairline);
+      padding-bottom: 0.6rem; margin-bottom: 1.5rem;
+    }
+    .section-tag .num {
+      font-family: var(--font-mono);
+      color: var(--gold);
+      font-size: 0.8rem;
+    }
+    .section-tag h2 {
+      font-family: var(--font-display);
+      font-weight: 400; font-size: 1.3rem; margin: 0;
+    }
+    .section-tag .hint {
+      margin-left: auto; color: var(--muted);
+      font-family: var(--font-mono); font-size: 0.72rem;
+    }
+
+    /* ── Phone frame ─────────────────────────────────────────── */
+    .phone-row {
+      display: flex; flex-wrap: wrap; gap: 2rem 2.5rem;
+      align-items: flex-start;
+    }
+    .phone-fig { flex: 0 0 auto; max-width: 300px; }
+    .phone {
+      position: relative;
+      width: 300px; height: 620px;
+      border-radius: 36px;
+      padding: 10px;
+      background: linear-gradient(160deg, #2a2a22, #16160f);
+      box-shadow: 0 24px 60px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(201,168,76,0.12);
+    }
+    .phone::before {
+      content: ""; position: absolute; top: 16px; left: 50%;
+      transform: translateX(-50%);
+      width: 92px; height: 6px; border-radius: 3px;
+      background: rgba(0,0,0,0.5); z-index: 40;
+    }
+    .screen {
+      position: relative; width: 100%; height: 100%;
+      border-radius: 27px; overflow: hidden;
+      background:
+        radial-gradient(140% 120% at 15% 0%, var(--bg) 0%, var(--bg-deep) 100%);
+      touch-action: none;
+    }
+    .fig-cap {
+      margin: 0.85rem 0 0;
+      font-family: var(--font-mono);
+      font-size: 0.74rem; line-height: 1.5;
+      color: var(--muted);
+    }
+    .fig-cap b { color: var(--ink); font-weight: 500; }
+
+    /* graph-paper grid inside screen */
+    .grid-bg {
+      position: absolute; inset: 0;
+      background-image:
+        linear-gradient(var(--grid-fine) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+        linear-gradient(var(--grid-major) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+      background-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px;
+      background-position: -1px -1px;
+    }
+
+    /* ── SVG drawing layer (walls / vertices) ────────────────── */
+    .draw-svg { position: absolute; inset: 0; overflow: visible; }
+    .wall-body { stroke: var(--wall-line); stroke-width: 10; stroke-linecap: round; opacity: 0.32; }
+    .wall-line { stroke: var(--wall-line); stroke-width: 2; stroke-linecap: round; }
+    .draft-line { stroke: var(--draft); stroke-width: 2; stroke-dasharray: 6 5; opacity: 0.9; }
+    .vertex { fill: var(--bg-deep); stroke: var(--wall-line); stroke-width: 2; }
+    .room-fill { fill: rgba(201,168,76,0.08); }
+    .dim-label {
+      fill: var(--ink); font-family: var(--font-mono); font-size: 11px;
+      text-anchor: middle;
+    }
+
+    /* ── On-screen chrome (touch-sized) ──────────────────────── */
+    /* Tool rail — bottom-left vertical cluster on mobile */
+    .m-rail {
+      position: absolute; left: 10px; bottom: 14px;
+      display: flex; flex-direction: column; gap: 8px; z-index: 20;
+    }
+    .m-btn {
+      width: 48px; height: 48px; border-radius: 12px;
+      display: grid; place-items: center;
+      background: var(--panel-solid);
+      border: 1px solid var(--hairline);
+      color: var(--ink); cursor: pointer;
+      backdrop-filter: blur(6px);
+    }
+    .m-btn svg { width: 20px; height: 20px; }
+    .m-btn[aria-pressed="true"] {
+      background: rgba(201,168,76,0.16);
+      border-color: var(--gold);
+      color: var(--gold);
+    }
+    .m-btn:disabled { opacity: 0.35; }
+
+    /* Zoom cluster — top-right */
+    .m-zoom {
+      position: absolute; right: 10px; top: 12px;
+      display: flex; flex-direction: column; gap: 6px; z-index: 20;
+    }
+    .m-zoom button {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: var(--panel); border: 1px solid var(--hairline);
+      color: var(--ink); font-family: var(--font-mono);
+      font-size: 1.1rem; cursor: pointer;
+    }
+
+    /* HUD readout — top-left */
+    .m-hud {
+      position: absolute; left: 10px; top: 12px;
+      display: flex; gap: 6px; flex-wrap: wrap; max-width: 190px; z-index: 20;
+    }
+    .m-hud .cell {
+      background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: 8px; padding: 5px 9px;
+      font-family: var(--font-mono); font-size: 0.68rem;
+      color: var(--muted);
+    }
+    .m-hud .cell b { color: var(--ink); font-weight: 500; }
+    .m-hud .cell.snap-grid b { color: var(--snap-grid); }
+    .m-hud .cell.snap-point b { color: var(--snap-point); }
+    .m-hud .cell.snap-close b { color: var(--snap-close); }
+
+    /* Finger blob (visualises the touch point / occlusion) */
+    .finger {
+      position: absolute; width: 46px; height: 46px; border-radius: 50%;
+      background: radial-gradient(circle at 38% 34%, rgba(236,231,214,0.42), rgba(236,231,214,0.14) 60%, transparent 72%);
+      border: 1px solid rgba(236,231,214,0.35);
+      transform: translate(-50%, -50%); pointer-events: none; z-index: 30;
+    }
+
+    /* Offset crosshair (Direction A: lens/loupe) */
+    .lens {
+      position: absolute; transform: translate(-50%, -50%);
+      pointer-events: none; z-index: 28;
+    }
+    .lens .ring {
+      width: 74px; height: 74px; border-radius: 50%;
+      border: 1.5px solid var(--gold-soft);
+      background: radial-gradient(circle, rgba(20,20,15,0.55), rgba(20,20,15,0.15) 70%, transparent);
+      display: grid; place-items: center;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+    }
+    .lens .ring::before, .lens .ring::after {
+      content: ""; position: absolute; background: var(--gold-soft);
+    }
+    .lens .ring::before { width: 1px; height: 74px; }
+    .lens .ring::after { height: 1px; width: 74px; }
+    .lens .snap-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: var(--snap-grid); box-shadow: 0 0 0 4px rgba(127,208,200,0.22);
+      z-index: 2;
+    }
+    .lens .leader {
+      position: absolute; left: 50%; top: 50%;
+      width: 1px; background: var(--gold-soft); opacity: 0.5;
+      transform-origin: top;
+    }
+
+    /* Snap tag near a target */
+    .snap-tag {
+      position: absolute; transform: translate(-50%, -140%);
+      font-family: var(--font-mono); font-size: 0.66rem;
+      padding: 2px 7px; border-radius: 5px;
+      background: var(--panel-solid); border: 1px solid var(--hairline);
+      white-space: nowrap; z-index: 29;
+    }
+    .snap-tag.grid { color: var(--snap-grid); }
+    .snap-tag.point { color: var(--snap-point); }
+    .snap-tag.close { color: var(--snap-close); }
+
+    /* Thumb commit bar (Direction B) */
+    .commit-bar {
+      position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; gap: 8px; z-index: 25;
+    }
+    .commit-bar button {
+      height: 46px; padding: 0 16px; border-radius: 23px;
+      font-family: var(--font-mono); font-size: 0.78rem;
+      display: inline-flex; align-items: center; gap: 7px;
+      border: 1px solid var(--hairline); background: var(--panel-solid);
+      color: var(--ink); cursor: pointer; backdrop-filter: blur(6px);
+    }
+    .commit-bar button.primary {
+      background: var(--gold); color: var(--bg-deep); border-color: var(--gold);
+      font-weight: 500;
+    }
+    .commit-bar button.ghost { color: var(--muted); }
+
+    /* Placed-vertex handle preview target */
+    .live-target {
+      position: absolute; transform: translate(-50%,-50%); z-index: 26;
+      width: 18px; height: 18px; border-radius: 50%;
+      border: 2px solid var(--snap-grid); background: rgba(127,208,200,0.18);
+      pointer-events: none;
+    }
+    .live-target.close { border-color: var(--snap-close); background: rgba(156,214,122,0.2); }
+
+    /* Selected symbol + touch handles */
+    .symbol {
+      position: absolute; transform: translate(-50%,-50%);
+      border: 1.5px solid var(--gold); background: rgba(201,168,76,0.1);
+      z-index: 15;
+    }
+    .symbol .sel-ring {
+      position: absolute; inset: -6px; border: 1px dashed var(--gold-soft);
+      border-radius: 3px;
+    }
+    .handle {
+      position: absolute; width: 28px; height: 28px; border-radius: 50%;
+      background: var(--panel-solid); border: 1.5px solid var(--gold);
+      transform: translate(-50%,-50%); display: grid; place-items: center;
+      z-index: 16;
+    }
+    .handle::after {
+      content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--gold);
+    }
+    .handle.rotate { border-color: var(--snap-grid); }
+    .handle.rotate::after { background: var(--snap-grid); }
+    .handle .hit { position: absolute; inset: -8px; border-radius: 50%; }
+
+    /* Symbol inspector (floating pill) */
+    .m-inspector {
+      position: absolute; transform: translate(-50%, 0);
+      display: flex; gap: 4px; padding: 5px;
+      background: var(--panel-solid); border: 1px solid var(--hairline);
+      border-radius: 14px; z-index: 22; backdrop-filter: blur(8px);
+    }
+    .m-inspector button {
+      width: 42px; height: 42px; border-radius: 10px;
+      background: transparent; border: none; color: var(--ink);
+      display: grid; place-items: center; cursor: pointer;
+    }
+    .m-inspector button svg { width: 18px; height: 18px; }
+    .m-inspector .sep { width: 1px; background: var(--hairline); margin: 6px 2px; }
+
+    /* Furniture dock (bottom sheet) */
+    .m-dock {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 24;
+      background: linear-gradient(to top, var(--panel-solid), rgba(24,24,18,0.88));
+      border-top: 1px solid var(--hairline);
+      padding: 10px 12px 14px;
+    }
+    .m-dock .grip {
+      width: 40px; height: 4px; border-radius: 2px; background: var(--hairline);
+      margin: 0 auto 10px;
+    }
+    .m-dock .items {
+      display: flex; gap: 10px; overflow-x: auto; padding-bottom: 2px;
+    }
+    .dock-item {
+      flex: 0 0 auto; width: 60px; height: 60px; border-radius: 12px;
+      background: var(--panel); border: 1px solid var(--hairline);
+      display: grid; place-items: center; color: var(--ink);
+      font-family: var(--font-mono); font-size: 0.6rem; text-align: center;
+    }
+    .dock-item span { display: block; margin-top: 3px; color: var(--muted); }
+
+    /* Callout annotations */
+    .callouts { list-style: none; padding: 0; margin: 1.25rem 0 0; }
+    .callouts li {
+      display: grid; grid-template-columns: 1.6rem 1fr; gap: 0.65rem;
+      padding: 0.55rem 0; border-bottom: 1px solid rgba(201,168,76,0.08);
+      font-size: 0.86rem; line-height: 1.45;
+    }
+    .callouts .pin {
+      font-family: var(--font-mono); font-size: 0.7rem; color: var(--bg-deep);
+      background: var(--gold); border-radius: 50%;
+      width: 1.35rem; height: 1.35rem; display: grid; place-items: center;
+      align-self: start;
+    }
+    .callouts b { color: var(--ink); font-weight: 600; }
+    .callouts .k { color: var(--muted); }
+
+    /* Recommendation banner */
+    .rec {
+      max-width: 60rem; margin: 0 auto 3rem;
+      border: 1px solid var(--hairline); border-left: 3px solid var(--gold);
+      border-radius: 8px; padding: 1.25rem 1.5rem;
+      background: rgba(201,168,76,0.05);
+    }
+    .rec h3 {
+      font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--gold); margin: 0 0 0.6rem;
+    }
+    .rec p { margin: 0.4rem 0; line-height: 1.6; font-size: 0.92rem; color: var(--ink); }
+    .rec .opt { color: var(--gold); font-weight: 500; }
+
+    @media (max-width: 680px) {
+      .phone { width: 270px; height: 560px; }
+      .phone-fig { max-width: 270px; }
+    }
+  </style>
+</head>
+<body>
+    <header class="page-head">
+      <p class="kicker">floorplan · issue #45 · mobile touch ergonomics</p>
+      <h1>Draw &amp; snap with a finger</h1>
+      <p>The editor's interaction model is mouse-first: it commits a wall vertex on
+        <em>pointer&nbsp;up</em> and relies on <strong>hover</strong> to preview the snap under the
+        cursor. A finger has no hover, and it <strong>occludes</strong> the very point it is
+        trying to place. These mockups explore how touch drawing, moving, and pinch/pan
+        should feel — without regressing desktop.</p>
+      <p>The <strong>shared ergonomics</strong> (touch-sized targets, gesture disambiguation,
+        no page scroll/zoom) are identical in both directions. What differs is
+        <strong>how a snapped vertex is committed under a fingertip</strong>. Pick a direction
+        for that; the rest is settled.</p>
+    </header>
+
+    <!-- ── Direction A: Offset loupe ─────────────────────────── -->
+    <section class="section">
+      <div class="section-tag">
+        <span class="num">A</span>
+        <h2>Direction A — Offset loupe (touch-and-drag, lift to place)</h2>
+        <span class="hint">drag · lift = commit</span>
+      </div>
+      <p class="page-head" style="margin:0 0 1.5rem;color:var(--muted);max-width:44rem;font-size:0.9rem;">
+        Touch down anywhere and a crosshair floats <strong style="color:var(--ink)">above
+        your fingertip</strong> showing the resolved snap point, so your finger never hides it.
+        Drag to fine-tune; the live snap tag follows. Lift to commit that vertex and continue
+        the chain. This mirrors the current down→drag→up flow — no new gesture to learn.</p>
+
+      <div class="phone-row">
+        <!-- Panel A1: mid-draw with loupe -->
+        <figure class="phone-fig">
+          <div class="phone"><div class="screen">
+            <div class="grid-bg"></div>
+            <svg class="draw-svg" viewBox="0 0 280 600" preserveAspectRatio="none">
+              <polyline class="wall-line" points="60,150 60,300 190,300" fill="none"/>
+              <line class="draft-line" x1="190" y1="300" x2="190" y2="180"/>
+              <circle class="vertex" cx="60" cy="150" r="5"/>
+              <circle class="vertex" cx="60" cy="300" r="5"/>
+              <circle class="vertex" cx="190" cy="300" r="5"/>
+            </svg>
+            <div class="m-hud">
+              <span class="cell">Area <b>—</b></span>
+              <span class="cell snap-grid">Snap <b>grid</b></span>
+            </div>
+            <div class="m-zoom"><button>+</button><button>−</button></div>
+            <!-- loupe floats above finger; snap resolved at loupe center -->
+            <div class="snap-tag grid" style="left:190px;top:172px;">grid · 2.30 m</div>
+            <div class="lens" style="left:190px;top:180px;">
+              <div class="leader" style="height:56px;transform:translateX(-50%);"></div>
+              <div class="ring"><div class="snap-dot"></div></div>
+            </div>
+            <div class="finger" style="left:190px;top:236px;"></div>
+            <div class="m-rail">
+              <button class="m-btn" aria-pressed="true" aria-label="Wall">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M2 12 L8 4 L14 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="m-btn" aria-label="Select">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M3 2 L13 7 L8 8 L7 13 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+              </button>
+            </div>
+          </div></div>
+          <figcaption class="fig-cap"><b>A · Drawing.</b> Crosshair sits ~56&nbsp;px
+            above the fingertip; snap resolves at the crosshair, not the touch point.</figcaption>
+        </figure>
+
+        <!-- Panel A2: close-room state -->
+        <figure class="phone-fig">
+          <div class="phone"><div class="screen">
+            <div class="grid-bg"></div>
+            <svg class="draw-svg" viewBox="0 0 280 600" preserveAspectRatio="none">
+              <polygon class="room-fill" points="60,150 60,300 190,300 190,150"/>
+              <polyline class="wall-line" points="60,150 60,300 190,300 190,150" fill="none"/>
+              <line class="draft-line" x1="190" y1="150" x2="72" y2="150"/>
+              <circle class="vertex" cx="60" cy="300" r="5"/>
+              <circle class="vertex" cx="190" cy="300" r="5"/>
+              <circle class="vertex" cx="190" cy="150" r="5"/>
+            </svg>
+            <div class="m-hud">
+              <span class="cell">Area <b>4.8 m²</b></span>
+              <span class="cell snap-close">Snap <b>close</b></span>
+            </div>
+            <div class="snap-tag close" style="left:60px;top:122px;">close room</div>
+            <div class="lens" style="left:60px;top:150px;">
+              <div class="leader" style="height:56px;transform:translateX(-50%);"></div>
+              <div class="ring" style="border-color:var(--snap-close);">
+                <div class="snap-dot" style="background:var(--snap-close);box-shadow:0 0 0 5px rgba(156,214,122,0.25);"></div>
+              </div>
+            </div>
+            <div class="finger" style="left:60px;top:206px;"></div>
+            <div class="m-rail">
+              <button class="m-btn" aria-pressed="true" aria-label="Wall">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M2 12 L8 4 L14 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="m-btn" aria-label="Finish chain">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M3 8 L7 12 L13 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+          </div></div>
+          <figcaption class="fig-cap"><b>A · Closing.</b> Snapping onto the first vertex
+            turns the loupe green; the enlarged 44&nbsp;px close-target is easy to hit.</figcaption>
+        </figure>
+      </div>
+
+      <ul class="callouts">
+        <li><span class="pin">1</span><div><b>Loupe offset.</b> The crosshair renders a fixed
+          screen offset above the contact point so the fingertip never occludes the snap.
+          <span class="k">Reuses the existing <code>onHover(sx, sy-OFFSET)</code> path with an offset applied while a touch pointer is active.</span></div></li>
+        <li><span class="pin">2</span><div><b>Commit on lift.</b> Lifting the finger fires the
+          existing <code>onClick</code> and starts the next segment — no extra tap.
+          <span class="k">Matches today's <code>_drawPending → onClick</code> logic exactly; only the snap coordinate is offset.</span></div></li>
+        <li><span class="pin">3</span><div><b>Finish the chain.</b> The rail's checkmark
+          (or tapping the start vertex to close) ends the chain, same as Enter/Esc on desktop.</div></li>
+      </ul>
+    </section>
+
+    <!-- ── Direction B: Persistent crosshair + commit button ── -->
+    <section class="section">
+      <div class="section-tag">
+        <span class="num">B</span>
+        <h2>Direction B — Aim-then-confirm crosshair</h2>
+        <span class="hint">drag to aim · tap ⊕ = commit</span>
+      </div>
+      <p class="page-head" style="margin:0 0 1.5rem;color:var(--muted);max-width:44rem;font-size:0.9rem;">
+        A <strong style="color:var(--ink)">persistent crosshair</strong> lives at screen centre
+        (or wherever you last dragged it). Dragging anywhere nudges it; the snap resolves at the
+        crosshair. A thumb-reachable <strong style="color:var(--ink)">⊕ Add point</strong> button
+        commits the vertex — placement is decoupled from the touch, so precise aiming and
+        committing never fight. Great one-handed; two taps per point is the tradeoff.</p>
+
+      <div class="phone-row">
+        <!-- Panel B1: aiming -->
+        <figure class="phone-fig">
+          <div class="phone"><div class="screen">
+            <div class="grid-bg"></div>
+            <svg class="draw-svg" viewBox="0 0 280 600" preserveAspectRatio="none">
+              <polyline class="wall-line" points="70,140 70,280" fill="none"/>
+              <line class="draft-line" x1="70" y1="280" x2="180" y2="280"/>
+              <circle class="vertex" cx="70" cy="140" r="5"/>
+              <circle class="vertex" cx="70" cy="280" r="5"/>
+            </svg>
+            <div class="m-hud">
+              <span class="cell">Len <b>2.75 m</b></span>
+              <span class="cell snap-grid">Snap <b>grid</b></span>
+            </div>
+            <div class="m-zoom"><button>+</button><button>−</button></div>
+            <div class="snap-tag grid" style="left:180px;top:262px;">grid</div>
+            <!-- fixed reticle -->
+            <div class="lens" style="left:180px;top:280px;">
+              <div class="ring"><div class="snap-dot"></div></div>
+            </div>
+            <div class="finger" style="left:120px;top:400px;"></div>
+            <div class="commit-bar">
+              <button class="ghost">Undo pt</button>
+              <button class="primary">⊕ Add point</button>
+              <button class="ghost">Finish</button>
+            </div>
+            <div class="m-rail">
+              <button class="m-btn" aria-pressed="true" aria-label="Wall">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M2 12 L8 4 L14 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="m-btn" aria-label="Select">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M3 2 L13 7 L8 8 L7 13 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+              </button>
+            </div>
+          </div></div>
+          <figcaption class="fig-cap"><b>B · Aim.</b> Drag anywhere on the canvas to move the
+            reticle; the fingertip can be far from the target. Snap tag tracks the reticle.</figcaption>
+        </figure>
+
+        <!-- Panel B2: committed + next -->
+        <figure class="phone-fig">
+          <div class="phone"><div class="screen">
+            <div class="grid-bg"></div>
+            <svg class="draw-svg" viewBox="0 0 280 600" preserveAspectRatio="none">
+              <polyline class="wall-line" points="70,140 70,280 180,280" fill="none"/>
+              <line class="draft-line" x1="180" y1="280" x2="180" y2="180"/>
+              <circle class="vertex" cx="70" cy="140" r="5"/>
+              <circle class="vertex" cx="70" cy="280" r="5"/>
+              <circle class="vertex" cx="180" cy="280" r="5"/>
+            </svg>
+            <div class="m-hud">
+              <span class="cell">Len <b>2.50 m</b></span>
+              <span class="cell snap-point">Snap <b>point</b></span>
+            </div>
+            <div class="m-zoom"><button>+</button><button>−</button></div>
+            <div class="snap-tag point" style="left:180px;top:162px;">point</div>
+            <div class="lens" style="left:180px;top:180px;">
+              <div class="ring" style="border-color:var(--snap-point);">
+                <div class="snap-dot" style="background:var(--snap-point);box-shadow:0 0 0 5px rgba(224,182,79,0.25);"></div>
+              </div>
+            </div>
+            <div class="commit-bar">
+              <button class="ghost">Undo pt</button>
+              <button class="primary">⊕ Add point</button>
+              <button class="ghost">Finish</button>
+            </div>
+            <div class="m-rail">
+              <button class="m-btn" aria-pressed="true" aria-label="Wall">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M2 12 L8 4 L14 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+          </div></div>
+          <figcaption class="fig-cap"><b>B · Confirm.</b> ⊕ commits and drops the reticle for
+            the next point. Undo&nbsp;pt / Finish live in the same thumb bar.</figcaption>
+        </figure>
+      </div>
+
+      <ul class="callouts">
+        <li><span class="pin">1</span><div><b>Reticle is state, not touch.</b> One-finger drag
+          moves the reticle (calls <code>onHover</code> at the reticle position); the finger
+          need not be on the target. <span class="k">Adds a persistent reticle position to wallTool; touch drags update it instead of committing.</span></div></li>
+        <li><span class="pin">2</span><div><b>Explicit commit.</b> ⊕ calls the existing
+          <code>onClick(reticleX, reticleY)</code>. Never accidental — panning or resting a
+          palm can't drop a point. <span class="k">Clean gesture separation at the cost of a second tap per vertex.</span></div></li>
+        <li><span class="pin">3</span><div><b>Undo / Finish in reach.</b> The thumb bar keeps
+          chain controls where a one-handed grip can hit them, replacing keyboard Backspace/Enter.</div></li>
+      </ul>
+    </section>
+
+    <!-- ── Shared: symbol handles + dock ─────────────────────── -->
+    <section class="section">
+      <div class="section-tag">
+        <span class="num">✦</span>
+        <h2>Shared — touch-sized handles, inspector &amp; furniture dock</h2>
+        <span class="hint">identical in A &amp; B</span>
+      </div>
+      <p class="page-head" style="margin:0 0 1.5rem;color:var(--muted);max-width:44rem;font-size:0.9rem;">
+        Selection, move, resize, rotate, and furniture placement are the same regardless of the
+        drawing direction chosen. Hit targets grow to <strong style="color:var(--ink)">≥44&nbsp;px</strong>
+        on touch (up from the 12/14&nbsp;px used for mouse) with an invisible padded hit ring, and the
+        dock becomes a swipeable bottom sheet.</p>
+
+      <div class="phone-row">
+        <!-- Panel S1: selected symbol with handles + inspector -->
+        <figure class="phone-fig">
+          <div class="phone"><div class="screen">
+            <div class="grid-bg"></div>
+            <svg class="draw-svg" viewBox="0 0 280 600" preserveAspectRatio="none">
+              <polygon class="room-fill" points="40,120 40,360 240,360 240,120"/>
+              <polyline class="wall-line" points="40,120 40,360 240,360 240,120 40,120" fill="none"/>
+            </svg>
+            <!-- selected sofa -->
+            <div class="symbol" style="left:140px;top:250px;width:120px;height:56px;border-radius:4px;">
+              <div class="sel-ring"></div>
+            </div>
+            <div class="m-inspector" style="left:140px;top:150px;">
+              <button aria-label="Rotate 90">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M3 8 A5 5 0 1 1 8 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><polyline points="3,5 3,8 6,8" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
+              </button>
+              <button aria-label="Duplicate">
+                <svg viewBox="0 0 16 16" fill="none"><rect x="5" y="2" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/><rect x="2" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="var(--bg-deep)"/></svg>
+              </button>
+              <button aria-label="Delete">
+                <svg viewBox="0 0 16 16" fill="none"><polyline points="2,4 14,4" stroke="currentColor" stroke-width="1.4"/><path d="M5 4 V13 H11 V4" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
+              </button>
+              <div class="sep"></div>
+              <button aria-label="Lock aspect">
+                <svg viewBox="0 0 16 16" fill="none"><rect x="4" y="7" width="8" height="7" rx="1.2" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 7 V5 A2.5 2.5 0 0 1 10.5 5 V7" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>
+              </button>
+            </div>
+            <!-- resize handles at corners (44px hit) + rotate above -->
+            <div class="handle" style="left:80px;top:222px;"><span class="hit"></span></div>
+            <div class="handle" style="left:200px;top:222px;"><span class="hit"></span></div>
+            <div class="handle" style="left:80px;top:278px;"><span class="hit"></span></div>
+            <div class="handle" style="left:200px;top:278px;"><span class="hit"></span></div>
+            <div class="handle rotate" style="left:140px;top:196px;"><span class="hit"></span></div>
+            <div class="m-hud"><span class="cell">Sofa <b>2.0 × 0.9 m</b></span></div>
+          </div></div>
+          <figcaption class="fig-cap"><b>Select.</b> One-finger drag on the body moves it;
+            corner handles resize, the teal handle rotates. Inspector floats above, clamped
+            on-screen.</figcaption>
+        </figure>
+
+        <!-- Panel S2: dock bottom sheet + placement ghost -->
+        <figure class="phone-fig">
+          <div class="phone"><div class="screen">
+            <div class="grid-bg"></div>
+            <svg class="draw-svg" viewBox="0 0 280 600" preserveAspectRatio="none">
+              <polygon class="room-fill" points="40,90 40,330 240,330 240,90"/>
+              <polyline class="wall-line" points="40,90 40,330 240,330 240,90 40,90" fill="none"/>
+            </svg>
+            <!-- placement ghost snapping flush to wall -->
+            <div class="symbol" style="left:150px;top:200px;width:110px;height:50px;border-radius:4px;border-style:dashed;opacity:0.75;"></div>
+            <div class="snap-tag close" style="left:150px;top:170px;">flush</div>
+            <div class="finger" style="left:150px;top:210px;"></div>
+            <div class="m-dock">
+              <div class="grip"></div>
+              <div class="items">
+                <div class="dock-item">▭<span>Door</span></div>
+                <div class="dock-item">▢<span>Window</span></div>
+                <div class="dock-item">🛋<span>Sofa</span></div>
+                <div class="dock-item">🛏<span>Bed</span></div>
+                <div class="dock-item">▦<span>Table</span></div>
+              </div>
+            </div>
+          </div></div>
+          <figcaption class="fig-cap"><b>Place.</b> Long-press-drag a dock item onto the canvas;
+            it snaps flush to walls / aligns to objects. Dock is a swipeable bottom sheet, out
+            of the thumb-draw zone.</figcaption>
+        </figure>
+      </div>
+
+      <ul class="callouts">
+        <li><span class="pin">1</span><div><b>≥44&nbsp;px hit targets.</b> Resize/rotate handles
+          render at 28&nbsp;px with an 8&nbsp;px invisible pad → 44&nbsp;px touch target.
+          <span class="k">Bump <code>MIN_HIT_PX</code> / <code>ROTATE_HIT_R</code> when a coarse pointer is detected (<code>matchMedia('(pointer: coarse)')</code>).</span></div></li>
+        <li><span class="pin">2</span><div><b>One-finger drag = move.</b> Unchanged
+          <code>onSelectDown → onSelectMove → onSelectUp</code> path; a coarse pointer just
+          gets a larger pick tolerance.</div></li>
+        <li><span class="pin">3</span><div><b>Dock as bottom sheet.</b> The furniture dock docks
+          to the bottom edge (swipe to reveal more), keeping the drawing surface clear and away
+          from the OS edge-swipe zones.</div></li>
+      </ul>
+    </section>
+
+    <!-- ── Gesture disambiguation ────────────────────────────── -->
+    <section class="section">
+      <div class="section-tag">
+        <span class="num">⇢</span>
+        <h2>Gesture disambiguation (both directions)</h2>
+        <span class="hint">draw vs pan vs pinch</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;">
+        <div class="dock-item" style="width:auto;height:auto;padding:1rem;text-align:left;align-items:start;justify-items:start;display:grid;gap:0.4rem;">
+          <div style="font-size:1.6rem;">☝</div>
+          <div style="font-family:var(--font-mono);color:var(--gold);font-size:0.8rem;">1 finger</div>
+          <div style="color:var(--ink);font-size:0.82rem;line-height:1.4;">Draw mode → place / aim vertex. Select mode → move symbol, else pan the canvas.</div>
+        </div>
+        <div class="dock-item" style="width:auto;height:auto;padding:1rem;text-align:left;align-items:start;justify-items:start;display:grid;gap:0.4rem;">
+          <div style="font-size:1.6rem;">✌</div>
+          <div style="font-family:var(--font-mono);color:var(--gold);font-size:0.8rem;">2 fingers</div>
+          <div style="color:var(--ink);font-size:0.82rem;line-height:1.4;">Always pinch-zoom + pan together. A second finger <b>cancels</b> any in-flight draw/move (no stray vertex).</div>
+        </div>
+        <div class="dock-item" style="width:auto;height:auto;padding:1rem;text-align:left;align-items:start;justify-items:start;display:grid;gap:0.4rem;">
+          <div style="font-size:1.6rem;">⏱</div>
+          <div style="font-family:var(--font-mono);color:var(--gold);font-size:0.8rem;">threshold</div>
+          <div style="color:var(--ink);font-size:0.82rem;line-height:1.4;">Move under ~10&nbsp;px within tap-time = a tap; beyond = a drag. Larger than the 6&nbsp;px mouse threshold to forgive finger jitter.</div>
+        </div>
+        <div class="dock-item" style="width:auto;height:auto;padding:1rem;text-align:left;align-items:start;justify-items:start;display:grid;gap:0.4rem;">
+          <div style="font-size:1.6rem;">🚫</div>
+          <div style="font-family:var(--font-mono);color:var(--gold);font-size:0.8rem;">no page scroll</div>
+          <div style="color:var(--ink);font-size:0.82rem;line-height:1.4;"><code>touch-action:none</code> on the stage + <code>overscroll-behavior:none</code> already present — the page never scrolls or pinch-zooms while drawing.</div>
+        </div>
+      </div>
+      <p class="page-head" style="margin:1.25rem 0 0;color:var(--muted);max-width:44rem;font-size:0.85rem;">
+        This logic already exists in <code>interactions.js</code> (<code>_pointers</code> map,
+        pinch seeding, threshold). The work is tuning thresholds for touch, applying the crosshair
+        offset (A) or reticle state (B), and detecting coarse pointers to grow hit targets —
+        <strong style="color:var(--ink)">no change to the desktop mouse path.</strong></p>
+    </section>
+
+    <div class="rec">
+      <h3>Recommendation</h3>
+      <p><span class="opt">Direction&nbsp;A (Offset loupe)</span> is the recommended default. It
+        keeps the exact desktop commit model (down → drag → lift), needs the least new state, and
+        matches the "sketch in two minutes" principle — one gesture per point, nothing to learn.
+        The finger-occlusion problem is solved purely by offsetting the snap preview above the
+        contact point.</p>
+      <p><span class="opt">Direction&nbsp;B (Aim-then-confirm)</span> is stronger for
+        <em>precision one-handed</em> work and eliminates any chance of an accidental vertex, but
+        costs a second tap per point and adds persistent reticle state. Offer it as a fallback if
+        A's lift-to-commit tests poorly on real devices.</p>
+      <p style="color:var(--muted);font-size:0.86rem;">Shared ergonomics (handles, dock, gesture
+        disambiguation) ship regardless of the choice. Reply with
+        <b style="color:var(--ink)">Frontend decision: A</b> or
+        <b style="color:var(--ink)">B</b> (or "A with B as opt-in").</p>
+    </div>
+</body>
+</html>
