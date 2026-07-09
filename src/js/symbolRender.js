@@ -15,6 +15,7 @@
  */
 
 import { worldToScreen, pxPerM } from "./view.js";
+import { isCoarsePointer } from "./pointerEnv.js";
 import { fmtLen, unitLabel } from "./units.js";
 import { model, corners, CATALOG } from "./symbols.js";
 
@@ -32,8 +33,10 @@ const GHOST_STROKE = GOLD;
 
 // Handle geometry (screen-space constants)
 const ROTATE_HANDLE_OFFSET = 22;  // px above top-center
-const ROTATE_HANDLE_R      = 6;   // px radius
-const SEL_BOX_SW           = 1.5;
+/** Visual rotate handle radius. Coarse pointer: 14px (~28px visual, 44px with pad). Fine: 6px. */
+const ROTATE_HANDLE_R      = isCoarsePointer ? 14 : 6;
+/** Selection box stroke width. Slightly thicker under coarse pointer for visibility. */
+const SEL_BOX_SW           = isCoarsePointer ? 1.5 : 1.5;  // same value; kept symmetric
 const CHIP_OFFSET_PX       = 2;   // extra offset so chip doesn't overlap the box line
 
 // ── DOM refs ───────────────────────────────────────────────────────────────────

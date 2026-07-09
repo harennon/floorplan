@@ -15,6 +15,7 @@
 import { view, zoomAbout, resetView, clampZoom, screenToWorld, BASE_PX_PER_M } from "./view.js";
 import { setCursorScreen } from "./hud.js";
 import { scheduleRender, W, H } from "./surface.js";
+import { effectiveDrawPoint, dragThreshold } from "./pointerEnv.js";
 
 // ─── Draw hooks (injected by main.js; no static wall import) ─────────────────
 
@@ -53,8 +54,7 @@ export function setSelectHooks(h) {
   _selectHooks = h;
 }
 
-/** Click-vs-drag threshold in screen pixels. */
-const DRAG_THRESHOLD = 6;
+// DRAG_THRESHOLD is now per-gesture (touch=10, mouse/pen=6); see dragThreshold() in pointerEnv.js.
 
 // ─── Transient state ────────────────────────────────────────────────────────
 
@@ -68,6 +68,21 @@ let _hintDismissed = false;
 let _drawPending = false;
 let _drawDownX = 0;
 let _drawDownY = 0;
+
+/**
+ * pointerType of the primary pointer that started the current gesture.
+ * Used to select the correct drag threshold and loupe offset.
+ * @type {"touch"|"mouse"|"pen"|string}
+ */
+let _downPointerType = "mouse";
+
+/**
+ * True after a second finger cancels an in-flight one-finger gesture (draw or
+ * select-move). Blocks trailing onClick / onUp / onTapEmpty in _onPointerEnd
+ * so no stray vertex is committed and no spurious history commit occurs.
+ * Cleared when all pointers lift (_pointers.size === 0).
+ */
+let _gestureCancelled = false;
 
 /**
  * Select-mode symbol drag state.
@@ -133,15 +148,32 @@ function _onPointerDown(e) {
   _dismissHint();
 
   if (_pointers.size === 2) {
-    // Second finger: cancel any in-flight single-pointer pan, seed pinch.
-    _dragging = false;
+    // Second finger: cancel any in-flight single-pointer gesture, seed pinch.
+
+    // Cancel in-flight draw gesture.
+    if (_drawPending && _drawHooks) {
+      _drawHooks.onLeave();
+    }
     _drawPending = false;
+
+    // Cancel in-flight select-move/rotate: finalize at pre-pinch position.
+    if (_selectConsumed && _selectHooks) {
+      _selectHooks.onUp(_lastX, _lastY);
+      _selectConsumed = false;
+    }
+
+    _gestureCancelled = true;
+    _dragging = false;
     _seedPinch();
     _updateCursor();
     return;
   }
 
   if (_pointers.size === 1) {
+    // Record the pointer type for this gesture so we can select threshold/loupe.
+    _downPointerType = e.pointerType || "mouse";
+    _gestureCancelled = false;
+
     // Draw mode: record down position; defer pan start until drag threshold exceeded.
     if (_drawHooks && _drawHooks.isDrawMode() && !_spaceHeld) {
       _drawPending = true;
@@ -150,6 +182,12 @@ function _onPointerDown(e) {
       _dragging = false;
       _lastX = e.clientX;
       _lastY = e.clientY;
+      // Touch: show the loupe crosshair immediately on finger-down so the user
+      // can see where the tap will land before lifting.
+      if (e.pointerType === "touch") {
+        const hp = effectiveDrawPoint(e.pointerType, e.clientX, e.clientY);
+        _drawHooks.onHover(hp.x, hp.y);
+      }
       _updateCursor();
       return;
     }
@@ -199,7 +237,8 @@ function _onPointerMove(e) {
 
   // Draw-mode: plain hover (no button) → update snap preview.
   if (_drawHooks && _drawHooks.isDrawMode() && e.buttons === 0) {
-    _drawHooks.onHover(e.clientX, e.clientY);
+    const hp = effectiveDrawPoint(e.pointerType, e.clientX, e.clientY);
+    _drawHooks.onHover(hp.x, hp.y);
     return;
   }
 
@@ -207,7 +246,8 @@ function _onPointerMove(e) {
   if (_drawPending && _drawHooks && _drawHooks.isDrawMode()) {
     const dx = e.clientX - _drawDownX;
     const dy = e.clientY - _drawDownY;
-    if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
+    const threshold = dragThreshold(_downPointerType);
+    if (Math.sqrt(dx * dx + dy * dy) > threshold) {
       // Crossed threshold → cancel pending click, start panning.
       _drawPending = false;
       _dragging = true;
@@ -215,7 +255,8 @@ function _onPointerMove(e) {
       _lastY = e.clientY;
     } else {
       // Still within threshold; update snap preview (touch feedback).
-      _drawHooks.onHover(e.clientX, e.clientY);
+      const hp = effectiveDrawPoint(e.pointerType, e.clientX, e.clientY);
+      _drawHooks.onHover(hp.x, hp.y);
     }
     _updateCursor();
   }
@@ -254,9 +295,21 @@ function _onPointerEnd(e) {
   }
 
   if (_pointers.size === 0) {
-    // Draw mode tap: pending click → commit vertex.
+    if (_gestureCancelled) {
+      // Gesture was cancelled by a second finger: skip all commit/finalize logic.
+      _gestureCancelled = false;
+      _downPointerType = "mouse";
+      _drawPending = false;
+      _dragging = false;
+      _selectConsumed = false;
+      _updateCursor();
+      return;
+    }
+
+    // Draw mode tap: pending click → commit vertex at loupe-offset point.
     if (_drawPending && _drawHooks && _drawHooks.isDrawMode()) {
-      _drawHooks.onClick(e.clientX, e.clientY);
+      const hp = effectiveDrawPoint(_downPointerType, e.clientX, e.clientY);
+      _drawHooks.onClick(hp.x, hp.y);
     }
 
     // Select hooks: finalize
@@ -268,7 +321,8 @@ function _onPointerEnd(e) {
       // it's a tap on empty canvas
       const dx = e.clientX - _selectDownX;
       const dy = e.clientY - _selectDownY;
-      if (Math.sqrt(dx * dx + dy * dy) <= DRAG_THRESHOLD) {
+      const threshold = dragThreshold(_downPointerType);
+      if (Math.sqrt(dx * dx + dy * dy) <= threshold) {
         _selectHooks.onTapEmpty();
       }
       _selectConsumed = false;
@@ -276,6 +330,7 @@ function _onPointerEnd(e) {
 
     _drawPending = false;
     _dragging = false;
+    _downPointerType = "mouse";
 
     // If it was a cancel / leave, clear snap preview.
     if (e.type === "pointercancel" || e.type === "pointerleave") {

@@ -13,6 +13,7 @@
  */
 
 import { screenToWorld, worldToScreen, pxPerM } from "./view.js";
+import { isCoarsePointer } from "./pointerEnv.js";
 import { gridSnap, wallSegments, WALL_M, roomCentroids } from "./walls.js";
 import { snapStep } from "./grid.js";
 import {
@@ -48,14 +49,21 @@ export function setHistoryAndToast(history, showToast) {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-/** Minimum hit target on screen, pixels (Edge Case 14). */
-const MIN_HIT_PX = 12;
+/**
+ * Minimum hit target on screen, pixels.
+ * Coarse pointer (touch): 44px effective (~28px visual + invisible pad).
+ * Fine pointer (mouse): 12px.
+ */
+const MIN_HIT_PX = isCoarsePointer ? 44 : 12;
 
 /** Snap increment for free rotate (degrees). */
 const ROTATE_SNAP_DEG = 15;
 
-/** Rotate handle hit radius (screen px). */
-const ROTATE_HIT_R = 14;
+/**
+ * Rotate handle hit radius (screen px).
+ * Coarse pointer: 22px (~44px diameter). Fine pointer: 14px.
+ */
+const ROTATE_HIT_R = isCoarsePointer ? 22 : 14;
 
 // ── State ──────────────────────────────────────────────────────────────────────
 

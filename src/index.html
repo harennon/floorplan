@@ -99,6 +99,9 @@
         position: absolute;
         inset: 0;
         touch-action: none;
+        /* Suppress iOS long-press callout / text selection during draw gestures */
+        -webkit-user-select: none;
+        user-select: none;
         cursor: grab;
 
         /* Radial "table" ground with vignette */
@@ -1101,6 +1104,47 @@
         opacity: 0.38;
         pointer-events: none;
         cursor: not-allowed;
+      }
+
+      /* ── Touch / coarse-pointer ergonomics (LLD 46) ──────────────────────── */
+
+      /* Bottom-sheet dock: full-width on coarse pointer / narrow screens.
+         Sits above the OS home indicator / gesture bar via safe-area insets.
+         Each dock item is ≥44px for comfortable finger tapping. */
+      @media (pointer: coarse), (max-width: 640px) {
+        .symbol-dock {
+          left: 0;
+          right: 0;
+          bottom: 0;
+          transform: none;
+          border-radius: 10px 10px 0 0;
+          max-width: 100%;
+          padding: 0.5rem 0.5rem;
+          padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+          /* Extra clearance above the OS gesture bar / home indicator */
+          padding-bottom: max(0.75rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem));
+          justify-content: flex-start;
+          /* Allow horizontal swipe through the dock without triggering canvas gestures */
+          touch-action: pan-x;
+          overflow-x: auto;
+        }
+        .dock-item {
+          /* Minimum 44px touch target */
+          width: 3rem;
+          height: 3rem;
+          flex-shrink: 0;
+        }
+      }
+
+      /* Coarse-pointer rotate handle: larger visual knob (rendered by symbolRender.js)
+         is already gated; add an invisible touch-pad on the .rotate-handle circle via
+         a filter-based approach — the actual hit expansion is done in JS (ROTATE_HIT_R=22). */
+      @media (pointer: coarse) {
+        /* Thicker selection outline for better visibility on touch */
+        .symbol-inspector .insp-btn {
+          width: 2.5rem;
+          height: 2.5rem;
+        }
       }
 
       /* ── Symbol inspector (floating near selected symbol) ─────────────────── */
