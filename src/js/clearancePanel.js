@@ -173,7 +173,7 @@ export function update() {
 
       const rowVal = document.createElement("span");
       rowVal.className = "clr-row-val";
-      if (c.gap <= 0) {
+      if (c.status === "bad") {
         rowVal.textContent = "overlap";
         rowVal.style.color = "var(--clr-bad)";
       } else {
