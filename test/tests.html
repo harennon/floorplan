@@ -9021,6 +9021,646 @@ describe("prefs.js — default theme resolution", () => {
   });
 });
 
+// ─── LLD 61: SVG structural assertions ───────────────────────────────────────
+
+import {
+  init as initWallRender,
+  render as wallRenderRender,
+} from "../src/js/wallRender.js";
+
+import {
+  init as initSymbolRender,
+  render as symbolRenderRender,
+  getRotateHandleScreen,
+} from "../src/js/symbolRender.js";
+
+// ─── LLD 61 helpers ───────────────────────────────────────────────────────────
+
+const NS_SVG_61 = "http://www.w3.org/2000/svg";
+
+/**
+ * Parse a buildExportSvg() string into a queryable Document.
+ * @param {string} svgStr
+ * @returns {Document}
+ */
+function parseSvg(svgStr) {
+  return new DOMParser().parseFromString(svgStr, "image/svg+xml");
+}
+
+/**
+ * Parse a "x1,y1 x2,y2 …" points string into [{x,y}] objects.
+ * @param {string} pointsAttr
+ * @returns {{x:number,y:number}[]}
+ */
+function parsePoints(pointsAttr) {
+  return (pointsAttr || "").trim().split(/\s+/).filter(Boolean).map(pair => {
+    const [x, y] = pair.split(",");
+    return { x: parseFloat(x), y: parseFloat(y) };
+  });
+}
+
+/**
+ * Build a minimal DOM rig for wallRender and symbolRender tests.
+ * Returns fresh detached SVG <g> nodes and HTML <div>s.
+ * Calls init on both modules with the fresh nodes.
+ *
+ * @param {object} [opts]
+ * @param {()=>*} [opts.getSnap]
+ * @param {()=>*} [opts.getHighlight]
+ * @param {()=>*} [opts.getEditingEdge]
+ * @param {()=>*} [opts.getSelectedId]
+ * @param {()=>*} [opts.getPlacementGhost]
+ * @param {()=>*} [opts.getEditingDim]
+ */
+function makeRenderRig61(opts = {}) {
+  const gWorld    = document.createElementNS(NS_SVG_61, "g");
+  const gDraft    = document.createElementNS(NS_SVG_61, "g");
+  const gSnap     = document.createElementNS(NS_SVG_61, "g");
+  const labels    = document.createElement("div");
+  const dimLabels = document.createElement("div");
+  const gSymbols  = document.createElementNS(NS_SVG_61, "g");
+  const gOverlay  = document.createElementNS(NS_SVG_61, "g");
+
+  initWallRender(
+    gWorld, gDraft, gSnap, labels, dimLabels,
+    opts.getSnap        || (() => null),
+    opts.getHighlight   || (() => null),
+    opts.getEditingEdge || (() => null)
+  );
+
+  initSymbolRender(
+    gSymbols, gOverlay, dimLabels,
+    opts.getSelectedId      || (() => null),
+    opts.getPlacementGhost  || (() => null),
+    opts.getEditingDim      || (() => null)
+  );
+
+  return { gWorld, gDraft, gSnap, labels, dimLabels, gSymbols, gOverlay };
+}
+
+// ─── Tests: LLD 61 — exportImg.buildExportSvg (structural) ───────────────────
+
+describe("exportImg.buildExportSvg — structural", () => {
+
+  // Constants hardcoded as documented literals — see exportImg.js.
+  // EXPORT_PX_PER_M = 96, MARGIN_M = 0.5
+  // For a room with minX=0, minY=0: originX = -0.5, originY = -0.5
+  // exportPx(worldX) = (worldX - originX) * 96 = (worldX + 0.5) * 96
+
+  it("produces valid SVG with no <parsererror>", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) {
+      throw new Error("buildExportSvg produced malformed SVG: " + doc.querySelector("parsererror").textContent);
+    }
+  });
+
+  it("single <svg> root with viewBox consistent with content", () => {
+    resetAll();
+    setUnit("m");
+    // Room: 3m wide × 2m tall, min at (0,0).
+    // wM = 3 + 2*0.5 = 4, hM = 2 + 2*0.5 = 3 → W = 4*96 = 384, H = 3*96 = 288
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    const svgs = doc.querySelectorAll("svg");
+    if (svgs.length !== 1) throw new Error(`Expected 1 <svg>, got ${svgs.length}`);
+    const svg = svgs[0];
+    const vb = svg.getAttribute("viewBox");
+    if (!vb) throw new Error("Missing viewBox attribute");
+    // viewBox must be "0 0 W H"
+    const [vbX, vbY, vbW, vbH] = vb.split(" ").map(Number);
+    if (vbX !== 0 || vbY !== 0) throw new Error(`viewBox should start at 0 0, got: ${vb}`);
+    const W = 4 * 96;  // 384
+    const H = 3 * 96;  // 288
+    expect(vbW).toBeCloseTo(W, 6);
+    expect(vbH).toBeCloseTo(H, 6);
+    // width and height attributes should also match
+    expect(parseFloat(svg.getAttribute("width"))).toBeCloseTo(W, 6);
+    expect(parseFloat(svg.getAttribute("height"))).toBeCloseTo(H, 6);
+  });
+
+  it("closed room → <polygon> with correct margin-offset coordinates", () => {
+    resetAll();
+    setUnit("m");
+    // Unit square room at (0,0)–(1,0)–(1,1)–(0,1)
+    // originX = 0 - 0.5 = -0.5, originY = 0 - 0.5 = -0.5
+    // vertex (0,0) → exportPx = (0+0.5)*96 = 48, same for y
+    // vertex (1,0) → (1.5*96, 0.5*96) = (144, 48)
+    // vertex (1,1) → (144, 144)
+    // vertex (0,1) → (48, 144)
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    // There should be at least 1 fill polygon (closed room)
+    const polygons = doc.querySelectorAll("polygon");
+    if (polygons.length === 0) throw new Error("Expected at least one <polygon> for closed room");
+
+    // The fill polygon is the first polygon emitted
+    const fillPoly = polygons[0];
+    const pts = parsePoints(fillPoly.getAttribute("points"));
+    if (pts.length !== 4) throw new Error(`Expected 4 points, got ${pts.length}: ${fillPoly.getAttribute("points")}`);
+
+    const expected = [
+      { x: 0.5 * 96, y: 0.5 * 96 },
+      { x: 1.5 * 96, y: 0.5 * 96 },
+      { x: 1.5 * 96, y: 1.5 * 96 },
+      { x: 0.5 * 96, y: 1.5 * 96 },
+    ];
+    for (let i = 0; i < 4; i++) {
+      expect(pts[i].x).toBeCloseTo(expected[i].x, 4);
+      expect(pts[i].y).toBeCloseTo(expected[i].y, 4);
+    }
+  });
+
+  it("2 m edge spans 192 px in export space (coordinate scale = 96 px/m)", () => {
+    resetAll();
+    setUnit("m");
+    // Room with a 2m horizontal edge from (0,0) to (2,0)
+    model.rooms.push({ id: "w0", closed: false, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    // Find a polyline (open room → polyline for body)
+    const polylines = doc.querySelectorAll("polyline");
+    if (polylines.length === 0) throw new Error("Expected <polyline> for open room");
+    const pts = parsePoints(polylines[0].getAttribute("points"));
+    // x span = (2 - 0) * 96 = 192
+    const xSpan = Math.abs(pts[1].x - pts[0].x);
+    expect(xSpan).toBeCloseTo(192, 4);
+  });
+
+  it("dimension labels: n edges → n <text> nodes per closed room", () => {
+    resetAll();
+    setUnit("m");
+    // Closed rectangle: 4 edges → 4 dimension labels
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const texts = doc.querySelectorAll("text");
+    if (texts.length !== 4) throw new Error(`Expected 4 <text> nodes for 4 edges, got ${texts.length}`);
+  });
+
+  it("room edges + symbols → correct total <text> count", () => {
+    resetAll();
+    setUnit("m");
+    // Closed 4-edge room + 2 symbols → 4 + 2 = 6 text nodes
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+    addSymbol(createSymbol("bed", 1, 1));
+    addSymbol(createSymbol("chair", 2, 1));
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const texts = doc.querySelectorAll("text");
+    if (texts.length !== 6) throw new Error(`Expected 6 <text> nodes (4 edge + 2 symbol), got ${texts.length}`);
+  });
+
+  it("text content is XML-safe: no raw < or & characters", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 },
+    ]});
+    addSymbol(createSymbol("table", 1, 1));
+    const svgStr = buildExportSvg();
+    // Check the raw SVG string has no unescaped & outside entities or unescaped <
+    // A well-formed SVG must not have bare & or < inside attribute/text values
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror — likely unescaped XML char");
+    // Verify text nodes round-trip correctly (no raw < or & as DOM text)
+    const texts = doc.querySelectorAll("text");
+    for (const t of texts) {
+      if (t.textContent.includes("<") || t.textContent.includes(">")) {
+        throw new Error(`Text node contains unescaped < or >: "${t.textContent}"`);
+      }
+    }
+  });
+
+  it("empty plan → minimal SVG: one <rect>, zero <polygon>, zero <text>", () => {
+    resetAll();
+    const svgStr = buildExportSvg();
+    if (!svgStr.startsWith("<?xml")) throw new Error("SVG does not start with <?xml");
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in empty-plan SVG");
+    const rects = doc.querySelectorAll("rect");
+    if (rects.length !== 1) throw new Error(`Expected 1 <rect> (bg), got ${rects.length}`);
+    const polygons = doc.querySelectorAll("polygon");
+    if (polygons.length !== 0) throw new Error(`Expected 0 <polygon> for empty plan, got ${polygons.length}`);
+    const texts = doc.querySelectorAll("text");
+    if (texts.length !== 0) throw new Error(`Expected 0 <text> for empty plan, got ${texts.length}`);
+  });
+
+  it("background rect fill is #14140f", () => {
+    resetAll();
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const rect = doc.querySelector("rect");
+    if (!rect) throw new Error("No <rect> found");
+    const fill = rect.getAttribute("fill");
+    if (fill !== "#14140f") throw new Error(`Expected bg fill #14140f, got ${fill}`);
+  });
+
+});
+
+// ─── Tests: LLD 61 — wallRender.render (mounted SVG) ─────────────────────────
+
+describe("wallRender.render", () => {
+
+  // At identity view (zoom=1, panX=0, panY=0):
+  //   worldToScreen(wx, wy) = { x: wx * 40, y: wy * 40 }
+  // BASE_PX_PER_M = 40
+
+  it("closed room: #world gets fill + body + centerline polygons + N vertex-dot circles", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    // 4-vertex closed room
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+    wallRenderRender();
+    const polygons = rig.gWorld.querySelectorAll("polygon");
+    // fill (1) + body (1) + centerline (1) = 3 polygons
+    if (polygons.length !== 3) throw new Error(`Expected 3 polygons in #world, got ${polygons.length}`);
+    const circles = rig.gWorld.querySelectorAll("circle");
+    // 4 vertex dots
+    if (circles.length !== 4) throw new Error(`Expected 4 circle vertex dots, got ${circles.length}`);
+  });
+
+  it("closed room: body polygon points match worldToScreen at identity (×40)", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 },
+    ]});
+    wallRenderRender();
+    // Body polygon is the second polygon (fill first, body second)
+    const polygons = rig.gWorld.querySelectorAll("polygon");
+    if (polygons.length < 2) throw new Error(`Expected ≥2 polygons, got ${polygons.length}`);
+    const bodyPts = parsePoints(polygons[1].getAttribute("points"));
+    const expected = [
+      { x: 0 * 40, y: 0 * 40 },
+      { x: 2 * 40, y: 0 * 40 },
+      { x: 2 * 40, y: 1 * 40 },
+      { x: 0 * 40, y: 1 * 40 },
+    ];
+    if (bodyPts.length !== 4) throw new Error(`Expected 4 body polygon points, got ${bodyPts.length}`);
+    for (let i = 0; i < 4; i++) {
+      expect(bodyPts[i].x).toBeCloseTo(expected[i].x, 4);
+      expect(bodyPts[i].y).toBeCloseTo(expected[i].y, 4);
+    }
+  });
+
+  it("vertex-dot cx/cy match worldToScreen at identity", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 1, y: 2 }, { x: 4, y: 2 }, { x: 4, y: 5 }, { x: 1, y: 5 },
+    ]});
+    wallRenderRender();
+    const circles = rig.gWorld.querySelectorAll("circle");
+    if (circles.length !== 4) throw new Error(`Expected 4 vertex dots, got ${circles.length}`);
+    const expectedCenters = [
+      { x: 1 * 40, y: 2 * 40 },
+      { x: 4 * 40, y: 2 * 40 },
+      { x: 4 * 40, y: 5 * 40 },
+      { x: 1 * 40, y: 5 * 40 },
+    ];
+    for (let i = 0; i < 4; i++) {
+      expect(parseFloat(circles[i].getAttribute("cx"))).toBeCloseTo(expectedCenters[i].x, 4);
+      expect(parseFloat(circles[i].getAttribute("cy"))).toBeCloseTo(expectedCenters[i].y, 4);
+    }
+  });
+
+  it("2-vertex chain: #draft gets body polyline + centerline polyline + dots; #world empty", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.chain.push({ x: 0, y: 0 }, { x: 2, y: 0 });
+    wallRenderRender();
+    if (rig.gWorld.childElementCount !== 0) throw new Error(`Expected empty #world for chain-only, got ${rig.gWorld.childElementCount} children`);
+    const draftPolylines = rig.gDraft.querySelectorAll("polyline");
+    // body polyline + centerline polyline = 2 polylines
+    if (draftPolylines.length !== 2) throw new Error(`Expected 2 polylines in #draft, got ${draftPolylines.length}`);
+    const draftCircles = rig.gDraft.querySelectorAll("circle");
+    // 2 vertex dots for 2-vertex chain
+    if (draftCircles.length !== 2) throw new Error(`Expected 2 vertex-dot circles in #draft, got ${draftCircles.length}`);
+  });
+
+  it("1-vertex chain: #draft gets only 1 vertex dot (no polyline)", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.chain.push({ x: 1, y: 1 });
+    wallRenderRender();
+    const polylines = rig.gDraft.querySelectorAll("polyline");
+    if (polylines.length !== 0) throw new Error(`Expected 0 polylines for 1-vert chain, got ${polylines.length}`);
+    const circles = rig.gDraft.querySelectorAll("circle");
+    if (circles.length !== 1) throw new Error(`Expected 1 vertex dot for 1-vert chain, got ${circles.length}`);
+  });
+
+  it("snap glyph (type=grid): #snap gets diamond <polygon> + center <circle>", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61({ getSnap: () => ({ x: 2, y: 3, type: "grid" }) });
+    wallRenderRender();
+    const snapPolys = rig.gSnap.querySelectorAll("polygon");
+    if (snapPolys.length !== 1) throw new Error(`Expected 1 diamond polygon in #snap, got ${snapPolys.length}`);
+    const snapCircles = rig.gSnap.querySelectorAll("circle");
+    if (snapCircles.length !== 1) throw new Error(`Expected 1 center circle in #snap, got ${snapCircles.length}`);
+  });
+
+  it("palette/theme wiring: fill, wallBody, wallLine attributes come from palette() tokens", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Use dark theme so palette is deterministic fallback
+    themeSetTheme("dark");
+    const rig = makeRenderRig61();
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 },
+    ]});
+    wallRenderRender();
+    const p = palette();
+    const polygons = rig.gWorld.querySelectorAll("polygon");
+    // fill polygon (index 0): fill = p.roomFill
+    if (polygons[0].getAttribute("fill") !== p.roomFill) {
+      throw new Error(`Fill polygon: expected fill=${p.roomFill}, got ${polygons[0].getAttribute("fill")}`);
+    }
+    // body polygon (index 1): stroke = p.wallBody
+    if (polygons[1].getAttribute("stroke") !== p.wallBody) {
+      throw new Error(`Body polygon: expected stroke=${p.wallBody}, got ${polygons[1].getAttribute("stroke")}`);
+    }
+    // centerline polygon (index 2): stroke = p.wallLine (not highlighted)
+    if (polygons[2].getAttribute("stroke") !== p.wallLine) {
+      throw new Error(`Centerline polygon: expected stroke=${p.wallLine}, got ${polygons[2].getAttribute("stroke")}`);
+    }
+  });
+
+  it("idempotent redraw: calling render() twice yields the same child count", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 },
+    ]});
+    wallRenderRender();
+    const count1 = rig.gWorld.childElementCount;
+    wallRenderRender();
+    const count2 = rig.gWorld.childElementCount;
+    if (count1 !== count2) throw new Error(`Second render changed child count: ${count1} → ${count2}`);
+  });
+
+  it("#draft and #snap are empty when there is no chain and no snap", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 },
+    ]});
+    wallRenderRender();
+    if (rig.gDraft.childElementCount !== 0) throw new Error(`Expected empty #draft, got ${rig.gDraft.childElementCount}`);
+    if (rig.gSnap.childElementCount !== 0) throw new Error(`Expected empty #snap, got ${rig.gSnap.childElementCount}`);
+  });
+
+});
+
+// ─── Tests: LLD 61 — symbolRender.render (mounted SVG) ───────────────────────
+
+describe("symbolRender.render", () => {
+
+  it("two symbols → two body <polygon>s in #symbols", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("table", 2, 2));
+    addSymbol(createSymbol("chair", 4, 4));
+    symbolRenderRender();
+    const polys = rig.gSymbols.querySelectorAll("polygon");
+    if (polys.length < 2) throw new Error(`Expected ≥2 body polygons for 2 symbols, got ${polys.length}`);
+  });
+
+  it("body polygon points equal screen-projected corners (identity view: ×40)", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    const sym = createSymbol("table", 2, 2);
+    // table: w=1.2, h=0.8, rot=0
+    addSymbol(sym);
+    symbolRenderRender();
+    const polys = rig.gSymbols.querySelectorAll("polygon");
+    if (polys.length === 0) throw new Error("Expected at least one body polygon");
+    const bodyPts = parsePoints(polys[0].getAttribute("points"));
+    if (bodyPts.length !== 4) throw new Error(`Expected 4 body polygon points, got ${bodyPts.length}`);
+
+    // corners(sym) at rot=0: TL=(-hw,-hh), TR=(hw,-hh), BR=(hw,hh), BL=(-hw,hh) + center
+    // sym.x=2, sym.y=2, hw=0.6, hh=0.4
+    // worldToScreen: *40 at identity
+    const expectedWorld = [
+      { x: 2 - 0.6, y: 2 - 0.4 },
+      { x: 2 + 0.6, y: 2 - 0.4 },
+      { x: 2 + 0.6, y: 2 + 0.4 },
+      { x: 2 - 0.6, y: 2 + 0.4 },
+    ];
+    for (let i = 0; i < 4; i++) {
+      expect(bodyPts[i].x).toBeCloseTo(expectedWorld[i].x * 40, 4);
+      expect(bodyPts[i].y).toBeCloseTo(expectedWorld[i].y * 40, 4);
+    }
+  });
+
+  it("rotated symbol body points are non-axis-aligned", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    const sym = createSymbol("table", 3, 3);
+    sym.rot = 45;
+    addSymbol(sym);
+    symbolRenderRender();
+    const polys = rig.gSymbols.querySelectorAll("polygon");
+    if (polys.length === 0) throw new Error("Expected body polygon");
+    const bodyPts = parsePoints(polys[0].getAttribute("points"));
+    // For a 45-degree rotation, x and y of all 4 corners should not all be equal in pairs
+    // (i.e., the bounding box has equal width and height but individual x/y differ from axis-aligned)
+    const allXSame = bodyPts.every(pt => Math.abs(pt.x - bodyPts[0].x) < 0.01);
+    const allYSame = bodyPts.every(pt => Math.abs(pt.y - bodyPts[0].y) < 0.01);
+    if (allXSame || allYSame) throw new Error("Rotated symbol points appear axis-aligned");
+    // Verify not identical to rot=0 TL/TR
+    const unrotatedTLX = (3 - sym.w / 2) * 40;
+    if (Math.abs(bodyPts[0].x - unrotatedTLX) < 0.1) {
+      throw new Error("Rotated symbol TL x matches non-rotated value — rotation not applied");
+    }
+  });
+
+  it("unselected symbol: stroke=symStroke, stroke-width=1.5, fill=symFill", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    themeSetTheme("dark");
+    const rig = makeRenderRig61({ getSelectedId: () => null });
+    addSymbol(createSymbol("table", 2, 2));
+    symbolRenderRender();
+    const p = palette();
+    const poly = rig.gSymbols.querySelectorAll("polygon")[0];
+    if (!poly) throw new Error("No body polygon found");
+    if (poly.getAttribute("stroke") !== p.symStroke) {
+      throw new Error(`Unselected: expected stroke=${p.symStroke}, got ${poly.getAttribute("stroke")}`);
+    }
+    if (poly.getAttribute("stroke-width") !== "1.5") {
+      throw new Error(`Unselected: expected stroke-width=1.5, got ${poly.getAttribute("stroke-width")}`);
+    }
+    if (poly.getAttribute("fill") !== p.symFill) {
+      throw new Error(`Unselected: expected fill=${p.symFill}, got ${poly.getAttribute("fill")}`);
+    }
+  });
+
+  it("selected symbol: stroke=gold, stroke-width=2, fill=symSelFill + selection-box + rotate handle in #overlay", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    themeSetTheme("dark");
+    const sym = createSymbol("table", 2, 2);
+    addSymbol(sym);
+    const rig = makeRenderRig61({ getSelectedId: () => sym.id });
+    symbolRenderRender();
+    const p = palette();
+    // Body polygon should have selected styling
+    const bodyPoly = rig.gSymbols.querySelectorAll("polygon")[0];
+    if (!bodyPoly) throw new Error("No body polygon");
+    if (bodyPoly.getAttribute("stroke") !== p.gold) {
+      throw new Error(`Selected: expected stroke=${p.gold}, got ${bodyPoly.getAttribute("stroke")}`);
+    }
+    if (bodyPoly.getAttribute("stroke-width") !== "2") {
+      throw new Error(`Selected: expected stroke-width=2, got ${bodyPoly.getAttribute("stroke-width")}`);
+    }
+    if (bodyPoly.getAttribute("fill") !== p.symSelFill) {
+      throw new Error(`Selected: expected fill=${p.symSelFill}, got ${bodyPoly.getAttribute("fill")}`);
+    }
+    // #overlay should have selection-box polygon
+    const overlayPolys = rig.gOverlay.querySelectorAll("polygon");
+    if (overlayPolys.length === 0) throw new Error("Expected selection-box polygon in #overlay");
+    // #overlay should have rotate handle circle
+    const overlayCircles = rig.gOverlay.querySelectorAll("circle");
+    if (overlayCircles.length === 0) throw new Error("Expected rotate handle circle in #overlay");
+  });
+
+  it("selected vs unselected styling differ", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    themeSetTheme("dark");
+    const sym = createSymbol("table", 2, 2);
+    addSymbol(sym);
+
+    // Unselected state
+    const rig1 = makeRenderRig61({ getSelectedId: () => null });
+    symbolRenderRender();
+    const unselPoly = rig1.gSymbols.querySelectorAll("polygon")[0];
+    const unselStroke = unselPoly.getAttribute("stroke");
+    const unselFill   = unselPoly.getAttribute("fill");
+
+    // Selected state (fresh rig so #overlay counts are isolated)
+    const rig2 = makeRenderRig61({ getSelectedId: () => sym.id });
+    symbolRenderRender();
+    const selPoly = rig2.gSymbols.querySelectorAll("polygon")[0];
+    const selStroke = selPoly.getAttribute("stroke");
+    const selFill   = selPoly.getAttribute("fill");
+
+    if (unselStroke === selStroke) throw new Error(`stroke unchanged between selected/unselected: ${unselStroke}`);
+    if (unselFill === selFill) throw new Error(`fill unchanged between selected/unselected: ${unselFill}`);
+    if (rig1.gOverlay.childElementCount !== 0) throw new Error("Unselected: overlay should be empty");
+    if (rig2.gOverlay.childElementCount === 0) throw new Error("Selected: overlay should be non-empty");
+  });
+
+  it("placement ghost: #overlay gets dashed ghost <polygon> + center snap <circle>", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const ghost = { type: "bed", x: 3, y: 3, w: 1.5, h: 2, rot: 0 };
+    const rig = makeRenderRig61({ getPlacementGhost: () => ghost });
+    symbolRenderRender();
+    // No symbols in model, so gSymbols is empty
+    if (rig.gSymbols.childElementCount !== 0) throw new Error("gSymbols should be empty when model is empty");
+    // Overlay: ghost polygon + snap circle
+    const overlayPolys = rig.gOverlay.querySelectorAll("polygon");
+    if (overlayPolys.length === 0) throw new Error("Expected ghost polygon in #overlay");
+    const overlayCircles = rig.gOverlay.querySelectorAll("circle");
+    if (overlayCircles.length === 0) throw new Error("Expected snap center circle in #overlay");
+    // Ghost polygon should have stroke-dasharray
+    const ghostPoly = overlayPolys[0];
+    const dashArr = ghostPoly.getAttribute("stroke-dasharray");
+    if (!dashArr || dashArr.trim() === "") throw new Error("Ghost polygon has no stroke-dasharray");
+  });
+
+  it("palette wiring: symbol body colors come from palette() tokens", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    themeSetTheme("dark");
+    const rig = makeRenderRig61({ getSelectedId: () => null });
+    addSymbol(createSymbol("chair", 1, 1));
+    symbolRenderRender();
+    const p = palette();
+    const poly = rig.gSymbols.querySelectorAll("polygon")[0];
+    if (!poly) throw new Error("No body polygon");
+    if (poly.getAttribute("fill") !== p.symFill) {
+      throw new Error(`body fill should be palette().symFill (${p.symFill}), got ${poly.getAttribute("fill")}`);
+    }
+    if (poly.getAttribute("stroke") !== p.symStroke) {
+      throw new Error(`body stroke should be palette().symStroke (${p.symStroke}), got ${poly.getAttribute("stroke")}`);
+    }
+  });
+
+  it("dim-labels div is not cleared by symbolRender (only appended)", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const sym = createSymbol("table", 2, 2);
+    addSymbol(sym);
+    const rig = makeRenderRig61({ getSelectedId: () => sym.id });
+    // Pre-populate the dimLabels div with a sentinel element
+    const sentinel = document.createElement("span");
+    sentinel.className = "sentinel";
+    rig.dimLabels.appendChild(sentinel);
+    symbolRenderRender();
+    // symbolRender must not have cleared the dimLabels — sentinel should still be present
+    if (!rig.dimLabels.querySelector(".sentinel")) {
+      throw new Error("symbolRender cleared dimLabels (it should only append, not clear)");
+    }
+  });
+
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 
