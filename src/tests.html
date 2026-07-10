@@ -8271,6 +8271,474 @@ describe("LLD-50 — plan round-trip: new-type symbol survives serialize→valid
   });
 });
 
+// ─── LLD-54: symbolTool — nudge / rotate / flush ──────────────────────────────
+
+import {
+  nudgeSelected, rotateSelected, flushNudge,
+  setHistoryAndToast as symSetHistoryAndToastLLD54,
+  hasSelection as hasSelectionLLD54,
+  selectSymbol as selectSymbolLLD54,
+  deleteSelected as deleteSelectedLLD54,
+  duplicateSelected as duplicateSelectedLLD54,
+  onTapEmpty as onTapEmptyLLD54,
+} from "./js/symbolTool.js";
+
+// Note: addSymbol, createSymbol, removeSymbol, symbolModel already imported above
+// from ./js/symbols.js — re-use those.
+
+// Minimal stub DOM needed for symbolTool.init
+function _buildSymbolToolDOM() {
+  const dock     = document.createElement("div");
+  const insp     = document.createElement("div");
+  return { dock, insp };
+}
+
+// Helper: add a symbol at (x, y) and return it
+function _addSym54(x = 0, y = 0) {
+  const sym = createSymbol("chair", x, y);
+  addSymbol(sym);
+  return sym;
+}
+
+// Helper: reset symbols model for LLD-54 tests
+function _resetSyms54() {
+  symbolModel.symbols.length = 0;
+}
+
+// Inject a spy history commit
+function _makeSpyCommit54() {
+  let count = 0;
+  const spy = () => { count++; };
+  spy.callCount = () => count;
+  return spy;
+}
+
+describe("LLD-54 — symbolTool: nudgeSelected", () => {
+  it("moves selected symbol by (dx, dy) exactly (no snap applied)", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    const sym = _addSym54(1, 2);
+    selectSymbolLLD54(sym.id);  // establish selection
+    nudgeSelected(0.5, 0.25);
+    expect(sym.x).toBeCloseTo(1.5, 10);
+    expect(sym.y).toBeCloseTo(2.25, 10);
+
+    flushNudge(); // clean up pending timer
+    _resetSyms54();
+  });
+
+  it("is a no-op when nothing is selected", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+    const sym = _addSym54(1, 2);
+    // no selectSymbolLLD54 call → _selectedId stays null
+    nudgeSelected(1, 1);
+    expect(sym.x).toBe(1);
+    expect(sym.y).toBe(2);
+    expect(spy.callCount()).toBe(0);
+    _resetSyms54();
+  });
+
+  it("debounce: N rapid nudgeSelected calls schedule exactly one commit (verified via flushNudge)", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    const sym = _addSym54(0, 0);
+    selectSymbolLLD54(sym.id);
+    // Fire 5 nudges in quick succession — each resets the debounce timer
+    nudgeSelected(0.1, 0);
+    nudgeSelected(0.1, 0);
+    nudgeSelected(0.1, 0);
+    nudgeSelected(0.1, 0);
+    nudgeSelected(0.1, 0);
+    // Symbol has moved 0.5 m total; debounce timer pending but no commit yet
+    expect(spy.callCount()).toBe(0);
+    expect(sym.x).toBeCloseTo(0.5, 10);
+    // Flush the pending timer synchronously — proves exactly one commit pending
+    flushNudge();
+    expect(spy.callCount()).toBe(1);
+    // Flushing again is a no-op (timer cleared)
+    flushNudge();
+    expect(spy.callCount()).toBe(1);
+
+    _resetSyms54();
+  });
+});
+
+describe("LLD-54 — symbolTool: flushNudge", () => {
+  it("is a no-op when no timer is pending", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    flushNudge(); // safe to call with nothing pending
+    expect(spy.callCount()).toBe(0);
+    _resetSyms54();
+  });
+
+  it("calling flushNudge repeatedly with nothing pending remains a no-op", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    flushNudge(); flushNudge(); flushNudge();
+    expect(spy.callCount()).toBe(0);
+    _resetSyms54();
+  });
+
+  it("flushNudge with a pending timer calls _historyCommit exactly once and clears the timer", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    const sym = _addSym54(0, 0);
+    selectSymbolLLD54(sym.id);
+    nudgeSelected(0.1, 0); // schedules a debounced commit
+    expect(spy.callCount()).toBe(0); // not yet committed
+    flushNudge(); // should commit immediately
+    expect(spy.callCount()).toBe(1);
+    // Calling flushNudge again must not commit a second time (timer already cleared)
+    flushNudge();
+    expect(spy.callCount()).toBe(1);
+
+    _resetSyms54();
+  });
+});
+
+describe("LLD-54 — symbolTool: rotateSelected", () => {
+  it("is a no-op when nothing is selected", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+    rotateSelected(90); // nothing selected
+    expect(spy.callCount()).toBe(0);
+    _resetSyms54();
+  });
+
+  it("rotateSelected(90) changes rot by +90 (normalised to [0,360))", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    const sym = _addSym54(0, 0);
+    sym.rot = 0;
+    selectSymbolLLD54(sym.id);
+    rotateSelected(90);
+    expect(sym.rot).toBe(90);
+    expect(spy.callCount()).toBe(1);
+    // Rotate again — 90+90=180
+    rotateSelected(90);
+    expect(sym.rot).toBe(180);
+    // One more — 180+90=270
+    rotateSelected(90);
+    expect(sym.rot).toBe(270);
+    // One more — 270+90=360 normalised to 0
+    rotateSelected(90);
+    expect(sym.rot).toBe(0);
+
+    _resetSyms54();
+  });
+
+  it("rotateSelected(-90) changes rot by -90 (normalised to [0,360))", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    const sym = _addSym54(0, 0);
+    sym.rot = 0;
+    selectSymbolLLD54(sym.id);
+    rotateSelected(-90);
+    // 0 - 90 = -90 → normalised to 270
+    expect(sym.rot).toBe(270);
+    expect(spy.callCount()).toBe(1);
+
+    _resetSyms54();
+  });
+
+  it("rotateSelected flushes a pending nudge before rotating (ordering)", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    const sym = _addSym54(0, 0);
+    selectSymbolLLD54(sym.id);
+    nudgeSelected(0.1, 0); // pending nudge commit
+    expect(spy.callCount()).toBe(0);
+    rotateSelected(90); // must flush nudge first, then commit rotate
+    // spy.callCount should be 2: one for the flushed nudge, one for the rotate
+    expect(spy.callCount()).toBe(2);
+
+    _resetSyms54();
+  });
+});
+
+describe("LLD-54 — symbolTool: deleteSelected/duplicateSelected flush pending nudge", () => {
+  it("deleteSelected flushes a pending nudge before deleting", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    const sym = _addSym54(0, 0);
+    selectSymbolLLD54(sym.id);
+    nudgeSelected(0.1, 0); // pending nudge commit
+    expect(spy.callCount()).toBe(0);
+    deleteSelectedLLD54(); // must flush nudge first (commit for nudge), then commit for delete
+    expect(spy.callCount()).toBe(2);
+
+    _resetSyms54();
+  });
+
+  it("duplicateSelected flushes a pending nudge before duplicating", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    const sym = _addSym54(0, 0);
+    selectSymbolLLD54(sym.id);
+    nudgeSelected(0.1, 0); // pending nudge commit
+    expect(spy.callCount()).toBe(0);
+    duplicateSelectedLLD54(); // must flush nudge first (commit for nudge), then commit for duplicate
+    expect(spy.callCount()).toBe(2);
+
+    _resetSyms54();
+  });
+});
+
+// ─── LLD-54: Esc-to-deselect (overlay parity fix) ────────────────────────────
+
+describe("LLD-54 — Esc deselects selected symbol (onTapEmpty)", () => {
+  it("onTapEmpty clears selection when a symbol is selected", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    const sym = _addSym54(1, 1);
+    selectSymbolLLD54(sym.id);
+    expect(hasSelectionLLD54()).toBe(true);
+
+    onTapEmptyLLD54(); // this is what the Esc handler calls
+    expect(hasSelectionLLD54()).toBe(false);
+
+    _resetSyms54();
+  });
+
+  it("onTapEmpty is a no-op when nothing is selected", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    expect(hasSelectionLLD54()).toBe(false);
+    onTapEmptyLLD54(); // no-op
+    expect(hasSelectionLLD54()).toBe(false);
+
+    _resetSyms54();
+  });
+});
+
+// ─── LLD-54: nudge step helper logic ──────────────────────────────────────────
+
+describe("LLD-54 — nudge step selection logic", () => {
+  it("base step derives from snapStep() when non-null (auto mode)", () => {
+    // snapStep() in "auto" mode returns chooseGridStep(56), which is grid-step-dependent.
+    // At zoom=1 (pxPerM=40), the step should be >= 56/40 = 1.4m → chooseGridStep picks 2m.
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setSnapMode("auto");
+    const step = snapStep();
+    // We just verify it's a positive number
+    if (typeof step !== "number" || step <= 0) throw new Error(`Expected positive step, got ${step}`);
+  });
+
+  it("snapStep() returns null when mode is 'off'", () => {
+    setSnapMode("off");
+    expect(snapStep()).toBe(null);
+    setSnapMode("auto"); // restore
+  });
+
+  it("snapStep() returns fixed value for preset modes", () => {
+    setSnapMode(0.1);
+    expect(snapStep()).toBe(0.1);
+    setSnapMode(0.25);
+    expect(snapStep()).toBe(0.25);
+    setSnapMode("auto"); // restore
+  });
+
+  it("nudge fallback: when snapStep is null, base is 0.1 (verified by manual computation)", () => {
+    // When snap is off, nudge code uses `snapStep() ?? 0.1` → base = 0.1
+    // and Shift multiplies by 4 → 0.4
+    setSnapMode("off");
+    const base = snapStep() ?? 0.1;
+    expect(base).toBe(0.1);
+    const coarse = base * 4;
+    expect(coarse).toBeCloseTo(0.4, 10);
+    setSnapMode("auto"); // restore
+  });
+});
+
+// ─── LLD-54: help.js SHORTCUTS parity ─────────────────────────────────────────
+
+import { SHORTCUTS, renderTableForTest } from "./js/help.js";
+
+// Expected action set — must match every active shortcut exactly
+const EXPECTED_ACTIONS = new Set([
+  "Undo",
+  "Redo",
+  "Delete selected",
+  "Duplicate selected",
+  "Nudge selected",
+  "Coarse nudge",
+  "Rotate 90° CW",
+  "Rotate 90° CCW",
+  "Draw wall",
+  "Select",
+  "Zoom in",
+  "Zoom out",
+  "Reset zoom",
+  "Zoom to fit content",
+  "Toggle snapping",
+  "Free snap (momentary)",
+  "Finish chain",
+  "Remove last point (drawing)",
+  "Toggle shortcuts overlay",
+  "Deselect / cancel",
+]);
+
+describe("LLD-54 — help.SHORTCUTS parity", () => {
+  it("SHORTCUTS is an array with at least 1 entry", () => {
+    if (!Array.isArray(SHORTCUTS) || SHORTCUTS.length === 0) {
+      throw new Error("SHORTCUTS must be a non-empty array");
+    }
+  });
+
+  it("every entry has non-empty mac and other chord strings", () => {
+    for (const entry of SHORTCUTS) {
+      if (!entry.mac || typeof entry.mac !== "string") {
+        throw new Error(`Entry "${entry.action}" has missing/empty mac chord`);
+      }
+      if (!entry.other || typeof entry.other !== "string") {
+        throw new Error(`Entry "${entry.action}" has missing/empty other chord`);
+      }
+    }
+  });
+
+  it("every entry has non-empty action and group strings", () => {
+    for (const entry of SHORTCUTS) {
+      if (!entry.action || typeof entry.action !== "string") {
+        throw new Error(`Entry has missing/empty action`);
+      }
+      if (!entry.group || typeof entry.group !== "string") {
+        throw new Error(`Entry "${entry.action}" has missing/empty group`);
+      }
+    }
+  });
+
+  it("SHORTCUTS action set exactly equals the expected active-shortcut set", () => {
+    const actualActions = new Set(SHORTCUTS.map(e => e.action));
+    for (const expected of EXPECTED_ACTIONS) {
+      if (!actualActions.has(expected)) {
+        throw new Error(`Missing shortcut in SHORTCUTS: "${expected}"`);
+      }
+    }
+    for (const actual of actualActions) {
+      if (!EXPECTED_ACTIONS.has(actual)) {
+        throw new Error(`Unexpected/dead entry in SHORTCUTS: "${actual}"`);
+      }
+    }
+  });
+
+  it("no two entries have the same action string", () => {
+    const seen = new Set();
+    for (const entry of SHORTCUTS) {
+      if (seen.has(entry.action)) {
+        throw new Error(`Duplicate action in SHORTCUTS: "${entry.action}"`);
+      }
+      seen.add(entry.action);
+    }
+  });
+});
+
+describe("LLD-54 — help: _renderTable platform rendering", () => {
+  it("_renderTable(true) populates #help-table-body with rows", () => {
+    // Create a temporary tbody in document
+    let tbody = document.getElementById("help-table-body");
+    if (!tbody) {
+      tbody = document.createElement("tbody");
+      tbody.id = "help-table-body";
+      document.body.appendChild(tbody);
+    }
+    renderTableForTest(true);
+    const rows = tbody.querySelectorAll("tr");
+    if (rows.length === 0) throw new Error("Expected rows after renderTable(true)");
+  });
+
+  it("_renderTable(false) populates #help-table-body with rows", () => {
+    let tbody = document.getElementById("help-table-body");
+    if (!tbody) {
+      tbody = document.createElement("tbody");
+      tbody.id = "help-table-body";
+      document.body.appendChild(tbody);
+    }
+    renderTableForTest(false);
+    const rows = tbody.querySelectorAll("tr");
+    if (rows.length === 0) throw new Error("Expected rows after renderTable(false)");
+  });
+
+  it("mac rendering uses ⌘ for Undo; non-mac uses Ctrl+", () => {
+    let tbody = document.getElementById("help-table-body");
+    if (!tbody) {
+      tbody = document.createElement("tbody");
+      tbody.id = "help-table-body";
+      document.body.appendChild(tbody);
+    }
+    renderTableForTest(true);
+    const macText = tbody.textContent;
+    renderTableForTest(false);
+    const otherText = tbody.textContent;
+    if (!macText.includes("⌘")) throw new Error("Mac table should include ⌘ for Undo");
+    if (!otherText.includes("Ctrl")) throw new Error("Non-mac table should include Ctrl for Undo");
+    // They should be different
+    if (macText === otherText) throw new Error("Mac and non-mac tables should differ");
+  });
+
+  it("number of data rows equals SHORTCUTS.length", () => {
+    let tbody = document.getElementById("help-table-body");
+    if (!tbody) {
+      tbody = document.createElement("tbody");
+      tbody.id = "help-table-body";
+      document.body.appendChild(tbody);
+    }
+    renderTableForTest(false);
+    // Count non-header rows (rows with <td class="help-key">)
+    const dataRows = tbody.querySelectorAll("td.help-key");
+    expect(dataRows.length).toBe(SHORTCUTS.length);
+  });
+});
+
 // ─── Tests: LLD-58 — prefs.js theme extension ─────────────────────────────────
 
 // Note: PREFS_KEY, prefsGridSnap, setGridSnap, toggleGridSnap, onPrefsChange

@@ -10,14 +10,14 @@ import { onChange as onUnitChange } from "./units.js";
 import { init as initSurface, initWallLayer, onRender, resize, render, scheduleRender, W, H } from "./surface.js";
 import { init as initTheme, toggleTheme, getTheme, onThemeChange } from "./theme.js";
 import { init as initHud } from "./hud.js";
-import { init as initInteractions, setDrawHooks, setSelectHooks } from "./interactions.js";
+import { init as initInteractions, setDrawHooks, setSelectHooks, zoomInStep, zoomOutStep, zoomReset } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
 import { init as initWallTool, isDrawMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit } from "./wallTool.js";
 import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from "./measure.js";
 import { init as initDimEntry, reposition as dimReposition, getEditingEdge, setHistoryCommit as dimSetHistoryCommit } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim, setHistoryCommit as symDimSetHistoryCommit } from "./symbolDimEntry.js";
-import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, repositionFlushGuide, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast } from "./symbolTool.js";
+import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, repositionFlushGuide, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast, nudgeSelected, rotateSelected, flushNudge } from "./symbolTool.js";
 import { init as initStore, loadLocal, saveNow } from "./store.js";
 import { readBootHash } from "./share.js";
 import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
@@ -30,10 +30,11 @@ import { getSymbol } from "./symbols.js";
 import { init as initHistory, reset as historyReset, commit as historyCommit, undo as historyUndo, redo as historyRedo, canUndo, canRedo, depth as historyDepth, onChange as historyOnChange } from "./history.js";
 import { init as initHelp } from "./help.js";
 import { initDockTabs } from "./dockTabs.js";
-import { onSnapModeChange } from "./grid.js";
+import { onSnapModeChange, snapStep } from "./grid.js";
 import { init as initClearanceRender, render as clearanceRenderFn } from "./clearanceRender.js";
 import { init as initClearancePanel, update as clearancePanelUpdate } from "./clearancePanel.js";
 import { onChange as onClearanceChange, setEnabled as setClearanceEnabled } from "./clearance.js";
+import { toggleGridSnap } from "./prefs.js";
 
 /** Detect macOS for platform-correct tooltip chords. */
 const _isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
@@ -314,7 +315,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (inspDuplicate) inspDuplicate.title = `Duplicate (${_mod}D)`;
   if (inspDelete)    inspDelete.title    = "Delete (Del)";
 
-  // ── Global editing keyboard shortcuts (LLD-21) ────────────────────────────
+  // ── Global editing keyboard shortcuts (LLD-21, extended LLD-54) ──────────────
   window.addEventListener("keydown", (e) => {
     // Guard: ignore when focus is in an editable element
     const tag = document.activeElement?.tagName;
@@ -325,6 +326,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Undo: Ctrl/Cmd+Z (without Shift) — accept both cases so Caps Lock doesn't break it
     if (meta && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
       e.preventDefault();
+      flushNudge(); // flush pending nudge before undo so stack ordering is correct
       if (historyUndo()) scheduleRender();
       return;
     }
@@ -332,11 +334,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // Redo: Ctrl/Cmd+Shift+Z or Ctrl+Y — accept both cases so Caps Lock doesn't break it
     if (meta && e.shiftKey && (e.key === "z" || e.key === "Z")) {
       e.preventDefault();
+      flushNudge(); // flush pending nudge before redo
       if (historyRedo()) scheduleRender();
       return;
     }
     if (meta && !e.shiftKey && (e.key === "y" || e.key === "Y")) {
       e.preventDefault();
+      flushNudge(); // flush pending nudge before redo
       if (historyRedo()) scheduleRender();
       return;
     }
@@ -345,7 +349,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (meta && (e.key === "d" || e.key === "D")) {
       if (hasSelection()) {
         e.preventDefault();
-        duplicateSelected();
+        duplicateSelected(); // duplicateSelected flushes nudge internally
       }
       // If nothing selected: do NOT preventDefault → browser bookmark allowed
       return;
@@ -363,8 +367,78 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (hasSelection()) {
         e.preventDefault();
-        deleteSelected();
+        deleteSelected(); // deleteSelected flushes nudge internally
       }
+      return;
+    }
+
+    // Esc — deselect selected symbol (LLD-54 extension: symbolTool "extended").
+    // help.js capture-phase listener stops propagation when overlay is open, so
+    // this branch only fires when the overlay is already closed.
+    // wallTool handles Esc for active wall chains in its own bubble-phase listener
+    // (registered earlier); it does not stopPropagation, so we still receive the
+    // event — but we must not deselect when wallTool is about to finish a chain.
+    if (!meta && e.key === "Escape") {
+      if (isDrawMode() && wallsModel.chain.length > 0) {
+        // Let wallTool bubble-phase listener handle chain finish/cancel
+        return;
+      }
+      if (hasSelection()) {
+        e.preventDefault();
+        flushNudge(); // commit any pending nudge before clearing selection
+        onTapEmpty(); // clears selection + hides inspector; no-op if dim edit active
+      }
+      return;
+    }
+
+    // ── New shortcuts (LLD-54) ─────────────────────────────────────────────────
+
+    // Nudge — bare/Shift arrows, only when a symbol is selected and not a chord
+    if (!meta && (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      if (!hasSelection()) return; // let native scroll happen if nothing selected
+      e.preventDefault();
+      const base = snapStep() ?? 0.1; // grid step, fallback 0.1m when snap is off
+      const step = e.shiftKey ? base * 4 : base;
+      let dx = 0, dy = 0;
+      if (e.key === "ArrowUp")    dy = -step;
+      if (e.key === "ArrowDown")  dy =  step;
+      if (e.key === "ArrowLeft")  dx = -step;
+      if (e.key === "ArrowRight") dx =  step;
+      nudgeSelected(dx, dy);
+      return;
+    }
+
+    // Rotate — R (Shift+R = CCW), only with a selection, not a chord
+    if (!meta && (e.key === "r" || e.key === "R")) {
+      if (!hasSelection()) return;
+      e.preventDefault();
+      rotateSelected(e.shiftKey ? -90 : 90); // rotateSelected flushes nudge internally
+      return;
+    }
+
+    // Zoom — + / = (in), - / _ (out), 0 (reset), Shift+1 = fit (US layout: "!")
+    if (!meta && (e.key === "+" || e.key === "=")) { e.preventDefault(); zoomInStep();  return; }
+    if (!meta && (e.key === "-" || e.key === "_")) { e.preventDefault(); zoomOutStep(); return; }
+    if (!meta && e.key === "0")                    { e.preventDefault(); zoomReset();   return; }
+    if (!meta && e.key === "!") {  // Shift+1 on US layouts produces "!"
+      e.preventDefault();
+      const b = contentBounds();
+      if (b) {
+        fitToContent(b, W, H);
+      } else {
+        resetView(W, H);
+      }
+      scheduleRender();
+      return;
+    }
+
+    // Snap toggle — S flips persistent gridSnap pref (coordinate w/ #29)
+    // Only when not a chord (Cmd+S = browser save must pass through)
+    if (!meta && (e.key === "s" || e.key === "S")) {
+      e.preventDefault();
+      const on = toggleGridSnap();
+      showToast(on ? "Snapping on" : "Snapping off");
+      scheduleRender();
       return;
     }
   });
