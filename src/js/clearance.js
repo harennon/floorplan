@@ -41,6 +41,10 @@ export const THRESH_MAX     = 1.20;
 export const THRESH_STEP    = 0.05;
 export const DEFAULT_THRESHOLD = 0.60;
 
+/** Flush tolerance band (metres). Below display precision (1 cm), above FP noise (~1e-16).
+ *  Anything within ±WALL_FLUSH_EPS of a wall inner face is "flush / touching". */
+export const WALL_FLUSH_EPS = 1e-4; // 0.1 mm
+
 // ── Session-only UI state ─────────────────────────────────────────────────────
 // NOT persisted to plan JSON / localStorage / URL hash — clearance is transient
 // inspection state, not part of the drawn plan.
@@ -112,6 +116,25 @@ export function classify(gap) {
   if (gap <= 0) return "bad";
   if (gap < threshold) return "tight";
   return "ok";
+}
+
+/**
+ * Map a signed symbol-edge → wall-inner-face gap to {gap, status}.
+ * Symmetric ±WALL_FLUSH_EPS band around 0 treats "flush/touching" as tight,
+ * so the LLD-26 seat-against-wall success state is never mis-classified as bad.
+ *
+ * faceGap < -WALL_FLUSH_EPS : edge is inside wall body (real overlap) → bad
+ * |faceGap| <= WALL_FLUSH_EPS: flush / touching → tight, gap 0
+ * faceGap >  WALL_FLUSH_EPS : genuine walkway → classify(faceGap)
+ *
+ * Module-private; called only from computeClearances() wall-side blocks.
+ * @param {number} faceGap  signed metres = rawGap - WALL_M/2 (un-clamped)
+ * @returns {{ gap:number, status:ClrStatus }}
+ */
+function wallFaceStatus(faceGap) {
+  if (faceGap < -WALL_FLUSH_EPS) return { gap: 0, status: "bad" };   // inside wall body
+  if (faceGap <=  WALL_FLUSH_EPS) return { gap: 0, status: "tight" }; // flush / touching
+  return { gap: faceGap, status: classify(faceGap) };                // genuine walkway
 }
 
 /**
@@ -280,13 +303,13 @@ export function computeClearances(sym, world) {
       const dRight0 = dLeft === null ? _wallDist(box.l, midY, "right") : null;
       if (dLeft !== null) {
         const rawGap = dLeft;
-        const gap = Math.max(0, rawGap - wallHalf);
+        const { gap, status } = wallFaceStatus(rawGap - wallHalf);
         const bx = box.l - rawGap; // wall centerline x
         results.push({
           label: "left wall",
           kind: "wall",
           gap,
-          status: classify(gap),
+          status,
           a: { x: box.l, y: midY },
           b: { x: bx + wallHalf, y: midY },
         });
@@ -309,13 +332,13 @@ export function computeClearances(sym, world) {
       const dLeft0  = dRight === null ? _wallDist(box.r, midY, "left") : null;
       if (dRight !== null) {
         const rawGap = dRight;
-        const gap = Math.max(0, rawGap - wallHalf);
+        const { gap, status } = wallFaceStatus(rawGap - wallHalf);
         const bx = box.r + rawGap;
         results.push({
           label: "right wall",
           kind: "wall",
           gap,
-          status: classify(gap),
+          status,
           a: { x: box.r, y: midY },
           b: { x: bx - wallHalf, y: midY },
         });
@@ -338,13 +361,13 @@ export function computeClearances(sym, world) {
       const dDown0 = dTop === null ? _wallDist(midX, box.t, "down") : null;
       if (dTop !== null) {
         const rawGap = dTop;
-        const gap = Math.max(0, rawGap - wallHalf);
+        const { gap, status } = wallFaceStatus(rawGap - wallHalf);
         const by = box.t - rawGap;
         results.push({
           label: "top wall",
           kind: "wall",
           gap,
-          status: classify(gap),
+          status,
           a: { x: midX, y: box.t },
           b: { x: midX, y: by + wallHalf },
         });
@@ -367,13 +390,13 @@ export function computeClearances(sym, world) {
       const dUp0    = dBottom === null ? _wallDist(midX, box.b, "up") : null;
       if (dBottom !== null) {
         const rawGap = dBottom;
-        const gap = Math.max(0, rawGap - wallHalf);
+        const { gap, status } = wallFaceStatus(rawGap - wallHalf);
         const by = box.b + rawGap;
         results.push({
           label: "bottom wall",
           kind: "wall",
           gap,
-          status: classify(gap),
+          status,
           a: { x: midX, y: box.b },
           b: { x: midX, y: by - wallHalf },
         });

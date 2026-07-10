@@ -4242,6 +4242,7 @@ describe("LLD-22 — HUD chip label: 0.025 m preset shows correct precision (bug
 import {
   threshold as clrThreshold, density as clrDensity, enabled as clrEnabled,
   THRESH_MIN, THRESH_MAX, THRESH_STEP, DEFAULT_THRESHOLD,
+  WALL_FLUSH_EPS,
   setThreshold, setDensity, setEnabled, onChange as onClrChange,
   classify, aabb as clrAabb, pointInRoom,
   computeClearances, worstStatus,
@@ -4642,6 +4643,146 @@ describe("clearance.js — computeClearances: wall gaps", () => {
     if (!leftWall) throw new Error("Expected left wall gap for straddling sofa (QA repro)");
     expect(leftWall.gap).toBe(0);
     expect(leftWall.status).toBe("bad");
+  });
+});
+
+// ─── Tests: clearance.js — flush-to-wall verdict consistency (LLD 52) ────────
+
+describe("clearance.js — flush-to-wall verdict consistency (LLD 52)", () => {
+  // Helper: place symbol flush against a given wall of a rectangular room.
+  // roomW x roomH room from (0,0). symW x symH symbol.
+  // Returns the clearance for the specified wall side.
+  function flushResult(roomW, roomH, symW, symH, side) {
+    resetClearance();
+    resetSymbolModel();
+    const wh = WALL_M / 2; // inner face offset
+    // Position symbol so its near AABB edge sits exactly on the wall inner face.
+    // In exact arithmetic faceGap = rawGap - wallHalf = 0.
+    // The FP paths diverge, which is the exact bug this test guards against.
+    let cx, cy;
+    switch (side) {
+      case "left":   cx = wh + symW / 2;       cy = roomH / 2; break;
+      case "right":  cx = roomW - wh - symW / 2; cy = roomH / 2; break;
+      case "top":    cx = roomW / 2; cy = wh + symH / 2;       break;
+      case "bottom": cx = roomW / 2; cy = roomH - wh - symH / 2; break;
+    }
+    const room = mkRoom("r0", 0, 0, roomW, roomH);
+    const sym  = mkSym("s0", "sofa", cx, cy, symW, symH, 0);
+    const result = computeClearances(sym, { rooms: [room], symbols: [sym] });
+    return result.find(c => c.kind === "wall" && c.label === side + " wall");
+  }
+
+  it("WALL_FLUSH_EPS exported and is 1e-4", () => {
+    expect(WALL_FLUSH_EPS).toBeCloseTo(1e-4, 9);
+  });
+
+  it("flush to right wall → tight, gap 0 (was: bad — the bug)", () => {
+    const c = flushResult(5, 4, 1, 1, "right");
+    if (!c) throw new Error("No right wall gap found");
+    expect(c.status).toBe("tight");
+    expect(c.gap).toBe(0);
+  });
+
+  it("flush to top wall → tight, gap 0", () => {
+    const c = flushResult(5, 4, 1, 1, "top");
+    if (!c) throw new Error("No top wall gap found");
+    expect(c.status).toBe("tight");
+    expect(c.gap).toBe(0);
+  });
+
+  it("flush to left wall → tight, gap 0", () => {
+    const c = flushResult(5, 4, 1, 1, "left");
+    if (!c) throw new Error("No left wall gap found");
+    expect(c.status).toBe("tight");
+    expect(c.gap).toBe(0);
+  });
+
+  it("flush to bottom wall → tight, gap 0", () => {
+    const c = flushResult(5, 4, 1, 1, "bottom");
+    if (!c) throw new Error("No bottom wall gap found");
+    expect(c.status).toBe("tight");
+    expect(c.gap).toBe(0);
+  });
+
+  it("right wall and top wall both flush → both tight (consistency: the bug was they disagreed)", () => {
+    const right  = flushResult(5, 4, 1, 1, "right");
+    const top    = flushResult(5, 4, 1, 1, "top");
+    if (!right) throw new Error("No right wall gap");
+    if (!top)   throw new Error("No top wall gap");
+    expect(right.status).toBe("tight");
+    expect(top.status).toBe("tight");
+    expect(right.gap).toBe(top.gap); // both 0
+  });
+
+  it("worstStatus for flush-seated symbol is tight, not bad", () => {
+    resetClearance();
+    resetSymbolModel();
+    // 5x4 room, 1x1 symbol flush to right wall — this was the failing case
+    const wh = WALL_M / 2;
+    const room = mkRoom("r0", 0, 0, 5, 4);
+    const sym  = mkSym("s0", "sofa", 5 - wh - 0.5, 2, 1, 1, 0);
+    const result = computeClearances(sym, { rooms: [room], symbols: [sym] });
+    expect(worstStatus(result)).toBe("tight");
+  });
+
+  it("regression: edge 3 cm inside wall body → bad (real overlap not softened)", () => {
+    resetClearance();
+    resetSymbolModel();
+    const WALL_M_LOCAL = 0.12;
+    const wh = WALL_M_LOCAL / 2;
+    // faceGap = (box.r - roomRight_centerline) ... position so right AABB edge is 3cm inside
+    // symbol right edge at roomW_centerline - wh + 0.03 = 5 - 0.06 + 0.03 = 4.97
+    // rawGap to right wall = roomW - box.r = 5 - 4.97 = 0.03
+    // faceGap = 0.03 - 0.06 = -0.03 < -EPS → bad
+    const room = mkRoom("r0", 0, 0, 5, 4);
+    const sym  = mkSym("s0", "sofa", 4.47, 2, 1, 1, 0); // AABB r = 4.47+0.5=4.97
+    const result = computeClearances(sym, { rooms: [room], symbols: [sym] });
+    const rightWall = result.find(c => c.kind === "wall" && c.label === "right wall");
+    if (!rightWall) throw new Error("No right wall gap");
+    expect(rightWall.status).toBe("bad");
+    expect(rightWall.gap).toBe(0);
+  });
+
+  it("negative sub-EPS faceGap (FP noise, symbol nominally flush) → tight not bad", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Simulate a faceGap that is between -WALL_FLUSH_EPS and 0 (right-wall noise case).
+    // We do this by placing the symbol so its AABB right edge is *just* past the wall inner
+    // face by less than EPS. faceGap = rawGap - wallHalf where rawGap < wallHalf but
+    // |faceGap| < EPS.
+    // rawGap = wallHalf - (EPS * 0.5) → faceGap = -(EPS*0.5)
+    const room = mkRoom("r0", 0, 0, 5, 4);
+    const wallHalf = WALL_M / 2;
+    // box.r = 5 - rawGap = 5 - (wallHalf - WALL_FLUSH_EPS * 0.5)
+    const rawGap = wallHalf - WALL_FLUSH_EPS * 0.5;
+    const boxR = 5 - rawGap;
+    const symCx = boxR - 0.5; // w=1, so cx = boxR - 0.5
+    const sym = mkSym("s0", "sofa", symCx, 2, 1, 1, 0);
+    const result = computeClearances(sym, { rooms: [room], symbols: [sym] });
+    const rightWall = result.find(c => c.kind === "wall" && c.label === "right wall");
+    if (!rightWall) throw new Error("No right wall gap");
+    expect(rightWall.status).toBe("tight");
+    expect(rightWall.gap).toBe(0);
+  });
+
+  it("classify() unchanged: classify(0) → bad, classify(-0.1) → bad, classify(0.01) → tight", () => {
+    setThreshold(0.60);
+    expect(classify(0)).toBe("bad");
+    expect(classify(-0.1)).toBe("bad");
+    expect(classify(0.01)).toBe("tight");
+  });
+
+  it("true walkway gap unchanged: sofa 4m from wall → gap 3.94 ok/tight", () => {
+    resetClearance();
+    resetSymbolModel();
+    const WALL_M_LOCAL = 0.12;
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    // sofa at (5,4), w=2, h=1 → left AABB at x=4; raw gap to left wall = 4; face gap = 3.94
+    const sofa = mkSym("s0", "sofa", 5, 4, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const leftWall = result.find(c => c.kind === "wall" && c.label === "left wall");
+    if (!leftWall) throw new Error("No left wall gap");
+    expect(leftWall.gap).toBeCloseTo(4 - WALL_M_LOCAL / 2, 5);
   });
 });
 
@@ -5235,6 +5376,142 @@ describe("clearancePanel — empty state prompts", () => {
       throw new Error("Expected 'Nothing nearby to measure.' prompt");
 
     symbolModel.symbols.length = 0;
+    rig.cleanup();
+  });
+});
+
+// ─── Integration: LLD-52 — chip and panel row guard (flush gap renders 0.0 not overlap) ──
+
+describe("LLD-52 — chip renders 0.0 for flush gap (status tight, gap 0)", () => {
+  it("flush clearance (gap:0, status:tight) chip shows '0.00 m', not 'overlap'", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // Place symbol flush to right wall in a 5x4 room (the original bug scenario)
+    const wh = WALL_M / 2;
+    const room = mkRoom("r0", 0, 0, 5, 4);
+    const sym  = mkSym("s0", "sofa", 5 - wh - 0.5, 2, 1, 1, 0);
+
+    const rig = makeRenderRig();
+    const savedRooms = model.rooms.slice();
+    model.rooms.length = 0;
+    model.rooms.push(room);
+
+    setDensity("all"); // annotate all gaps so the flush gap chip is drawn
+    initClearanceRender(rig.gClearance, rig.overlay, () => "s0", () => sym);
+    clrRender();
+
+    const chips = rig.overlay.querySelectorAll(".clr-chip");
+    if (chips.length === 0) throw new Error("Expected chip nodes");
+
+    // Find the chip that corresponds to the right wall (closest to symbol right edge)
+    // All chips should show a numeric value, none should say "overlap" for the flush side
+    const overlapChip = Array.from(chips).find(el => el.textContent.trim() === "overlap");
+    if (overlapChip) throw new Error("Flush gap chip showed 'overlap'; expected '0.00 m'");
+
+    // The flush gap chip must show "0.00" (followed by the unit with possibly non-breaking space)
+    const zeroChip = Array.from(chips).find(el => el.textContent.trim().startsWith("0.00"));
+    if (!zeroChip) throw new Error("Expected a chip with '0.00 m' for the flush gap");
+
+    model.rooms.length = 0;
+    for (const r of savedRooms) model.rooms.push(r);
+    rig.cleanup();
+  });
+
+  it("bad clearance (gap:0, status:bad) chip still shows 'overlap'", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // Place symbol 3 cm inside the right wall (real overlap, faceGap=-0.03)
+    const room = mkRoom("r0", 0, 0, 5, 4);
+    // box.r at 4.97 → rawGap=0.03, faceGap=0.03-0.06=-0.03 < -EPS → bad
+    const sym  = mkSym("s0", "sofa", 4.47, 2, 1, 1, 0);
+
+    const rig = makeRenderRig();
+    const savedRooms = model.rooms.slice();
+    model.rooms.length = 0;
+    model.rooms.push(room);
+
+    setDensity("all");
+    initClearanceRender(rig.gClearance, rig.overlay, () => "s0", () => sym);
+    clrRender();
+
+    const chips = rig.overlay.querySelectorAll(".clr-chip");
+    const overlapChip = Array.from(chips).find(el => el.textContent.trim() === "overlap");
+    if (!overlapChip) throw new Error("Expected 'overlap' chip for a real overlap (status:bad)");
+
+    model.rooms.length = 0;
+    for (const r of savedRooms) model.rooms.push(r);
+    rig.cleanup();
+  });
+});
+
+describe("LLD-52 — panel row renders 0.00 m for flush gap (status tight, gap 0)", () => {
+  it("flush clearance panel row shows '0.00 m', not 'overlap'", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+
+    const wh = WALL_M / 2;
+    const room = mkRoom("r0", 0, 0, 5, 4);
+    const sym  = mkSym("s0", "sofa", 5 - wh - 0.5, 2, 1, 1, 0);
+
+    const savedRooms = model.rooms.slice();
+    model.rooms.length = 0;
+    model.rooms.push(room);
+
+    const rig = makePanelRig();
+    initClearancePanel({
+      panel: rig.panel, body: rig.body, toggle: rig.toggle,
+      getSelectedId: () => "s0",
+      getSymbol: () => sym,
+    });
+    clrPanelUpdate();
+
+    const rowVals = rig.body.querySelectorAll(".clr-row-val");
+    if (rowVals.length === 0) throw new Error("Expected row value elements");
+
+    const overlapRow = Array.from(rowVals).find(el => el.textContent.trim() === "overlap");
+    if (overlapRow) throw new Error("Panel row showed 'overlap' for flush gap; expected '0.00 m'");
+
+    const zeroRow = Array.from(rowVals).find(el => el.textContent.trim().startsWith("0.00"));
+    if (!zeroRow) throw new Error("Expected a panel row with '0.00 m' for the flush gap");
+
+    model.rooms.length = 0;
+    for (const r of savedRooms) model.rooms.push(r);
+    rig.cleanup();
+  });
+
+  it("bad clearance panel row still shows 'overlap'", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+
+    const room = mkRoom("r0", 0, 0, 5, 4);
+    const sym  = mkSym("s0", "sofa", 4.47, 2, 1, 1, 0); // 3cm inside right wall
+
+    const savedRooms = model.rooms.slice();
+    model.rooms.length = 0;
+    model.rooms.push(room);
+
+    const rig = makePanelRig();
+    initClearancePanel({
+      panel: rig.panel, body: rig.body, toggle: rig.toggle,
+      getSelectedId: () => "s0",
+      getSymbol: () => sym,
+    });
+    clrPanelUpdate();
+
+    const rowVals = rig.body.querySelectorAll(".clr-row-val");
+    const overlapRow = Array.from(rowVals).find(el => el.textContent.trim() === "overlap");
+    if (!overlapRow) throw new Error("Expected 'overlap' row for real overlap (status:bad)");
+
+    model.rooms.length = 0;
+    for (const r of savedRooms) model.rooms.push(r);
     rig.cleanup();
   });
 });
