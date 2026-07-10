@@ -274,22 +274,12 @@
         color: var(--ink);
       }
 
-      /* Theme toggle pill — to the left of the unit toggle */
+      /* Theme toggle pill — flex sibling inside .actions-cluster */
       .theme-toggle {
-        position: absolute;
-        top: 1.25rem;
-        right: calc(1.25rem + 9.5rem + 0.5rem + 5.5rem); /* left of unit toggle */
-        background: var(--panel);
-        border: 1px solid var(--hairline);
+        /* inherits background/border/font/padding/border-radius/cursor/transition/backdrop from
+           .actions-cluster button; override only what differs */
         color: var(--muted);
-        font-family: var(--font-mono);
-        font-size: 0.85rem;
-        padding: 0.25rem 0.6rem;
-        border-radius: 100px;
-        cursor: pointer;
-        transition: color 0.15s, border-color 0.15s;
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
+        font-size: 0.85rem; /* slightly larger for the sun/moon glyph */
         line-height: 1;
       }
       .theme-toggle:hover {
@@ -1927,16 +1917,16 @@
             <button data-action="reset" class="menu-destructive" role="menuitem">Reset plan…</button>
           </div>
         </div>
-      </div>
 
-      <!-- Theme toggle -->
-      <button
-        id="btn-theme-toggle"
-        class="theme-toggle"
-        aria-label="Switch to light mode"
-        aria-pressed="false"
-        title="Toggle light/dark theme"
-      >☀</button>
+        <!-- Theme toggle — flex sibling inside the cluster -->
+        <button
+          id="btn-theme-toggle"
+          class="theme-toggle"
+          aria-label="Switch to light mode"
+          aria-pressed="false"
+          title="Toggle light/dark theme"
+        >☀</button>
+      </div>
 
       <!-- Unit toggle -->
       <div class="unit-toggle" role="group" aria-label="Unit system">
