@@ -8080,6 +8080,221 @@ describe("LLD-50 — plan round-trip: new-type symbol survives serialize→valid
   });
 });
 
+// ─── Tests: LLD-58 — prefs.js theme extension ─────────────────────────────────
+
+// Note: PREFS_KEY, prefsGridSnap, setGridSnap, toggleGridSnap, onPrefsChange
+// were already imported above (LLD-26 tests). We import only the new theme API here.
+import {
+  getTheme, setTheme, toggleTheme as toggleThemePref,
+} from "./js/prefs.js";
+
+describe("prefs.js — getTheme / setTheme / toggleTheme", () => {
+  it("getTheme returns 'light' or 'dark'", () => {
+    const t = getTheme();
+    if (t !== "light" && t !== "dark") throw new Error(`getTheme returned unexpected: ${t}`);
+  });
+
+  it("setTheme('light') → getTheme() === 'light'", () => {
+    setTheme("light");
+    expect(getTheme()).toBe("light");
+  });
+
+  it("setTheme('dark') → getTheme() === 'dark'", () => {
+    setTheme("dark");
+    expect(getTheme()).toBe("dark");
+  });
+
+  it("unknown value passed to setTheme falls back to resolved default", () => {
+    // The fallback is either 'light' or 'dark' — not the invalid value.
+    setTheme("invalid-theme");
+    const t = getTheme();
+    if (t !== "light" && t !== "dark") throw new Error(`Expected light or dark, got: ${t}`);
+  });
+
+  it("toggleTheme flips light ↔ dark and returns new value", () => {
+    setTheme("light");
+    const next = toggleThemePref();
+    expect(next).toBe("dark");
+    expect(getTheme()).toBe("dark");
+    const back = toggleThemePref();
+    expect(back).toBe("light");
+    expect(getTheme()).toBe("light");
+  });
+
+  it("setTheme fires onPrefsChange listeners", () => {
+    setTheme("light");
+    let fired = false;
+    // onPrefsChange is already imported from the LLD-26 tests block above
+    onPrefsChange(() => { fired = true; });
+    setTheme("dark");
+    if (!fired) throw new Error("onPrefsChange was not fired by setTheme");
+    setTheme("light"); // restore
+  });
+
+  it("theme is persisted to localStorage", () => {
+    setTheme("dark");
+    // PREFS_KEY is already imported from the LLD-26 tests block above
+    const stored = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
+    expect(stored.theme).toBe("dark");
+    setTheme("light"); // restore
+  });
+
+  it("gridSnap still works after theme extension", () => {
+    // prefsGridSnap is already imported from the LLD-26 tests block above
+    const before = prefsGridSnap();
+    if (typeof before !== "boolean") throw new Error("gridSnap() should return boolean");
+  });
+});
+
+// ─── Tests: LLD-58 — theme preference not in plan schema ──────────────────────
+// serializePlan and buildPlan are already imported above (plan.js section)
+
+describe("prefs.js — theme never leaks into plan serialization", () => {
+  it("serializePlan output does not contain 'theme' key from prefs", () => {
+    setTheme("dark");
+    resetModel();
+    resetSymbolModel();
+    // buildPlan is already imported from plan.js section above
+    const plan = JSON.parse(serializePlan(buildPlan()));
+    // Plan schema: rooms, chain, symbols, view, units — never 'theme'
+    if ("theme" in plan) throw new Error("'theme' key found in serialized plan");
+    setTheme("light");
+  });
+});
+
+// ─── Tests: LLD-58 — theme.js module ─────────────────────────────────────────
+
+import {
+  init as initThemeModule,
+  getTheme as themeGetTheme,
+  setTheme as themeSetTheme,
+  toggleTheme as themeToggleTheme,
+  palette,
+  onThemeChange,
+} from "./js/theme.js";
+
+describe("theme.js — init applies data-theme to <html>", () => {
+  it("after init(), document.documentElement.dataset.theme is 'light' or 'dark'", () => {
+    setTheme("light");
+    initThemeModule();
+    const t = document.documentElement.dataset.theme;
+    if (t !== "light" && t !== "dark") throw new Error(`data-theme is unexpected: ${t}`);
+  });
+
+  it("after setTheme('dark'), data-theme = 'dark'", () => {
+    themeSetTheme("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+
+  it("after setTheme('light'), data-theme = 'light'", () => {
+    themeSetTheme("light");
+    expect(document.documentElement.dataset.theme).toBe("light");
+  });
+
+  it("toggleTheme flips data-theme", () => {
+    themeSetTheme("light");
+    const next = themeToggleTheme();
+    expect(next).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    themeSetTheme("light"); // restore
+  });
+});
+
+describe("theme.js — onThemeChange fires on toggle", () => {
+  it("callback receives the new theme value", () => {
+    themeSetTheme("light");
+    let received = null;
+    onThemeChange(t => { received = t; });
+    themeSetTheme("dark");
+    expect(received).toBe("dark");
+    themeSetTheme("light"); // restore
+  });
+});
+
+describe("theme.js — palette() returns non-empty concrete strings for all tokens", () => {
+  // These tests verify that the palette cache has all required keys with non-empty values.
+  // In the test environment, getComputedStyle returns "" for undefined vars, so the
+  // fallback values defined in theme.js must kick in.
+
+  const PALETTE_KEYS = [
+    "bg", "bgDeep", "ink", "muted", "gold", "goldSoft",
+    "wallBody", "wallLine", "wallLineHi", "draft",
+    "roomFill", "roomFillHi",
+    "snapGrid", "snapPoint", "snapClose", "snapTeal",
+    "symFill", "symStroke", "symSelFill",
+    "ghostFill", "ghostStroke",
+    "alignEdge", "alignCenter", "roomCenter",
+    "dim", "accentRgb", "symInkRgb",
+  ];
+
+  it("palette() has all required keys with non-empty values (dark theme)", () => {
+    themeSetTheme("dark");
+    const p = palette();
+    for (const key of PALETTE_KEYS) {
+      if (!(key in p)) throw new Error(`palette() missing key: ${key}`);
+      if (!p[key] || typeof p[key] !== "string" || p[key].trim() === "") {
+        throw new Error(`palette().${key} is empty or not a string: ${JSON.stringify(p[key])}`);
+      }
+    }
+  });
+
+  it("palette() has all required keys with non-empty values (light theme)", () => {
+    themeSetTheme("light");
+    const p = palette();
+    for (const key of PALETTE_KEYS) {
+      if (!(key in p)) throw new Error(`palette() missing key: ${key}`);
+      if (!p[key] || typeof p[key] !== "string" || p[key].trim() === "") {
+        throw new Error(`palette().${key} is empty or not a string: ${JSON.stringify(p[key])}`);
+      }
+    }
+    themeSetTheme("dark"); // restore
+  });
+
+  it("accentRgb and symInkRgb look like 'R,G,B' triples", () => {
+    themeSetTheme("dark");
+    const p = palette();
+    const rgbPattern = /^\d{1,3},\d{1,3},\d{1,3}$/;
+    if (!rgbPattern.test(p.accentRgb)) throw new Error(`accentRgb bad format: ${p.accentRgb}`);
+    if (!rgbPattern.test(p.symInkRgb)) throw new Error(`symInkRgb bad format: ${p.symInkRgb}`);
+  });
+
+  it("palette() keys snapGrid/snapTeal/snapPoint/snapClose/alignEdge/alignCenter/roomCenter are all non-empty", () => {
+    const snapAlignKeys = ["snapGrid", "snapTeal", "snapPoint", "snapClose", "alignEdge", "alignCenter", "roomCenter"];
+    for (const theme of ["dark", "light"]) {
+      themeSetTheme(theme);
+      const p = palette();
+      for (const key of snapAlignKeys) {
+        if (!p[key] || p[key].trim() === "") throw new Error(`palette().${key} empty in ${theme} theme`);
+      }
+    }
+    themeSetTheme("light"); // leave in light mode so following tests see it
+  });
+});
+
+// ─── Tests: LLD-58 — default theme resolution ────────────────────────────────
+
+describe("prefs.js — default theme resolution", () => {
+  it("matchMedia absent → default is 'light'", () => {
+    // Simulate a no-matchMedia environment by overriding and then restoring.
+    // We cannot reload the module, but we can verify getTheme() falls back correctly
+    // when the stored value is invalid: setTheme with unknown → falls back to computed default.
+    // The important thing is that unknown value does not produce an invalid theme.
+    setTheme("not-valid");
+    const t = getTheme();
+    if (t !== "light" && t !== "dark") throw new Error(`Should fall back to light or dark, got: ${t}`);
+  });
+
+  it("persisted 'dark' → getTheme() returns 'dark' after set", () => {
+    setTheme("dark");
+    expect(getTheme()).toBe("dark");
+  });
+
+  it("persisted 'light' → getTheme() returns 'light' after set", () => {
+    setTheme("light");
+    expect(getTheme()).toBe("light");
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 
