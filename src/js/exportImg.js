@@ -127,7 +127,7 @@ export function buildExportSvg() {
       const mx = wx((a.x + b.x) / 2);
       const my = wy((a.y + b.y) / 2);
       const labelText = `${fmtLen(len)} ${unitLabel()}`;
-      body += `<text x="${mx}" y="${my}" font-family=${JSON.stringify(FONT_FAMILY)} font-size="10" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(labelText)}</text>\n`;
+      body += `<text x="${mx}" y="${my}" font-family='${FONT_FAMILY}' font-size="10" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(labelText)}</text>\n`;
     }
   }
 
@@ -145,7 +145,7 @@ export function buildExportSvg() {
 
     // Type label at center
     const label = CATALOG[sym.type]?.label || sym.type;
-    body += `<text x="${wx(sym.x)}" y="${wy(sym.y)}" font-family=${JSON.stringify(FONT_FAMILY)} font-size="9" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(label)}</text>\n`;
+    body += `<text x="${wx(sym.x)}" y="${wy(sym.y)}" font-family='${FONT_FAMILY}' font-size="9" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(label)}</text>\n`;
   }
 
   return [
