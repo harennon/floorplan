@@ -28,14 +28,18 @@ import {
   getSymbol,
   aabb,
   CATALOG,
-  DEFAULT_THRESHOLD,
-  THRESH_MIN,
-  THRESH_MAX,
   encodePlanToHash,
   serializePlan,
 } from "./core.js";
 import * as session from "./session.js";
-import { getBrief, setBrief } from "./brief.js";
+import {
+  getBrief,
+  setBrief,
+  MCP_WALKWAY_MIN,
+  MCP_WALKWAY_MAX,
+  MCP_WALKWAY_DEFAULT,
+  WALKWAY_RANGE_MSG,
+} from "./brief.js";
 import { buildClearanceReport } from "./feedback.js";
 import { savePlanFile } from "./io.js";
 
@@ -288,8 +292,8 @@ export function tool_get_metrics() {
 
 /**
  * Effective threshold for an evaluator call: explicit override, else brief's
- * minWalkwayM, else DEFAULT_THRESHOLD. Range-checked (M1) — out of range returns
- * a reason instead of a threshold.
+ * minWalkwayM, else MCP_WALKWAY_DEFAULT. Range-checked (M1) against the grounded
+ * MCP walkway range — out of range returns a reason instead of a threshold.
  * @returns {{thresholdM:number}|{error:string}}
  */
 function resolveThreshold(minWalkwayM) {
@@ -298,10 +302,10 @@ function resolveThreshold(minWalkwayM) {
     thr = minWalkwayM;
   } else {
     const brief = getBrief();
-    thr = brief ? brief.minWalkwayM : DEFAULT_THRESHOLD;
+    thr = brief ? brief.minWalkwayM : MCP_WALKWAY_DEFAULT;
   }
-  if (!isFiniteNum(thr) || thr < THRESH_MIN || thr > THRESH_MAX) {
-    return { error: "walkway must be 0.30–1.20 m" };
+  if (!isFiniteNum(thr) || thr < MCP_WALKWAY_MIN || thr > MCP_WALKWAY_MAX) {
+    return { error: WALKWAY_RANGE_MSG };
   }
   return { thresholdM: thr };
 }
@@ -320,8 +324,8 @@ export function tool_check_clearance(args) {
 /** Compact single-symbol clearance readout used by mutators. */
 function singleClearance(id) {
   const brief = getBrief();
-  // brief.js already guarantees minWalkwayM ∈ [THRESH_MIN, THRESH_MAX] (M1).
-  const thr = brief ? brief.minWalkwayM : DEFAULT_THRESHOLD;
+  // brief.js already guarantees minWalkwayM ∈ [MCP_WALKWAY_MIN, MCP_WALKWAY_MAX] (M1).
+  const thr = brief ? brief.minWalkwayM : MCP_WALKWAY_DEFAULT;
   const report = buildClearanceReport(world(), thr, id, aabb, getSymbol);
   const item = report.items[0] || null;
   return {

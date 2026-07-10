@@ -14,25 +14,26 @@ import { validatePlan, encodePlanToHash, decodeHashToPlan } from "../src/core.js
 
 beforeEach(() => session.resetAll());
 
-test("headline convergence: 5×7 studio, bed+desk+sofa, 60 cm → satisfied", () => {
-  // 1. Brief.
+test("headline convergence: 7×9 studio, bed+desk+sofa, 80 cm → satisfied", () => {
+  // 1. Brief. Walkway 0.8 m sits inside the grounded MCP range (0.76–1.20 m); the
+  // 7×9 room gives comfortable slack so a greedy suggestedMove resolver converges.
   const brief = tools.tool_set_brief({
-    room: { w: 5, h: 7 },
+    room: { w: 7, h: 9 },
     furniture: [{ type: "bed" }, { type: "desk" }, { type: "sofa" }],
-    minWalkwayM: 0.6,
+    minWalkwayM: 0.8,
   });
   assert.equal(brief.ok, true);
 
   // 2. Room FIRST at exact brief dims (M2 sequencing).
-  const room = tools.tool_add_room({ rect: { x: 0, y: 0, w: 5, h: 7 } });
+  const room = tools.tool_add_room({ rect: { x: 0, y: 0, w: 7, h: 9 } });
   assert.equal(room.ok, true);
 
-  // 3. Place the three pieces stacked toward the left in y-order, deliberately
-  // too close (sub-threshold positive gaps between them) but resolvable by
-  // translation — the intended "nudge me apart" start, not a hopeless pile-up.
-  const bed = tools.tool_place_symbol({ type: "bed", x: 1.5, y: 2.2 }).id;
-  const sofa = tools.tool_place_symbol({ type: "sofa", x: 1.6, y: 3.9 }).id;
-  const desk = tools.tool_place_symbol({ type: "desk", x: 1.4, y: 4.85 }).id;
+  // 3. Place the three pieces spread in x and y, deliberately too close
+  // (sub-threshold positive gaps between them) but resolvable by translation —
+  // the intended "nudge me apart" start, not a hopeless pile-up.
+  const bed = tools.tool_place_symbol({ type: "bed", x: 2.0, y: 2.0 }).id;
+  const sofa = tools.tool_place_symbol({ type: "sofa", x: 4.5, y: 5.0 }).id;
+  const desk = tools.tool_place_symbol({ type: "desk", x: 2.5, y: 6.5 }).id;
   assert.ok(bed && desk && sofa);
   // Sanity: the start is genuinely unsatisfied (something to converge from).
   assert.equal(tools.tool_check_brief().satisfied, false);
@@ -66,11 +67,38 @@ test("headline convergence: 5×7 studio, bed+desk+sofa, 60 cm → satisfied", ()
   assert.equal(finalRep.worstStatus, "ok");
 });
 
+test("snug convergence near the walkway floor: bed+desk in 6×7 @ 0.8 m → satisfied", () => {
+  // Guards the "genuinely tight, still converges" property near the grounded 0.76 m
+  // floor (the old 5×7 @ 0.6 headline can't run — 0.6 is now rejected). Bed+desk
+  // start stacked and too close; a single nudge-apart must satisfy at 0.8 m.
+  const brief = tools.tool_set_brief({
+    room: { w: 6, h: 7 },
+    furniture: [{ type: "bed" }, { type: "desk" }],
+    minWalkwayM: 0.8,
+  });
+  assert.equal(brief.ok, true);
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 6, h: 7 } });
+  const bed = tools.tool_place_symbol({ type: "bed", x: 3.0, y: 2.5 }).id;
+  const desk = tools.tool_place_symbol({ type: "desk", x: 3.0, y: 4.0 }).id;
+  assert.ok(bed && desk);
+  assert.equal(tools.tool_check_brief().satisfied, false, "starts genuinely tight");
+
+  let done = false;
+  for (let i = 0; i < 40; i++) {
+    if (tools.tool_check_brief().satisfied) { done = true; break; }
+    const rep = tools.tool_check_clearance({});
+    const t = rep.items.find((it) => it.suggestedMove && it.worstStatus !== "ok");
+    assert.ok(t, `no suggestedMove but unsatisfied: ${JSON.stringify(tools.tool_check_brief().unmet)}`);
+    assert.equal(tools.tool_move_symbol({ id: t.id, x: t.suggestedMove.toX, y: t.suggestedMove.toY }).ok, true);
+  }
+  assert.ok(done, "snug layout converges near the walkway floor");
+});
+
 test("boxed-in adversarial (pinned flush left): first report is infeasible, no oscillation", () => {
   tools.tool_set_brief({
     room: { w: 4, h: 12 },
     furniture: [{ type: "sofa" }, { type: "desk" }],
-    minWalkwayM: 0.6,
+    minWalkwayM: 0.8,
   });
   tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 12 } });
   // Sofa pinned FLUSH against the left wall (NOT centered) — box 0.1..2.1.
@@ -103,7 +131,7 @@ test("boxed-in adversarial (pinned flush left): first report is infeasible, no o
 });
 
 test("regression: dumped plan has exactly the plan.js key set (no brief/threshold leakage)", () => {
-  tools.tool_set_brief({ room: { w: 5, h: 7 }, furniture: [{ type: "bed" }], minWalkwayM: 0.7 });
+  tools.tool_set_brief({ room: { w: 5, h: 7 }, furniture: [{ type: "bed" }], minWalkwayM: 0.8 });
   tools.tool_add_room({ rect: { x: 0, y: 0, w: 5, h: 7 } });
   tools.tool_place_symbol({ type: "bed", x: 2.5, y: 3.5 });
   const doc = tools.tool_get_plan().document;

@@ -16,12 +16,25 @@ import * as session from "./session.js";
 import { getBrief } from "./brief.js";
 import { CATALOG, serializePlan } from "./core.js";
 
-/** Wrap a handler's plain-object result as an MCP tool result. */
-function asResult(obj) {
-  return {
+/**
+ * Wrap a handler's plain-object result as an MCP tool result.
+ *
+ * A genuine execution/input failure — every failure path returns `{ ok:false }`
+ * (unknown id, degenerate geometry, unknown type, out-of-range walkway) — is
+ * flagged `isError:true` per the MCP spec so a text-only client surfaces it as an
+ * error. A negative *verdict* (`check_brief`/`check_clearance` returning
+ * `{ satisfied:false }` with NO `ok` field) is an expected result of a successful
+ * evaluation, so it stays a normal (non-error) result. The SDK skips outputSchema
+ * validation for isError results, so each tool's outputSchema need only describe
+ * its success shape.
+ */
+export function asResult(obj) {
+  const res = {
     content: [{ type: "text", text: JSON.stringify(obj) }],
     structuredContent: obj,
   };
+  if (obj && obj.ok === false) res.isError = true;
+  return res;
 }
 
 export function buildServer() {
@@ -32,9 +45,55 @@ export function buildServer() {
 
   const vec = { x: z.number(), y: z.number() };
 
+  // Coordinate frame every tool uses (screen coords, y-DOWN). Appended to each
+  // coordinate-taking tool's description so the agent picks x/y in the right
+  // frame — it is inverted vs the usual y-up math convention, so "up" = smaller y.
+  const FRAME =
+    " Coords are metres in screen space: +x=right, +y=DOWN, origin top-left; to " +
+    "move toward the TOP of the plan DECREASE y; rotation is degrees CLOCKWISE.";
+
+  // ── Evaluator output schemas ──────────────────────────────────────────────
+  // Describe each evaluator's SUCCESS shape so clients can validate/introspect
+  // the rich feedback the loop depends on. Failure results carry `ok:false` →
+  // isError → the SDK skips output validation, so these need only match success.
+  // Nested arrays (gaps/items) are intentionally loose (`.passthrough()`) to keep
+  // the contract on the fields the agent acts on without over-constraining a
+  // prototype's internal shapes.
+  const metricsOutput = {
+    rooms: z.array(z.object({
+      id: z.string(), areaM2: z.number(), perimeterM: z.number(), closed: z.boolean(),
+    })),
+    totals: z.object({ areaM2: z.number(), perimeterM: z.number() }),
+  };
+
+  const clearanceItem = z.object({
+    id: z.string(),
+    label: z.string(),
+    worstStatus: z.enum(["ok", "tight", "bad"]),
+    center: z.object(vec),
+    gaps: z.array(z.object({}).passthrough()),
+    suggestedMove: z.object({ toX: z.number(), toY: z.number() }).nullable(),
+    boxedInAxes: z.array(z.enum(["x", "y"])),
+    outsideRoom: z.boolean().optional(),
+  }).passthrough();
+
+  const clearanceOutput = {
+    thresholdM: z.number(),
+    satisfied: z.boolean(),
+    worstStatus: z.enum(["ok", "tight", "bad"]),
+    axisConvention: z.string(),
+    items: z.array(clearanceItem),
+    violations: z.array(z.string()),
+  };
+
+  const briefOutput = {
+    satisfied: z.boolean(),
+    unmet: z.array(z.string()),
+  };
+
   // ── Session / lifecycle ───────────────────────────────────────────────────
   server.registerTool("set_brief", {
-    description: "Set the design requirements (target room dims, required furniture, min walkway metres) the agent will try to satisfy.",
+    description: "Set the design requirements (target room dims, required furniture, min walkway metres) the agent will try to satisfy. minWalkwayM is a real passage width: 0.76–1.20 m, default 0.915 m (36 in — ADA §403.5.1 accessible route / IRC §R311.6 hallway); below 0.76 m is a between-furniture gap, not a walkway.",
     inputSchema: {
       room: z.object({ w: z.number(), h: z.number() }).optional(),
       furniture: z.array(z.object({ type: z.string(), count: z.number().int().optional() })).optional(),
@@ -69,7 +128,7 @@ export function buildServer() {
 
   // ── Mutators ──────────────────────────────────────────────────────────────
   server.registerTool("add_room", {
-    description: "Add a closed room. Provide rect:{x,y,w,h} (top-left origin) or verts:[{x,y},…] (≥3). Returns the room id and metrics.",
+    description: "Add a closed room. Provide rect:{x,y,w,h} (top-left origin) or verts:[{x,y},…] (≥3). Returns the room id and metrics." + FRAME,
     inputSchema: {
       rect: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
       verts: z.array(z.object(vec)).optional(),
@@ -82,7 +141,7 @@ export function buildServer() {
   }, (args) => asResult(tools.tool_set_edge_length(args)));
 
   server.registerTool("place_symbol", {
-    description: "Place a furniture/opening symbol at center (x,y). Optional w,h,rot; dims are clamped to the catalog range.",
+    description: "Place a furniture/opening symbol at center (x,y). Optional w,h,rot; dims are clamped to the catalog range." + FRAME,
     inputSchema: {
       type: z.string(),
       x: z.number(),
@@ -94,7 +153,7 @@ export function buildServer() {
   }, (args) => asResult(tools.tool_place_symbol(args)));
 
   server.registerTool("move_symbol", {
-    description: "Move a symbol's center to (x,y). Returns fresh clearance for it.",
+    description: "Move a symbol's center to (x,y). Returns fresh clearance for it." + FRAME,
     inputSchema: { id: z.string(), x: z.number(), y: z.number() },
   }, (args) => asResult(tools.tool_move_symbol(args)));
 
@@ -104,7 +163,7 @@ export function buildServer() {
   }, (args) => asResult(tools.tool_resize_symbol(args)));
 
   server.registerTool("rotate_symbol", {
-    description: "Rotate a symbol to deg (normalised to [0,360)).",
+    description: "Rotate a symbol to deg (normalised to [0,360)); degrees are CLOCKWISE in screen coords (y-down).",
     inputSchema: { id: z.string(), deg: z.number() },
   }, (args) => asResult(tools.tool_rotate_symbol(args)));
 
@@ -122,16 +181,19 @@ export function buildServer() {
   server.registerTool("get_metrics", {
     description: "Per-room area (m²) and perimeter (m), plus totals.",
     inputSchema: {},
+    outputSchema: metricsOutput,
   }, () => asResult(tools.tool_get_metrics()));
 
   server.registerTool("check_clearance", {
-    description: "Evaluate walkway clearance for furniture. Returns per-gap centimetres, a direction to move, a resolved suggestedMove, boxed-in axes, and NL violations. minWalkwayM overrides the brief's threshold.",
+    description: "Evaluate walkway clearance for furniture. Returns per-gap centimetres, a direction to move, a resolved suggestedMove, boxed-in axes, and NL violations. minWalkwayM (0.76–1.20 m, default 0.915 m) overrides the brief's threshold.",
     inputSchema: { id: z.string().optional(), minWalkwayM: z.number().optional() },
+    outputSchema: clearanceOutput,
   }, (args) => asResult(tools.tool_check_clearance(args)));
 
   server.registerTool("check_brief", {
     description: "The goal oracle: does the current plan satisfy the brief? Returns { satisfied, unmet:[…] }.",
     inputSchema: {},
+    outputSchema: briefOutput,
   }, () => asResult(tools.tool_check_brief()));
 
   // ── Resources ─────────────────────────────────────────────────────────────

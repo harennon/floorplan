@@ -6,7 +6,27 @@
  * server-session state only and is NEVER serialized into the Plan JSON.
  */
 
-import { CATALOG, THRESH_MIN, THRESH_MAX, DEFAULT_THRESHOLD } from "./core.js";
+import { CATALOG, THRESH_MAX } from "./core.js";
+
+// ── MCP walkway policy (grounded in accessibility/building standards) ──────────
+// The shared editor slider (clearance.js) clamps to [0.30, 1.20] m — those are UI
+// bounds, NOT a walkway standard. For the agent's design brief we hold "min
+// walkway" to a real passage width:
+//   • 0.915 m (36 in) default — ADA §403.5.1 accessible route + IRC §R311.6 hallway.
+//   • 0.76  m (30 in) floor    — tightest defensible residential walkway; below this
+//                                 is a between-furniture gap, not a passage.
+//   • 1.20  m ceiling          — the shared clamp's max (a wider "min walkway" would
+//                                 be silently clamped by setThreshold, desyncing the
+//                                 objective from the reported thresholdM — see M1).
+//                                 A wheelchair-turning brief (1.525 m, ADA §304) would
+//                                 need the shared clamp widened first — out of scope.
+export const MCP_WALKWAY_MIN = 0.76;
+export const MCP_WALKWAY_MAX = THRESH_MAX; // 1.20 — shared clamp ceiling
+export const MCP_WALKWAY_DEFAULT = 0.915;
+
+/** Shared out-of-range message so brief.js and tools.js stay in lockstep. */
+export const WALKWAY_RANGE_MSG =
+  "walkway must be 0.76–1.20 m (ADA §403.5.1 / IRC R311.6 recommend ≥0.915 m for a passage)";
 
 /**
  * @typedef {{ w:number, h:number }} RoomReq
@@ -31,8 +51,10 @@ export function clearBrief() {
  * Parse + validate a brief spec. Returns { ok:true, brief } or { ok:false, reason }.
  * - room dims must be finite positive metres when supplied.
  * - furniture types must be in CATALOG; count defaults to 1, must be a positive integer.
- * - minWalkwayM defaults to DEFAULT_THRESHOLD; MUST be in [THRESH_MIN, THRESH_MAX]
- *   (M1: reject out-of-range here so setThreshold can never silently clamp it).
+ * - minWalkwayM defaults to MCP_WALKWAY_DEFAULT; MUST be in
+ *   [MCP_WALKWAY_MIN, MCP_WALKWAY_MAX] (M1: reject out-of-range here so
+ *   setThreshold can never silently clamp it, and so "min walkway" means a real
+ *   passage width, not the editor slider's floor).
  *
  * @param {{ room?:{w:number,h:number}, furniture?:{type:string,count?:number}[], minWalkwayM?:number }} spec
  */
@@ -42,7 +64,7 @@ export function setBrief(spec) {
   }
 
   /** @type {Brief} */
-  const brief = { furniture: [], minWalkwayM: DEFAULT_THRESHOLD };
+  const brief = { furniture: [], minWalkwayM: MCP_WALKWAY_DEFAULT };
 
   // room (optional)
   if (spec.room !== undefined) {
@@ -70,11 +92,11 @@ export function setBrief(spec) {
     }
   }
 
-  // minWalkwayM (optional; M1 range guard)
+  // minWalkwayM (optional; M1 range guard against the grounded MCP range)
   if (spec.minWalkwayM !== undefined) {
     const m = spec.minWalkwayM;
-    if (!Number.isFinite(m) || m < THRESH_MIN || m > THRESH_MAX) {
-      return { ok: false, reason: "walkway must be 0.30–1.20 m" };
+    if (!Number.isFinite(m) || m < MCP_WALKWAY_MIN || m > MCP_WALKWAY_MAX) {
+      return { ok: false, reason: WALKWAY_RANGE_MSG };
     }
     brief.minWalkwayM = m;
   }

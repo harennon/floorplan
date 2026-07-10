@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import * as session from "../src/session.js";
 import * as tools from "../src/tools.js";
 import { buildClearanceReport } from "../src/feedback.js";
-import { aabb, getSymbol, wallsModel, symbolsModel } from "../src/core.js";
+import { aabb, getSymbol, wallsModel, symbolsModel, pointInRoom } from "../src/core.js";
 
 function world() {
   return { rooms: wallsModel.rooms, symbols: symbolsModel.symbols };
@@ -195,6 +195,81 @@ test("feasible near-boundary two-sided axis converges (no oscillation)", () => {
     tools.tool_move_symbol({ id: subj, x: it.suggestedMove.toX, y: it.suggestedMove.toY });
   }
   assert.ok(converged >= 0, "converged without oscillating");
+});
+
+test("containment: subject centre outside the room reads bad, not ok", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 3, h: 4 } });
+  // Bed placed far outside the room — no wall gaps are computed for it.
+  const bed = tools.tool_place_symbol({ type: "bed", x: 20, y: 20 }).id;
+  const r = report(0.60, bed);
+  const item = r.items[0];
+  assert.equal(item.worstStatus, "bad");
+  assert.equal(item.outsideRoom, true);
+  assert.equal(r.satisfied, false);
+  // suggestedMove pulls it back toward the room interior (centroid ~1.5,2.0).
+  assert.ok(item.suggestedMove, "has an inward suggestedMove");
+  assert.ok(item.suggestedMove.toX > 0 && item.suggestedMove.toX < 3);
+  assert.ok(item.suggestedMove.toY > 0 && item.suggestedMove.toY < 4);
+  assert.match(r.violations[0], /outside the room/);
+});
+
+test("containment: wall-overlap suggestedMove pushes INTO the room, not out", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 3, h: 4 } });
+  // Bed (h=2) at y=0.8 → top edge at y=-0.2, poking through the TOP wall.
+  const bed = tools.tool_place_symbol({ type: "bed", x: 1.5, y: 0.8 }).id;
+  const r = report(0.60, bed);
+  const item = r.items[0];
+  assert.equal(item.worstStatus, "bad");
+  // The escape must be DOWNWARD (+y, into the room), NOT up through the wall.
+  assert.ok(item.suggestedMove, "overlapping-wall subject still gets a move");
+  assert.ok(item.suggestedMove.toY > 0.8, "moves down into the room, not up out of it");
+});
+
+test("containment: applying suggestedMove converges to inside + satisfied", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 3, h: 4 } });
+  const bed = tools.tool_place_symbol({ type: "bed", x: 1.5, y: 0.8 }).id;
+  let converged = false;
+  for (let i = 0; i < 8; i++) {
+    const item = report(0.60, bed).items[0];
+    if (item.worstStatus === "ok") { converged = true; break; }
+    assert.ok(item.suggestedMove, "always offers a move until satisfied");
+    tools.tool_move_symbol({ id: bed, x: item.suggestedMove.toX, y: item.suggestedMove.toY });
+  }
+  assert.ok(converged, "bed converges to a satisfied placement inside the room");
+});
+
+test("containment: concave (L-shaped) room — inward target is inside, converges", () => {
+  session.newPlan();
+  // L-shape whose vertex-average centroid (3,3) falls OUTSIDE the polygon, so
+  // the naive centroid target would itself be outside. The interior-point
+  // fallback must still hand back a point inside the room.
+  tools.tool_add_room({ verts: [
+    { x: 0, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 3 },
+    { x: 3, y: 3 }, { x: 3, y: 6 }, { x: 0, y: 6 },
+  ] });
+  const room = wallsModel.rooms[0];
+  assert.equal(pointInRoom(room, 3, 3), false, "premise: centroid is outside the L");
+  // Chair placed in the cut-out notch → genuinely outside the room.
+  const ch = tools.tool_place_symbol({ type: "chair", x: 4.5, y: 4.5 }).id;
+  const it = report(0.60, ch).items[0];
+  assert.equal(it.outsideRoom, true);
+  assert.ok(it.suggestedMove, "offers an inward move");
+  assert.equal(
+    pointInRoom(room, it.suggestedMove.toX, it.suggestedMove.toY), true,
+    "the suggested target is itself inside the room"
+  );
+  // Applying it must resolve the outside-room flag.
+  let converged = false;
+  for (let i = 0; i < 12; i++) {
+    const item = report(0.60, ch).items[0];
+    if (item.worstStatus === "ok") { converged = true; break; }
+    if (!item.suggestedMove) break;
+    tools.tool_move_symbol({ id: ch, x: item.suggestedMove.toX, y: item.suggestedMove.toY });
+  }
+  assert.ok(converged, "chair converges to a placement inside the concave room");
 });
 
 test("diagonal pair flagged diagonal:true", () => {
