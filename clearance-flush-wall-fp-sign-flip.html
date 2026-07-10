@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Clearance — flush-to-wall verdict (LLD 53)</title>
+<style>
+  :root {
+    --bg:         #14140f;
+    --bg-deep:    #100f0b;
+    --ink:        #ece7d6;
+    --muted:      #8f8a78;
+    --panel:      rgba(20, 20, 15, 0.72);
+    --hairline:   rgba(201, 168, 76, 0.18);
+    --accent:     #d9be6e;
+    --clr-ok:         #7fd0c8;
+    --clr-tight:      #e0b64f;
+    --clr-bad:        #e57373;
+    --clr-ok-fill:    rgba(127,208,200,0.14);
+    --clr-tight-fill: rgba(224,182,79,0.16);
+    --clr-bad-fill:   rgba(229,115,115,0.18);
+    --clr-flush:      #9cd67a;              /* NEW: dedicated flush/touching hue */
+    --clr-flush-fill: rgba(156,214,122,0.16);
+    --font-ui:      "DM Sans", system-ui, sans-serif;
+    --font-mono:    "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font-ui);
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 800px at 70% -10%, #1a1a12 0%, var(--bg-deep) 60%);
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+  header.page {
+    padding: 2rem clamp(1rem, 4vw, 3rem) 0.5rem;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  header.page h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.5rem;
+    margin: 0 0 0.3rem;
+  }
+  header.page p {
+    color: var(--muted);
+    font-size: 0.85rem;
+    max-width: 62ch;
+    margin: 0.2rem 0;
+  }
+  header.page code {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-size: 0.8em;
+  }
+  .wrap {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem clamp(1rem, 4vw, 3rem) 4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+  }
+  .section-title {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--hairline);
+    padding-bottom: 0.4rem;
+    margin: 0.5rem 0 0;
+  }
+
+  /* ── Comparison grid (before / after) ── */
+  .cmp {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.25rem;
+  }
+  .card {
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .card--bug   { border-color: rgba(229,115,115,0.4); }
+  .card--fix   { border-color: rgba(156,214,122,0.4); }
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.8rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .tag {
+    font-size: 0.62rem;
+    padding: 0.08rem 0.42rem;
+    border-radius: 100px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.05em;
+  }
+  .tag--bug { background: var(--clr-bad-fill);   color: var(--clr-bad); }
+  .tag--fix { background: var(--clr-flush-fill); color: var(--clr-flush); }
+
+  /* ── Faux blueprint canvas ── */
+  .stage {
+    position: relative;
+    height: 240px;
+    background:
+      linear-gradient(var(--hairline) 1px, transparent 1px) 0 0 / 24px 24px,
+      linear-gradient(90deg, var(--hairline) 1px, transparent 1px) 0 0 / 24px 24px,
+      var(--bg);
+    background-blend-mode: normal;
+    overflow: hidden;
+  }
+  /* Room walls: a thick L in the top-right corner */
+  .wall {
+    position: absolute;
+    background: rgba(236,231,214,0.14);
+    border: 1px solid rgba(236,231,214,0.35);
+  }
+  .wall-top   { top: 26px; left: 26px; right: 26px; height: 12px; }
+  .wall-right { top: 26px; right: 26px; bottom: 26px; width: 12px; }
+  .wall-left  { top: 26px; left: 26px; bottom: 26px; width: 12px; }
+  .wall-bot   { bottom: 26px; left: 26px; right: 26px; height: 12px; }
+
+  /* Furniture symbol (bed) */
+  .sym {
+    position: absolute;
+    background: rgba(217,190,110,0.10);
+    border: 1.5px solid var(--accent);
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Leader line + chip on canvas */
+  .chip {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    padding: 0.06rem 0.3rem;
+    border-radius: 3px;
+    white-space: nowrap;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+  }
+  /* Fit pill on canvas */
+  .pill {
+    position: absolute;
+    transform: translate(-50%, 0);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 100px;
+    white-space: nowrap;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .pill .glyph { font-size: 0.7rem; line-height: 1; }
+  .card-note {
+    padding: 0.55rem 0.8rem;
+    font-size: 0.72rem;
+    color: var(--muted);
+    border-top: 1px solid var(--hairline);
+  }
+  .card-note b { color: var(--ink); font-weight: 700; }
+
+  /* ── Clearance panel (right-side) replica ── */
+  .panel {
+    width: 260px;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--panel);
+    font-family: var(--font-mono);
+    overflow: hidden;
+  }
+  .panel-head {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.55rem 0.7rem;
+    font-size: 0.75rem;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .hdr-dot { width: 9px; height: 9px; border-radius: 50%; }
+  .row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.66rem;
+  }
+  .row .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .row .lbl { color: var(--muted); }
+  .row .val { text-align: right; }
+  .verdict {
+    padding: 0.45rem 0.7rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+    border-top: 1px solid var(--hairline);
+    text-align: center;
+    display: flex; align-items: center; justify-content: center; gap: 0.35rem;
+  }
+
+  .d-ok    { background: var(--clr-ok); }
+  .d-tight { background: var(--clr-tight); }
+  .d-bad   { background: var(--clr-bad); }
+  .d-flush { background: var(--clr-flush); }
+  .t-ok    { color: var(--clr-ok); }
+  .t-tight { color: var(--clr-tight); }
+  .t-bad   { color: var(--clr-bad); }
+  .t-flush { color: var(--clr-flush); }
+
+  /* ── Status band legend ── */
+  .band {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem;
+  }
+  .band .cell {
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 0.7rem 0.8rem;
+    background: var(--panel);
+  }
+  .band .cell h4 {
+    margin: 0 0 0.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    display: flex; align-items: center; gap: 0.4rem;
+  }
+  .band .cell p {
+    margin: 0;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+  .band .cell code {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-size: 0.9em;
+  }
+
+  .panels-row { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+
+  /* Corner seating diagram helpers */
+  .badge {
+    position: absolute;
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    padding: 0.04rem 0.28rem;
+    border-radius: 3px;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+  }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+  rel="stylesheet" />
+</head>
+<body>
+<header class="page">
+  <h1>Clearance — flush-to-wall verdict</h1>
+  <p>LLD 53 · The bug: a symbol seated flush against a wall reads <code>Won't fit — overlap</code>
+    on some walls but <code>It fits / 0.0m</code> on others, because two code paths compute the same
+    gap and disagree by floating-point noise right where <code>classify()</code> splits at zero.</p>
+  <p>Touching the wall is the <b>desired</b> end state of the "seat against the wall" gesture — so
+    all four walls must read identically. This is a status-classification change, so these mockups
+    focus on <b>what the verdict pill, gap chips, and panel say for a touching/flush state</b>, plus
+    the corner case from the prior iteration where flush overshot one wall.</p>
+</header>
+<div class="wrap">
+  <!-- SECTION 1: the bug, today -->
+  <h2 class="section-title">1 · The bug today — same physical state, two verdicts</h2>
+  <div class="cmp">
+    <!-- right wall: won't fit -->
+    <div class="card card--bug">
+      <div class="card-head">
+        <span class="tag tag--bug">BUG</span> Bed flush to RIGHT wall
+      </div>
+      <div class="stage">
+        <div class="wall wall-top"></div>
+        <div class="wall wall-right"></div>
+        <div class="wall wall-left"></div>
+        <div class="wall wall-bot"></div>
+        <!-- bed seated against right inner face -->
+        <div class="sym" style="top:70px; right:38px; width:70px; height:110px;">Bed</div>
+        <div class="chip t-bad" style="top:125px; right:30px;">overlap</div>
+        <div class="pill t-bad" style="top:196px; right:73px; transform:translate(50%,0);">
+          <span class="glyph">✕</span> Won't fit — overlap
+        </div>
+      </div>
+      <div class="card-note">
+        <code style="color:var(--clr-bad)">gap = −4e-17</code> → <code style="color:var(--clr-bad)">Math.max(0,…)</code>
+        collapses to 0 → trips <b>gap ≤ 0</b> → <b>bad</b>.
+      </div>
+    </div>
+    <!-- top wall: it fits -->
+    <div class="card card--bug">
+      <div class="card-head">
+        <span class="tag tag--bug">BUG</span> Bed flush to TOP wall
+      </div>
+      <div class="stage">
+        <div class="wall wall-top"></div>
+        <div class="wall wall-right"></div>
+        <div class="wall wall-left"></div>
+        <div class="wall wall-bot"></div>
+        <div class="sym" style="top:38px; left:90px; width:110px; height:70px;">Bed</div>
+        <div class="chip t-tight" style="top:78px; left:145px;">0.0m</div>
+        <div class="pill t-ok" style="top:120px; left:145px;">
+          <span class="glyph">✓</span> It fits — room to spare
+        </div>
+      </div>
+      <div class="card-note">
+        <code style="color:var(--clr-tight)">gap = +5.55e-17</code> → survives
+        <code>Math.max</code> → reads as tight/<b>0.0m fits</b>. Same physical touch, opposite verdict.
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 2: the fix — how a flush/touching state should read -->
+  <h2 class="section-title">2 · The fix — one epsilon band, three ways to say "touching"</h2>
+  <p style="color:var(--muted); font-size:0.82rem; max-width:70ch; margin:0;">
+    A ±0.1mm flush epsilon (below display precision, above FP noise) makes both walls land in the
+    same band. The open question is only the <b>copy + hue</b> for that band. Three directions below —
+    all four walls read identically in each.
+  </p>
+  <div class="cmp">
+    <!-- Option A: tight/amber, neutral -->
+    <div class="card card--fix">
+      <div class="card-head"><span class="tag tag--fix">OPTION A</span> Reuse "tight" (amber)</div>
+      <div class="stage">
+        <div class="wall wall-top"></div><div class="wall wall-right"></div>
+        <div class="wall wall-left"></div><div class="wall wall-bot"></div>
+        <div class="sym" style="top:70px; right:38px; width:70px; height:110px;">Bed</div>
+        <div class="chip t-tight" style="top:125px; right:30px;">0.0m</div>
+        <div class="pill t-tight" style="top:196px; right:73px; transform:translate(50%,0);">
+          <span class="glyph">◐</span> Touching wall — 0.0m
+        </div>
+      </div>
+      <div class="card-note">
+        No new color token. Flush = the existing <b class="t-tight">tight</b> hue, chip shows
+        <code>0.0m</code> (never "overlap"). Smallest change; flush looks like any tight gap.
+      </div>
+    </div>
+
+    <!-- Option B: dedicated flush green -->
+    <div class="card card--fix">
+      <div class="card-head"><span class="tag tag--fix">OPTION B</span> Dedicated flush hue (green)</div>
+      <div class="stage">
+        <div class="wall wall-top"></div><div class="wall wall-right"></div>
+        <div class="wall wall-left"></div><div class="wall wall-bot"></div>
+        <div class="sym" style="top:70px; right:38px; width:70px; height:110px; border-color:var(--clr-flush); background:var(--clr-flush-fill);">Bed</div>
+        <div class="chip t-flush" style="top:125px; right:30px;">flush</div>
+        <div class="pill t-flush" style="top:196px; right:73px; transform:translate(50%,0);">
+          <span class="glyph">✓</span> Seated flush to wall
+        </div>
+      </div>
+      <div class="card-note">
+        A 4th status <b class="t-flush">flush</b> in the LLD-26 snap green (<code>#9cd67a</code>).
+        Rewards the hero "seat against wall" gesture as a <b>success</b>, distinct from a tight walkway.
+      </div>
+    </div>
+
+    <!-- Option C: tight hue, positive copy -->
+    <div class="card card--fix">
+      <div class="card-head"><span class="tag tag--fix">OPTION C</span> Tight hue, positive copy</div>
+      <div class="stage">
+        <div class="wall wall-top"></div><div class="wall wall-right"></div>
+        <div class="wall wall-left"></div><div class="wall wall-bot"></div>
+        <div class="sym" style="top:70px; right:38px; width:70px; height:110px;">Bed</div>
+        <div class="chip t-tight" style="top:125px; right:30px;">0.0m</div>
+        <div class="pill t-ok" style="top:196px; right:73px; transform:translate(50%,0);">
+          <span class="glyph">✓</span> It fits — flush to wall
+        </div>
+      </div>
+      <div class="card-note">
+        Chip stays amber <code>0.0m</code>, but the pill reads a green <b class="t-ok">It fits</b>
+        verdict. Middle ground: no new token, but the verdict celebrates the fit.
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 3: classification band legend -->
+  <h2 class="section-title">3 · The classification band (with the new epsilon zone)</h2>
+  <div class="band">
+    <div class="cell">
+      <h4><span class="dot d-bad" style="width:9px;height:9px;border-radius:50%;display:inline-block;"></span> bad</h4>
+      <p><code>faceGap &lt; −0.1mm</code><br/>Edge genuinely inside the wall body → real overlap.
+        Verdict: <span class="t-bad">Won't fit</span>.</p>
+    </div>
+    <div class="cell" style="border-color:rgba(156,214,122,0.4)">
+      <h4><span class="dot d-flush" style="width:9px;height:9px;border-radius:50%;display:inline-block;"></span> flush / tight (NEW band)</h4>
+      <p><code>|faceGap| ≤ 0.1mm</code><br/>Touching the face. Shows <code>0.0m</code>, <b>never</b>
+        "overlap". This is where both walls now agree.</p>
+    </div>
+    <div class="cell">
+      <h4><span class="dot d-tight" style="width:9px;height:9px;border-radius:50%;display:inline-block;"></span> tight</h4>
+      <p><code>0 &lt; faceGap &lt; threshold</code><br/>A real but sub-threshold walkway.
+        Verdict: <span class="t-tight">Tight</span>.</p>
+    </div>
+    <div class="cell">
+      <h4><span class="dot d-ok" style="width:9px;height:9px;border-radius:50%;display:inline-block;"></span> ok</h4>
+      <p><code>faceGap ≥ threshold</code><br/>Room to spare. Verdict:
+        <span class="t-ok">It fits</span>.</p>
+    </div>
+  </div>
+
+  <!-- SECTION 4: corner case + panel -->
+  <h2 class="section-title">4 · Corner seating (prior-iteration feedback) + panel readout</h2>
+  <p style="color:var(--muted); font-size:0.82rem; max-width:72ch; margin:0;">
+    Feedback: <em>"flush doesn't work with corners — the bed goes past one wall instead of seating
+    against the side."</em> When a symbol is near two walls at once, flush must seat against
+    <b>both</b> inner faces, not overshoot one. Left = the reported bug; right = the target.
+  </p>
+  <div class="cmp">
+    <div class="card card--bug">
+      <div class="card-head"><span class="tag tag--bug">BEFORE</span> Corner overshoot</div>
+      <div class="stage">
+        <div class="wall wall-top"></div><div class="wall wall-right"></div>
+        <div class="wall wall-left"></div><div class="wall wall-bot"></div>
+        <!-- bed seated on top face but overshooting past right inner face -->
+        <div class="sym" style="top:38px; right:14px; width:90px; height:70px; border-color:var(--clr-bad); background:var(--clr-bad-fill);">Bed</div>
+        <div class="badge t-bad" style="top:70px; right:10px;">past →</div>
+        <div class="pill t-bad" style="top:120px; right:59px; transform:translate(50%,0);">
+          <span class="glyph">✕</span> Won't fit — overlap
+        </div>
+      </div>
+      <div class="card-note">
+        Only one face is seated; the perpendicular wall is ignored, so the bed clips
+        <b class="t-bad">through the right wall</b>.
+      </div>
+    </div>
+    <div class="card card--fix">
+      <div class="card-head"><span class="tag tag--fix">AFTER</span> Both faces seated</div>
+      <div class="stage">
+        <div class="wall wall-top"></div><div class="wall wall-right"></div>
+        <div class="wall wall-left"></div><div class="wall wall-bot"></div>
+        <div class="sym" style="top:38px; right:38px; width:90px; height:70px;">Bed</div>
+        <div class="badge t-flush" style="top:24px; right:70px;">0.0m ↑</div>
+        <div class="badge t-flush" style="top:70px; right:14px;">0.0m →</div>
+        <div class="pill t-flush" style="top:120px; right:83px; transform:translate(50%,0);">
+          <span class="glyph">✓</span> Seated in corner
+        </div>
+      </div>
+      <div class="card-note">
+        Corner resolve seats <b>both</b> perpendicular faces at once. Both wall clearances read
+        <code>0.0m</code>, verdict is consistent — no overshoot.
+      </div>
+    </div>
+  </div>
+
+  <div class="panels-row">
+    <div class="panel">
+      <div class="panel-head"><span class="hdr-dot d-bad"></span> Clearance — today (bug)</div>
+      <div class="row"><span class="dot d-bad"></span><span class="lbl">to right wall</span><span class="val t-bad">overlap</span></div>
+      <div class="row"><span class="dot d-tight"></span><span class="lbl">to top wall</span><span class="val t-tight">0.0m</span></div>
+      <div class="row"><span class="dot d-ok"></span><span class="lbl">to left wall</span><span class="val t-ok">2.1m</span></div>
+      <div class="verdict t-bad"><span>✕</span> Won't fit — overlap</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="hdr-dot d-flush"></span> Clearance — fixed (Option B)</div>
+      <div class="row"><span class="dot d-flush"></span><span class="lbl">to right wall</span><span class="val t-flush">flush</span></div>
+      <div class="row"><span class="dot d-flush"></span><span class="lbl">to top wall</span><span class="val t-flush">flush</span></div>
+      <div class="row"><span class="dot d-ok"></span><span class="lbl">to left wall</span><span class="val t-ok">2.1m</span></div>
+      <div class="verdict t-flush"><span>✓</span> Seated flush to wall</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
