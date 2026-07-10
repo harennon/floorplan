@@ -6,8 +6,50 @@
  * pre-empts the bubble-phase wall/symbol tool listeners (Edge Case 15 /
  * GAP-3 resolution).
  *
- * Exports: init, toggle, isOpen
+ * Exports: init, toggle, isOpen, SHORTCUTS
  */
+
+// ── Platform detection ────────────────────────────────────────────────────────
+
+const _isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+
+// ── Shortcuts data ────────────────────────────────────────────────────────────
+
+/**
+ * Single source of truth for the overlay.
+ * `mac`/`other` are display chord strings shown per-platform.
+ * `group` is used for section header rows.
+ * @type {{ group:string, action:string, mac:string, other:string }[]}
+ */
+export const SHORTCUTS = [
+  // Edit
+  { group: "Edit",    action: "Undo",                       mac: "⌘Z",         other: "Ctrl+Z" },
+  { group: "Edit",    action: "Redo",                       mac: "⇧⌘Z",        other: "Ctrl+Shift+Z / Ctrl+Y" },
+  { group: "Edit",    action: "Delete selected",            mac: "Del / ⌫",    other: "Del / Backspace" },
+  { group: "Edit",    action: "Duplicate selected",         mac: "⌘D",         other: "Ctrl+D" },
+  // Object
+  { group: "Object",  action: "Nudge selected",             mac: "↑ ↓ ← →",   other: "↑ ↓ ← →" },
+  { group: "Object",  action: "Coarse nudge",               mac: "⇧↑↓←→",     other: "Shift+↑↓←→" },
+  { group: "Object",  action: "Rotate 90° CW",              mac: "R",          other: "R" },
+  { group: "Object",  action: "Rotate 90° CCW",             mac: "⇧R",         other: "Shift+R" },
+  // Tools
+  { group: "Tools",   action: "Draw wall",                  mac: "W",          other: "W" },
+  { group: "Tools",   action: "Select",                     mac: "V",          other: "V" },
+  // View
+  { group: "View",    action: "Zoom in",                    mac: "+ / =",      other: "+ / =" },
+  { group: "View",    action: "Zoom out",                   mac: "− / _",      other: "− / _" },
+  { group: "View",    action: "Reset zoom",                 mac: "0",          other: "0" },
+  { group: "View",    action: "Zoom to fit content",        mac: "⇧1",         other: "Shift+1" },
+  // Snap
+  { group: "Snap",    action: "Toggle snapping",            mac: "S",          other: "S" },
+  { group: "Snap",    action: "Free snap (momentary)",      mac: "⌥ hold",     other: "Alt hold" },
+  // Drawing
+  { group: "Drawing", action: "Finish chain",               mac: "Enter",      other: "Enter" },
+  { group: "Drawing", action: "Remove last point (drawing)", mac: "⌫",         other: "Backspace" },
+  // General
+  { group: "General", action: "Toggle shortcuts overlay",   mac: "?",          other: "?" },
+  { group: "General", action: "Deselect / cancel",          mac: "Esc",        other: "Esc" },
+];
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -16,6 +58,58 @@ let _open       = false;
 let _overlayEl  = null;
 /** @type {Element|null} */
 let _buttonEl   = null;
+
+// ── Private: render table ─────────────────────────────────────────────────────
+
+/**
+ * Build <tr> rows into #help-table-body, choosing mac/non-mac chords.
+ * Group header rows are injected before each group's first entry.
+ * @param {boolean} isMac
+ */
+function _renderTable(isMac) {
+  const tbody = document.getElementById("help-table-body");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  let lastGroup = null;
+  for (const entry of SHORTCUTS) {
+    // Inject a group header row when the group changes
+    if (entry.group !== lastGroup) {
+      lastGroup = entry.group;
+      const headerRow = document.createElement("tr");
+      headerRow.setAttribute("aria-hidden", "true");
+      const headerTd = document.createElement("td");
+      headerTd.colSpan = 2;
+      headerTd.style.cssText = "padding-top:0.6rem; padding-bottom:0.15rem; color:var(--muted); font-size:0.6rem; letter-spacing:0.08em; text-transform:uppercase; opacity:0.7;";
+      headerTd.textContent = entry.group;
+      headerRow.appendChild(headerTd);
+      tbody.appendChild(headerRow);
+    }
+
+    const chord = isMac ? entry.mac : entry.other;
+    const tr = document.createElement("tr");
+
+    const tdKey = document.createElement("td");
+    tdKey.className = "help-key";
+    // Split compound chords like "⌘Z" or "Ctrl+Shift+Z / Ctrl+Y" into <kbd> elements
+    const parts = chord.split(" / ");
+    parts.forEach((part, i) => {
+      const kbd = document.createElement("kbd");
+      kbd.textContent = part;
+      tdKey.appendChild(kbd);
+      if (i < parts.length - 1) {
+        tdKey.appendChild(document.createTextNode(" / "));
+      }
+    });
+
+    const tdAction = document.createElement("td");
+    tdAction.textContent = entry.action;
+
+    tr.appendChild(tdKey);
+    tr.appendChild(tdAction);
+    tbody.appendChild(tr);
+  }
+}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -26,6 +120,9 @@ let _buttonEl   = null;
 export function init(refs) {
   _buttonEl  = refs.button;
   _overlayEl = refs.overlay;
+
+  // Populate the shortcuts table from the SHORTCUTS data array
+  _renderTable(_isMac);
 
   // Button click toggles overlay
   if (_buttonEl) {
@@ -38,6 +135,13 @@ export function init(refs) {
 
   // Outside-click dismissal (bubble phase on document)
   document.addEventListener("click", _onDocumentClick);
+}
+
+// ── Internal render helper (exported for tests) ───────────────────────────────
+
+/** @internal — exposed for unit tests; renders the table with the given platform flag. */
+export function renderTableForTest(isMac) {
+  _renderTable(isMac);
 }
 
 /** Show or hide the cheat sheet. */
