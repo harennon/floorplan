@@ -30,12 +30,13 @@ jobs:
           node-version: "20"
 
       # ── Step 1: HTML validation ──────────────────────────────────────────────
-      # html-validate checks structural correctness of all HTML files under src/.
+      # html-validate checks structural correctness of all HTML files: the app
+      # under src/ and the test harness under test/.
       # Config at .github/html-validate.json relaxes style/inline-script rules
       # so both index.html and tests.html (which uses inline <script type="module">)
       # pass on structural grounds only.
       - name: Validate HTML
-        run: npx --yes html-validate@9.7.1 --config .github/html-validate.json "src/**/*.html"
+        run: npx --yes html-validate@9.7.1 --config .github/html-validate.json "src/**/*.html" "test/**/*.html"
 
       # ── Step 2: JS syntax check ──────────────────────────────────────────────
       # node --check --input-type=module parses each ES module for syntax errors
@@ -57,9 +58,10 @@ jobs:
           done
 
       # ── Step 3: Unit tests (headless Chromium via Playwright) ───────────────
-      # tests.html is a browser ES-module test suite; it cannot run under Node
-      # directly because it uses the DOM.  We serve src/ over a local HTTP
-      # server, load the page in headless Chromium, and read window.__testResult
+      # test/tests.html is a browser ES-module test suite; it cannot run under
+      # Node directly because it uses the DOM.  We serve the repo root over a
+      # local HTTP server (so the harness can import ../src/js/* app modules),
+      # load the page in headless Chromium, and read window.__testResult
       # (set by the harness's render() function after all async tests resolve).
       # playwright is installed locally (--no-save avoids creating package.json)
       # so run-tests.mjs can import it; node_modules/ is gitignored.
@@ -98,4 +100,5 @@ jobs:
             --timeout 20
             --exclude-all-private
             "src/**/*.html"
+            "test/**/*.html"
           fail: true
