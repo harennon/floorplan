@@ -8089,6 +8089,7 @@ import {
   selectSymbol as selectSymbolLLD54,
   deleteSelected as deleteSelectedLLD54,
   duplicateSelected as duplicateSelectedLLD54,
+  onTapEmpty as onTapEmptyLLD54,
 } from "./js/symbolTool.js";
 
 // Note: addSymbol, createSymbol, removeSymbol, symbolModel already imported above
@@ -8329,6 +8330,41 @@ describe("LLD-54 — symbolTool: deleteSelected/duplicateSelected flush pending 
     expect(spy.callCount()).toBe(0);
     duplicateSelectedLLD54(); // must flush nudge first (commit for nudge), then commit for duplicate
     expect(spy.callCount()).toBe(2);
+
+    _resetSyms54();
+  });
+});
+
+// ─── LLD-54: Esc-to-deselect (overlay parity fix) ────────────────────────────
+
+describe("LLD-54 — Esc deselects selected symbol (onTapEmpty)", () => {
+  it("onTapEmpty clears selection when a symbol is selected", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    const sym = _addSym54(1, 1);
+    selectSymbolLLD54(sym.id);
+    expect(hasSelectionLLD54()).toBe(true);
+
+    onTapEmptyLLD54(); // this is what the Esc handler calls
+    expect(hasSelectionLLD54()).toBe(false);
+
+    _resetSyms54();
+  });
+
+  it("onTapEmpty is a no-op when nothing is selected", () => {
+    _resetSyms54();
+    const spy = _makeSpyCommit54();
+    symSetHistoryAndToastLLD54({ commit: spy, undo: () => false, depth: () => 0 }, () => {});
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolTool({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+
+    expect(hasSelectionLLD54()).toBe(false);
+    onTapEmptyLLD54(); // no-op
+    expect(hasSelectionLLD54()).toBe(false);
 
     _resetSyms54();
   });

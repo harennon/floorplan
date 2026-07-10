@@ -337,6 +337,25 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    // Esc — deselect selected symbol (LLD-54 extension: symbolTool "extended").
+    // help.js capture-phase listener stops propagation when overlay is open, so
+    // this branch only fires when the overlay is already closed.
+    // wallTool handles Esc for active wall chains in its own bubble-phase listener
+    // (registered earlier); it does not stopPropagation, so we still receive the
+    // event — but we must not deselect when wallTool is about to finish a chain.
+    if (!meta && e.key === "Escape") {
+      if (isDrawMode() && wallsModel.chain.length > 0) {
+        // Let wallTool bubble-phase listener handle chain finish/cancel
+        return;
+      }
+      if (hasSelection()) {
+        e.preventDefault();
+        flushNudge(); // commit any pending nudge before clearing selection
+        onTapEmpty(); // clears selection + hides inspector; no-op if dim edit active
+      }
+      return;
+    }
+
     // ── New shortcuts (LLD-54) ─────────────────────────────────────────────────
 
     // Nudge — bare/Shift arrows, only when a symbol is selected and not a chord
