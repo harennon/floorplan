@@ -261,16 +261,27 @@ the agent can read and correct.
 **`check_clearance`** → the couch-fit evaluator, the reason this server is differentiated.
 Args `{ id?, minWalkwayM? }`: with `id`, evaluates one symbol; without, evaluates **every**
 furniture symbol. `minWalkwayM` overrides the session threshold for this call (defaults to
-the brief's `minWalkwayM`, else `clearance.js` `DEFAULT_THRESHOLD` = 0.60 m). It calls
+the brief's `minWalkwayM`, else the MCP walkway default 0.915 m — see M1). It calls
 `setThreshold(minWalkway)` then `computeClearances(sym, {rooms, symbols})` per subject.
 
+> **Update (2026-07-10) — walkway re-grounding.** The MCP walkway range was re-grounded in
+> real accessibility/building standards: **accepted range `[0.76, 1.20] m`, default `0.915 m`**
+> (0.915 m ≈ 36 in per ADA §403.5.1 / IRC R311.6; 0.30 m is a between-furniture gap, not a
+> passage). This lives in `mcp/src/brief.js` (MCP-only) and does **not** touch the shared
+> `clearance.js` clamp. The contract statements below reflect the new range; the **worked
+> examples, the JSON payload, and the M5 feasibility study still use the original 0.60 m
+> threshold for illustration** and are not re-derived here (0.60 m is now below the 0.76 m
+> floor, so those exact figures are no longer reachable through a fresh brief).
+
 **M1 — the `setThreshold` clamp must not silently corrupt the objective.** `setThreshold`
-clamps to `[THRESH_MIN, THRESH_MAX] = [0.30, 1.20] m` (clearance.js:78-80). A brief asking for
-a walkway **outside** that range would otherwise be evaluated at the clamp — the oracle could
-never satisfy the true target, or satisfy too early — a silent, undebuggable loop failure.
+clamps to the shared editor range `[THRESH_MIN, THRESH_MAX] = [0.30, 1.20] m` (clearance.js:78-80).
+The MCP layer enforces a **tighter, standards-grounded walkway range `[0.76, 1.20] m`, default
+0.915 m** (mcp/src/brief.js). A brief asking for a walkway **outside** the accepted range would
+otherwise be evaluated at the shared clamp — the oracle could never satisfy the true target, or
+satisfy too early — a silent, undebuggable loop failure.
 The server **rejects out-of-range `minWalkwayM` at the boundary**: `set_brief` and
-`check_clearance` return `{ ok:false, reason:"walkway must be 0.30–1.20 m" }` for a value
-outside `[THRESH_MIN, THRESH_MAX]` rather than passing it to `setThreshold`. Additionally, the
+`check_clearance` return `{ ok:false, reason:"walkway must be 0.76–1.20 m (…)" }` for a value
+outside `[0.76, 1.20]` rather than passing it to `setThreshold`. Additionally, the
 `thresholdM` echoed in every `ClearanceReport` is the **effective, post-`setThreshold` value
 actually used** (read back from `clearance.js`), so `deficitCm` and `satisfied` are always
 computed against the same number the report advertises — no drift between the requested and
@@ -291,7 +302,8 @@ y-down. `+x` = right, `−x` = left, `+y` = down, `−y` = up. All lengths metre
 
 ```jsonc
 {
-  "thresholdM": 0.60,                 // EFFECTIVE (post-clamp) threshold — see M1 note below
+  "thresholdM": 0.60,                 // EFFECTIVE (post-clamp) threshold — illustrative at the
+                                      // pre-re-grounding 0.60 m; the default is now 0.915 m (M1)
   "satisfied": false,                 // fast top-level pass/fail against threshold
   "worstStatus": "tight",             // from clearance.js worstStatus()
   "axisConvention": "+x=right, +y=down (screen coords); metres",
@@ -462,6 +474,8 @@ rectangle-deforming operation, not a resize.
 ### Why this shape works as a loop (worked trace)
 
 1. `set_brief {room:{w:5,h:7}, furniture:[{type:"bed"},{type:"desk"},{type:"sofa"}], minWalkwayM:0.6}`
+   *(illustrative trace at the original 0.60 m walkway; the accepted range is now [0.76, 1.20] m,
+   default 0.915 m — a real brief would use e.g. `minWalkwayM:0.8` in a larger room, see M1 update)*
 2. `add_room {rect:{x:0,y:0,w:5,h:7}}` → `{room:"w0", metrics:{areaM2:35,…}}`
 3. `place_symbol {type:"bed", …}` ×3 (bed/desk/sofa) → each returns its own clearance readout.
 4. `check_brief` → `satisfied:false`, with a violation carrying a `suggestedMove` target for
@@ -487,9 +501,9 @@ the Plan (they stay server-side, exactly as clearance settings stay session-only
 type Brief = {
   room?: { w: number; h: number };          // target room dims, metres (optional)
   furniture?: { type: SymbolType; count: number }[]; // required pieces (count default 1)
-  minWalkwayM: number;                       // default DEFAULT_THRESHOLD (0.60); MUST be in
-                                             // [THRESH_MIN, THRESH_MAX] = [0.30, 1.20] — set_brief
-                                             // rejects out-of-range so setThreshold can't clamp it
+  minWalkwayM: number;                       // MCP default 0.915 m; MUST be in the grounded
+                                             // range [0.76, 1.20] — set_brief rejects out-of-range
+                                             // so setThreshold can't clamp it (see M1 update)
 };
 
 // One gap, carrying DIRECTION (not just magnitude) — derived from clearance.js a/b endpoints.
@@ -678,9 +692,10 @@ Prompt add cheap context. All are optional to the loop and small.
 17. **`unit` in the loaded document is `ft`.** The core works in metres regardless; feedback
     is always metres+cm. `unit` is preserved through `buildPlan`/`applyPlan` for the human's
     view but does not affect evaluation.
-18. **`minWalkwayM` out of `[0.30, 1.20]`.** `set_brief`/`check_clearance` reject it with
-    `{ ok:false, reason:"walkway must be 0.30–1.20 m" }` — never passed to `setThreshold`
-    (which would silently clamp and desync the objective from the reported `thresholdM`). See M1.
+18. **`minWalkwayM` out of `[0.76, 1.20]`.** `set_brief`/`check_clearance` reject it with
+    `{ ok:false, reason:"walkway must be 0.76–1.20 m (…)" }` — never passed to `setThreshold`
+    (which would silently clamp and desync the objective from the reported `thresholdM`). See M1
+    (the grounded MCP range; the shared clearance.js clamp remains `[0.30, 1.20]`).
 19. **Room-size requirement with no non-destructive resize.** `set_edge_length`→`rescaleEdge`
     deforms a rectangle (moves one shared corner along the edge, walls.js:316-342); it does NOT
     resize a room to w×h. The loop handles this by **sequencing** (see M2): `check_brief`'s
@@ -834,7 +849,9 @@ refuse to oscillate on. They exercise opposite ends of the design.
   furniture reports `worstStatus:"ok"`.
 
 **M5 — why the happy-path brief is 5×7 m, not 4×5 m (feasibility is a hard constraint on
-this test).** The scripted harness is a *direct applier* of `suggestedMove`, not an optimizer,
+this test).** *(Feasibility below is analysed at the original 0.60 m threshold; after the
+2026-07-10 walkway re-grounding the shipped headline test uses 7×9 m @ 0.8 m — see the M1
+update and `mcp/test/convergence.test.js`.)* The scripted harness is a *direct applier* of `suggestedMove`, not an optimizer,
 so the chosen brief must be **feasible by translation of the DEFAULT footprints** or the loop
 can never reach `satisfied:true` (or thrashes near the boundary). An exhaustive brute-force
 against the real `src/js` core (`computeClearances` + `worstStatus` at threshold 0.60,

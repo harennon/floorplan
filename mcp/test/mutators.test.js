@@ -152,17 +152,29 @@ test("load_plan with a valid doc replaces contents", () => {
   assert.equal(wallsModel.rooms.length, 1);
 });
 
-test("set_brief rejects out-of-range walkway (M1)", () => {
+test("set_brief rejects out-of-range walkway (M1, grounded range)", () => {
   const r = tools.tool_set_brief({ minWalkwayM: 2.0 });
   assert.equal(r.ok, false);
-  assert.match(r.reason, /0.30–1.20/);
+  assert.match(r.reason, /0.76–1.20/);
 });
 
-test("check_clearance rejects out-of-range walkway (M1)", () => {
+test("set_brief rejects a below-passage walkway (0.30 m is a furniture gap, not a walkway)", () => {
+  const r = tools.tool_set_brief({ minWalkwayM: 0.30 });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /0.76–1.20/);
+});
+
+test("set_brief defaults minWalkwayM to the grounded 0.915 m", () => {
+  const r = tools.tool_set_brief({ room: { w: 3, h: 4 } });
+  assert.equal(r.ok, true);
+  assert.equal(r.brief.minWalkwayM, 0.915);
+});
+
+test("check_clearance rejects out-of-range walkway (M1, grounded range)", () => {
   session.newPlan();
   const r = tools.tool_check_clearance({ minWalkwayM: 0.1 });
   assert.equal(r.ok, false);
-  assert.match(r.reason, /0.30–1.20/);
+  assert.match(r.reason, /0.76–1.20/);
 });
 
 test("check_brief with no brief set is self-healing", () => {

@@ -58,6 +58,7 @@ export {
   worstStatus,
   setThreshold,
   aabb,
+  pointInRoom,
   THRESH_MIN,
   THRESH_MAX,
   DEFAULT_THRESHOLD,
