@@ -14,6 +14,7 @@ import { snapStep } from "./grid.js";
 import { model, resolveSnap, placeVertex, closeRoom, finishChain, undoPoint } from "./walls.js";
 import { scheduleRender } from "./surface.js";
 import { isOpen as isHelpOpen } from "./help.js";
+import * as loupe from "./loupe.js";
 
 // history.commit is injected from main.js to avoid circular imports
 let _historyCommit = null;
@@ -126,6 +127,7 @@ export function setTool(t) {
   }
   _tool = t;
   _snap = null;
+  loupe.hide();
   _updateRail();
   _updateCursor();
   scheduleRender();
@@ -137,8 +139,9 @@ export function setTool(t) {
  * Update snap on hover (desktop: pointermove with buttons==0; mobile: while finger down).
  * @param {number} sx screen x
  * @param {number} sy screen y
+ * @param {"touch"|"mouse"|"pen"|string} [pointerType] pointer type of the active gesture
  */
-export function onHover(sx, sy) {
+export function onHover(sx, sy, pointerType) {
   _snap = resolveSnap(sx, sy, {
     chain: model.chain,
     rooms: model.rooms,
@@ -147,6 +150,14 @@ export function onHover(sx, sy) {
   });
   _positionSnapTag(sx, sy);
   _updateHudSnap();
+
+  // Show/update the magnifier loupe for touch-type gestures only
+  if (pointerType === "touch" && _snap !== null && isDrawMode()) {
+    loupe.show(sx, sy, _snap);
+  } else if (pointerType && pointerType !== "touch") {
+    loupe.hide();
+  }
+
   scheduleRender();
 }
 
@@ -164,6 +175,8 @@ export function onClick(sx, sy) {
   });
   _snap = snap;
   placeVertex(snap);
+  // Hide the magnifier loupe — vertex is committed; no need to show it any more
+  loupe.hide();
   // If the tap closed the room (or the chain is now empty for any reason),
   // clear the snap so the green ring / HUD 'close room' lingers are not
   // displayed until the next pointer interaction.
@@ -181,6 +194,7 @@ export function onClick(sx, sy) {
 /** Clear snap when cursor leaves the canvas. */
 export function onLeave() {
   _snap = null;
+  loupe.hide();
   _hideSnapTag();
   _updateHudSnap();
   scheduleRender();

@@ -182,11 +182,11 @@ function _onPointerDown(e) {
       _dragging = false;
       _lastX = e.clientX;
       _lastY = e.clientY;
-      // Touch: show the loupe crosshair immediately on finger-down so the user
-      // can see where the tap will land before lifting.
+      // Touch: show the loupe immediately on finger-down so the user can see
+      // where the tap will land before lifting.
       if (e.pointerType === "touch") {
         const hp = effectiveDrawPoint(e.pointerType, e.clientX, e.clientY);
-        _drawHooks.onHover(hp.x, hp.y);
+        _drawHooks.onHover(hp.x, hp.y, e.pointerType);
       }
       _updateCursor();
       return;
@@ -238,7 +238,7 @@ function _onPointerMove(e) {
   // Draw-mode: plain hover (no button) → update snap preview.
   if (_drawHooks && _drawHooks.isDrawMode() && e.buttons === 0) {
     const hp = effectiveDrawPoint(e.pointerType, e.clientX, e.clientY);
-    _drawHooks.onHover(hp.x, hp.y);
+    _drawHooks.onHover(hp.x, hp.y, e.pointerType);
     return;
   }
 
@@ -248,15 +248,17 @@ function _onPointerMove(e) {
     const dy = e.clientY - _drawDownY;
     const threshold = dragThreshold(_downPointerType);
     if (Math.sqrt(dx * dx + dy * dy) > threshold) {
-      // Crossed threshold → cancel pending click, start panning.
+      // Crossed threshold → cancel pending click, start panning; hide loupe.
       _drawPending = false;
       _dragging = true;
       _lastX = e.clientX;
       _lastY = e.clientY;
+      // Hide loupe by calling onLeave (which hides loupe + snap tag)
+      if (_drawHooks) _drawHooks.onLeave();
     } else {
       // Still within threshold; update snap preview (touch feedback).
       const hp = effectiveDrawPoint(e.pointerType, e.clientX, e.clientY);
-      _drawHooks.onHover(hp.x, hp.y);
+      _drawHooks.onHover(hp.x, hp.y, e.pointerType);
     }
     _updateCursor();
   }

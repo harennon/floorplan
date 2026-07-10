@@ -5,7 +5,7 @@
  * This is the only file that knows about all modules.
  */
 
-import { onChange as onViewChange, resetView } from "./view.js";
+import { onChange as onViewChange, resetView, fitToContent, view, pxPerM, worldToScreen } from "./view.js";
 import { onChange as onUnitChange } from "./units.js";
 import { init as initSurface, initWallLayer, onRender, resize, render, scheduleRender, W, H } from "./surface.js";
 import { init as initHud } from "./hud.js";
@@ -21,7 +21,6 @@ import { init as initStore, loadLocal, saveNow } from "./store.js";
 import { readBootHash } from "./share.js";
 import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
 import { contentBounds } from "./exportImg.js";
-import { fitToContent } from "./view.js";
 import { init as initActions, showToast, showConflictBanner, setHistoryReset, setOpenTemplates } from "./actions.js";
 import { init as initTemplates, open as openTemplates } from "./templates.js";
 import { model as wallsModel } from "./walls.js";
@@ -33,6 +32,7 @@ import { onSnapModeChange } from "./grid.js";
 import { init as initClearanceRender, render as clearanceRenderFn } from "./clearanceRender.js";
 import { init as initClearancePanel, update as clearancePanelUpdate } from "./clearancePanel.js";
 import { onChange as onClearanceChange, setEnabled as setClearanceEnabled } from "./clearance.js";
+import { init as initLoupe, setViewModule as loupeSetViewModule, reposition as loupeReposition } from "./loupe.js";
 
 /** Detect macOS for platform-correct tooltip chords. */
 const _isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
@@ -138,6 +138,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
 
+  // Magnifier loupe (LLD 57) — visual affordance for touch drawing
+  initLoupe(stage, svg);
+  loupeSetViewModule({ view, pxPerM, worldToScreen });
+
   // Measure inspector
   initMeasure({ panel: measurePanel, list: measureList, total: measureTotal, toggle: measureToggle });
 
@@ -202,7 +206,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Register post-render hooks
   // Order: wallRender (in _wallRender) → symbolRenderFn → clearanceRenderFn →
   //        symbolDimReposition → repositionInspector → dimReposition →
-  //        measureUpdate → clearancePanelUpdate
+  //        measureUpdate → clearancePanelUpdate → loupeReposition
   onRender(symbolRenderFn);
   onRender(repositionFlushGuide); // re-append guide line after symbolRender clears overlay
   onRender(clearanceRenderFn);   // leaders above symbol bodies, below #symbol-overlay
@@ -211,6 +215,7 @@ document.addEventListener("DOMContentLoaded", () => {
   onRender(measureUpdate);
   onRender(clearancePanelUpdate);
   onRender(dimReposition);
+  onRender(loupeReposition);     // loupe content stays aligned after pan/zoom
 
   // Initialise store (save pill + autosave hook)
   if (savePillEl) {
