@@ -211,7 +211,7 @@ function _appendChip(c) {
   const chip = document.createElement("div");
   chip.className = "clr-chip";
 
-  const gapText = c.gap <= 0
+  const gapText = c.status === "bad"
     ? "overlap"
     : fmtLen(c.gap) + " " + unitLabel();
 

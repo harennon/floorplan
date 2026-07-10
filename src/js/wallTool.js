@@ -15,6 +15,7 @@ import { model, resolveSnap, placeVertex, closeRoom, finishChain, undoPoint } fr
 import { scheduleRender } from "./surface.js";
 import { isOpen as isHelpOpen } from "./help.js";
 import * as loupe from "./loupe.js";
+import { palette } from "./theme.js";
 
 // history.commit is injected from main.js to avoid circular imports
 let _historyCommit = null;
@@ -326,12 +327,15 @@ const SNAP_LABELS = {
   free:  "free",
 };
 
-const SNAP_COLORS = {
-  grid:  "#7fd0c8",
-  point: "#e0b64f",
-  close: "#9cd67a",
-  free:  "#8f8a78",
-};
+function _snapColors() {
+  const p = palette();
+  return {
+    grid:  p.snapGrid,
+    point: p.snapPoint,
+    close: p.snapClose,
+    free:  p.muted,
+  };
+}
 
 function _updateHudSnap() {
   if (!_hudSnapEl) return;
@@ -341,7 +345,7 @@ function _updateHudSnap() {
     return;
   }
   _hudSnapEl.textContent = SNAP_LABELS[_snap.type] || _snap.type;
-  _hudSnapEl.style.color = SNAP_COLORS[_snap.type] || "";
+  _hudSnapEl.style.color = _snapColors()[_snap.type] || "";
 }
 
 function _positionSnapTag(sx, sy) {
@@ -350,7 +354,7 @@ function _positionSnapTag(sx, sy) {
     return;
   }
   const label = SNAP_LABELS[_snap.type] || _snap.type;
-  const color  = SNAP_COLORS[_snap.type] || "";
+  const color  = _snapColors()[_snap.type] || "";
   _snapTagEl.textContent = label;
   _snapTagEl.style.color = color;
   _snapTagEl.style.display = "block";

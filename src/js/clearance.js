@@ -100,6 +100,22 @@ export function setEnabled(on) {
 
 // ── Pure geometry ─────────────────────────────────────────────────────────────
 
+/** Flush tolerance: a wall-face gap within ±this (metres) counts as touching, not
+ *  overlapping. 0.1mm — below the 0.01m display precision, far above FP noise (~1e-17). */
+const WALL_FLUSH_EPS = 1e-4;
+
+/**
+ * Classify a symbol's near edge against a wall inner face.
+ * @param {number} faceGap  metres from AABB edge to wall inner face
+ *                          (rawGap - WALL_M/2), signed; negative = edge inside wall body.
+ * @returns {{ gap: number, status: ClrStatus }}
+ */
+function wallFaceStatus(faceGap) {
+  if (faceGap < -WALL_FLUSH_EPS) return { gap: 0, status: "bad" };   // inside wall body
+  if (faceGap <=  WALL_FLUSH_EPS) return { gap: 0, status: "tight" }; // flush / touching
+  return { gap: faceGap, status: classify(faceGap) };
+}
+
 /**
  * Classify a gap (metres) against the current threshold.
  * gap <= 0  → "bad" (overlap or sticking through wall)
@@ -280,13 +296,13 @@ export function computeClearances(sym, world) {
       const dRight0 = dLeft === null ? _wallDist(box.l, midY, "right") : null;
       if (dLeft !== null) {
         const rawGap = dLeft;
-        const gap = Math.max(0, rawGap - wallHalf);
+        const { gap, status } = wallFaceStatus(rawGap - wallHalf);
         const bx = box.l - rawGap; // wall centerline x
         results.push({
           label: "left wall",
           kind: "wall",
           gap,
-          status: classify(gap),
+          status,
           a: { x: box.l, y: midY },
           b: { x: bx + wallHalf, y: midY },
         });
@@ -309,13 +325,13 @@ export function computeClearances(sym, world) {
       const dLeft0  = dRight === null ? _wallDist(box.r, midY, "left") : null;
       if (dRight !== null) {
         const rawGap = dRight;
-        const gap = Math.max(0, rawGap - wallHalf);
+        const { gap, status } = wallFaceStatus(rawGap - wallHalf);
         const bx = box.r + rawGap;
         results.push({
           label: "right wall",
           kind: "wall",
           gap,
-          status: classify(gap),
+          status,
           a: { x: box.r, y: midY },
           b: { x: bx - wallHalf, y: midY },
         });
@@ -338,13 +354,13 @@ export function computeClearances(sym, world) {
       const dDown0 = dTop === null ? _wallDist(midX, box.t, "down") : null;
       if (dTop !== null) {
         const rawGap = dTop;
-        const gap = Math.max(0, rawGap - wallHalf);
+        const { gap, status } = wallFaceStatus(rawGap - wallHalf);
         const by = box.t - rawGap;
         results.push({
           label: "top wall",
           kind: "wall",
           gap,
-          status: classify(gap),
+          status,
           a: { x: midX, y: box.t },
           b: { x: midX, y: by + wallHalf },
         });
@@ -367,13 +383,13 @@ export function computeClearances(sym, world) {
       const dUp0    = dBottom === null ? _wallDist(midX, box.b, "up") : null;
       if (dBottom !== null) {
         const rawGap = dBottom;
-        const gap = Math.max(0, rawGap - wallHalf);
+        const { gap, status } = wallFaceStatus(rawGap - wallHalf);
         const by = box.b + rawGap;
         results.push({
           label: "bottom wall",
           kind: "wall",
           gap,
-          status: classify(gap),
+          status,
           a: { x: midX, y: box.b },
           b: { x: midX, y: by - wallHalf },
         });
