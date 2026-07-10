@@ -13,6 +13,7 @@
 /** @typedef {"door"|"window"|"bed"|"sofa"|"table"|"chair"|"desk"|"fridge"
  *   |"toilet"|"bathtub"|"sink"|"stove"|"wardrobe"|"bookshelf"|"tv"|"washer"} SymbolType */
 /** @typedef {{ id:string, type:SymbolType, x:number, y:number, w:number, h:number, rot:number }} Sym */
+/** @typedef {"openings"|"living"|"kitchen"|"bedroom"|"bath"} SymCategory */
 
 // ── In-memory model ───────────────────────────────────────────────────────────
 
@@ -29,26 +30,26 @@ export const model = { symbols: /** @type {Sym[]} */ ([]) };
 /**
  * Per-type catalog. openings:true → single editable dimension (width);
  * depth is a fixed thin marker and its chip is hidden. Furniture edits both w and h.
- * @type {Record<SymbolType, {label:string, category:"openings"|"furniture",
+ * @type {Record<SymbolType, {label:string, category:SymCategory,
  *   openings?:boolean, w:number, h:number, min:number, max:number}>}
  */
 export const CATALOG = {
-  door:   { label: "Door",   category: "openings",  openings: true, w: 0.90, h: 0.12, min: 0.60, max: 2.00 },
-  window: { label: "Window", category: "openings",  openings: true, w: 1.00, h: 0.12, min: 0.30, max: 3.00 },
-  bed:    { label: "Bed",    category: "furniture",               w: 1.50, h: 2.00, min: 0.30, max: 2.50 },
-  sofa:   { label: "Sofa",   category: "furniture",               w: 2.00, h: 0.90, min: 0.30, max: 3.50 },
-  table:  { label: "Table",  category: "furniture",               w: 1.20, h: 0.80, min: 0.30, max: 3.00 },
-  chair:  { label: "Chair",  category: "furniture",               w: 0.50, h: 0.50, min: 0.30, max: 1.00 },
-  desk:   { label: "Desk",   category: "furniture",               w: 1.40, h: 0.70, min: 0.30, max: 2.50 },
-  fridge:    { label: "Fridge",    category: "furniture", w: 0.70, h: 0.70, min: 0.30, max: 1.20 },
-  toilet:    { label: "Toilet",    category: "furniture", w: 0.40, h: 0.70, min: 0.30, max: 1.00 },
-  bathtub:   { label: "Bathtub",   category: "furniture", w: 1.70, h: 0.75, min: 0.30, max: 2.20 },
-  sink:      { label: "Sink",      category: "furniture", w: 0.60, h: 0.45, min: 0.30, max: 1.50 },
-  stove:     { label: "Stove",     category: "furniture", w: 0.60, h: 0.60, min: 0.30, max: 1.20 },
-  wardrobe:  { label: "Wardrobe",  category: "furniture", w: 1.00, h: 0.60, min: 0.30, max: 3.00 },
-  bookshelf: { label: "Bookshelf", category: "furniture", w: 0.80, h: 0.30, min: 0.30, max: 3.00 },
-  tv:        { label: "TV",        category: "furniture", w: 1.20, h: 0.40, min: 0.30, max: 2.50 },
-  washer:    { label: "Washer",    category: "furniture", w: 0.60, h: 0.60, min: 0.30, max: 1.00 },
+  door:      { label: "Door",      category: "openings", openings: true, w: 0.90, h: 0.12, min: 0.60, max: 2.00 },
+  window:    { label: "Window",    category: "openings", openings: true, w: 1.00, h: 0.12, min: 0.30, max: 3.00 },
+  sofa:      { label: "Sofa",      category: "living",   w: 2.00, h: 0.90, min: 0.30, max: 3.50 },
+  table:     { label: "Table",     category: "living",   w: 1.20, h: 0.80, min: 0.30, max: 3.00 },
+  chair:     { label: "Chair",     category: "living",   w: 0.50, h: 0.50, min: 0.30, max: 1.00 },
+  desk:      { label: "Desk",      category: "living",   w: 1.40, h: 0.70, min: 0.30, max: 2.50 },
+  tv:        { label: "TV",        category: "living",   w: 1.20, h: 0.40, min: 0.30, max: 2.50 },
+  bookshelf: { label: "Bookshelf", category: "living",   w: 0.80, h: 0.30, min: 0.30, max: 3.00 },
+  fridge:    { label: "Fridge",    category: "kitchen",  w: 0.70, h: 0.70, min: 0.30, max: 1.20 },
+  stove:     { label: "Stove",     category: "kitchen",  w: 0.60, h: 0.60, min: 0.30, max: 1.20 },
+  sink:      { label: "Sink",      category: "kitchen",  w: 0.60, h: 0.45, min: 0.30, max: 1.50 },
+  washer:    { label: "Washer",    category: "kitchen",  w: 0.60, h: 0.60, min: 0.30, max: 1.00 },
+  bed:       { label: "Bed",       category: "bedroom",  w: 1.50, h: 2.00, min: 0.30, max: 2.50 },
+  wardrobe:  { label: "Wardrobe",  category: "bedroom",  w: 1.00, h: 0.60, min: 0.30, max: 3.00 },
+  toilet:    { label: "Toilet",    category: "bath",     w: 0.40, h: 0.70, min: 0.30, max: 1.00 },
+  bathtub:   { label: "Bathtub",   category: "bath",     w: 1.70, h: 0.75, min: 0.30, max: 2.20 },
 };
 
 // ── CRUD ───────────────────────────────────────────────────────────────────────

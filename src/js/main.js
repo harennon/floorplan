@@ -28,6 +28,7 @@ import { model as wallsModel } from "./walls.js";
 import { getSymbol } from "./symbols.js";
 import { init as initHistory, reset as historyReset, commit as historyCommit, undo as historyUndo, redo as historyRedo, canUndo, canRedo, depth as historyDepth, onChange as historyOnChange } from "./history.js";
 import { init as initHelp } from "./help.js";
+import { initDockTabs } from "./dockTabs.js";
 import { onSnapModeChange } from "./grid.js";
 import { init as initClearanceRender, render as clearanceRenderFn } from "./clearanceRender.js";
 import { init as initClearancePanel, update as clearancePanelUpdate } from "./clearancePanel.js";
@@ -182,6 +183,9 @@ document.addEventListener("DOMContentLoaded", () => {
     snapTag:     snapTagEl,
     symOverlay:  gSymOverlay,
   });
+
+  // Dock category tabs (session-only UI state; no persistence)
+  if (dockEl) initDockTabs(dockEl);
 
   // Wire select hooks into interactions (no static symbol import there)
   setSelectHooks({ onDown: onSelectDown, onMove: onSelectMove, onUp: onSelectUp, onTapEmpty });

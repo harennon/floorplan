@@ -1456,10 +1456,11 @@ describe("symbols.js — units reuse: fmtLen/parseLen round-trip for w/h", () =>
 const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer"];
 
 describe("LLD-45 — catalog integrity: all new types present and valid", () => {
-  it("every new type exists in CATALOG with category:'furniture'", () => {
+  it("every new type exists in CATALOG with a valid category (updated by LLD-50)", () => {
+    const VALID_CATS = new Set(["openings", "living", "kitchen", "bedroom", "bath"]);
     for (const t of LLD45_TYPES) {
       if (!(t in CATALOG)) throw new Error(`${t} missing from CATALOG`);
-      if (CATALOG[t].category !== "furniture") throw new Error(`${t} category not 'furniture'`);
+      if (!VALID_CATS.has(CATALOG[t].category)) throw new Error(`${t} has invalid category:'${CATALOG[t].category}'`);
     }
   });
 
@@ -7733,6 +7734,349 @@ describe("LLD-43 — open/close/isOpen toggle --visible class", () => {
 
     if (!openState)   throw new Error("isOpen() should be true after open()");
     if (closedState)  throw new Error("isOpen() should be false after close()");
+  });
+});
+
+// ─── LLD-50: Richer curated furniture/symbol set ─────────────────────────────
+
+import { initDockTabs, setActiveCategory } from "./js/dockTabs.js";
+
+// ─── LLD-50 — catalog taxonomy integrity ─────────────────────────────────────
+
+describe("LLD-50 — catalog: every entry has a valid 5-value category", () => {
+  const VALID_CATS = new Set(["openings", "living", "kitchen", "bedroom", "bath"]);
+
+  it("no entry retains the old 'furniture' category", () => {
+    for (const [type, entry] of Object.entries(CATALOG)) {
+      if (entry.category === "furniture") {
+        throw new Error(`${type} still has category:"furniture"`);
+      }
+    }
+  });
+
+  it("every category value is one of the 5 valid values", () => {
+    for (const [type, entry] of Object.entries(CATALOG)) {
+      if (!VALID_CATS.has(entry.category)) {
+        throw new Error(`${type} has invalid category:"${entry.category}"`);
+      }
+    }
+  });
+
+  it("door and window have category:'openings' AND openings:true; no other type sets openings:true", () => {
+    if (CATALOG.door.category !== "openings") throw new Error("door.category should be 'openings'");
+    if (!CATALOG.door.openings) throw new Error("door.openings should be true");
+    if (CATALOG.window.category !== "openings") throw new Error("window.category should be 'openings'");
+    if (!CATALOG.window.openings) throw new Error("window.openings should be true");
+    for (const [type, entry] of Object.entries(CATALOG)) {
+      if (type !== "door" && type !== "window" && entry.openings) {
+        throw new Error(`${type} unexpectedly has openings:true`);
+      }
+    }
+  });
+
+  it("spot-check mapping: bed→bedroom, stove→kitchen, tv→living, toilet→bath", () => {
+    expect(CATALOG.bed.category).toBe("bedroom");
+    expect(CATALOG.stove.category).toBe("kitchen");
+    expect(CATALOG.tv.category).toBe("living");
+    expect(CATALOG.toilet.category).toBe("bath");
+  });
+
+  it("spot-check: wardrobe→bedroom, sofa→living, sink→kitchen, bathtub→bath, bookshelf→living, washer→kitchen", () => {
+    expect(CATALOG.wardrobe.category).toBe("bedroom");
+    expect(CATALOG.sofa.category).toBe("living");
+    expect(CATALOG.sink.category).toBe("kitchen");
+    expect(CATALOG.bathtub.category).toBe("bath");
+    expect(CATALOG.bookshelf.category).toBe("living");
+    expect(CATALOG.washer.category).toBe("kitchen");
+  });
+});
+
+describe("LLD-50 — catalog: regression guard (dimensions + labels)", () => {
+  it("all entries have finite w, h, min, max; non-openings satisfy min <= w,h <= max", () => {
+    for (const [type, entry] of Object.entries(CATALOG)) {
+      for (const field of ["w", "h", "min", "max"]) {
+        if (!isFinite(entry[field])) {
+          throw new Error(`${type}.${field} is not finite: ${entry[field]}`);
+        }
+      }
+      // openings (door/window) have a fixed thin depth (h) that is intentionally below
+      // the user-editable min — only the width (w) is user-resizable for openings.
+      if (entry.min > entry.w) throw new Error(`${type}: min(${entry.min}) > w(${entry.w})`);
+      if (entry.w > entry.max) throw new Error(`${type}: w(${entry.w}) > max(${entry.max})`);
+      if (!entry.openings) {
+        if (entry.min > entry.h) throw new Error(`${type}: min(${entry.min}) > h(${entry.h})`);
+        if (entry.h > entry.max) throw new Error(`${type}: h(${entry.h}) > max(${entry.max})`);
+      }
+    }
+  });
+
+  it("all entries have non-empty label", () => {
+    for (const [type, entry] of Object.entries(CATALOG)) {
+      if (!entry.label || entry.label.trim() === "") {
+        throw new Error(`${type} has empty label`);
+      }
+    }
+  });
+});
+
+describe("LLD-50 — createSymbol + clampDim for new-type spot-checks", () => {
+  it("createSymbol for each new type returns correct catalog dims, rot:0, valid id", () => {
+    const newTypes = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer"];
+    for (const type of newTypes) {
+      const s = createSymbol(type, 1, 2);
+      if (s.type !== type) throw new Error(`createSymbol(${type}).type mismatch`);
+      if (Math.abs(s.w - CATALOG[type].w) > 1e-9) throw new Error(`${type}: w mismatch`);
+      if (Math.abs(s.h - CATALOG[type].h) > 1e-9) throw new Error(`${type}: h mismatch`);
+      if (s.rot !== 0) throw new Error(`${type}: rot should be 0`);
+      if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(`${type}: bad id`);
+    }
+  });
+
+  it("clampDim: asymmetric type (bathtub) clamps min and max correctly", () => {
+    // bathtub: min=0.30, max=2.20
+    expect(clampDim("bathtub", 0.20)).toBeCloseTo(0.30, 9); // below min → min
+    expect(clampDim("bathtub", 3.00)).toBeCloseTo(2.20, 9); // above max → max
+    expect(clampDim("bathtub", 1.00)).toBeCloseTo(1.00, 9); // in range → unchanged
+  });
+
+  it("clampDim: symmetric type (washer) clamps min and max correctly", () => {
+    // washer: min=0.30, max=1.00
+    expect(clampDim("washer", 0.10)).toBeCloseTo(0.30, 9); // below min → min
+    expect(clampDim("washer", 1.50)).toBeCloseTo(1.00, 9); // above max → max
+    expect(clampDim("washer", 0.60)).toBeCloseTo(0.60, 9); // in range → unchanged
+  });
+
+  it("resizeSymbol clamps and returns changed flag correctly", () => {
+    resetSymbolModel();
+    const s = createSymbol("bathtub", 0, 0);
+    // Resize to below min — should clamp and return true (changed)
+    const changed = resizeSymbol(s, "w", 0.10);
+    expect(changed).toBe(true);
+    expect(s.w).toBeCloseTo(0.30, 9);
+    // Resize to same clamped value — should return false (no change)
+    const notChanged = resizeSymbol(s, "w", 0.10);
+    expect(notChanged).toBe(false);
+  });
+});
+
+// ─── LLD-50 — dock tabs (DOM-based) ──────────────────────────────────────────
+
+/** Build a minimal dock DOM matching the index.html structure for tab tests. */
+function _makeDockDOM() {
+  const dock = document.createElement("nav");
+  dock.id = "test-symbol-dock";
+
+  // Tab strip
+  const tablist = document.createElement("div");
+  tablist.setAttribute("role", "tablist");
+  tablist.className = "dock-tabs";
+
+  const categories = ["openings", "living", "kitchen", "bedroom", "bath"];
+  const tabLabels  = { openings: "Openings", living: "Living", kitchen: "Kitchen", bedroom: "Bedroom", bath: "Bath" };
+  // Item types per category (matching CATALOG)
+  const itemsByCategory = {
+    openings: ["door", "window"],
+    living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf"],
+    kitchen:  ["fridge", "stove", "sink", "washer"],
+    bedroom:  ["bed", "wardrobe"],
+    bath:     ["toilet", "bathtub"],
+  };
+
+  for (let i = 0; i < categories.length; i++) {
+    const cat = categories[i];
+    const tab = document.createElement("button");
+    tab.setAttribute("role", "tab");
+    tab.dataset.category = cat;
+    tab.id = `test-tab-${cat}`;
+    tab.setAttribute("aria-controls", `test-row-${cat}`);
+    tab.setAttribute("aria-selected", i === 0 ? "true" : "false");
+    tab.tabIndex = i === 0 ? 0 : -1;
+    tab.textContent = tabLabels[cat];
+    tablist.appendChild(tab);
+  }
+  dock.appendChild(tablist);
+
+  for (let i = 0; i < categories.length; i++) {
+    const cat = categories[i];
+    const row = document.createElement("div");
+    row.setAttribute("role", "tabpanel");
+    row.dataset.category = cat;
+    row.id = `test-row-${cat}`;
+    row.setAttribute("aria-labelledby", `test-tab-${cat}`);
+    if (i !== 0) row.setAttribute("hidden", "");
+
+    for (const type of itemsByCategory[cat]) {
+      const btn = document.createElement("button");
+      btn.className = "dock-item";
+      btn.dataset.type = type;
+      btn.setAttribute("aria-label", `Add ${type}`);
+      row.appendChild(btn);
+    }
+    dock.appendChild(row);
+  }
+
+  document.body.appendChild(dock);
+  return dock;
+}
+
+function _removeDockDOM(dock) {
+  if (dock.parentNode) dock.parentNode.removeChild(dock);
+}
+
+describe("LLD-50 — dock tabs: structure integrity", () => {
+  it("dock has exactly 5 tabs (one per category)", () => {
+    const dock = _makeDockDOM();
+    const tabs = dock.querySelectorAll("[role='tab'][data-category]");
+    _removeDockDOM(dock);
+    expect(tabs.length).toBe(5);
+  });
+
+  it("dock has exactly 5 tabpanel rows (one per category)", () => {
+    const dock = _makeDockDOM();
+    const rows = dock.querySelectorAll("[role='tabpanel'][data-category]");
+    _removeDockDOM(dock);
+    expect(rows.length).toBe(5);
+  });
+
+  it("union of all dock-item[data-type] equals the 16 catalog keys", () => {
+    const dock = _makeDockDOM();
+    const types = Array.from(dock.querySelectorAll(".dock-item[data-type]")).map(b => b.dataset.type);
+    _removeDockDOM(dock);
+    const catalogKeys = Object.keys(CATALOG).sort();
+    const dockTypes = [...new Set(types)].sort();
+    if (JSON.stringify(dockTypes) !== JSON.stringify(catalogKeys)) {
+      throw new Error(`Dock types don't match catalog keys.\nDock: ${dockTypes.join(", ")}\nCatalog: ${catalogKeys.join(", ")}`);
+    }
+    expect(types.length).toBe(16);
+  });
+
+  it("no tab button has a data-type attribute", () => {
+    const dock = _makeDockDOM();
+    const tabs = dock.querySelectorAll("[role='tab']");
+    for (const tab of tabs) {
+      if (tab.dataset.type) {
+        _removeDockDOM(dock);
+        throw new Error(`Tab for category "${tab.dataset.category}" unexpectedly has data-type="${tab.dataset.type}"`);
+      }
+    }
+    _removeDockDOM(dock);
+  });
+});
+
+describe("LLD-50 — dock tabs: initial state after initDockTabs", () => {
+  it("exactly one tab has aria-selected='true' (the first, openings)", () => {
+    const dock = _makeDockDOM();
+    initDockTabs(dock);
+    const selectedTabs = dock.querySelectorAll("[role='tab'][aria-selected='true']");
+    const firstTabCategory = dock.querySelector("[role='tab']")?.dataset.category;
+    _removeDockDOM(dock);
+    if (selectedTabs.length !== 1) {
+      throw new Error(`Expected 1 selected tab, got ${selectedTabs.length}`);
+    }
+    if (selectedTabs[0].dataset.category !== "openings") {
+      throw new Error(`Expected openings tab selected, got ${selectedTabs[0].dataset.category}`);
+    }
+    expect(firstTabCategory).toBe("openings");
+  });
+
+  it("exactly one dock-row is visible (not hidden) after init", () => {
+    const dock = _makeDockDOM();
+    initDockTabs(dock);
+    const rows = Array.from(dock.querySelectorAll("[role='tabpanel']"));
+    const visibleRows = rows.filter(r => !r.hasAttribute("hidden"));
+    _removeDockDOM(dock);
+    if (visibleRows.length !== 1) {
+      throw new Error(`Expected 1 visible row, got ${visibleRows.length}`);
+    }
+    expect(visibleRows[0].dataset.category).toBe("openings");
+  });
+});
+
+describe("LLD-50 — dock tabs: setActiveCategory", () => {
+  it("setActiveCategory('kitchen') shows only kitchen row, hides other four", () => {
+    const dock = _makeDockDOM();
+    initDockTabs(dock);
+    setActiveCategory(dock, "kitchen");
+    const rows = Array.from(dock.querySelectorAll("[role='tabpanel']"));
+    const visibleRows = rows.filter(r => !r.hasAttribute("hidden"));
+    const hiddenRows  = rows.filter(r =>  r.hasAttribute("hidden"));
+    _removeDockDOM(dock);
+    if (visibleRows.length !== 1 || visibleRows[0].dataset.category !== "kitchen") {
+      throw new Error(`Expected only kitchen row visible, got: ${visibleRows.map(r => r.dataset.category).join(", ")}`);
+    }
+    if (hiddenRows.length !== 4) {
+      throw new Error(`Expected 4 hidden rows, got ${hiddenRows.length}`);
+    }
+  });
+
+  it("setActiveCategory('kitchen') sets aria-selected='true' only on kitchen tab", () => {
+    const dock = _makeDockDOM();
+    initDockTabs(dock);
+    setActiveCategory(dock, "kitchen");
+    const tabs = Array.from(dock.querySelectorAll("[role='tab']"));
+    const selectedTabs = tabs.filter(t => t.getAttribute("aria-selected") === "true");
+    _removeDockDOM(dock);
+    if (selectedTabs.length !== 1 || selectedTabs[0].dataset.category !== "kitchen") {
+      throw new Error(`Expected kitchen tab selected only, got: ${selectedTabs.map(t => t.dataset.category).join(", ")}`);
+    }
+  });
+
+  it("setActiveCategory cycles through all 5 categories correctly", () => {
+    const dock = _makeDockDOM();
+    initDockTabs(dock);
+    for (const cat of ["openings", "living", "kitchen", "bedroom", "bath"]) {
+      setActiveCategory(dock, cat);
+      const rows = Array.from(dock.querySelectorAll("[role='tabpanel']"));
+      const visible = rows.filter(r => !r.hasAttribute("hidden"));
+      if (visible.length !== 1 || visible[0].dataset.category !== cat) {
+        _removeDockDOM(dock);
+        throw new Error(`After setActiveCategory('${cat}'): visible row is '${visible.map(r => r.dataset.category).join(",")}' not '${cat}'`);
+      }
+    }
+    _removeDockDOM(dock);
+  });
+});
+
+// ─── LLD-50 — round-trip / backwards-compat (plan.js) ────────────────────────
+
+describe("LLD-50 — plan round-trip: new-type symbol survives serialize→validate", () => {
+  it("plan with a toilet symbol passes validatePlan and round-trips unchanged", () => {
+    resetSymbolModel();
+    const s = createSymbol("toilet", 3, 4);
+    addSymbol(s);
+    const plan = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(plan)));
+    if (!v) throw new Error("validatePlan rejected plan with toilet symbol");
+    if (v.symbols.symbols[0].type !== "toilet") throw new Error("Symbol type lost after round-trip");
+    resetSymbolModel();
+  });
+
+  it("plan with only old-type symbols still validates after category change", () => {
+    resetSymbolModel();
+    const s = createSymbol("bed", 1, 2);
+    addSymbol(s);
+    const plan = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(plan)));
+    if (!v) throw new Error("validatePlan rejected plan with old-type symbols");
+    resetSymbolModel();
+  });
+
+  it("empty plan (no symbols) still validates after category change", () => {
+    resetSymbolModel();
+    const plan = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(plan)));
+    if (!v) throw new Error("validatePlan rejected empty plan");
+  });
+
+  it("plan with new types serializes and re-validates (all 8 new types)", () => {
+    resetSymbolModel();
+    const newTypes = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer"];
+    for (const t of newTypes) addSymbol(createSymbol(t, 0, 0));
+    const json = serializePlan(buildPlan());
+    const v = validatePlan(JSON.parse(json));
+    if (!v) throw new Error("validatePlan rejected plan after serialize of all new types");
+    if (v.symbols.symbols.length !== newTypes.length) throw new Error(`Expected ${newTypes.length} symbols, got ${v.symbols.symbols.length}`);
+    resetSymbolModel();
   });
 });
 
