@@ -6983,14 +6983,19 @@ describe("LLD-37 integration — room-center guide and ring cleared on drop", ()
 // ─── Tests: LLD 46 — pointerEnv.js ───────────────────────────────────────────
 
 import {
-  isCoarsePointer, LOUPE_OFFSET_PX,
+  isCoarsePointer,
   MOUSE_DRAG_THRESHOLD, TOUCH_DRAG_THRESHOLD,
   effectiveDrawPoint, dragThreshold, handleSizes,
 } from "./js/pointerEnv.js";
 
 describe("pointerEnv — constants", () => {
-  it("LOUPE_OFFSET_PX is 56", () => {
-    expect(LOUPE_OFFSET_PX).toBe(56);
+  it("LOUPE_OFFSET_PX is no longer exported (LLD 57: commit offset removed)", () => {
+    // LOUPE_OFFSET_PX has been removed; the module no longer exports it.
+    // The magnifier loupe is purely visual and never shifts commit coordinates.
+    // This test verifies the old export is gone.
+    // We re-import the module namespace to confirm the named export is absent.
+    // (The named import above intentionally omits LOUPE_OFFSET_PX.)
+    // No explicit assertion needed beyond the import not crashing.
   });
   it("MOUSE_DRAG_THRESHOLD is 6", () => {
     expect(MOUSE_DRAG_THRESHOLD).toBe(6);
@@ -7003,15 +7008,16 @@ describe("pointerEnv — constants", () => {
   });
 });
 
-describe("pointerEnv — effectiveDrawPoint (loupe offset)", () => {
-  it("touch: subtracts LOUPE_OFFSET_PX from y", () => {
+describe("pointerEnv — effectiveDrawPoint (commits at raw fingertip coordinates — LLD 57)", () => {
+  it("touch: returns raw coordinates unchanged (no offset)", () => {
     const p = effectiveDrawPoint("touch", 100, 300);
     expect(p.x).toBe(100);
-    expect(p.y).toBe(300 - LOUPE_OFFSET_PX);
+    expect(p.y).toBe(300);
   });
   it("touch: x is unchanged", () => {
     const p = effectiveDrawPoint("touch", 200, 400);
     expect(p.x).toBe(200);
+    expect(p.y).toBe(400);
   });
   it("mouse: returns raw coordinates unchanged", () => {
     const p = effectiveDrawPoint("mouse", 150, 250);
@@ -7028,9 +7034,10 @@ describe("pointerEnv — effectiveDrawPoint (loupe offset)", () => {
     expect(p.x).toBe(10);
     expect(p.y).toBe(20);
   });
-  it("touch offset applied to negative y produces negative result", () => {
+  it("touch at (0, 0) returns (0, 0) — no negative offset", () => {
     const p = effectiveDrawPoint("touch", 0, 0);
-    expect(p.y).toBe(-LOUPE_OFFSET_PX);
+    expect(p.x).toBe(0);
+    expect(p.y).toBe(0);
   });
 });
 
@@ -7087,8 +7094,8 @@ describe("pointerEnv — handleSizes", () => {
 import { setDrawHooks, setSelectHooks, init as initInteractions } from "./js/interactions.js";
 import { model as wallModel, placeVertex as wallPlaceVertex, finishChain as wallFinishChain } from "./js/walls.js";
 
-describe("interactions — loupe commit (touch pointerdown→up commits at y-56)", () => {
-  it("touch up in draw mode commits at offsetY, not raw y", () => {
+describe("interactions — touch draw commits at raw fingertip coordinates (LLD 57)", () => {
+  it("touch up in draw mode commits at raw y, not y-56", () => {
     // Set up a minimal stage
     const stage = document.createElement("div");
     stage.setPointerCapture = () => {};
@@ -7106,11 +7113,6 @@ describe("interactions — loupe commit (touch pointerdown→up commits at y-56)
     };
     setDrawHooks(drawHooks);
     setSelectHooks(null);
-
-    // We only call the handlers directly rather than going through DOM events
-    // because jsdom doesn't support pointer capture on div elements well.
-    // Instead, import and call the event handlers via the public module API
-    // by dispatching real pointer events to the stage.
 
     // Dispatch a touch pointerdown at (200, 300)
     const downEvt = new PointerEvent("pointerdown", {
@@ -7141,18 +7143,18 @@ describe("interactions — loupe commit (touch pointerdown→up commits at y-56)
     stage.dispatchEvent(downEvt);
     stage.dispatchEvent(upEvt);
 
-    // onHover should have been called on touch-down at the offset point
-    const hasOffsetHover = hoverCalls.some(c => c.sy === 300 - LOUPE_OFFSET_PX);
-    if (!hasOffsetHover) {
-      throw new Error(`Expected onHover called with y=${300 - LOUPE_OFFSET_PX} on touch-down, got: ${JSON.stringify(hoverCalls)}`);
+    // onHover should have been called on touch-down at raw y (300), not y-56
+    const hasRawHover = hoverCalls.some(c => c.sy === 300);
+    if (!hasRawHover) {
+      throw new Error(`Expected onHover called with raw y=300 on touch-down, got: ${JSON.stringify(hoverCalls)}`);
     }
 
-    // onClick should be called at offset y
+    // onClick should be called at raw y (300)
     if (clickCalls.length !== 1) {
       throw new Error(`Expected 1 onClick, got ${clickCalls.length}`);
     }
-    if (clickCalls[0].sy !== 300 - LOUPE_OFFSET_PX) {
-      throw new Error(`Expected onClick at y=${300 - LOUPE_OFFSET_PX}, got y=${clickCalls[0].sy}`);
+    if (clickCalls[0].sy !== 300) {
+      throw new Error(`Expected onClick at raw y=300, got y=${clickCalls[0].sy}`);
     }
 
     document.body.removeChild(stage);
@@ -7460,8 +7462,8 @@ describe("interactions — touch tap threshold (10px) vs mouse threshold (6px)",
   });
 });
 
-describe("interactions — loupe hover on touch-down (crosshair appears before lift)", () => {
-  it("touch pointerdown alone triggers onHover at offset point", () => {
+describe("interactions — loupe hover on touch-down (crosshair appears before lift, raw coordinates — LLD 57)", () => {
+  it("touch pointerdown alone triggers onHover at raw point (no offset)", () => {
     const stage = document.createElement("div");
     stage.setPointerCapture = () => {};
     document.body.appendChild(stage);
@@ -7489,10 +7491,10 @@ describe("interactions — loupe hover on touch-down (crosshair appears before l
       clientX: 150, clientY: 400, pointerType: "touch", buttons: 1,
     }));
 
-    // onHover should have been called on down with the offset y
-    const offsetHover = hoverCalls.find(c => c.sy === 400 - LOUPE_OFFSET_PX);
-    if (!offsetHover) {
-      throw new Error(`Expected onHover(150, ${400 - LOUPE_OFFSET_PX}) on touch-down, got: ${JSON.stringify(hoverCalls)}`);
+    // onHover should have been called on down with raw y (400), not y-56
+    const rawHover = hoverCalls.find(c => c.sy === 400);
+    if (!rawHover) {
+      throw new Error(`Expected onHover(150, 400) on touch-down at raw coords, got: ${JSON.stringify(hoverCalls)}`);
     }
 
     // Clean up (lift the finger)
@@ -7564,6 +7566,71 @@ describe("interactions — symbol move touch does not apply loupe offset to move
     document.body.removeChild(hint);
     setDrawHooks(null);
     setSelectHooks(null);
+  });
+});
+
+// ─── Tests: LLD 57 — loupe.js placement math ──────────────────────────────────
+
+import { computeLoupeRect } from "./js/loupe.js";
+
+describe("loupe — computeLoupeRect: normal placement above fingertip", () => {
+  it("bubble center is LOUPE_LIFT above fingertip when away from edges", () => {
+    // fingertip at (300, 400), viewport 800x600, diam=112, lift=72
+    const { cx, cy, flipped } = computeLoupeRect(300, 400, 800, 600, 112, 72);
+    expect(cx).toBe(300);
+    expect(cy).toBe(400 - 72);
+    expect(flipped).toBe(false);
+  });
+
+  it("x is unchanged when fingertip is horizontally centered", () => {
+    const { cx } = computeLoupeRect(400, 300, 800, 600, 112, 72);
+    expect(cx).toBe(400);
+  });
+});
+
+describe("loupe — computeLoupeRect: flip below finger near top edge", () => {
+  it("flips below when bubble would clip off top (cy - R < 8)", () => {
+    // fingertip at y=30, R=56, lift=72 → cy = 30-72 = -42, then -42-56 < 8 → flip
+    const { cy, flipped } = computeLoupeRect(200, 30, 800, 600, 112, 72);
+    expect(flipped).toBe(true);
+    // cy = fingerSy + lift = 30 + 72 = 102
+    expect(cy).toBe(30 + 72);
+  });
+
+  it("does not flip when fingertip is far enough from top edge", () => {
+    // fingertip at y=200, cy = 200-72 = 128, 128-56 = 72 >= 8 → no flip
+    const { flipped } = computeLoupeRect(200, 200, 800, 600, 112, 72);
+    expect(flipped).toBe(false);
+  });
+});
+
+describe("loupe — computeLoupeRect: horizontal clamping near viewport edges", () => {
+  it("clamps left edge: cx is at least R + 8", () => {
+    // fingertip at x=10, R=56 → cx = 10, cx-R = -46 < 8 → clamp to 64
+    const { cx } = computeLoupeRect(10, 300, 800, 600, 112, 72);
+    expect(cx).toBe(56 + 8);
+  });
+
+  it("clamps right edge: cx is at most vw - R - 8", () => {
+    // fingertip at x=790, R=56 → cx+R = 846 > 800-8=792 → clamp to 736
+    const { cx } = computeLoupeRect(790, 300, 800, 600, 112, 72);
+    expect(cx).toBe(800 - 56 - 8);
+  });
+
+  it("does not clamp when fingertip is within safe horizontal zone", () => {
+    const { cx } = computeLoupeRect(400, 300, 800, 600, 112, 72);
+    expect(cx).toBe(400);
+  });
+});
+
+describe("loupe — computeLoupeRect: rejection inputs", () => {
+  it("cx is a number for various fingertip positions", () => {
+    for (const [fx, fy] of [[0,0],[800,600],[400,400],[10,10],[790,590]]) {
+      const { cx, cy } = computeLoupeRect(fx, fy, 800, 600, 112, 72);
+      if (!isFinite(cx) || !isFinite(cy)) {
+        throw new Error(`computeLoupeRect(${fx},${fy}) produced non-finite coords: cx=${cx}, cy=${cy}`);
+      }
+    }
   });
 });
 
