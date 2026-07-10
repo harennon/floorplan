@@ -5,14 +5,34 @@
  * document state. prefs.js owns editor-session preferences that should survive
  * reload but must NOT appear in exported JSON or share links.
  *
- * Starting preference: gridSnap (boolean, default true).
+ * Preferences: gridSnap (boolean), theme ("light"|"dark").
  */
 
 export const PREFS_KEY = "floorplan:prefs:v1";
 
-/** @typedef {{ gridSnap: boolean }} Prefs */
+/** @typedef {{ gridSnap: boolean, theme: "light"|"dark" }} Prefs */
 
-const _defaults = { gridSnap: true };
+/**
+ * Resolve the default theme from prefers-color-scheme.
+ * Only an explicit OS dark preference yields "dark"; everything else → "light".
+ * @returns {"light"|"dark"}
+ */
+function _resolveDefaultTheme() {
+  try {
+    if (typeof window !== "undefined" && window.matchMedia) {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+  } catch {
+    // matchMedia unavailable or throws
+  }
+  return "light";
+}
+
+const _defaults = {
+  gridSnap: true,
+  // Theme default is computed at module load from prefers-color-scheme (light fallback).
+  theme: _resolveDefaultTheme(),
+};
 
 /** In-memory copy, kept in sync with localStorage. */
 let _prefs = { ..._defaults };
@@ -27,8 +47,12 @@ const _listeners = [];
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return;
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.gridSnap === "boolean") {
-      _prefs = { gridSnap: parsed.gridSnap };
+    if (!parsed) return;
+    if (typeof parsed.gridSnap === "boolean") {
+      _prefs.gridSnap = parsed.gridSnap;
+    }
+    if (parsed.theme === "light" || parsed.theme === "dark") {
+      _prefs.theme = parsed.theme;
     }
     // Unrecognised keys are silently ignored; missing keys fall back to defaults.
   } catch {
@@ -53,12 +77,7 @@ export function gridSnap() {
  */
 export function setGridSnap(on) {
   _prefs.gridSnap = !!on;
-  try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(_prefs));
-  } catch {
-    // QuotaExceededError, SecurityError, or private-mode write failure.
-    // The in-memory value was already updated, so the session behaves correctly.
-  }
+  _persist();
   for (const cb of _listeners) cb();
 }
 
@@ -72,9 +91,47 @@ export function toggleGridSnap() {
 }
 
 /**
+ * Read the current theme preference.
+ * @returns {"light"|"dark"}
+ */
+export function getTheme() {
+  return _prefs.theme;
+}
+
+/**
+ * Set theme preference; persists to localStorage and fires onChange listeners.
+ * @param {"light"|"dark"} theme
+ */
+export function setTheme(theme) {
+  _prefs.theme = (theme === "light" || theme === "dark") ? theme : _defaults.theme;
+  _persist();
+  for (const cb of _listeners) cb();
+}
+
+/**
+ * Toggle theme and return the new value.
+ * @returns {"light"|"dark"}
+ */
+export function toggleTheme() {
+  setTheme(_prefs.theme === "light" ? "dark" : "light");
+  return _prefs.theme;
+}
+
+/**
  * Register a callback fired after any pref change.
  * @param {() => void} cb
  */
 export function onPrefsChange(cb) {
   _listeners.push(cb);
+}
+
+// ── Private helpers ───────────────────────────────────────────────────────────
+
+function _persist() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(_prefs));
+  } catch {
+    // QuotaExceededError, SecurityError, or private-mode write failure.
+    // The in-memory value was already updated, so the session behaves correctly.
+  }
 }

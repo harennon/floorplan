@@ -9,22 +9,14 @@
 import { model as wallsModel, edgeLength, WALL_M } from "./walls.js";
 import { model as symbolsModel, corners, CATALOG } from "./symbols.js";
 import { fmtLen, unitLabel } from "./units.js";
+import { palette } from "./theme.js";
 
 /** Export scale: pixels per metre in the exported image */
 const EXPORT_PX_PER_M = 96; // ~100px/m for a readable print-scale output
 const MARGIN_M = 0.5;        // world-space margin around content, metres
 const EXPORT_2X = 2;         // pixel density multiplier for PNG
 
-// Palette (blueprint theme, opaque background)
-const BG_COLOR         = "#14140f";
-const WALL_BODY_COLOR  = "rgba(201,168,76,0.30)";
-const WALL_LINE_COLOR  = "#d9be6e";
-const ROOM_FILL_COLOR  = "rgba(201,168,76,0.07)";
-const CHAIN_COLOR      = "#d9be6e";
-const SYM_FILL         = "rgba(201,168,76,0.12)";
-const SYM_STROKE       = "#d9be6e";
-const DIM_COLOR        = "#8f8a78";
-const FONT_FAMILY      = '"DM Mono", "Courier New", monospace';
+const FONT_FAMILY = '"DM Mono", "Courier New", monospace';
 
 /** @typedef {{ minX:number, minY:number, maxX:number, maxY:number }} Bounds */
 
@@ -70,6 +62,10 @@ export function contentBounds() {
  * @returns {string}
  */
 export function buildExportSvg() {
+  // Read the active theme palette at build time — the exported SVG must contain
+  // concrete colors, not CSS vars (it may be opened outside the app).
+  const p = palette();
+
   const bounds = contentBounds();
 
   // If empty, produce a minimal valid SVG
@@ -103,19 +99,19 @@ export function buildExportSvg() {
 
     // Fill (closed rooms only)
     if (room.closed && pts.length >= 3) {
-      body += `<polygon points="${ptsStr}" fill="${ROOM_FILL_COLOR}" stroke="none"/>\n`;
+      body += `<polygon points="${ptsStr}" fill="${p.roomFill}" stroke="none"/>\n`;
     }
 
     // Wall body
     if (pts.length >= 2) {
       const tag = room.closed ? "polygon" : "polyline";
-      body += `<${tag} points="${ptsStr}" fill="none" stroke="${WALL_BODY_COLOR}" stroke-width="${wallPx}" stroke-linejoin="round" stroke-linecap="round"/>\n`;
+      body += `<${tag} points="${ptsStr}" fill="none" stroke="${p.wallBody}" stroke-width="${wallPx}" stroke-linejoin="round" stroke-linecap="round"/>\n`;
     }
 
     // Centerline
     if (pts.length >= 2) {
       const tag = room.closed ? "polygon" : "polyline";
-      body += `<${tag} points="${ptsStr}" fill="none" stroke="${WALL_LINE_COLOR}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>\n`;
+      body += `<${tag} points="${ptsStr}" fill="none" stroke="${p.wallLine}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>\n`;
     }
 
     // Dimension labels per edge
@@ -131,31 +127,31 @@ export function buildExportSvg() {
       const mx = wx((a.x + b.x) / 2);
       const my = wy((a.y + b.y) / 2);
       const labelText = `${fmtLen(len)} ${unitLabel()}`;
-      body += `<text x="${mx}" y="${my}" font-family=${JSON.stringify(FONT_FAMILY)} font-size="10" fill="${DIM_COLOR}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(labelText)}</text>\n`;
+      body += `<text x="${mx}" y="${my}" font-family=${JSON.stringify(FONT_FAMILY)} font-size="10" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(labelText)}</text>\n`;
     }
   }
 
   // ── Active chain (draft polyline) ───────────────────────────────────────────
   if (wallsModel.chain.length >= 2) {
     const ptsStr = wallsModel.chain.map(v => `${wx(v.x)},${wy(v.y)}`).join(" ");
-    body += `<polyline points="${ptsStr}" fill="none" stroke="${CHAIN_COLOR}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 4"/>\n`;
+    body += `<polyline points="${ptsStr}" fill="none" stroke="${p.draft}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 4"/>\n`;
   }
 
   // ── Symbols ─────────────────────────────────────────────────────────────────
   for (const sym of symbolsModel.symbols) {
     const cs = corners(sym);
     const ptsStr = cs.map(c => `${wx(c.x)},${wy(c.y)}`).join(" ");
-    body += `<polygon points="${ptsStr}" fill="${SYM_FILL}" stroke="${SYM_STROKE}" stroke-width="1.5" stroke-linejoin="round"/>\n`;
+    body += `<polygon points="${ptsStr}" fill="${p.symFill}" stroke="${p.symStroke}" stroke-width="1.5" stroke-linejoin="round"/>\n`;
 
     // Type label at center
     const label = CATALOG[sym.type]?.label || sym.type;
-    body += `<text x="${wx(sym.x)}" y="${wy(sym.y)}" font-family=${JSON.stringify(FONT_FAMILY)} font-size="9" fill="${DIM_COLOR}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(label)}</text>\n`;
+    body += `<text x="${wx(sym.x)}" y="${wy(sym.y)}" font-family=${JSON.stringify(FONT_FAMILY)} font-size="9" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(label)}</text>\n`;
   }
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`,
-    `  <rect width="${W}" height="${H}" fill="${BG_COLOR}"/>`,
+    `  <rect width="${W}" height="${H}" fill="${p.bg}"/>`,
     body,
     `</svg>`,
   ].join("\n");

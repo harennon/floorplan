@@ -32,6 +32,7 @@
     <style>
       /* ── Design tokens ────────────────────────────────────────────────── */
       :root {
+        /* Dark (warm blueprint) theme — default */
         --bg:         #14140f;
         --bg-deep:    #100f0b;
         --ink:        #ece7d6;
@@ -56,12 +57,28 @@
         /* Wall / snap palette */
         --wall-body:     rgba(201,168,76,0.30);
         --wall-line:     #d9be6e;
+        --wall-line-hi:  #e8cf7a;
         --draft:         #d9be6e;
         --room-fill:     rgba(201,168,76,0.07);
         --room-fill-hi:  rgba(201,168,76,0.15);
         --snap-grid:     #7fd0c8;
+        --snap-teal:     #7fd0c8;
         --snap-point:    #e0b64f;
         --snap-close:    #9cd67a;
+
+        /* Symbol palette */
+        --sym-fill:      rgba(201,168,76,0.12);
+        --sym-stroke:    #d9be6e;
+        --sym-sel-fill:  rgba(201,168,76,0.18);
+        --ghost-fill:    rgba(201,168,76,0.25);
+        --ghost-stroke:  #c9a84c;
+
+        /* Export dimension color */
+        --dim:           #8f8a78;
+
+        /* Alpha-ladder base RGB triples */
+        --accent-rgb:    201,168,76;
+        --sym-ink-rgb:   201,168,76;
 
         /* Dimension entry */
         --error: #e57373;
@@ -73,6 +90,56 @@
         --clr-ok-fill:    rgba(127,208,200,0.14);
         --clr-tight-fill: rgba(224,182,79,0.16);
         --clr-bad-fill:   rgba(229,115,115,0.18);
+      }
+
+      /* ── Light theme (P1 Paper) ──────────────────────────────────────────── */
+      html[data-theme="light"] {
+        --bg:         #f3ecda;
+        --bg-deep:    #e7dcc2;
+        --ink:        #3a3020;
+        --muted:      #8a7c60;
+        --gold:       #a9812a;
+        --gold-soft:  rgba(169, 129, 42, 0.5);
+
+        /* Grid line tiers */
+        --grid-fine:  rgba(120, 96, 50, 0.07);
+        --grid-major: rgba(120, 96, 50, 0.16);
+        --grid-axis:  rgba(120, 96, 50, 0.36);
+
+        /* Chrome */
+        --panel:      rgba(248, 242, 228, 0.82);
+        --hairline:   rgba(120, 96, 50, 0.22);
+
+        /* Wall / snap palette */
+        --wall-body:     rgba(107,88,54,0.30);
+        --wall-line:     #6b5836;
+        --wall-line-hi:  #4f4022;
+        --draft:         #6b5836;
+        --room-fill:     rgba(107,88,54,0.07);
+        --room-fill-hi:  rgba(107,88,54,0.15);
+        --snap-grid:     #2f8f86;
+        --snap-teal:     #2f8f86;
+        --snap-point:    #b07d1e;
+        --snap-close:    #3f8a2f;
+
+        /* Symbol palette */
+        --sym-fill:      rgba(107,88,54,0.12);
+        --sym-stroke:    #6b5836;
+        --sym-sel-fill:  rgba(107,88,54,0.18);
+        --ghost-fill:    rgba(107,88,54,0.25);
+        --ghost-stroke:  #a9812a;
+
+        /* Export dimension color */
+        --dim:           #8a7c60;
+
+        /* Alpha-ladder base RGB triples (sepia) */
+        --accent-rgb:    107,88,54;
+        --sym-ink-rgb:   107,88,54;
+
+        /* Alignment guide colors */
+        --align-edge:    #7a4fb0;
+        --align-center:  #2f8f86;
+        --room-center:   #b64e8a;
       }
 
       /* ── Reset ────────────────────────────────────────────────────────── */
@@ -205,6 +272,32 @@
       }
       .unit-toggle button:hover:not([aria-pressed="true"]) {
         color: var(--ink);
+      }
+
+      /* Theme toggle pill — to the left of the unit toggle */
+      .theme-toggle {
+        position: absolute;
+        top: 1.25rem;
+        right: calc(1.25rem + 9.5rem + 0.5rem + 5.5rem); /* left of unit toggle */
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.85rem;
+        padding: 0.25rem 0.6rem;
+        border-radius: 100px;
+        cursor: pointer;
+        transition: color 0.15s, border-color 0.15s;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        line-height: 1;
+      }
+      .theme-toggle:hover {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .theme-toggle { transition: none; }
       }
 
       /* Zoom cluster — bottom left */
@@ -412,7 +505,7 @@
         color: #14140f;
       }
       .length-chip--placed {
-        background: rgba(20, 20, 15, 0.62);
+        background: var(--panel);
         color: var(--muted);
         border: 1px solid var(--hairline);
       }
@@ -1835,6 +1928,15 @@
           </div>
         </div>
       </div>
+
+      <!-- Theme toggle -->
+      <button
+        id="btn-theme-toggle"
+        class="theme-toggle"
+        aria-label="Switch to light mode"
+        aria-pressed="false"
+        title="Toggle light/dark theme"
+      >☀</button>
 
       <!-- Unit toggle -->
       <div class="unit-toggle" role="group" aria-label="Unit system">

@@ -11,19 +11,9 @@
 import { worldToScreen, pxPerM } from "./view.js";
 import { fmtLen, unitLabel } from "./units.js";
 import { model, WALL_M, canClose, edgeLength } from "./walls.js";
+import { palette } from "./theme.js";
 
 const NS = "http://www.w3.org/2000/svg";
-
-// Palette tokens (from LLD / Direction A)
-const WALL_BODY_COLOR  = "rgba(201,168,76,0.30)";
-const WALL_LINE_COLOR  = "#d9be6e";
-const DRAFT_COLOR      = "#d9be6e";
-const ROOM_FILL_COLOR  = "rgba(201,168,76,0.07)";
-const ROOM_FILL_HI     = "rgba(201,168,76,0.15)";
-const WALL_LINE_HI     = "#e8cf7a";
-const SNAP_GRID_COLOR  = "#7fd0c8";
-const SNAP_POINT_COLOR = "#e0b64f";
-const SNAP_CLOSE_COLOR = "#9cd67a";
 
 // Snap glyph metrics (screen-constant)
 const VERTEX_DOT_R = 3;
@@ -77,6 +67,7 @@ export function render() {
   _clearLabels();
   _clearDimLabels();
 
+  const p = palette();
   const snap = _getSnap();
   const ppm = pxPerM();
   const highlightId = _getHighlight();
@@ -84,7 +75,7 @@ export function render() {
 
   // ── Committed rooms ────────────────────────────────────────────────────────
   for (const room of model.rooms) {
-    _renderRoom(room, ppm, highlightId === room.id);
+    _renderRoom(room, p, ppm, highlightId === room.id);
   }
 
   // ── Interactive dimension chips for committed rooms ─────────────────────────
@@ -95,10 +86,10 @@ export function render() {
   // ── Active chain (draft) ───────────────────────────────────────────────────
   const chain = model.chain;
   if (chain.length >= 2) {
-    _renderChainSegments(_gDraft, chain, ppm, true /* showLengths */);
-    _renderVertexDots(_gDraft, chain, WALL_LINE_COLOR);
+    _renderChainSegments(_gDraft, chain, p, ppm, true /* showLengths */);
+    _renderVertexDots(_gDraft, chain, p.wallLine);
   } else if (chain.length === 1) {
-    _renderVertexDots(_gDraft, chain, WALL_LINE_COLOR);
+    _renderVertexDots(_gDraft, chain, p.wallLine);
   }
 
   // ── Rubber-band segment ────────────────────────────────────────────────────
@@ -107,7 +98,7 @@ export function render() {
     const p0 = worldToScreen(last.x, last.y);
     const p1 = worldToScreen(snap.x, snap.y);
     const line = _makeLine(p0.x, p0.y, p1.x, p1.y);
-    line.setAttribute("stroke", DRAFT_COLOR);
+    line.setAttribute("stroke", p.draft);
     line.setAttribute("stroke-width", "1.5");
     line.setAttribute("stroke-dasharray", "6 4");
     line.setAttribute("stroke-linecap", "round");
@@ -129,8 +120,8 @@ export function render() {
   if (snap !== null && snap.type === "close" && chain.length >= 2) {
     const previewVerts = [...chain, { x: snap.x, y: snap.y }];
     const poly = _buildPolygon(previewVerts);
-    poly.setAttribute("fill", ROOM_FILL_COLOR);
-    poly.setAttribute("stroke", SNAP_CLOSE_COLOR);
+    poly.setAttribute("fill", p.roomFill);
+    poly.setAttribute("stroke", p.snapClose);
     poly.setAttribute("stroke-width", "1");
     poly.setAttribute("stroke-dasharray", "4 3");
     poly.setAttribute("fill-opacity", "0.5");
@@ -139,18 +130,18 @@ export function render() {
 
   // ── Snap glyph ─────────────────────────────────────────────────────────────
   if (snap !== null) {
-    _renderSnapGlyph(snap, ppm);
+    _renderSnapGlyph(snap, p);
   }
 }
 
 // ── Private: committed room rendering ────────────────────────────────────────
 
-function _renderRoom(room, ppm, highlighted) {
+function _renderRoom(room, p, ppm, highlighted) {
   const pts = room.verts;
   if (pts.length === 0) return;
 
-  const fillColor    = highlighted ? ROOM_FILL_HI  : ROOM_FILL_COLOR;
-  const lineColor    = highlighted ? WALL_LINE_HI  : WALL_LINE_COLOR;
+  const fillColor = highlighted ? p.roomFillHi : p.roomFill;
+  const lineColor = highlighted ? p.wallLineHi : p.wallLine;
 
   // Fill (closed rooms only)
   if (room.closed && pts.length >= 3) {
@@ -165,7 +156,7 @@ function _renderRoom(room, ppm, highlighted) {
   if (pts.length >= 2) {
     const body = room.closed ? _buildPolygon(pts) : _buildPolyline(pts);
     body.setAttribute("fill", "none");
-    body.setAttribute("stroke", WALL_BODY_COLOR);
+    body.setAttribute("stroke", p.wallBody);
     body.setAttribute("stroke-width", String(wallPx));
     body.setAttribute("stroke-linejoin", "round");
     body.setAttribute("stroke-linecap", "round");
@@ -238,13 +229,13 @@ function _renderDimChips(room, editingEdge) {
 
 // ── Private: chain segment rendering ─────────────────────────────────────────
 
-function _renderChainSegments(parent, chain, ppm, showLengths) {
+function _renderChainSegments(parent, chain, p, ppm, showLengths) {
   const wallPx = Math.max(6, WALL_M * ppm);
 
   // Wall body
   const body = _buildPolyline(chain);
   body.setAttribute("fill", "none");
-  body.setAttribute("stroke", WALL_BODY_COLOR);
+  body.setAttribute("stroke", p.wallBody);
   body.setAttribute("stroke-width", String(wallPx));
   body.setAttribute("stroke-linejoin", "round");
   body.setAttribute("stroke-linecap", "round");
@@ -253,7 +244,7 @@ function _renderChainSegments(parent, chain, ppm, showLengths) {
   // Centerline
   const center = _buildPolyline(chain);
   center.setAttribute("fill", "none");
-  center.setAttribute("stroke", DRAFT_COLOR);
+  center.setAttribute("stroke", p.draft);
   center.setAttribute("stroke-width", "1.5");
   center.setAttribute("stroke-linejoin", "round");
   center.setAttribute("stroke-linecap", "round");
@@ -293,7 +284,7 @@ function _renderVertexDots(parent, verts, color) {
 
 // ── Private: snap glyph ───────────────────────────────────────────────────────
 
-function _renderSnapGlyph(snap, ppm) {
+function _renderSnapGlyph(snap, p) {
   const s = worldToScreen(snap.x, snap.y);
   const sx = s.x;
   const sy = s.y;
@@ -304,7 +295,7 @@ function _renderSnapGlyph(snap, ppm) {
     const diamond = document.createElementNS(NS, "polygon");
     diamond.setAttribute("points", `${sx},${sy - d} ${sx + d},${sy} ${sx},${sy + d} ${sx - d},${sy}`);
     diamond.setAttribute("fill", "none");
-    diamond.setAttribute("stroke", SNAP_GRID_COLOR);
+    diamond.setAttribute("stroke", p.snapGrid);
     diamond.setAttribute("stroke-width", String(GLYPH_SW));
     _gSnap.appendChild(diamond);
 
@@ -312,7 +303,7 @@ function _renderSnapGlyph(snap, ppm) {
     dot.setAttribute("cx", String(sx));
     dot.setAttribute("cy", String(sy));
     dot.setAttribute("r", "2");
-    dot.setAttribute("fill", SNAP_GRID_COLOR);
+    dot.setAttribute("fill", p.snapGrid);
     _gSnap.appendChild(dot);
 
   } else if (snap.type === "point") {
@@ -322,7 +313,7 @@ function _renderSnapGlyph(snap, ppm) {
     ring.setAttribute("cy", String(sy));
     ring.setAttribute("r", String(GLYPH_SIZE));
     ring.setAttribute("fill", "none");
-    ring.setAttribute("stroke", SNAP_POINT_COLOR);
+    ring.setAttribute("stroke", p.snapPoint);
     ring.setAttribute("stroke-width", String(GLYPH_SW));
     ring.setAttribute("class", "snap-pulse");
     _gSnap.appendChild(ring);
@@ -331,7 +322,7 @@ function _renderSnapGlyph(snap, ppm) {
     dot.setAttribute("cx", String(sx));
     dot.setAttribute("cy", String(sy));
     dot.setAttribute("r", "3");
-    dot.setAttribute("fill", SNAP_POINT_COLOR);
+    dot.setAttribute("fill", p.snapPoint);
     _gSnap.appendChild(dot);
 
   } else if (snap.type === "close") {
@@ -341,7 +332,7 @@ function _renderSnapGlyph(snap, ppm) {
     ring.setAttribute("cy", String(sy));
     ring.setAttribute("r", String(GLYPH_SIZE));
     ring.setAttribute("fill", "none");
-    ring.setAttribute("stroke", SNAP_CLOSE_COLOR);
+    ring.setAttribute("stroke", p.snapClose);
     ring.setAttribute("stroke-width", String(GLYPH_SW));
     ring.setAttribute("class", "snap-pulse");
     _gSnap.appendChild(ring);
@@ -350,7 +341,7 @@ function _renderSnapGlyph(snap, ppm) {
     dot.setAttribute("cx", String(sx));
     dot.setAttribute("cy", String(sy));
     dot.setAttribute("r", "3");
-    dot.setAttribute("fill", SNAP_CLOSE_COLOR);
+    dot.setAttribute("fill", p.snapClose);
     _gSnap.appendChild(dot);
 
   } else if (snap.type === "free") {
@@ -358,13 +349,13 @@ function _renderSnapGlyph(snap, ppm) {
     const arm = GLYPH_SIZE;
     const opacity = "0.45";
     const hLine = _makeLine(sx - arm, sy, sx + arm, sy);
-    hLine.setAttribute("stroke", WALL_LINE_COLOR);
+    hLine.setAttribute("stroke", p.muted);
     hLine.setAttribute("stroke-width", String(GLYPH_SW));
     hLine.setAttribute("opacity", opacity);
     _gSnap.appendChild(hLine);
 
     const vLine = _makeLine(sx, sy - arm, sx, sy + arm);
-    vLine.setAttribute("stroke", WALL_LINE_COLOR);
+    vLine.setAttribute("stroke", p.muted);
     vLine.setAttribute("stroke-width", String(GLYPH_SW));
     vLine.setAttribute("opacity", opacity);
     _gSnap.appendChild(vLine);

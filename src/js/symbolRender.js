@@ -18,18 +18,9 @@ import { worldToScreen, pxPerM } from "./view.js";
 import { isCoarsePointer } from "./pointerEnv.js";
 import { fmtLen, unitLabel } from "./units.js";
 import { model, corners, CATALOG } from "./symbols.js";
+import { palette } from "./theme.js";
 
 const NS = "http://www.w3.org/2000/svg";
-
-// ── Palette ────────────────────────────────────────────────────────────────────
-
-const GOLD         = "#c9a84c";
-const GOLD_SOFT    = "rgba(201,168,76,0.55)";
-const GOLD_FILL    = "rgba(201,168,76,0.12)";
-const GOLD_STROKE  = "#d9be6e";
-const SNAP_TEAL    = "#7fd0c8";
-const GHOST_FILL   = "rgba(201,168,76,0.25)";
-const GHOST_STROKE = GOLD;
 
 // Handle geometry (screen-space constants)
 const ROTATE_HANDLE_OFFSET = 22;  // px above top-center
@@ -83,53 +74,55 @@ export function render() {
   _clearGroup(_gSymbols);
   _clearGroup(_gOverlay);
 
+  const p = palette();
   const selectedId = _getSelectedId();
   const editingDim = _getEditingDim();
   const ghost = _getPlacementGhost();
 
   // ── Symbol bodies ──────────────────────────────────────────────────────────
   for (const sym of model.symbols) {
-    _renderSymbolBody(_gSymbols, sym, sym.id === selectedId);
+    _renderSymbolBody(_gSymbols, sym, sym.id === selectedId, p);
   }
 
   // ── Selection overlay + chips for selected symbol ─────────────────────────
   if (selectedId) {
     const sym = model.symbols.find(s => s.id === selectedId);
     if (sym) {
-      _renderSelectionBox(_gOverlay, sym);
-      _renderRotateHandle(_gOverlay, sym);
+      _renderSelectionBox(_gOverlay, sym, p);
+      _renderRotateHandle(_gOverlay, sym, p);
       _renderDimChips(sym, editingDim);
     }
   }
 
   // ── Placement ghost ────────────────────────────────────────────────────────
   if (ghost) {
-    _renderGhost(_gOverlay, ghost);
+    _renderGhost(_gOverlay, ghost, p);
   }
 }
 
 // ── Private: symbol body ───────────────────────────────────────────────────────
 
-function _renderSymbolBody(parent, sym, selected) {
+function _renderSymbolBody(parent, sym, selected, p) {
   const cs = corners(sym).map(c => worldToScreen(c.x, c.y));
   const pts = cs.map(s => `${s.x},${s.y}`).join(" ");
 
   const poly = document.createElementNS(NS, "polygon");
   poly.setAttribute("points", pts);
-  poly.setAttribute("fill", selected ? "rgba(201,168,76,0.18)" : GOLD_FILL);
-  poly.setAttribute("stroke", selected ? GOLD : GOLD_STROKE);
+  poly.setAttribute("fill", selected ? p.symSelFill : p.symFill);
+  poly.setAttribute("stroke", selected ? p.gold : p.symStroke);
   poly.setAttribute("stroke-width", selected ? "2" : "1.5");
   poly.setAttribute("stroke-linejoin", "round");
   parent.appendChild(poly);
 
   // Type-specific interior glyph
-  _renderInterior(parent, sym, cs);
+  _renderInterior(parent, sym, cs, p);
 }
 
 /**
  * Draw a simple interior glyph so the symbol type is recognisable.
+ * @param {import("./theme.js").Palette} p
  */
-function _renderInterior(parent, sym, cs) {
+function _renderInterior(parent, sym, cs, p) {
   // cs = [TL, TR, BR, BL] in screen space
   const ppm = pxPerM();
   const sc = worldToScreen(sym.x, sym.y); // screen center
@@ -138,6 +131,9 @@ function _renderInterior(parent, sym, cs) {
   const rad = (sym.rot * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
+
+  // Alpha-composited fill using symInkRgb base
+  const rgb = p.symInkRgb;
 
   // Helper: offset by local (lx,ly) from center in rotated screen space
   const lp = (lx, ly) => ({
@@ -152,22 +148,18 @@ function _renderInterior(parent, sym, cs) {
     const topMid = { x: (cs[0].x + cs[1].x) / 2, y: (cs[0].y + cs[1].y) / 2 };
     const botMid = { x: (cs[3].x + cs[2].x) / 2, y: (cs[3].y + cs[2].y) / 2 };
     const line = _makeLine(topMid.x, topMid.y, botMid.x, botMid.y);
-    line.setAttribute("stroke", GOLD);
+    line.setAttribute("stroke", p.gold);
     line.setAttribute("stroke-width", "1");
     line.setAttribute("stroke-dasharray", "3 2");
     parent.appendChild(line);
 
     if (sym.type === "door") {
       // Door arc: quarter-circle from one end of door width
-      const r = sw * 0.9; // swing radius in screen px
       const a0 = lp(-sw / 2, sh / 2); // hinge point (BL in local)
       const a1 = lp(-sw / 2 + sw, sh / 2); // swing end (BR in local)
       const arc = document.createElementNS(NS, "path");
-      // Simple 90-degree arc sweep
-      const dx = a1.x - a0.x;
-      const dy = a1.y - a0.y;
       arc.setAttribute("d", `M ${a0.x} ${a0.y} L ${a1.x} ${a1.y}`);
-      arc.setAttribute("stroke", GOLD);
+      arc.setAttribute("stroke", p.gold);
       arc.setAttribute("stroke-width", "1");
       arc.setAttribute("fill", "none");
       arc.setAttribute("opacity", "0.6");
@@ -180,22 +172,22 @@ function _renderInterior(parent, sym, cs) {
     // Pillow indicator (small rect top ~30% of depth)
     const pw = sw * 0.8;
     const ph = sh * 0.25;
-    const p0 = lp(-pw / 2, -sh / 2 + 4);
-    const p1 = lp( pw / 2, -sh / 2 + 4);
-    const p2 = lp( pw / 2, -sh / 2 + 4 + ph);
-    const p3 = lp(-pw / 2, -sh / 2 + 4 + ph);
-    const pillowPts = [p0, p1, p2, p3].map(p => `${p.x},${p.y}`).join(" ");
+    const vp0 = lp(-pw / 2, -sh / 2 + 4);
+    const vp1 = lp( pw / 2, -sh / 2 + 4);
+    const vp2 = lp( pw / 2, -sh / 2 + 4 + ph);
+    const vp3 = lp(-pw / 2, -sh / 2 + 4 + ph);
+    const pillowPts = [vp0, vp1, vp2, vp3].map(v => `${v.x},${v.y}`).join(" ");
     const pillow = document.createElementNS(NS, "polygon");
     pillow.setAttribute("points", pillowPts);
-    pillow.setAttribute("fill", "rgba(201,168,76,0.2)");
-    pillow.setAttribute("stroke", GOLD_STROKE);
+    pillow.setAttribute("fill", `rgba(${rgb},0.2)`);
+    pillow.setAttribute("stroke", p.symStroke);
     pillow.setAttribute("stroke-width", "0.8");
     parent.appendChild(pillow);
     // Center line
     const l0 = lp(0, -sh / 2 + 4 + ph);
     const l1 = lp(0,  sh / 2);
     const cLine = _makeLine(l0.x, l0.y, l1.x, l1.y);
-    cLine.setAttribute("stroke", GOLD_STROKE);
+    cLine.setAttribute("stroke", p.symStroke);
     cLine.setAttribute("stroke-width", "0.6");
     cLine.setAttribute("opacity", "0.5");
     parent.appendChild(cLine);
@@ -210,11 +202,11 @@ function _renderInterior(parent, sym, cs) {
     const b1 = lp( bw / 2, -sh / 2 + 2);
     const b2 = lp( bw / 2, -sh / 2 + 2 + bh);
     const b3 = lp(-bw / 2, -sh / 2 + 2 + bh);
-    const backPts = [b0, b1, b2, b3].map(p => `${p.x},${p.y}`).join(" ");
+    const backPts = [b0, b1, b2, b3].map(v => `${v.x},${v.y}`).join(" ");
     const back = document.createElementNS(NS, "polygon");
     back.setAttribute("points", backPts);
-    back.setAttribute("fill", "rgba(201,168,76,0.15)");
-    back.setAttribute("stroke", GOLD_STROKE);
+    back.setAttribute("fill", `rgba(${rgb},0.15)`);
+    back.setAttribute("stroke", p.symStroke);
     back.setAttribute("stroke-width", "0.8");
     parent.appendChild(back);
     // Two armrests
@@ -224,11 +216,11 @@ function _renderInterior(parent, sym, cs) {
       const a1 = lp(ax + sw * 0.04, -sh / 2 + bh + 2);
       const a2 = lp(ax + sw * 0.04,  sh / 2 - 2);
       const a3 = lp(ax - sw * 0.04,  sh / 2 - 2);
-      const armPts = [a0, a1, a2, a3].map(p => `${p.x},${p.y}`).join(" ");
+      const armPts = [a0, a1, a2, a3].map(v => `${v.x},${v.y}`).join(" ");
       const arm = document.createElementNS(NS, "polygon");
       arm.setAttribute("points", armPts);
-      arm.setAttribute("fill", "rgba(201,168,76,0.1)");
-      arm.setAttribute("stroke", GOLD_STROKE);
+      arm.setAttribute("fill", `rgba(${rgb},0.1)`);
+      arm.setAttribute("stroke", p.symStroke);
       arm.setAttribute("stroke-width", "0.7");
       parent.appendChild(arm);
     }
@@ -243,7 +235,7 @@ function _renderInterior(parent, sym, cs) {
     ]) {
       const pa = lp(ax, ay), pb = lp(bx, by);
       const l = _makeLine(pa.x, pa.y, pb.x, pb.y);
-      l.setAttribute("stroke", GOLD_STROKE);
+      l.setAttribute("stroke", p.symStroke);
       l.setAttribute("stroke-width", "0.7");
       l.setAttribute("opacity", "0.5");
       parent.appendChild(l);
@@ -259,7 +251,7 @@ function _renderInterior(parent, sym, cs) {
     circle.setAttribute("cy", String(sc.y));
     circle.setAttribute("r", String(r));
     circle.setAttribute("fill", "none");
-    circle.setAttribute("stroke", GOLD_STROKE);
+    circle.setAttribute("stroke", p.symStroke);
     circle.setAttribute("stroke-width", "0.8");
     parent.appendChild(circle);
     return;
@@ -273,12 +265,12 @@ function _renderInterior(parent, sym, cs) {
     const edgeH  = lp(lx2, ly1);
     const edgeV  = lp(lx1, ly2);
     const l1 = _makeLine(corner.x, corner.y, edgeH.x, edgeH.y);
-    l1.setAttribute("stroke", GOLD_STROKE);
+    l1.setAttribute("stroke", p.symStroke);
     l1.setAttribute("stroke-width", "0.8");
     l1.setAttribute("opacity", "0.6");
     parent.appendChild(l1);
     const l2 = _makeLine(corner.x, corner.y, edgeV.x, edgeV.y);
-    l2.setAttribute("stroke", GOLD_STROKE);
+    l2.setAttribute("stroke", p.symStroke);
     l2.setAttribute("stroke-width", "0.8");
     l2.setAttribute("opacity", "0.6");
     parent.appendChild(l2);
@@ -291,14 +283,14 @@ function _renderInterior(parent, sym, cs) {
     const d0 = lp(-sw / 2 + 2, divY);
     const d1 = lp( sw / 2 - 2, divY);
     const divL = _makeLine(d0.x, d0.y, d1.x, d1.y);
-    divL.setAttribute("stroke", GOLD_STROKE);
+    divL.setAttribute("stroke", p.symStroke);
     divL.setAttribute("stroke-width", "0.8");
     parent.appendChild(divL);
     // Handle: short line on right edge near center
     const h0 = lp(sw / 2 - 4, -sh * 0.08);
     const h1 = lp(sw / 2 - 4,  sh * 0.08);
     const handle = _makeLine(h0.x, h0.y, h1.x, h1.y);
-    handle.setAttribute("stroke", GOLD);
+    handle.setAttribute("stroke", p.gold);
     handle.setAttribute("stroke-width", "1.2");
     handle.setAttribute("stroke-linecap", "round");
     parent.appendChild(handle);
@@ -314,11 +306,11 @@ function _renderInterior(parent, sym, cs) {
     const t1 = lp( tankW / 2, -sh / 2);
     const t2 = lp( tankW / 2, -sh / 2 + tankH);
     const t3 = lp(-tankW / 2, -sh / 2 + tankH);
-    const tankPts = [t0, t1, t2, t3].map(p => `${p.x},${p.y}`).join(" ");
+    const tankPts = [t0, t1, t2, t3].map(v => `${v.x},${v.y}`).join(" ");
     const tank = document.createElementNS(NS, "polygon");
     tank.setAttribute("points", tankPts);
-    tank.setAttribute("fill", "rgba(201,168,76,0.1)");
-    tank.setAttribute("stroke", GOLD_STROKE);
+    tank.setAttribute("fill", `rgba(${rgb},0.1)`);
+    tank.setAttribute("stroke", p.symStroke);
     tank.setAttribute("stroke-width", "0.8");
     parent.appendChild(tank);
     // Oval seat: ellipse centered slightly below tank
@@ -329,12 +321,11 @@ function _renderInterior(parent, sym, cs) {
     const seat = document.createElementNS(NS, "ellipse");
     seat.setAttribute("cx", String(seatCenter.x));
     seat.setAttribute("cy", String(seatCenter.y));
-    // For rotated symbols, approximate with an ellipse at the rotated angle
     seat.setAttribute("rx", String(seatRX));
     seat.setAttribute("ry", String(seatRY));
     seat.setAttribute("transform", `rotate(${sym.rot},${seatCenter.x},${seatCenter.y})`);
     seat.setAttribute("fill", "none");
-    seat.setAttribute("stroke", GOLD_STROKE);
+    seat.setAttribute("stroke", p.symStroke);
     seat.setAttribute("stroke-width", "0.8");
     seat.setAttribute("opacity", "0.7");
     parent.appendChild(seat);
@@ -351,11 +342,11 @@ function _renderInterior(parent, sym, cs) {
     const b1 = lp( basinW / 2, -basinH / 2);
     const b2 = lp( basinW / 2,  basinH / 2);
     const b3 = lp(-basinW / 2,  basinH / 2);
-    const basinPts = [b0, b1, b2, b3].map(p => `${p.x},${p.y}`).join(" ");
+    const basinPts = [b0, b1, b2, b3].map(v => `${v.x},${v.y}`).join(" ");
     const basin = document.createElementNS(NS, "polygon");
     basin.setAttribute("points", basinPts);
-    basin.setAttribute("fill", "rgba(201,168,76,0.08)");
-    basin.setAttribute("stroke", GOLD_STROKE);
+    basin.setAttribute("fill", `rgba(${rgb},0.08)`);
+    basin.setAttribute("stroke", p.symStroke);
     basin.setAttribute("stroke-width", "0.8");
     parent.appendChild(basin);
     // Drain circle near bottom short end
@@ -365,7 +356,7 @@ function _renderInterior(parent, sym, cs) {
     drain.setAttribute("cy", String(drainCenter.y));
     drain.setAttribute("r", String(Math.max(2, sw * 0.04)));
     drain.setAttribute("fill", "none");
-    drain.setAttribute("stroke", GOLD_STROKE);
+    drain.setAttribute("stroke", p.symStroke);
     drain.setAttribute("stroke-width", "0.7");
     drain.setAttribute("opacity", "0.7");
     parent.appendChild(drain);
@@ -382,11 +373,11 @@ function _renderInterior(parent, sym, cs) {
     const s1 = lp( basinW / 2, -basinH / 2);
     const s2 = lp( basinW / 2,  basinH / 2);
     const s3 = lp(-basinW / 2,  basinH / 2);
-    const basinPts = [s0, s1, s2, s3].map(p => `${p.x},${p.y}`).join(" ");
+    const basinPts = [s0, s1, s2, s3].map(v => `${v.x},${v.y}`).join(" ");
     const basin = document.createElementNS(NS, "polygon");
     basin.setAttribute("points", basinPts);
-    basin.setAttribute("fill", "rgba(201,168,76,0.08)");
-    basin.setAttribute("stroke", GOLD_STROKE);
+    basin.setAttribute("fill", `rgba(${rgb},0.08)`);
+    basin.setAttribute("stroke", p.symStroke);
     basin.setAttribute("stroke-width", "0.8");
     parent.appendChild(basin);
     // Faucet dot on top (back) edge center
@@ -395,7 +386,7 @@ function _renderInterior(parent, sym, cs) {
     faucet.setAttribute("cx", String(faucetPt.x));
     faucet.setAttribute("cy", String(faucetPt.y));
     faucet.setAttribute("r", String(Math.max(1.5, sw * 0.05)));
-    faucet.setAttribute("fill", GOLD_STROKE);
+    faucet.setAttribute("fill", p.symStroke);
     faucet.setAttribute("opacity", "0.7");
     parent.appendChild(faucet);
     return;
@@ -413,7 +404,7 @@ function _renderInterior(parent, sym, cs) {
       burner.setAttribute("cy", String(bc.y));
       burner.setAttribute("r", String(br));
       burner.setAttribute("fill", "none");
-      burner.setAttribute("stroke", GOLD_STROKE);
+      burner.setAttribute("stroke", p.symStroke);
       burner.setAttribute("stroke-width", "0.8");
       burner.setAttribute("opacity", "0.7");
       parent.appendChild(burner);
@@ -426,7 +417,7 @@ function _renderInterior(parent, sym, cs) {
     const divTop = lp(0, -sh / 2 + 2);
     const divBot = lp(0,  sh / 2 - 2);
     const divL = _makeLine(divTop.x, divTop.y, divBot.x, divBot.y);
-    divL.setAttribute("stroke", GOLD_STROKE);
+    divL.setAttribute("stroke", p.symStroke);
     divL.setAttribute("stroke-width", "0.8");
     divL.setAttribute("opacity", "0.7");
     parent.appendChild(divL);
@@ -437,7 +428,7 @@ function _renderInterior(parent, sym, cs) {
       hdot.setAttribute("cx", String(hPt.x));
       hdot.setAttribute("cy", String(hPt.y));
       hdot.setAttribute("r", "1.5");
-      hdot.setAttribute("fill", GOLD_STROKE);
+      hdot.setAttribute("fill", p.symStroke);
       hdot.setAttribute("opacity", "0.7");
       parent.appendChild(hdot);
     }
@@ -453,7 +444,7 @@ function _renderInterior(parent, sym, cs) {
       const l0 = lp(-sw / 2 + 2, lineY);
       const l1 = lp( sw / 2 - 2, lineY);
       const shelf = _makeLine(l0.x, l0.y, l1.x, l1.y);
-      shelf.setAttribute("stroke", GOLD_STROKE);
+      shelf.setAttribute("stroke", p.symStroke);
       shelf.setAttribute("stroke-width", "0.7");
       shelf.setAttribute("opacity", "0.6");
       parent.appendChild(shelf);
@@ -471,18 +462,18 @@ function _renderInterior(parent, sym, cs) {
     const sv1 = lp( screenW / 2, sTopY);
     const sv2 = lp( screenW / 2, sBotY);
     const sv3 = lp(-screenW / 2, sBotY);
-    const screenPts = [sv0, sv1, sv2, sv3].map(p => `${p.x},${p.y}`).join(" ");
+    const screenPts = [sv0, sv1, sv2, sv3].map(v => `${v.x},${v.y}`).join(" ");
     const screen = document.createElementNS(NS, "polygon");
     screen.setAttribute("points", screenPts);
-    screen.setAttribute("fill", "rgba(201,168,76,0.08)");
-    screen.setAttribute("stroke", GOLD_STROKE);
+    screen.setAttribute("fill", `rgba(${rgb},0.08)`);
+    screen.setAttribute("stroke", p.symStroke);
     screen.setAttribute("stroke-width", "0.8");
     parent.appendChild(screen);
     // Stand: short center line from bottom of screen to bottom edge
     const standTop = lp(0, sBotY);
     const standBot = lp(0, sh / 2 - 2);
     const stand = _makeLine(standTop.x, standTop.y, standBot.x, standBot.y);
-    stand.setAttribute("stroke", GOLD_STROKE);
+    stand.setAttribute("stroke", p.symStroke);
     stand.setAttribute("stroke-width", "0.8");
     stand.setAttribute("opacity", "0.6");
     parent.appendChild(stand);
@@ -498,7 +489,7 @@ function _renderInterior(parent, sym, cs) {
     drum.setAttribute("cy", String(drumCenter.y));
     drum.setAttribute("r", String(drumR));
     drum.setAttribute("fill", "none");
-    drum.setAttribute("stroke", GOLD_STROKE);
+    drum.setAttribute("stroke", p.symStroke);
     drum.setAttribute("stroke-width", "0.9");
     parent.appendChild(drum);
     // Detergent tray: small rect near top edge
@@ -508,11 +499,11 @@ function _renderInterior(parent, sym, cs) {
     const tray1 = lp( trayW / 2, -sh / 2 + 2);
     const tray2 = lp( trayW / 2, -sh / 2 + 2 + trayH);
     const tray3 = lp(-trayW / 2, -sh / 2 + 2 + trayH);
-    const trayPts = [tray0, tray1, tray2, tray3].map(p => `${p.x},${p.y}`).join(" ");
+    const trayPts = [tray0, tray1, tray2, tray3].map(v => `${v.x},${v.y}`).join(" ");
     const tray = document.createElementNS(NS, "polygon");
     tray.setAttribute("points", trayPts);
-    tray.setAttribute("fill", "rgba(201,168,76,0.1)");
-    tray.setAttribute("stroke", GOLD_STROKE);
+    tray.setAttribute("fill", `rgba(${rgb},0.1)`);
+    tray.setAttribute("stroke", p.symStroke);
     tray.setAttribute("stroke-width", "0.7");
     parent.appendChild(tray);
     return;
@@ -521,13 +512,13 @@ function _renderInterior(parent, sym, cs) {
 
 // ── Private: selection box ────────────────────────────────────────────────────
 
-function _renderSelectionBox(parent, sym) {
+function _renderSelectionBox(parent, sym, p) {
   const cs = corners(sym).map(c => worldToScreen(c.x, c.y));
   const pts = cs.map(s => `${s.x},${s.y}`).join(" ");
   const box = document.createElementNS(NS, "polygon");
   box.setAttribute("points", pts);
   box.setAttribute("fill", "none");
-  box.setAttribute("stroke", GOLD);
+  box.setAttribute("stroke", p.gold);
   box.setAttribute("stroke-width", String(SEL_BOX_SW));
   box.setAttribute("stroke-dasharray", "5 3");
   box.setAttribute("stroke-linejoin", "round");
@@ -540,7 +531,7 @@ function _renderSelectionBox(parent, sym) {
  * Rotate handle: gold circle above the top-center of the bounding box.
  * The handle position is stored as a data attribute so symbolTool can read it.
  */
-function _renderRotateHandle(parent, sym) {
+function _renderRotateHandle(parent, sym, p) {
   const pos = getRotateHandleScreen(sym);
 
   // Stem line from top-center to handle
@@ -550,7 +541,7 @@ function _renderRotateHandle(parent, sym) {
     y: (cs[0].y + cs[1].y) / 2,
   };
   const stem = _makeLine(topMid.x, topMid.y, pos.x, pos.y);
-  stem.setAttribute("stroke", GOLD_SOFT);
+  stem.setAttribute("stroke", p.goldSoft);
   stem.setAttribute("stroke-width", "1");
   parent.appendChild(stem);
 
@@ -558,7 +549,7 @@ function _renderRotateHandle(parent, sym) {
   knob.setAttribute("cx", String(pos.x));
   knob.setAttribute("cy", String(pos.y));
   knob.setAttribute("r", String(ROTATE_HANDLE_R));
-  knob.setAttribute("fill", GOLD);
+  knob.setAttribute("fill", p.gold);
   knob.setAttribute("stroke", "none");
   knob.setAttribute("class", "rotate-handle");
   parent.appendChild(knob);
@@ -662,11 +653,8 @@ function _appendSymbolChip(symbolId, dim, metres, sx, sy) {
 
 // ── Private: ghost ────────────────────────────────────────────────────────────
 
-function _renderGhost(parent, ghost) {
+function _renderGhost(parent, ghost, p) {
   const sc = worldToScreen(ghost.x, ghost.y);
-  const ppm = pxPerM();
-  const sw = ghost.w * ppm;
-  const sh = ghost.h * ppm;
   const rad = (ghost.rot * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
@@ -685,8 +673,8 @@ function _renderGhost(parent, ghost) {
 
   const poly = document.createElementNS(NS, "polygon");
   poly.setAttribute("points", pts);
-  poly.setAttribute("fill", GHOST_FILL);
-  poly.setAttribute("stroke", GHOST_STROKE);
+  poly.setAttribute("fill", p.ghostFill);
+  poly.setAttribute("stroke", p.ghostStroke);
   poly.setAttribute("stroke-width", "1.5");
   poly.setAttribute("stroke-dasharray", "5 3");
   poly.setAttribute("stroke-linejoin", "round");
@@ -698,7 +686,7 @@ function _renderGhost(parent, ghost) {
   dot.setAttribute("cx", String(sc.x));
   dot.setAttribute("cy", String(sc.y));
   dot.setAttribute("r", "4");
-  dot.setAttribute("fill", SNAP_TEAL);
+  dot.setAttribute("fill", p.snapTeal);
   dot.setAttribute("stroke", "none");
   parent.appendChild(dot);
 }

@@ -28,6 +28,7 @@ import { gridSnap as prefsGridSnap } from "./prefs.js";
 import { scheduleRender } from "./surface.js";
 import { getRotateHandleScreen } from "./symbolRender.js";
 import { beginEdit as beginDimEdit, cancel as cancelDimEdit, isEditing as isDimEditing } from "./symbolDimEntry.js";
+import { palette } from "./theme.js";
 
 // history and showToast are injected to avoid circular dependencies at init time
 let _historyCommit = null;
@@ -840,12 +841,15 @@ function _onWindowBlur() {
 
 // ── Snap-tag (cursor label) ───────────────────────────────────────────────────
 
-const _SNAP_TAG_COLORS = {
-  flush: "#9cd67a",
-  align: "#b98bd9",   // violet — edge alignment dominant (may also be teal for center)
-  grid:  "#7fd0c8",
-  free:  "#8f8a78",
-};
+function _snapTagColors() {
+  const p = palette();
+  return {
+    flush: p.snapClose,
+    align: p.alignEdge,   // violet — edge alignment dominant (may also be teal for center)
+    grid:  p.snapGrid,
+    free:  p.muted,
+  };
+}
 
 /**
  * Show the .snap-tag near (sx, sy) with the given snapType label.
@@ -860,7 +864,9 @@ function _updateSnapTag(sx, sy, snapType, alignMatches) {
   // Guard: only show in select/placement mode; wallTool owns it in draw mode
   if (_isDrawModeFn && _isDrawModeFn()) return;
 
-  let color = _SNAP_TAG_COLORS[snapType] || "#8f8a78";
+  const stc = _snapTagColors();
+  const p = palette();
+  let color = stc[snapType] || p.muted;
 
   // For align snap: use rose if dominant is room-center; teal if all center; violet if any edge
   if (snapType === "align" && alignMatches) {
@@ -868,13 +874,13 @@ function _updateSnapTag(sx, sy, snapType, alignMatches) {
     const allRoomCenter = matches.length > 0 && matches.every(m => m.kind === "room-center");
     const allCenter = matches.length > 0 && matches.every(m => m.kind === "center");
     if (allRoomCenter) {
-      color = _COLOR_ROOM;
+      color = p.roomCenter;
     } else if (allCenter) {
-      color = _COLOR_CENTER;
+      color = p.alignCenter;
     } else {
       // Mixed or edge-dominant: check if any edge exists; otherwise rose if any room-center
       const hasEdge = matches.some(m => m.kind === "edge");
-      color = hasEdge ? _COLOR_EDGE : _COLOR_ROOM;
+      color = hasEdge ? p.alignEdge : p.roomCenter;
     }
   }
 
@@ -906,11 +912,16 @@ function _hideSnapTag() {
 
 const NS_SVG = "http://www.w3.org/2000/svg";
 
-// Colors
-const _COLOR_FLUSH  = "#9cd67a";  // green  — wall-flush (LLD 26)
-const _COLOR_EDGE   = "#b98bd9";  // violet — edge-to-edge alignment
-const _COLOR_CENTER = "#7fd0c8";  // teal   — center-to-center alignment
-const _COLOR_ROOM   = "#e08fbf";  // rose   — room-center alignment (LLD 37)
+// Guide colors are resolved from the active theme palette at draw time (see _guideColors()).
+function _guideColors() {
+  const p = palette();
+  return {
+    flush:  p.snapClose,   // green  — wall-flush
+    edge:   p.alignEdge,   // violet — edge-to-edge alignment
+    center: p.alignCenter, // teal   — center-to-center alignment
+    room:   p.roomCenter,  // rose   — room-center alignment
+  };
+}
 
 /**
  * Cached SVG elements for guides: up to 1 flush + 2 alignment (X and Y).
@@ -932,11 +943,13 @@ function _updateGuides(resolved) {
 
   if (!_gSymOverlay) return;
 
+  const gc = _guideColors();
+
   // Wall-flush guide (unchanged from LLD 26 — dashed green line only, no label chip)
   if (resolved._flushActive && _flushGuide) {
     _activeGuides.push({
       kind: "flush",
-      color: _COLOR_FLUSH,
+      color: gc.flush,
       label: null,
       guide: _flushGuide.guide,
     });
@@ -945,9 +958,9 @@ function _updateGuides(resolved) {
   // Alignment guides (object alignment + room-center)
   if (resolved._alignX !== null) {
     const m = resolved._alignX;
-    const color = m.kind === "room-center" ? _COLOR_ROOM
-                : m.kind === "center"      ? _COLOR_CENTER
-                :                            _COLOR_EDGE;
+    const color = m.kind === "room-center" ? gc.room
+                : m.kind === "center"      ? gc.center
+                :                            gc.edge;
     const label = m.kind === "room-center" ? "room"
                 : m.kind === "center"      ? "centers"
                 :                            "edges";
@@ -955,9 +968,9 @@ function _updateGuides(resolved) {
   }
   if (resolved._alignY !== null) {
     const m = resolved._alignY;
-    const color = m.kind === "room-center" ? _COLOR_ROOM
-                : m.kind === "center"      ? _COLOR_CENTER
-                :                            _COLOR_EDGE;
+    const color = m.kind === "room-center" ? gc.room
+                : m.kind === "center"      ? gc.center
+                :                            gc.edge;
     const label = m.kind === "room-center" ? "room"
                 : m.kind === "center"      ? "centers"
                 :                            "edges";
@@ -1005,11 +1018,12 @@ function _ensureFlushLine() {
   if (!_flushGuideLine) {
     _flushGuideLine = document.createElementNS(NS_SVG, "line");
     _flushGuideLine.setAttribute("class", "flush-guide");
-    _flushGuideLine.setAttribute("stroke", _COLOR_FLUSH);
     _flushGuideLine.setAttribute("stroke-width", "1");
     _flushGuideLine.setAttribute("stroke-dasharray", "4 3");
     _flushGuideLine.setAttribute("opacity", "0.55");
   }
+  // Update stroke color from active theme each time the guide is shown
+  _flushGuideLine.setAttribute("stroke", _guideColors().flush);
   if (!_flushGuideLine.parentNode) {
     _gSymOverlay.appendChild(_flushGuideLine);
   }
@@ -1109,12 +1123,13 @@ function _syncRoomCenterRing(worldCenter) {
     _roomCenterRing = document.createElementNS(NS_SVG, "circle");
     _roomCenterRing.setAttribute("class", "room-center-ring");
     _roomCenterRing.setAttribute("r", "4");
-    _roomCenterRing.setAttribute("stroke", _COLOR_ROOM);
     _roomCenterRing.setAttribute("stroke-width", "1.4");
     _roomCenterRing.setAttribute("fill", "none");
     _roomCenterRing.setAttribute("aria-hidden", "true");
     _roomCenterRing.setAttribute("pointer-events", "none");
   }
+  // Update stroke from active theme each time the ring is shown
+  _roomCenterRing.setAttribute("stroke", _guideColors().room);
   const sc = worldToScreen(worldCenter.x, worldCenter.y);
   _roomCenterRing.setAttribute("cx", String(sc.x));
   _roomCenterRing.setAttribute("cy", String(sc.y));
