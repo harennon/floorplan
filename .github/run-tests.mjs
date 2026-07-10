@@ -1,9 +1,10 @@
 /**
- * Headless test runner for src/tests.html.
+ * Headless test runner for test/tests.html.
  *
- * Serves src/ over HTTP (so ES module imports work), loads tests.html in a
- * headless Chromium page, waits for window.__testResult to be set by the
- * in-page harness, then exits 0 (all pass) or 1 (any failure).
+ * Serves the repo root over HTTP (so the harness at /test/tests.html can import
+ * the app modules under /src/js/ via ../src/js/*), loads it in a headless
+ * Chromium page, waits for window.__testResult to be set by the in-page
+ * harness, then exits 0 (all pass) or 1 (any failure).
  *
  * Usage (requires playwright installed in the environment):
  *   node .github/run-tests.mjs
@@ -17,7 +18,8 @@ import { readFile } from "fs/promises";
 import { extname, join } from "path";
 import { fileURLToPath } from "url";
 
-const SRC_DIR = join(fileURLToPath(import.meta.url), "../../src");
+const ROOT_DIR = join(fileURLToPath(import.meta.url), "../..");
+const TEST_PAGE = "/test/tests.html";
 const PORT = 3742; // arbitrary; unlikely to collide in CI
 
 const MIME = {
@@ -36,7 +38,7 @@ function serve() {
   return new Promise((resolve) => {
     const server = createServer(async (req, res) => {
       const safePath = req.url.split("?")[0].replace(/\.\./g, "");
-      const file = join(SRC_DIR, safePath === "/" ? "/tests.html" : safePath);
+      const file = join(ROOT_DIR, safePath === "/" ? TEST_PAGE : safePath);
       try {
         const data = await readFile(file);
         const mime = MIME[extname(file)] ?? "application/octet-stream";
@@ -63,7 +65,7 @@ page.on("console", (msg) => {
 });
 page.on("pageerror", (err) => process.stderr.write(`[page uncaught] ${err}\n`));
 
-await page.goto(`http://127.0.0.1:${PORT}/tests.html`);
+await page.goto(`http://127.0.0.1:${PORT}${TEST_PAGE}`);
 
 // Wait for the harness to finish all async tests and call render()
 await page.waitForFunction(
