@@ -246,7 +246,9 @@ function _positionTemplateTip() {
 }
 
 /**
- * Position the dismiss button below the lower tip (or near bottom-center).
+ * Position the dismiss button below the lower visible tip.
+ * Falls back to top-center (beneath any title bar area) if no tip rect is
+ * available, avoiding the #symbol-dock at the bottom.
  */
 function _positionDismissBtn() {
   if (!_dismissBtn) return;
@@ -254,9 +256,28 @@ function _positionDismissBtn() {
   const btnW = btnRect.width  || 160;
   const btnH = btnRect.height || 36;
 
-  // Place near the bottom-center of the viewport
-  const left = window.innerWidth  / 2 - btnW / 2;
-  const top  = window.innerHeight - btnH - _MARGIN * 4;
+  // Collect the bottom edge of each visible tip
+  let lowestBottom = 0;
+  if (_wallTip && !_wallTip.hidden) {
+    const r = _wallTip.getBoundingClientRect();
+    if (r.bottom > lowestBottom) lowestBottom = r.bottom;
+  }
+  if (_templateTip && !_templateTip.hidden) {
+    const r = _templateTip.getBoundingClientRect();
+    if (r.bottom > lowestBottom) lowestBottom = r.bottom;
+  }
+
+  let top;
+  if (lowestBottom > 0) {
+    // Place just below the lower of the two visible tips
+    top = lowestBottom + _GAP;
+  } else {
+    // No tip rect available — place near top-quarter of viewport so it doesn't
+    // collide with the bottom-center symbol dock.
+    top = window.innerHeight * 0.25;
+  }
+
+  const left = window.innerWidth / 2 - btnW / 2;
 
   _dismissBtn.style.left = _clamp(left, btnW, window.innerWidth) + "px";
   _dismissBtn.style.top  = _clamp(top,  btnH, window.innerHeight) + "px";
