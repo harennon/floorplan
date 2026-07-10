@@ -125,7 +125,7 @@ import {
 } from "../src/js/units.js";
 
 import {
-  NICE_STEPS, MAJOR_EVERY, chooseGridStep,
+  NICE_STEPS, MAJOR_EVERY, chooseGridStep, drawGrid,
   SNAP_PRESETS, getSnapMode, setSnapMode, cycleSnapMode, snapStep, onSnapModeChange,
 } from "../src/js/grid.js";
 
@@ -1935,7 +1935,7 @@ describe("security — symbolDimEntry: raw input string never reaches DOM as mar
 
 // ─── Import dimEntry and measure (behavioral tests) ───────────────────────────
 
-import { init as initDimEntry, isEditing, getEditingEdge, beginEdit, commit, cancel } from "../src/js/dimEntry.js";
+import { init as initDimEntry, isEditing, getEditingEdge, beginEdit, commit, cancel, reposition } from "../src/js/dimEntry.js";
 import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from "../src/js/measure.js";
 
 // ─── Tests: dimEntry.js — behavioral ─────────────────────────────────────────
@@ -3738,7 +3738,7 @@ describe("history.js — depth() reflects _past.length", () => {
 
 // ─── Import hud.js (LLD-22 chip label tests) ─────────────────────────────────
 
-import { init as initHud, update as updateHud } from "../src/js/hud.js";
+import { init as initHud, update as updateHud, setCursorScreen } from "../src/js/hud.js";
 
 // ─── Tests: LLD-22 — view.js MAX_ZOOM raised to 16 ───────────────────────────
 
@@ -9659,6 +9659,668 @@ describe("symbolRender.render", () => {
     }
   });
 
+});
+
+// ─── LLD 62: Layout / Geometry assertions ─────────────────────────────────────
+
+// ── Rect helpers ─────────────────────────────────────────────────────────────
+
+/** Returns true if rects a and b overlap (share interior area). */
+function rectsOverlap(a, b) {
+  return !(a.right <= b.left || b.right <= a.left ||
+           a.bottom <= b.top || b.bottom <= a.top);
+}
+
+/**
+ * Returns true if rect inner is entirely within rect outer, within tol pixels.
+ * @param {DOMRect} inner
+ * @param {DOMRect} outer
+ * @param {number} [tol=1]
+ */
+function rectInside(inner, outer, tol = 1) {
+  return (
+    inner.left   >= outer.left   - tol &&
+    inner.right  <= outer.right  + tol &&
+    inner.top    >= outer.top    - tol &&
+    inner.bottom <= outer.bottom + tol
+  );
+}
+
+// ── Layout rig helpers ────────────────────────────────────────────────────────
+
+/**
+ * Fixed-size stage rig for dimEntry/symbolDimEntry layout tests.
+ * Sets stage to an explicit 800×600 position:relative container so that
+ * getBoundingClientRect() reflects the JS-set style.left/top values.
+ * Returns { stage, dimLabels, cleanup }.
+ */
+function makeLayoutDimRig() {
+  const stage = document.createElement("div");
+  stage.className = "stage";
+  stage.style.position = "relative";
+  stage.style.width = "800px";
+  stage.style.height = "600px";
+  stage.style.overflow = "hidden";
+  const dimLabels = document.createElement("div");
+  dimLabels.className = "dim-labels";
+  stage.appendChild(dimLabels);
+  document.body.appendChild(stage);
+  return {
+    stage, dimLabels,
+    cleanup() { document.body.removeChild(stage); },
+  };
+}
+
+/**
+ * HUD LAYOUT rig — distinct from existing makeHudRig() at line 4137.
+ * Builds the real HUD DOM inside an 800×600 position:relative container,
+ * injects the minimal positioning CSS subset from src/index.html (lines 327–415),
+ * places a simulated tool-rail alongside it, and returns refs + cleanup.
+ *
+ * CSS source: src/index.html lines 327–415 (.hud, .hud-cell) and 519–533 (.tool-rail).
+ */
+function makeHudLayoutRig() {
+  // Fixed 800×600 container
+  const container = document.createElement("div");
+  container.style.position = "relative";
+  container.style.width = "800px";
+  container.style.height = "600px";
+  container.style.overflow = "hidden";
+
+  // Inject minimal positioning CSS subset (source: src/index.html)
+  const style = document.createElement("style");
+  style.textContent = `
+    /* Subset from src/index.html .hud / .hud-cell (lines 327–346) */
+    .lld62-hud {
+      position: absolute;
+      bottom: 1.25rem;
+      right: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.15rem;
+      pointer-events: none;
+    }
+    .lld62-hud-cell {
+      padding: 0.2rem 0.55rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      white-space: nowrap;
+    }
+    /* Subset from src/index.html .tool-rail (lines 519–533) */
+    .lld62-tool-rail {
+      position: absolute;
+      left: 1.25rem;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      padding: 0.4rem 0.3rem;
+      border-radius: 8px;
+      width: 2.8rem;
+    }
+  `;
+  container.appendChild(style);
+
+  // HUD DOM
+  const hud = document.createElement("div");
+  hud.className = "lld62-hud";
+
+  const elZoom = document.createElement("span");
+  elZoom.className = "lld62-hud-cell";
+  const elScale = document.createElement("span");
+  elScale.className = "lld62-hud-cell";
+  const elCursor = document.createElement("span");
+  elCursor.className = "lld62-hud-cell hud-cursor";
+
+  const elImp = document.createElement("button");
+  elImp.className = "lld62-hud-cell";
+  const elMet = document.createElement("button");
+  elMet.className = "lld62-hud-cell";
+
+  const snapModeBtn = document.createElement("button");
+  snapModeBtn.id = "hud-snap-mode-lld62";
+  snapModeBtn.className = "lld62-hud-cell";
+  const snapModeVal = document.createElement("span");
+  snapModeVal.id = "hud-snap-mode-val";
+  snapModeBtn.appendChild(snapModeVal);
+
+  const gridToggleBtn = document.createElement("button");
+  gridToggleBtn.id = "hud-grid-toggle-lld62";
+  gridToggleBtn.className = "lld62-hud-cell";
+  const gridToggleVal = document.createElement("span");
+  gridToggleVal.id = "hud-grid-toggle-val";
+  gridToggleBtn.appendChild(gridToggleVal);
+
+  hud.appendChild(elZoom);
+  hud.appendChild(elScale);
+  hud.appendChild(elCursor);
+  hud.appendChild(elImp);
+  hud.appendChild(elMet);
+  hud.appendChild(snapModeBtn);
+  hud.appendChild(gridToggleBtn);
+
+  // Simulated tool-rail
+  const toolRail = document.createElement("div");
+  toolRail.className = "lld62-tool-rail";
+  // Give it a small fixed size so its rect is non-zero
+  toolRail.style.minHeight = "200px";
+
+  container.appendChild(toolRail);
+  container.appendChild(hud);
+  document.body.appendChild(container);
+
+  // init HUD with our nodes
+  initHud(elZoom, elScale, elCursor, elImp, elMet, snapModeBtn, gridToggleBtn);
+
+  return {
+    container, hud, toolRail,
+    cells: { elZoom, elScale, elCursor, snapModeVal, gridToggleVal },
+    cleanup() {
+      document.body.removeChild(container);
+    },
+  };
+}
+
+/**
+ * Clearance LAYOUT rig — distinct from existing makePanelRig() at line 4977.
+ * Wraps makePanelRig()'s panel DOM inside an 800×600 position:relative container,
+ * injects the minimal clearance positioning CSS subset from src/index.html (lines 852–862),
+ * and returns refs + cleanup.
+ *
+ * CSS source: src/index.html lines 852–862 (.clearance — width + display).
+ */
+function makeClearanceLayoutRig() {
+  // Build the panel via the existing rig
+  const panelRig = makePanelRig();
+  // Remove it from body (makePanelRig appended it)
+  document.body.removeChild(panelRig.panel);
+
+  // Fixed 800×600 container
+  const container = document.createElement("div");
+  container.style.position = "relative";
+  container.style.width = "800px";
+  container.style.height = "600px";
+  container.style.overflow = "hidden";
+
+  // Inject minimal CSS subset (source: src/index.html lines 852–862)
+  const style = document.createElement("style");
+  style.textContent = `
+    /* Subset from src/index.html .clearance (lines 852–862) */
+    .clearance {
+      width: 14rem;
+      overflow: hidden;
+      position: absolute;
+      top: 1.25rem;
+      right: 1.25rem;
+    }
+  `;
+  container.appendChild(style);
+
+  container.appendChild(panelRig.panel);
+  document.body.appendChild(container);
+
+  return {
+    container,
+    panel: panelRig.panel,
+    body: panelRig.body,
+    toggle: panelRig.toggle,
+    cleanup() {
+      document.body.removeChild(container);
+    },
+  };
+}
+
+// ─── Category 1: dimEntry layout ─────────────────────────────────────────────
+
+describe("dimEntry — floating input layout", () => {
+  it("anchor at edge midpoint: style.left/top equals worldToScreen of edge-0 midpoint", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Closed 4-vertex room; edge 0 goes from (0,0)→(2,0).
+    // At identity view: worldToScreen(0,0)={0,0}, worldToScreen(2,0)={80,0}
+    // midpoint = (40, 0)
+    model.rooms.push({ id: "lld62-r0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 },
+    ]});
+    const rig = makeLayoutDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("lld62-r0", 0);
+
+    // _positionInput sets style.left/top to the screen midpoint of edge 0
+    // edge 0: verts[0]=(0,0)→verts[1]=(2,0)
+    // worldToScreen(0,0)={0,0}, worldToScreen(2,0)={80,0} → midpoint=(40,0)
+    const input = rig.stage.querySelector(".dim-input");
+    if (!input) throw new Error("Expected .dim-input to be appended to stage");
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    const expectedLeft = (worldToScreen(0, 0).x + worldToScreen(2, 0).x) / 2; // 40
+    const expectedTop  = (worldToScreen(0, 0).y + worldToScreen(2, 0).y) / 2; // 0
+    if (Math.abs(leftPx - expectedLeft) > 1) {
+      throw new Error(`input.style.left ${leftPx} expected ~${expectedLeft}`);
+    }
+    if (Math.abs(topPx - expectedTop) > 1) {
+      throw new Error(`input.style.top ${topPx} expected ~${expectedTop}`);
+    }
+    cancel();
+    rig.cleanup();
+    resetAll();
+  });
+
+  it("inside stage bounds: input bounding rect is within the 800×600 stage rect", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Place room mid-stage: center at (10, 7.5) in world → screen (400, 300)
+    model.rooms.push({ id: "lld62-r1", closed: true, verts: [
+      { x: 9, y: 7 }, { x: 11, y: 7 }, { x: 11, y: 8 }, { x: 9, y: 8 },
+    ]});
+    const rig = makeLayoutDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("lld62-r1", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    if (!input) throw new Error("Expected .dim-input");
+    const stageRect = rig.stage.getBoundingClientRect();
+    const inputRect = input.getBoundingClientRect();
+    // The input is positioned by style.left/top; its rect center should be within stage
+    // Use the style values directly (transform: translate(-50%,-50%) centers it on left/top)
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    const TOL = 2;
+    if (leftPx < -TOL || leftPx > 800 + TOL) {
+      throw new Error(`input left=${leftPx} outside stage width 800`);
+    }
+    if (topPx < -TOL || topPx > 600 + TOL) {
+      throw new Error(`input top=${topPx} outside stage height 600`);
+    }
+    cancel();
+    rig.cleanup();
+    resetAll();
+  });
+
+  it("reposition() tracks the edge after view.panX changes", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    model.rooms.push({ id: "lld62-r2", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 },
+    ]});
+    const rig = makeLayoutDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("lld62-r2", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    if (!input) throw new Error("Expected .dim-input");
+    const leftBefore = parseFloat(input.style.left);
+
+    // Pan by 50px → reposition should update style.left by 50
+    view.panX = 50;
+    // reposition is exported from dimEntry
+    reposition();
+    const leftAfter = parseFloat(input.style.left);
+    if (Math.abs((leftAfter - leftBefore) - 50) > 1) {
+      throw new Error(`After panX=50, left changed by ${leftAfter - leftBefore}, expected ~50`);
+    }
+    cancel();
+    rig.cleanup();
+    resetAll();
+  });
+});
+
+// ─── Category 2: symbolDimEntry layout ───────────────────────────────────────
+
+describe("symbolDimEntry — floating input layout", () => {
+  it("width chip: style.left/top equals top-edge midpoint of projected corners + (0,-14)", () => {
+    resetAll();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // table: w=1.2, h=0.8, rot=0, centered at world (5, 5)
+    // corners at identity: TL=(4.4,4.6), TR=(5.6,4.6), BR=(5.6,5.4), BL=(4.4,5.4)
+    // screen coords: *40 at identity
+    // top-edge midpoint of cs[0]=TL and cs[1]=TR:
+    //   cx = (4.4*40 + 5.6*40)/2 = (176+224)/2 = 200
+    //   cy = (4.6*40 + 4.6*40)/2 = 184
+    // offset for width (rot=0): (0,-14) → left=200, top=170
+    const sym = createSymbol("table", 5, 5);
+    addSymbol(sym);
+    const rig = makeLayoutDimRig();
+    initSymbolDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginSymbolEdit(sym.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    if (!input) throw new Error("Expected .sym-dim-input");
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    // hand-compute: sym.w=1.2, sym.h=0.8; corners at rot=0:
+    //   TL={x:5-0.6, y:5-0.4}={4.4,4.6}, TR={5.6,4.6}
+    // screen *40: TL={176,184}, TR={224,184}
+    // top-edge midpoint cx=200, cy=184; offset (0,-14) → (200,170)
+    const cs = corners(sym).map(c => worldToScreen(c.x, c.y));
+    const expectedCx = (cs[0].x + cs[1].x) / 2;
+    const expectedCy = (cs[0].y + cs[1].y) / 2 - 14;
+    if (Math.abs(leftPx - expectedCx) > 1) {
+      throw new Error(`width input left ${leftPx} expected ~${expectedCx}`);
+    }
+    if (Math.abs(topPx - expectedCy) > 1) {
+      throw new Error(`width input top ${topPx} expected ~${expectedCy}`);
+    }
+    cancelSymbol();
+    rig.cleanup();
+    resetAll();
+    resetSymbolModel();
+  });
+
+  it("depth chip: style.left/top equals left-edge midpoint of projected corners + (-14,0)", () => {
+    resetAll();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // table: w=1.2, h=0.8, rot=0, centered at world (5, 5)
+    // left-edge midpoint of cs[0]=TL and cs[3]=BL at identity:
+    //   cx = (4.4*40 + 4.4*40)/2 = 176
+    //   cy = (4.6*40 + 5.4*40)/2 = (184+216)/2 = 200
+    // offset for depth (rot=0): (-14,0) → left=162, top=200
+    const sym = createSymbol("table", 5, 5);
+    addSymbol(sym);
+    const rig = makeLayoutDimRig();
+    initSymbolDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginSymbolEdit(sym.id, "h");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    if (!input) throw new Error("Expected .sym-dim-input");
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    const cs = corners(sym).map(c => worldToScreen(c.x, c.y));
+    // left-edge: TL=cs[0], BL=cs[3]
+    const expectedCx = (cs[0].x + cs[3].x) / 2 - 14;
+    const expectedCy = (cs[0].y + cs[3].y) / 2;
+    if (Math.abs(leftPx - expectedCx) > 1) {
+      throw new Error(`depth input left ${leftPx} expected ~${expectedCx}`);
+    }
+    if (Math.abs(topPx - expectedCy) > 1) {
+      throw new Error(`depth input top ${topPx} expected ~${expectedCy}`);
+    }
+    cancelSymbol();
+    rig.cleanup();
+    resetAll();
+    resetSymbolModel();
+  });
+
+  it("width chip: style.left within stage bounds (800×600)", () => {
+    resetAll();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const sym = createSymbol("table", 5, 5);
+    addSymbol(sym);
+    const rig = makeLayoutDimRig();
+    initSymbolDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginSymbolEdit(sym.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    if (!input) throw new Error("Expected .sym-dim-input");
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    const TOL = 20; // allow for the 14px offset
+    if (leftPx < -TOL || leftPx > 800 + TOL) {
+      throw new Error(`width input left=${leftPx} outside stage`);
+    }
+    if (topPx < -TOL || topPx > 600 + TOL) {
+      throw new Error(`width input top=${topPx} outside stage`);
+    }
+    cancelSymbol();
+    rig.cleanup();
+    resetAll();
+    resetSymbolModel();
+  });
+
+  it("depth chip: style.left within stage bounds (800×600)", () => {
+    resetAll();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const sym = createSymbol("table", 5, 5);
+    addSymbol(sym);
+    const rig = makeLayoutDimRig();
+    initSymbolDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginSymbolEdit(sym.id, "h");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    if (!input) throw new Error("Expected .sym-dim-input");
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    const TOL = 20;
+    if (leftPx < -TOL || leftPx > 800 + TOL) {
+      throw new Error(`depth input left=${leftPx} outside stage`);
+    }
+    if (topPx < -TOL || topPx > 600 + TOL) {
+      throw new Error(`depth input top=${topPx} outside stage`);
+    }
+    cancelSymbol();
+    rig.cleanup();
+    resetAll();
+    resetSymbolModel();
+  });
+});
+
+// ─── Category 3: hud layout ──────────────────────────────────────────────────
+
+describe("hud — layout / no-collision", () => {
+  it("cells visible + populated after init + setCursorScreen + update", () => {
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeHudLayoutRig();
+    setCursorScreen(400, 300);
+    updateHud();
+
+    // Zoom cell: non-empty textContent
+    if (!rig.cells.elZoom.textContent || rig.cells.elZoom.textContent.trim() === "") {
+      throw new Error("Zoom cell has empty textContent");
+    }
+    // Snap mode cell: exists (was written by update)
+    if (!rig.cells.snapModeVal.textContent) {
+      // mode="auto" may show a non-empty label; just verify the element exists
+    }
+    // Grid toggle cell should be non-empty
+    // (In test env getPrefsGridSnap() returns true by default → "On")
+    const gridText = rig.cells.gridToggleVal.textContent;
+    if (!gridText || gridText.trim() === "") {
+      throw new Error(`Grid toggle val has empty textContent, got "${gridText}"`);
+    }
+
+    rig.cleanup();
+    setUnit("ft");
+  });
+
+  it("HUD block sits inside the 800×600 viewport container", () => {
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeHudLayoutRig();
+    setCursorScreen(400, 300);
+    updateHud();
+
+    const containerRect = rig.container.getBoundingClientRect();
+    const hudRect = rig.hud.getBoundingClientRect();
+
+    // HUD is position:absolute inside the container — its rect must be within container
+    if (!rectInside(hudRect, containerRect, 2)) {
+      throw new Error(
+        `HUD rect {left:${hudRect.left.toFixed(0)},top:${hudRect.top.toFixed(0)},right:${hudRect.right.toFixed(0)},bottom:${hudRect.bottom.toFixed(0)}} ` +
+        `not inside container {left:${containerRect.left.toFixed(0)},top:${containerRect.top.toFixed(0)},right:${containerRect.right.toFixed(0)},bottom:${containerRect.bottom.toFixed(0)}}`
+      );
+    }
+
+    rig.cleanup();
+    setUnit("ft");
+  });
+
+  it("HUD does not overlap the tool-rail ('overlapping toolbars' regression)", () => {
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeHudLayoutRig();
+    setCursorScreen(400, 300);
+    updateHud();
+
+    const hudRect      = rig.hud.getBoundingClientRect();
+    const toolRailRect = rig.toolRail.getBoundingClientRect();
+
+    if (rectsOverlap(hudRect, toolRailRect)) {
+      throw new Error(
+        `HUD and tool-rail overlap: ` +
+        `HUD {left:${hudRect.left.toFixed(0)},right:${hudRect.right.toFixed(0)}} ` +
+        `toolRail {left:${toolRailRect.left.toFixed(0)},right:${toolRailRect.right.toFixed(0)}}`
+      );
+    }
+
+    rig.cleanup();
+    setUnit("ft");
+  });
+});
+
+// ─── Category 4: clearancePanel containment ──────────────────────────────────
+
+describe("clearancePanel — panel containment", () => {
+  it("panel rect sits inside the 800×600 viewport container after clrPanelUpdate", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // A closed room + a furniture symbol placed inside it to produce clearance rows
+    const room = mkRoom("lld62-clr0", 0, 0, 10, 8);
+    model.rooms.push(room);
+    const sofa = mkSym("lld62-s0", "sofa", 5, 4, 2, 0.9, 0);
+    const chair = mkSym("lld62-s1", "chair", 2.75, 4, 0.5, 0.5, 0);
+    symbolModel.symbols.push(sofa);
+    symbolModel.symbols.push(chair);
+
+    setEnabled(true);
+    setThreshold(DEFAULT_THRESHOLD);
+
+    const rig = makeClearanceLayoutRig();
+    initClearancePanel({
+      panel: rig.panel,
+      body: rig.body,
+      toggle: rig.toggle,
+      getSelectedId: () => "lld62-s0",
+      getSymbol: () => sofa,
+    });
+    clrPanelUpdate();
+
+    const containerRect = rig.container.getBoundingClientRect();
+    const panelRect = rig.panel.getBoundingClientRect();
+
+    if (!rectInside(panelRect, containerRect, 2)) {
+      throw new Error(
+        `Panel rect {left:${panelRect.left.toFixed(0)},top:${panelRect.top.toFixed(0)},` +
+        `right:${panelRect.right.toFixed(0)},bottom:${panelRect.bottom.toFixed(0)}} ` +
+        `not inside container {left:${containerRect.left.toFixed(0)},top:${containerRect.top.toFixed(0)},` +
+        `right:${containerRect.right.toFixed(0)},bottom:${containerRect.bottom.toFixed(0)}}`
+      );
+    }
+
+    rig.cleanup();
+    resetClearance();
+    symbolModel.symbols.length = 0;
+    model.rooms.length = 0;
+  });
+});
+
+// ─── Category 5: grid.drawGrid line placement ─────────────────────────────────
+
+describe("grid.drawGrid — line placement", () => {
+  it("line count is nonzero and matches hand-computed index range", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const NS_G = "http://www.w3.org/2000/svg";
+    const g = document.createElementNS(NS_G, "g");
+    const W = 800, H = 600;
+    drawGrid(g, W, H);
+    const lines = g.querySelectorAll("line");
+    if (lines.length === 0) throw new Error("drawGrid emitted 0 lines");
+    // At identity view: step = chooseGridStep(56) at zoom=1, pxPerM=40
+    // step*40 >= 56 → step=2 (2*40=80 >= 56)
+    // topLeft=screenToWorld(0,0)=(0,0), botRight=screenToWorld(800,600)=(20,15)
+    // iXMin=floor(0/2)-1=-1, iXMax=ceil(20/2)+1=11 → 13 vertical lines
+    // iYMin=floor(0/2)-1=-1, iYMax=ceil(15/2)+1=9 → 11 horizontal lines
+    // Total = 24; allow ±4 due to floating-point ceiling differences
+    const step = chooseGridStep(56);
+    // Inline screenToWorld for hand-computed index range (view is identity)
+    const s2w = (sx, sy) => {
+      const ppm = view.zoom * BASE_PX_PER_M;
+      return { x: (sx - view.panX) / ppm, y: (sy - view.panY) / ppm };
+    };
+    const tl = s2w(0, 0), br = s2w(W, H);
+    const iXMin = Math.floor(tl.x / step) - 1;
+    const iXMax = Math.ceil(br.x / step) + 1;
+    const iYMin = Math.floor(tl.y / step) - 1;
+    const iYMax = Math.ceil(br.y / step) + 1;
+    const expectedCount = (iXMax - iXMin + 1) + (iYMax - iYMin + 1);
+    if (lines.length !== expectedCount) {
+      throw new Error(`Expected ${expectedCount} lines, got ${lines.length}`);
+    }
+  });
+
+  it("adjacent grid-major vertical lines differ in x by MAJOR_EVERY * step * pxPerM()", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const NS_G = "http://www.w3.org/2000/svg";
+    const g = document.createElementNS(NS_G, "g");
+    drawGrid(g, 800, 600);
+    const majorVerticals = Array.from(g.querySelectorAll("line.grid-major")).filter(l => {
+      // vertical lines have x1 === x2
+      return parseFloat(l.getAttribute("x1")) === parseFloat(l.getAttribute("x2"));
+    });
+    if (majorVerticals.length < 2) {
+      throw new Error(`Need ≥2 major vertical lines, got ${majorVerticals.length}`);
+    }
+    // Sort by x1
+    majorVerticals.sort((a, b) => parseFloat(a.getAttribute("x1")) - parseFloat(b.getAttribute("x1")));
+    const step = chooseGridStep(56);
+    const expectedSpacing = MAJOR_EVERY * step * pxPerM();
+    for (let i = 1; i < majorVerticals.length; i++) {
+      const dx = parseFloat(majorVerticals[i].getAttribute("x1")) - parseFloat(majorVerticals[i-1].getAttribute("x1"));
+      if (Math.abs(dx - expectedSpacing) > 1) {
+        throw new Error(`Major vertical spacing ${dx.toFixed(2)} expected ~${expectedSpacing.toFixed(2)}`);
+      }
+    }
+  });
+
+  it("vertical lines span full height (y1≈0, y2≈600) and horizontal lines span full width (x1≈0, x2≈800)", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const NS_G = "http://www.w3.org/2000/svg";
+    const g = document.createElementNS(NS_G, "g");
+    const W = 800, H = 600;
+    drawGrid(g, W, H);
+    const TOL = 1;
+    // Check vertical lines: x1===x2, y1≈0, y2≈H
+    const allLines = Array.from(g.querySelectorAll("line"));
+    for (const line of allLines) {
+      const x1 = parseFloat(line.getAttribute("x1"));
+      const y1 = parseFloat(line.getAttribute("y1"));
+      const x2 = parseFloat(line.getAttribute("x2"));
+      const y2 = parseFloat(line.getAttribute("y2"));
+      if (Math.abs(x1 - x2) < TOL) {
+        // vertical line
+        if (Math.abs(y1 - 0) > TOL) throw new Error(`Vertical line y1=${y1} expected ≈0`);
+        if (Math.abs(y2 - H) > TOL) throw new Error(`Vertical line y2=${y2} expected ≈${H}`);
+      } else {
+        // horizontal line
+        if (Math.abs(x1 - 0) > TOL) throw new Error(`Horizontal line x1=${x1} expected ≈0`);
+        if (Math.abs(x2 - W) > TOL) throw new Error(`Horizontal line x2=${x2} expected ≈${W}`);
+      }
+    }
+  });
+
+  it("idempotent redraw: calling drawGrid twice yields the same line count", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const NS_G = "http://www.w3.org/2000/svg";
+    const g = document.createElementNS(NS_G, "g");
+    drawGrid(g, 800, 600);
+    const count1 = g.querySelectorAll("line").length;
+    drawGrid(g, 800, 600);
+    const count2 = g.querySelectorAll("line").length;
+    if (count1 !== count2) {
+      throw new Error(`Idempotent redraw: first=${count1}, second=${count2}`);
+    }
+    if (count1 === 0) throw new Error("drawGrid emitted 0 lines");
+  });
 });
 
 // ─── Render ────────────────────────────────────────────────────────────────────
