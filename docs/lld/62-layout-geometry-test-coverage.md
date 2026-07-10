@@ -20,8 +20,9 @@ laid-out geometry via `getBoundingClientRect()` / element attributes at a **fixe
    HUD cells are visible (non-zero size, populated), the HUD block sits inside the viewport
    container, and does not overlap the tool-rail (toolbar) rect.
 4. **`clearancePanel.js`** — with a plan that produces clearance rows and a selected symbol,
-   assert `update()` renders the expected `.clr-row` count and the panel rect sits inside the
-   viewport container.
+   assert the rendered panel rect sits **inside a fixed viewport container** (the new
+   layout/containment check). Row-count and empty/off (`.clr-empty`) assertions already exist in
+   the current suite (see Dependencies / Category 4) and are **not** re-stated here.
 5. **`grid.js` `drawGrid()`** — for a known identity view and fixed `W×H`, assert the emitted
    line count, that `grid-major` lines are spaced `MAJOR_EVERY` steps apart, and that vertical
    lines span the full `H` / horizontal lines span the full `W`.
@@ -92,12 +93,28 @@ Overlap/containment checks are boolean relationships on rects (`aLeft >= bRight 
 values. No assertion reads pixel color or depends on font metrics (text may be zero-width without
 fonts — assert element presence and box, not text width).
 
-### Build on the Tier-1 rig, don't fork it
+### Reuse existing rigs and imports — do NOT re-create or re-import
+The suite **already** has substantial HUD/clearance infrastructure; this LLD extends it, never
+duplicates it:
+- **Imports already present.** `hud.js` (`initHud`/`updateHud`, line 3741), `clearance.js`
+  (line 4248), and `clearancePanel.js` (`initClearancePanel`/`clrPanelUpdate`, line 4942) are
+  **already imported** in `test/tests.html`. **Do NOT add new `import` statements for these** —
+  a duplicate top-level `import` binding is a `SyntaxError` that fails the whole suite. Reuse the
+  existing bindings.
+- **Rig naming — avoid collisions.** A `function makeHudRig()` already exists (line 4137, used by
+  ~6 LLD-22 HUD tests; it builds bare `<span>`/`<button>` nodes on `document.body` with **no
+  fixed container / no CSS subset**). A second top-level `function makeHudRig()` in the same module
+  scope would shadow it and silently break those tests. The new fixed-container + CSS-subset HUD
+  rig **must use a distinct name — `makeHudLayoutRig()`**. Likewise the new clearance layout rig
+  is **`makeClearanceLayoutRig()`** to avoid colliding with `makePanelRig()` (line 4977).
+- **`makePanelRig()` (line 4977) already builds the `.clearance` panel DOM** (`.clr-header`,
+  `.clr-body`, toggle) on `document.body`. For the clearance *containment* check, **extend/wrap
+  `makePanelRig` output** (mount its `panel` into a fixed `position:relative` 800×600 container +
+  inject the panel positioning CSS subset) rather than rebuilding the panel DOM from scratch.
+
 Reuse the LLD-61 `makeRenderRig61` / `parseSvg` / `parsePoints` helpers and the existing
-`makeDimRig` / `makeSymbolDimRig` factories where they fit. Add small new factories only for
-`hud` and `clearancePanel` (which need the real element IDs/classes + the CSS subset). Follow the
-file's dominant assertion style (plain `throw new Error(...)` guards + existing `expect`
-matchers); **no new matchers**.
+`makeDimRig` / `makeSymbolDimRig` factories where they fit. Follow the file's dominant assertion
+style (plain `throw new Error(...)` guards + existing `expect` matchers); **no new matchers**.
 
 ### Grid line assertions
 `drawGrid(gGrid, W, H)` clears and repopulates `gGrid` with `<line class="grid-{axis|major|fine}">`
@@ -159,17 +176,20 @@ export function drawGrid(gGrid, W, H): void   // clears + appends <line class="g
 `BASE_PX_PER_M`; `walls.model`, `edgeLength`; `symbols` `createSymbol`/`addSymbol`/`corners`;
 `clearance.js` `computeClearances`/`setEnabled`/`setThreshold`; `units.setUnit`.
 
-**New test-local helpers (in `test/tests.html`):**
+**New test-local helpers (in `test/tests.html`)** — all **new names**, chosen to avoid colliding
+with the existing `makeHudRig` (4137) and `makePanelRig` (4977):
 ```js
 // Fixed-size stage rig for dimEntry/symbolDimEntry layout (extends existing makeDimRig):
 //   sets stage width/height explicitly; returns { stage, dimLabels, cleanup }.
 function makeLayoutDimRig() -> {...}
-// HUD rig: builds the real HUD DOM (correct ids/classes) + a tool-rail node inside an
-// 800×600 container, injects the minimal positioning CSS subset, returns refs + cleanup.
-function makeHudRig() -> { container, hud, toolRail, cells, cleanup }
-// Clearance rig: builds .clearance panel + .clr-body + toggle in the fixed container,
+// HUD LAYOUT rig (distinct from existing makeHudRig at 4137): builds the real HUD DOM +
+// a tool-rail node inside an 800×600 position:relative container, injects the minimal
+// positioning CSS subset, returns refs + cleanup.
+function makeHudLayoutRig() -> { container, hud, toolRail, cells, cleanup }
+// Clearance LAYOUT rig (distinct from existing makePanelRig at 4977): reuses/wraps the
+// makePanelRig panel DOM, mounts it into the fixed 800×600 position:relative container,
 // injects the panel positioning CSS subset, returns refs + cleanup.
-function makeClearanceRig() -> { container, panel, body, toggle, cleanup }
+function makeClearanceLayoutRig() -> { container, panel, body, toggle, cleanup }
 // rect helpers:
 function rectsOverlap(a, b) -> boolean
 function rectInside(inner, outer, tol=1) -> boolean
@@ -221,26 +241,24 @@ Fixture / assertion pitfalls the implementation must handle:
    fixture (e.g. 4 verts, edge 0) so the input is created.
 6. **Openings allow width only.** `symbolDimEntry.beginEdit(id,"h")` for an opening-type symbol
    (door/window) no-ops. Use a furniture type (e.g. `bed`, `table`) for the depth-edit case.
-7. **Clearance requires enabled + selected symbol + nearby geometry.** `update()` renders
-   `.clr-row`s only when `enabled`, a symbol is selected via `getSelectedId`, and
-   `computeClearances` returns rows. Build a fixture (a closed room + a symbol placed inside near
-   walls, or two symbols) that produces a known nonzero row count; assert that exact count.
-   Empty/off/no-selection paths render `.clr-empty` instead — assert those as separate cases.
-8. **`clr-row` count == sorted clearances length.** Rows are 1:1 with `computeClearances`
-   results after sort. Pin threshold/density so the row set is stable; assert
-   `body.querySelectorAll(".clr-row").length`.
-9. **HUD `update()` early-returns if not initialised.** `update()` guards on `_elZoom`. Always
+7. **Clearance containment needs a populated panel.** For the (only new) panel-containment check,
+   `clrPanelUpdate()` must render a non-empty panel: `enabled=true`, a symbol selected via
+   `getSelectedId`, and `computeClearances` returning rows (closed room + symbol placed inside near
+   walls). A collapsed/empty panel still has a valid rect, but use a populated fixture so the
+   containment assertion reflects the real rendered panel size. (Row-count and `.clr-empty`
+   behaviour is out of scope here — already covered elsewhere; do not re-assert.)
+8. **HUD `update()` early-returns if not initialised.** `update()` guards on `_elZoom`. Always
    call `init(...)` with real nodes before `update()`. Also `setCursorScreen(x,y)` before
    `update()` so the cursor cell is populated deterministically.
-10. **Grid line count vs `MAX_LINES`.** `drawGrid` bails (draws nothing) if a degenerate range
+9. **Grid line count vs `MAX_LINES`.** `drawGrid` bails (draws nothing) if a degenerate range
     would exceed `MAX_LINES` (2000/axis). Keep the fixture view/zoom in a normal range so lines
     are emitted; assert count is nonzero and matches the hand-computed index range.
-11. **`drawGrid` clears first.** Calling twice yields the same count. Include an idempotent-redraw
+10. **`drawGrid` clears first.** Calling twice yields the same count. Include an idempotent-redraw
     case (mirrors LLD 61's render-idempotency check).
-12. **Grid axis vs major classification.** `_tier` uses `Math.round(idx)`; index 0 = `axis`,
+11. **Grid axis vs major classification.** `_tier` uses `Math.round(idx)`; index 0 = `axis`,
     multiples of `MAJOR_EVERY` = `major`, else `fine`. When asserting major spacing, filter to
     `.grid-major` only (exclude the `.grid-axis` line at origin) and compare adjacent x/y deltas.
-13. **Container must be `position:relative` and mounted.** For `hud`/`clearancePanel` overlap/
+12. **Container must be `position:relative` and mounted.** For `hud`/`clearancePanel` overlap/
     containment to be real, the fixed container must be appended to `document.body` and be
     `position:relative` with explicit size; children `position:absolute` resolve against it.
     `cleanup()` must remove it to avoid cross-test layout pollution.
@@ -254,11 +272,20 @@ Fixture / assertion pitfalls the implementation must handle:
 - `test/tests.html` harness (`describe`/`it`/`expect`, `window.__testResult`) and the headless
   runner `.github/run-tests.mjs` (Playwright + real headless Chromium — so `getBoundingClientRect`
   returns true laid-out geometry). No changes to either.
-- Existing rigs/factories: `makeDimRig`, `makeSymbolDimRig`, `resetAll`, `resetSymbolModel`, and
-  the imports of `dimEntry`/`symbolDimEntry` already present in the file.
+- Existing rigs/factories: `makeDimRig`, `makeSymbolDimRig`, `makeHudRig` (4137),
+  `makePanelRig` (4977), `resetAll`, `resetSymbolModel`, and the imports of
+  `dimEntry`/`symbolDimEntry` already present in the file.
 - Exported surfaces of `hud.js`, `clearancePanel.js`, `grid.js`, `clearance.js`, `view.js`,
-  `walls.js`, `symbols.js`, `units.js` (all present today). `hud.js`, `clearancePanel.js`, and
-  `clearance.js` are **not yet imported** into `test/tests.html` — this PR adds those imports.
+  `walls.js`, `symbols.js`, `units.js` (all present today). **`hud.js` (line 3741),
+  `clearance.js` (line 4248), and `clearancePanel.js` (line 4942) are ALREADY imported** into
+  `test/tests.html`. This PR **reuses those existing bindings and must NOT add duplicate
+  `import` statements** — a duplicate top-level import is a `SyntaxError` that fails the whole
+  suite. Only `grid.js`'s exports (`MAJOR_EVERY`/`chooseGridStep`/`drawGrid`) may need adding if
+  not already imported — verify before adding.
+- **Existing clearancePanel coverage to reuse, not duplicate.** The suite already asserts
+  `.clr-row` counts (tests near lines 4781, 5134, 5287, 5324) and `.clr-empty` off/no-selection
+  states (5242, 5400, 5424) via `makePanelRig`. Category 4 here adds **only** the new
+  panel-containment (inside-viewport) check and reuses that coverage for row-count/empty behaviour.
 - The positioning CSS snippets copied from `src/index.html` (`.hud`, `.hud-cell`, `.tool-rail`,
   `.clearance`) as documented literals with a source-line comment; they fail loudly if the app's
   layout model changes materially, which is acceptable and desirable for layout coverage.
@@ -313,14 +340,15 @@ New `describe("hud — layout / no-collision")`:
 - **No overlap with tool-rail.** HUD rect and tool-rail rect do not intersect (`rectsOverlap`
   false) — the core "overlapping toolbars" regression check.
 
-### Category 4 — clearancePanel layout
-New `describe("clearancePanel — row count / layout")`:
-- **Expected row count.** Fixture producing a known number of clearances (symbol + room/other
-  symbols), `enabled=true`, pinned threshold/density; after `update()`,
-  `body.querySelectorAll(".clr-row").length` equals the expected count.
-- **Empty/off states.** No selection → one `.clr-empty` "select furniture" prompt; `enabled=false`
-  → `.clr-empty` "overlay is off"; no rows.
-- **Panel inside viewport container** (panel rect within the fixed container).
+### Category 4 — clearancePanel layout (containment only)
+New `describe("clearancePanel — panel containment")` — **the only new clearancePanel assertion**.
+Row-count and `.clr-empty` off/no-selection behaviour are **already covered** (tests near lines
+4781/5134/5287/5324 for rows; 5242/5400/5424 for empty states) and are **not** restated here.
+- **Panel inside viewport container.** Using `makeClearanceLayoutRig()` (which wraps
+  `makePanelRig`'s panel into the fixed 800×600 `position:relative` container + panel CSS subset),
+  a selected-symbol fixture that produces rows, after `clrPanelUpdate()`: assert the panel's
+  bounding rect sits within the container rect (`rectInside`) — the "clipped/off-canvas panel"
+  regression check.
 
 ### Category 5 — grid.drawGrid layout
 New `describe("grid.drawGrid — line placement")`:
