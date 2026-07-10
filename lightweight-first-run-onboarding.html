@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Onboarding directions · floorplan mockup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ─── Tokens (mirror src/index.html) ─────────────────────────── */
+      :root {
+        --bg:        #14140f;
+        --bg-deep:   #100f0b;
+        --ink:       #ece7d6;
+        --muted:     #8f8a78;
+        --gold:      #c9a84c;
+        --gold-soft: rgba(201, 168, 76, 0.55);
+        --panel:     rgba(20, 20, 15, 0.72);
+        --hairline:  rgba(201, 168, 76, 0.18);
+        --grid-fine: rgba(201, 168, 76, 0.055);
+        --grid-major:rgba(201, 168, 76, 0.14);
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        font-family: var(--font-ui);
+        color: var(--ink);
+        background: var(--bg-deep);
+      }
+
+      /* ─── Mockup harness (not shipped) ───────────────────────────── */
+      .doc-bar {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.6rem 1rem;
+        background: #0b0b08;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .doc-bar h1 {
+        font-family: var(--font-display);
+        font-size: 0.95rem;
+        color: var(--gold);
+        margin: 0 0.5rem 0 0;
+        font-weight: 700;
+      }
+      .doc-bar .seg { display: flex; gap: 0.3rem; }
+      .doc-bar button {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        padding: 0.3rem 0.7rem;
+        border-radius: 100px;
+        cursor: pointer;
+        transition: color 0.12s, border-color 0.12s;
+      }
+      .doc-bar button.active { color: var(--gold); border-color: var(--gold-soft); }
+      .doc-bar button:hover { color: var(--ink); }
+      .doc-note {
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        color: var(--muted);
+        margin-left: auto;
+      }
+
+      /* ─── Simulated editor stage ─────────────────────────────────── */
+      .stage {
+        position: relative;
+        height: calc(100vh - 3rem);
+        min-height: 30rem;
+        overflow: hidden;
+        background:
+          radial-gradient(ellipse 90% 80% at 50% 50%, var(--bg) 0%, var(--bg-deep) 100%);
+        /* graph-paper grid */
+        background-image:
+          radial-gradient(ellipse 90% 80% at 50% 50%, var(--bg) 0%, var(--bg-deep) 100%),
+          repeating-linear-gradient(0deg, transparent 0 39px, var(--grid-fine) 39px 40px),
+          repeating-linear-gradient(90deg, transparent 0 39px, var(--grid-fine) 39px 40px),
+          repeating-linear-gradient(0deg, transparent 0 199px, var(--grid-major) 199px 200px),
+          repeating-linear-gradient(90deg, transparent 0 199px, var(--grid-major) 199px 200px);
+      }
+
+      /* Shared floating-chrome stand-ins so hints have real anchors */
+      .chrome {
+        position: absolute;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        font-family: var(--font-mono);
+        color: var(--muted);
+        font-size: 0.7rem;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        z-index: 5;
+      }
+      .brand { top: 1.25rem; left: 1.25rem; border: none; background: none; padding: 0; }
+      .brand-name { font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; color: var(--gold); }
+      .brand-sub  { font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+      /* Tool rail stand-in (left-center) */
+      .tool-rail {
+        left: 1.25rem; top: 50%; transform: translateY(-50%);
+        display: flex; flex-direction: column; gap: 0.15rem;
+        padding: 0.4rem 0.3rem;
+      }
+      .tool-rail .tbtn {
+        width: 2.4rem; height: 2.4rem; border-radius: 6px;
+        border: 1px solid transparent;
+        display: flex; align-items: center; justify-content: center;
+        color: var(--muted); font-size: 0.9rem;
+      }
+      .tool-rail .tbtn.on {
+        color: var(--gold);
+        background: rgba(201,168,76,0.1);
+        border-color: var(--gold-soft);
+      }
+
+      /* Actions cluster stand-in (top-right) */
+      .actions { top: 1.25rem; right: 1.25rem; display: flex; gap: 0.3rem; border: none; background: none; padding: 0; }
+      .actions .abtn {
+        background: var(--panel); border: 1px solid var(--hairline);
+        color: var(--ink); font-family: var(--font-mono); font-size: 0.68rem;
+        padding: 0.3rem 0.7rem; border-radius: 100px;
+      }
+
+      /* Symbol dock stand-in (bottom-center) */
+      .dock {
+        bottom: 1rem; left: 50%; transform: translateX(-50%);
+        display: flex; gap: 0.4rem; padding: 0.5rem 0.7rem;
+      }
+      .dock .ditem {
+        width: 2.6rem; height: 2.6rem; border-radius: 7px;
+        border: 1px solid transparent;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        color: var(--muted); font-size: 0.5rem; gap: 0.15rem;
+      }
+      .dock .ditem b { font-size: 1rem; font-weight: 400; }
+
+      /* Directions are toggled by a class on .stage */
+      .onb { display: none; }
+      .stage[data-dir="A"] .onb-A,
+      .stage[data-dir="B"] .onb-B,
+      .stage[data-dir="C"] .onb-C { display: block; }
+
+      @keyframes onb-rise {
+        from { opacity: 0; transform: translate(-50%, 0.6rem); }
+        to   { opacity: 1; transform: translate(-50%, 0); }
+      }
+      @keyframes onb-fade { from { opacity: 0; } to { opacity: 1; } }
+
+      /* ─── Direction A — Coach card ───────────────────────────────── */
+      .onb-A {
+        position: absolute;
+        left: 50%;
+        bottom: 6.5rem;
+        transform: translateX(-50%);
+        width: min(92vw, 27rem);
+        background: var(--panel);
+        border: 1px solid var(--gold-soft);
+        border-radius: 12px;
+        padding: 0.95rem 1.05rem 0.85rem;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+        z-index: 12;
+        animation: onb-rise 0.35s ease both;
+      }
+      .onb-A-eyebrow {
+        font-family: var(--font-mono);
+        font-size: 0.58rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin-bottom: 0.3rem;
+      }
+      .onb-A-title {
+        font-family: var(--font-display);
+        font-size: 1.05rem;
+        line-height: 1.25;
+        color: var(--ink);
+        margin: 0 0 0.75rem;
+      }
+      .onb-A-actions { display: flex; gap: 0.5rem; }
+      .onb-A-actions button {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.15rem;
+        padding: 0.55rem 0.7rem;
+        border-radius: 8px;
+        cursor: pointer;
+        font-family: var(--font-ui);
+        text-align: left;
+        transition: border-color 0.12s, background 0.12s;
+      }
+      .onb-A-primary {
+        background: rgba(201,168,76,0.13);
+        border: 1px solid var(--gold-soft);
+        color: var(--gold);
+      }
+      .onb-A-primary:hover { background: rgba(201,168,76,0.2); }
+      .onb-A-secondary {
+        background: transparent;
+        border: 1px solid var(--hairline);
+        color: var(--ink);
+      }
+      .onb-A-secondary:hover { border-color: var(--gold-soft); }
+      .onb-A-actions .a-lead { font-size: 0.82rem; font-weight: 700; }
+      .onb-A-actions .a-sub  { font-size: 0.62rem; color: var(--muted); font-family: var(--font-mono); }
+      .onb-A-dismiss {
+        position: absolute;
+        top: 0.55rem;
+        right: 0.6rem;
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 1.05rem;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0.15rem 0.3rem;
+        border-radius: 4px;
+      }
+      .onb-A-dismiss:hover { color: var(--ink); }
+      /* little tail pointing down toward the dock */
+      .onb-A::after {
+        content: "";
+        position: absolute;
+        bottom: -7px;
+        left: 50%;
+        transform: translateX(-50%) rotate(45deg);
+        width: 12px;
+        height: 12px;
+        background: var(--panel);
+        border-right: 1px solid var(--gold-soft);
+        border-bottom: 1px solid var(--gold-soft);
+      }
+
+      /* ─── Direction B — Anchored coach-marks ─────────────────────── */
+      .onb-B { position: static; }
+      .coachmark {
+        position: absolute;
+        z-index: 12;
+        background: var(--panel);
+        border: 1px solid var(--gold-soft);
+        border-radius: 9px;
+        padding: 0.5rem 0.7rem;
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        color: var(--ink);
+        max-width: 12rem;
+        line-height: 1.4;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+        animation: onb-fade 0.4s ease both;
+      }
+      .coachmark b { color: var(--gold); font-weight: 500; }
+      .coachmark .cm-tail {
+        position: absolute;
+        width: 10px; height: 10px;
+        background: var(--panel);
+        transform: rotate(45deg);
+      }
+      /* Mark 1: points to the wall tool on the left rail */
+      .cm-wall { left: 4.6rem; top: calc(50% - 1.6rem); }
+      .cm-wall .cm-tail {
+        left: -6px; top: 1rem;
+        border-left: 1px solid var(--gold-soft);
+        border-bottom: 1px solid var(--gold-soft);
+      }
+      /* Mark 2: points up to the "Templates" affordance (dock / overflow) */
+      .cm-tpl { left: 50%; transform: translateX(-50%); bottom: 5.5rem; text-align: center; }
+      .cm-tpl .cm-tail {
+        left: 50%; margin-left: -5px; bottom: -6px;
+        border-right: 1px solid var(--gold-soft);
+        border-bottom: 1px solid var(--gold-soft);
+      }
+      .cm-tpl .cm-link {
+        display: inline-block;
+        margin-top: 0.35rem;
+        color: var(--gold);
+        border: 1px solid var(--gold-soft);
+        border-radius: 100px;
+        padding: 0.15rem 0.6rem;
+        cursor: pointer;
+      }
+      .cm-tpl .cm-link:hover { background: rgba(201,168,76,0.13); }
+      .onb-B-dismiss {
+        position: absolute;
+        left: 50%; transform: translateX(-50%);
+        bottom: 2.5rem;
+        background: none; border: none;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        cursor: pointer;
+        z-index: 12;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      .onb-B-dismiss:hover { color: var(--ink); }
+
+      /* ─── Direction C — Empty-state hero ─────────────────────────── */
+      .onb-C {
+        position: absolute;
+        left: 50%; top: 50%;
+        transform: translate(-50%, -50%);
+        width: min(92vw, 30rem);
+        text-align: center;
+        z-index: 12;
+        animation: onb-rise 0.4s ease both;
+        pointer-events: none; /* let clicks fall through to the canvas except on buttons */
+      }
+      .onb-C-glyph { color: var(--gold-soft); margin-bottom: 0.6rem; }
+      .onb-C-title {
+        font-family: var(--font-display);
+        font-size: 1.5rem;
+        color: var(--ink);
+        margin: 0 0 0.4rem;
+      }
+      .onb-C-sub {
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--muted);
+        line-height: 1.5;
+        margin: 0 auto 1.15rem;
+        max-width: 22rem;
+      }
+      .onb-C-row {
+        display: flex;
+        gap: 0.6rem;
+        justify-content: center;
+        flex-wrap: wrap;
+        pointer-events: auto;
+      }
+      .onb-C-row button {
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        padding: 0.5rem 1.15rem;
+        border-radius: 100px;
+        cursor: pointer;
+        transition: background 0.12s, border-color 0.12s;
+      }
+      .onb-C-primary {
+        background: rgba(201,168,76,0.13);
+        border: 1px solid var(--gold-soft);
+        color: var(--gold);
+      }
+      .onb-C-primary:hover { background: rgba(201,168,76,0.22); }
+      .onb-C-ghost {
+        background: transparent;
+        border: 1px solid var(--hairline);
+        color: var(--ink);
+      }
+      .onb-C-ghost:hover { border-color: var(--gold-soft); }
+      .onb-C-skip {
+        margin-top: 1rem;
+        font-size: 0.62rem;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        background: none; border: none; cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        pointer-events: auto;
+      }
+      .onb-C-skip:hover { color: var(--ink); }
+
+      @media (max-width: 560px) {
+        .onb-A { bottom: 5.5rem; }
+        .cm-wall { top: auto; bottom: 8rem; left: 3.8rem; }
+        .onb-C-title { font-size: 1.25rem; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .onb-A, .onb-C, .coachmark { animation: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="doc-bar">
+      <h1>Onboarding — first-run hint</h1>
+      <div class="seg" id="dir-seg">
+        <button data-dir="A" class="active">A · Coach card</button>
+        <button data-dir="B">B · Anchored marks</button>
+        <button data-dir="C">C · Empty-state hero</button>
+      </div>
+      <span class="doc-note">Empty first-run only · dismissible · localStorage-gated</span>
+    </div>
+
+    <div class="stage" id="stage" data-dir="A">
+      <!-- Shared editor chrome stand-ins (so hints have real anchors) -->
+      <div class="chrome brand">
+        <div class="brand-name">floorplan</div>
+        <div class="brand-sub">warm blueprint</div>
+      </div>
+
+      <div class="chrome actions">
+        <span class="abtn">Share</span>
+        <span class="abtn">Export</span>
+        <span class="abtn">⋯</span>
+      </div>
+
+      <nav class="chrome tool-rail" aria-label="Drawing tools">
+        <span class="tbtn">▚</span>
+        <span class="tbtn on" title="Draw wall">◺</span>
+        <span class="tbtn">↩</span>
+        <span class="tbtn">✓</span>
+      </nav>
+
+      <nav class="chrome dock" aria-label="Symbol palette">
+        <span class="ditem"><b>▢</b>Door</span>
+        <span class="ditem"><b>▭</b>Window</span>
+        <span class="ditem"><b>◛</b>Sofa</span>
+        <span class="ditem"><b>▦</b>Table</span>
+        <span class="ditem"><b>◯</b>Chair</span>
+      </nav>
+
+      <!-- ─── Direction A — Coach card (floats above dock) ─── -->
+      <div class="onb onb-A" role="dialog" aria-label="Get started">
+        <button class="onb-A-dismiss" aria-label="Dismiss">×</button>
+        <div class="onb-A-eyebrow">New here?</div>
+        <p class="onb-A-title">Sketch a room in two minutes. Pick a starting point:</p>
+        <div class="onb-A-actions">
+          <button class="onb-A-primary">
+            <span class="a-lead">Draw a wall</span>
+            <span class="a-sub">Click to drop points</span>
+          </button>
+          <button class="onb-A-secondary">
+            <span class="a-lead">Start from a template</span>
+            <span class="a-sub">Studio, 1-bed, office…</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ─── Direction B — Anchored coach-marks ─── -->
+      <div class="onb onb-B">
+        <div class="coachmark cm-wall">
+          <span class="cm-tail"></span>
+          <b>Draw a wall</b> — click points on the grid, close the loop to make a room.
+        </div>
+        <div class="coachmark cm-tpl">
+          <span class="cm-tail"></span>
+          In a hurry?
+          <span class="cm-link">Start from a template →</span>
+        </div>
+        <button class="onb-B-dismiss">Got it — hide tips</button>
+      </div>
+
+      <!-- ─── Direction C — Empty-state hero ─── -->
+      <div class="onb onb-C" role="dialog" aria-label="Get started">
+        <div class="onb-C-glyph" aria-hidden="true">
+          <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+            <rect x="9" y="13" width="38" height="30" rx="2" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M9 43 L20 43 L20 30 L34 30 L34 43 L47 43" stroke="currentColor" stroke-width="1.2" opacity="0.6" fill="none"/>
+            <circle cx="34" cy="30" r="2" fill="currentColor"/>
+          </svg>
+        </div>
+        <h2 class="onb-C-title">A blank plan, ready when you are</h2>
+        <p class="onb-C-sub">
+          Draw walls on the grid to shape a room — or drop in a template and tweak it.
+          Everything stays on this device. No signup.
+        </p>
+        <div class="onb-C-row">
+          <button class="onb-C-primary">Draw a wall</button>
+          <button class="onb-C-ghost">Start from a template</button>
+        </div>
+        <button class="onb-C-skip">Skip — I'll explore on my own</button>
+      </div>
+    </div>
+
+    <script>
+      // Mockup-only: direction switcher + dismiss demo (no persistence here).
+      const stage = document.getElementById("stage");
+      document.getElementById("dir-seg").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-dir]");
+        if (!btn) return;
+        stage.dataset.dir = btn.dataset.dir;
+        for (const b of e.currentTarget.children) b.classList.toggle("active", b === btn);
+      });
+      // Any dismiss / skip / action hides the current onboarding to demo "gets out of the way".
+      stage.addEventListener("click", (e) => {
+        if (e.target.closest(".onb-A-dismiss, .onb-A-actions button, .onb-B-dismiss, .cm-link, .onb-C-row button, .onb-C-skip")) {
+          const active = stage.querySelector(".onb-" + stage.dataset.dir);
+          if (active) { active.style.transition = "opacity .3s"; active.style.opacity = "0"; setTimeout(() => (active.style.display = "none"), 300); }
+          setTimeout(() => { if (active) { active.style.display = ""; active.style.opacity = ""; } }, 1200);
+        }
+      });
+    </script>
+  </body>
+</html>
