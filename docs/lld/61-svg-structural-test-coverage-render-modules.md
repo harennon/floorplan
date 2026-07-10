@@ -23,8 +23,16 @@ longer entirely untested.
   remains the separate follow-up named in LLD 38.
 - **No changes to `ci.yml`, `run-tests.mjs`, or the harness engine** (`describe`/`it`/`expect`).
   We only add test suites and, if needed, extend `expect` with additive matchers (see Approach).
-- **No production code changes** to `wallRender.js`, `symbolRender.js`, `exportImg.js`,
-  `view.js`, or `theme.js`. These are tests only.
+- **No production code changes** to `wallRender.js`, `symbolRender.js`, `view.js`, or
+  `theme.js`. These are tests only.
+  **Exception discovered during implementation:** `exportImg.js` contained a latent
+  production bug — `font-family` attributes were built with `JSON.stringify(FONT_FAMILY)`,
+  producing backslash-escaped double-quotes inside double-quoted XML attributes (e.g.
+  `font-family="\"DM Mono\""`) that DOMParser parses as `<parsererror>`. This broke SVG
+  download and PNG export for any plan with dimension or symbol labels. The fix switches
+  to single-quote attribute delimiters so the double-quoted font stack is valid XML. This
+  change was bundled into this PR because the structural tests require parseable SVG output.
+  See _Dependencies_ for the auto-merge implication.
 - **No edit to `.claude/project.json`** `autoMerge.renderPaths`. Removing these three files from
   the render-path gate is a separate human-gated PR; this LLD only makes them *candidates* and
   the PR description must call that out (see Dependencies).
@@ -234,8 +242,9 @@ These are the fixture / assertion pitfalls the implementation must handle:
 - `DOMParser` and SVG `createElementNS` — available in the Chromium test environment.
 
 **Ordering / handoff:**
-- Independent of any other in-flight LLD; this is test-only and touches only `test/tests.html`,
-  which is **outside** `autoMerge.renderPaths`, so this PR is itself auto-merge eligible.
+- Originally test-only. Due to the `exportImg.js` production bugfix bundled in (see Scope
+  exception above), `exportImg.js` is listed in `autoMerge.renderPaths`. **This PR is NOT
+  auto-merge eligible and must go through the human render-path review gate.**
 - **PR description must call out** that once this lands, `src/js/wallRender.js`,
   `src/js/symbolRender.js`, and `src/js/exportImg.js` become candidates for removal from
   `autoMerge.renderPaths` in `.claude/project.json` — to be done in a **separate, human-gated
@@ -301,5 +310,7 @@ New `describe("symbolRender.render")`:
   `window.__testResult.total`.
 - **MCP / other suites unaffected:** no shared-state leakage — each new `it` resets model, view,
   and unit (State Model). Run the suite twice / observe order-independence.
-- **No production file diff:** the PR changes only `test/tests.html` (and this doc). Confirm
-  `wallRender.js`, `symbolRender.js`, `exportImg.js`, `view.js`, `theme.js` are byte-unchanged.
+- **Production diff limited to `exportImg.js`:** `wallRender.js`, `symbolRender.js`, `view.js`,
+  and `theme.js` are byte-unchanged. `exportImg.js` carries only the two-line font-family
+  attribute fix described in the Scope exception — no logic changes, no new exports, no
+  interface changes.

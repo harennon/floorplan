@@ -127,6 +127,9 @@ export function buildExportSvg() {
       const mx = wx((a.x + b.x) / 2);
       const my = wy((a.y + b.y) / 2);
       const labelText = `${fmtLen(len)} ${unitLabel()}`;
+      // Note: font-family uses single-quote attribute delimiters so the double-quoted font
+      // stack is valid XML. Using JSON.stringify() here would produce backslash-escaped quotes
+      // inside double-quoted attributes, which DOMParser rejects as a parsererror.
       body += `<text x="${mx}" y="${my}" font-family='${FONT_FAMILY}' font-size="10" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(labelText)}</text>\n`;
     }
   }
