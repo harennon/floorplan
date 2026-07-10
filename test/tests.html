@@ -9310,6 +9310,29 @@ describe("onboarding.js — dismissal triggers (LLD-60)", () => {
     expect(onboardingIsShown()).toBe(false);
     setOnboardingSeen(false);
   });
+
+  it("empty-cta click triggers dismiss()", () => {
+    const refs = _resetOnboarding({ wallVisible: true, templateVisible: true });
+    onboardingMaybeShow();
+    expect(onboardingIsShown()).toBe(true);
+    refs.emptyCta.click();
+    expect(onboardingIsShown()).toBe(false);
+    setOnboardingSeen(false);
+  });
+
+  it("overflow open-templates path: calling dismiss() before openTemplates dismisses coach-marks (LLD-60 Edge Case 8)", () => {
+    // The overflow menu handler in main.js wraps openTemplates as:
+    //   () => { onboardingDismiss(); openTemplates(); }
+    // This test simulates that wrapper to verify the dismiss() call is sufficient.
+    _resetOnboarding();
+    onboardingMaybeShow();
+    expect(onboardingIsShown()).toBe(true);
+    // Simulate the wrapper: dismiss first, then open templates (noop here)
+    onboardingDismiss();
+    expect(onboardingIsShown()).toBe(false);
+    expect(onboardingSeen()).toBe(true);
+    setOnboardingSeen(false);
+  });
 });
 
 describe("onboarding.js — Esc handling (LLD-60)", () => {
