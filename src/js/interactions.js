@@ -436,6 +436,23 @@ function _onReset() {
   scheduleRender();
 }
 
+// ─── Keyboard zoom wrappers (thin exports for main.js global handler) ─────────
+
+/** Zoom in by the standard step (1.25×), about viewport center. */
+export function zoomInStep() {
+  _stepZoom(1.25);
+}
+
+/** Zoom out by the standard step (÷1.25), about viewport center. */
+export function zoomOutStep() {
+  _stepZoom(1 / 1.25);
+}
+
+/** Reset zoom/pan to the default view (identical to the RESET rail button). */
+export function zoomReset() {
+  _onReset();
+}
+
 // ─── Hint ─────────────────────────────────────────────────────────────────────
 
 function _dismissHint() {

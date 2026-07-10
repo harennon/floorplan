@@ -36,6 +36,12 @@ let _showToastFn   = null;
 let _historyUndo   = null;
 let _historyDepth  = null;
 
+// ── Nudge debounce state ───────────────────────────────────────────────────────
+
+const NUDGE_COMMIT_MS = 400;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let _nudgeTimer = null;
+
 /**
  * Inject history / toast functions from main.js.
  * @param {{ commit:()=>void, undo:()=>boolean, depth:()=>number }} history
@@ -322,6 +328,7 @@ export function getPlacementGhost() {
  * Clears symbol selection and hides inspector (Edge Case 12).
  */
 export function onDrawModeEnter() {
+  flushNudge();
   _clearSelection();
   scheduleRender();
 }
@@ -670,12 +677,7 @@ function _updateDockActive(type) {
 // ── Inspector actions ──────────────────────────────────────────────────────────
 
 function _onRotate90() {
-  if (!_selectedId) return;
-  const sym = getSymbol(_selectedId);
-  if (!sym) return;
-  rotateSymbol(sym, sym.rot + 90);
-  if (_historyCommit) _historyCommit();
-  scheduleRender();
+  rotateSelected(90);
 }
 
 function _onDuplicate() {
@@ -721,6 +723,7 @@ export function hasSelection() {
  */
 export function deleteSelected() {
   if (!_selectedId) return;
+  flushNudge();
   if (isDimEditing()) cancelDimEdit();
   removeSymbol(_selectedId);
   _clearSelection();
@@ -748,12 +751,68 @@ export function deleteSelected() {
  */
 export function duplicateSelected() {
   if (!_selectedId) return;
+  flushNudge();
   const dup = duplicateSymbol(_selectedId);
   if (dup) {
     selectSymbol(dup.id);
     if (_historyCommit) _historyCommit();
     if (_showToastFn) _showToastFn("Duplicated");
   }
+  scheduleRender();
+}
+
+// ── Nudge / rotate / flush — keyboard action exports ──────────────────────────
+
+/**
+ * If a nudge commit is pending, cancel the timer and commit now.
+ * Safe to call when nothing is pending (no-op).
+ * Called before any committing gesture so undo-stack ordering stays correct.
+ */
+export function flushNudge() {
+  if (_nudgeTimer !== null) {
+    clearTimeout(_nudgeTimer);
+    _nudgeTimer = null;
+    if (_historyCommit) _historyCommit();
+  }
+}
+
+/**
+ * Move the selected symbol by (dx, dy) world metres.
+ * No-op if nothing selected or symbol missing.
+ * Applies the delta literally (no snap resolve), repositions inspector, renders.
+ * Schedules a debounced history commit (NUDGE_COMMIT_MS) so a burst of nudges
+ * collapses into a single undo step.
+ * @param {number} dx
+ * @param {number} dy
+ */
+export function nudgeSelected(dx, dy) {
+  if (!_selectedId) return;
+  const sym = getSymbol(_selectedId);
+  if (!sym) return;
+  moveSymbol(sym, sym.x + dx, sym.y + dy);
+  scheduleRender();
+  // Debounce: reset timer on every nudge; commit fires once after quiet window
+  clearTimeout(_nudgeTimer);
+  _nudgeTimer = setTimeout(() => {
+    _nudgeTimer = null;
+    if (_historyCommit) _historyCommit();
+  }, NUDGE_COMMIT_MS);
+}
+
+/**
+ * Rotate the selected symbol by deg (signed).
+ * No-op if nothing selected.
+ * Flushes any pending nudge first so undo steps are correctly ordered.
+ * Commits immediately (discrete gesture, like the inspector button).
+ * @param {number} deg
+ */
+export function rotateSelected(deg) {
+  if (!_selectedId) return;
+  flushNudge();
+  const sym = getSymbol(_selectedId);
+  if (!sym) return;
+  rotateSymbol(sym, sym.rot + deg);
+  if (_historyCommit) _historyCommit();
   scheduleRender();
 }
 
