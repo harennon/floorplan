@@ -256,7 +256,11 @@ function _positionDismissBtn() {
   const btnW = btnRect.width  || 160;
   const btnH = btnRect.height || 36;
 
-  // Collect the bottom edge of each visible tip
+  // Collect the bottom edge of each visible tip AND its anchor.
+  // The template tip is positioned above #empty-cta, so its bottom is above the
+  // CTA. Without including the anchor we'd land inside the gap between the tip
+  // and the CTA (dismiss button would visually appear between them and the arrow
+  // would appear to point at the dismiss button rather than the CTA).
   let lowestBottom = 0;
   if (_wallTip && !_wallTip.hidden) {
     const r = _wallTip.getBoundingClientRect();
@@ -265,6 +269,12 @@ function _positionDismissBtn() {
   if (_templateTip && !_templateTip.hidden) {
     const r = _templateTip.getBoundingClientRect();
     if (r.bottom > lowestBottom) lowestBottom = r.bottom;
+    // Also clear the anchor so the dismiss button sits below the CTA, not inside
+    // the gap between the tip arrow and the CTA it points at.
+    if (_emptyCta) {
+      const ar = _emptyCta.getBoundingClientRect();
+      if (ar.bottom > lowestBottom) lowestBottom = ar.bottom;
+    }
   }
 
   let top;
