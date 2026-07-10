@@ -19,8 +19,11 @@ In scope:
 2. A sun/moon toggle pill in the top-right chrome cluster (near Share / unit toggle).
 3. **Unifying the split palette** so there is one source of truth: chrome already uses
    CSS custom properties in `:root`; the SVG render layer (`wallRender.js`,
-   `symbolRender.js`) and `exportImg.js` currently use **hardcoded hex constants** and
-   must be switched to read the active theme's tokens.
+   `symbolRender.js`), the interaction/affordance layer (`wallTool.js`, `symbolTool.js`
+   — snap-type and alignment/flush colors), and `exportImg.js` currently use **hardcoded
+   hex constants** and must be switched to read the active theme's tokens. This includes
+   the already-declared-but-never-consumed `--align-edge` / `--align-center` /
+   `--room-center` CSS vars (see Approach → "In-scope hardcoded modules").
 4. Theme-aware export: `exportImg.js` background / wall / room / symbol colors switch
    with the active theme (light export → light ground). This is an acceptance criterion.
 
@@ -62,6 +65,44 @@ Decision (recommended): **CSS-as-source + a thin `theme.js` cache.**
   vars once opened outside the app).
 - The grid (`grid.js`) already renders via CSS classes (`.grid-fine/major/axis`) that
   reference vars, so it re-themes automatically with no JS change.
+
+### In-scope hardcoded modules (full inventory — no drift left behind)
+
+The single-source goal requires re-routing **every** hardcoded palette hex that paints
+on the themed surface, not only the render/export layers. Full inventory of files whose
+constants become theme-token reads:
+
+| File | Hardcoded constants (current) | Drives | Retheme via |
+| --- | --- | --- | --- |
+| `wallRender.js` | wall body/line/room-fill/draft gold hexes + alpha ladder | SVG walls, rooms, draft line | `theme.palette()` |
+| `symbolRender.js` | symbol fill/stroke/select/ghost/snap-teal hexes | SVG symbols, door arcs, ghosts | `theme.palette()` |
+| `exportImg.js` | `BG/WALL/ROOM/SYM/DIM` hexes | standalone export SVG | `theme.palette()` |
+| `wallTool.js` (L315-320) | `SNAP_COLORS` grid `#7fd0c8` / point `#e0b64f` / close `#9cd67a` / free `#8f8a78` | HUD snap-label color (`_updateHudSnap`) **and** cursor snap-tag (`_positionSnapTag`) | `theme.palette()` snap tokens |
+| `symbolTool.js` (L843-848) | `_SNAP_TAG_COLORS` flush `#9cd67a` / align `#b98bd9` / grid `#7fd0c8` / free `#8f8a78` | symbol-mode cursor snap-tag text | `theme.palette()` snap tokens |
+| `symbolTool.js` (L910-913) | `_COLOR_FLUSH #9cd67a` / `_COLOR_EDGE #b98bd9` / `_COLOR_CENTER #7fd0c8` / `_COLOR_ROOM #e08fbf` | alignment + wall-flush guide line strokes **and** their label chips | `theme.palette()` align tokens |
+
+**Why these must be in scope:** `wallTool.js` and `symbolTool.js` hardcode the *same*
+snap/alignment palette that `wallRender.js`/`symbolRender.js` are being re-themed to. If
+left out, in light mode the canvas snap glyphs and alignment guides would deepen to the
+cream-friendly values (e.g. snap-teal `#2f8f86`) while the matching cursor snap-tag, HUD
+snap label, and guide chips stay at the old bright dark-theme hex — visible drift and
+low-contrast/illegible affordances on cream, directly contradicting this LLD's goal.
+
+**Already-declared vars to activate.** `index.html` `:root` (L342-345) already declares
+`--align-edge #b98bd9`, `--align-center #7fd0c8`, `--room-center #e08fbf`, but
+`symbolTool.js`'s `_COLOR_EDGE/_COLOR_CENTER/_COLOR_ROOM` re-hardcode those identical
+values instead of reading the vars, and the vars have no light override. Resolution:
+add light overrides for all three (see palette table) and have `symbolTool.js` read them
+through `theme.palette()` (surfaced as `alignEdge` / `alignCenter` / `roomCenter`), so the
+vars finally become the single source. The `.align-guide-label` chip text
+(`fill: #14140f`, L359) sits on a colored chip and stays legible in both themes (same
+rationale as length-chips, Edge Case 9) — left as-is, documented.
+
+**Mapping of tool colors to palette tokens.** The snap tokens already planned for the
+render layer double as the tool tokens (grid↔`snapGrid`/`snapTeal`, point↔`snapPoint`,
+close/flush↔`snapClose`, free↔`muted`). `symbolTool.js`'s `align` snap-tag maps to
+`alignEdge`, its center/room variants to `alignCenter`/`roomCenter`. No new render tokens
+beyond `alignEdge`/`alignCenter`/`roomCenter` are introduced.
 
 **Alpha ladder via base RGB.** The render layers use many translucent gold fills at
 varying alpha (`rgba(201,168,76,0.07 … 0.30)`). Rather than inventing a dozen tokens,
@@ -115,6 +156,7 @@ export function toggleTheme(): "light" | "dark"           // returns new value
  *   snapGrid: string, snapPoint: string, snapClose: string,
  *   symFill: string, symStroke: string, symSelFill: string,
  *   ghostFill: string, ghostStroke: string, snapTeal: string,
+ *   alignEdge: string, alignCenter: string, roomCenter: string, // guide strokes/chips + snap-tags
  *   dim: string,                 // dimension-label color (export)
  *   accentRgb: string,           // e.g. "201,168,76"  (compose rgba alphas)
  *   symInkRgb: string            // base rgb for symbol interior fills
@@ -136,15 +178,31 @@ export function onThemeChange(cb: (t) => void): void
 - `setTheme`/`toggleTheme` → update `<html data-theme>`, `_refreshCache()`, fire
   `onThemeChange` listeners.
 
-### Render modules (`wallRender.js`, `symbolRender.js`)
+### Render + tool modules (`wallRender.js`, `symbolRender.js`, `wallTool.js`, `symbolTool.js`)
 
-Replace top-of-file hardcoded color consts with per-render reads:
+Replace top-of-file hardcoded color consts with per-use reads:
 ```js
 import { palette } from "./theme.js";
 // inside render(): const p = palette();
 // use p.wallLine, `rgba(${p.accentRgb},0.30)`, etc.
 ```
-No signature changes; the render loop already re-runs on `scheduleRender()`.
+- `wallRender.js` / `symbolRender.js`: no signature changes; the render loop already
+  re-runs on `scheduleRender()`.
+- `wallTool.js`: `SNAP_COLORS` object → resolve from `palette()` inside `_updateHudSnap`
+  and `_positionSnapTag` (map grid→`snapGrid`, point→`snapPoint`, close→`snapClose`,
+  free→`muted`). Because these read at call time (each cursor move / HUD update), they
+  pick up the current theme with no explicit `onThemeChange` subscription; a live snap
+  glyph re-colors on the next pointer event after toggle, which is acceptable (no glyph
+  is shown at rest). If a stale color while hovering during a toggle is undesirable, the
+  toggle handler already triggers `scheduleRender()` — extend it to also refresh the HUD
+  snap label.
+- `symbolTool.js`: `_SNAP_TAG_COLORS` and `_COLOR_FLUSH/_EDGE/_CENTER/_ROOM` → resolve
+  from `palette()` (snap-tag: flush→`snapClose`, align→`alignEdge`, grid→`snapGrid`,
+  free→`muted`; guides: flush→`snapClose`, edge→`alignEdge`, center→`alignCenter`,
+  room→`roomCenter`) at the point each guide/tag is built (`_updateGuides`,
+  `_updateSnapTag`). Guides are rebuilt every placement frame, so they re-theme on the
+  next pointer event; a full-repaint on toggle is not required for these transient
+  overlays.
 
 ### `exportImg.js`
 
@@ -156,9 +214,12 @@ and geometry constants (`EXPORT_PX_PER_M`, `MARGIN_M`, `EXPORT_2X`) are unchange
 
 - Existing `:root { … }` = dark values (unchanged), plus **new** render tokens that were
   previously JS-only: `--wall-line-hi`, `--sym-fill`, `--sym-stroke`, `--sym-sel-fill`,
-  `--ghost-fill`, `--ghost-stroke`, `--snap-teal`, `--dim`, `--accent-rgb`,
-  `--sym-ink-rgb`.
-- New `html[data-theme="light"] { … }` override block with the P1 Paper values.
+  `--ghost-fill`, `--ghost-stroke`, `--snap-teal`, `--snap-grid`, `--snap-point`,
+  `--snap-close`, `--dim`, `--accent-rgb`, `--sym-ink-rgb`.
+- `--align-edge` / `--align-center` / `--room-center` already exist in `:root` (L342-345,
+  dark values) — reused, not redeclared, and now given light overrides.
+- New `html[data-theme="light"] { … }` override block with the P1 Paper values, including
+  light values for **all** of the above (snap, align/room-center, render, and chrome tokens).
 - New `.theme-toggle` button markup in the top-right cluster (see State/CX below).
 
 ## Frontend Design
@@ -193,6 +254,9 @@ Candidate light palette (`html[data-theme="light"]`):
 | `--snap-grid` / `--snap-teal` | `#7fd0c8` | `#2f8f86` |
 | `--snap-point` | `#e0b64f` | `#b07d1e` |
 | `--snap-close` | `#9cd67a` | `#3f8a2f` |
+| `--align-edge` (violet) | `#b98bd9` | `#7a4fb0` (deepened for cream contrast) |
+| `--align-center` (teal) | `#7fd0c8` | `#2f8f86` |
+| `--room-center` (rose) | `#e08fbf` | `#b64e8a` (deepened for cream contrast) |
 | `--dim` | `#8f8a78` | `#8a7c60` |
 
 Design notes:
@@ -248,9 +312,20 @@ update via existing `onPrefsChange`.
    symbol type labels remain readable — `--dim`/`p.dim`).
 8. **Grain overlay on cream** may read as dirty; if so, add
    `html[data-theme="light"] .grain { opacity: .02 }` (or 0). Decide against the mockup.
-9. **Length-chip / align-guide labels** hardcode a dark text color (`#14140f`) on a gold
-   chip background — the chip is gold in both themes, so dark text stays legible; leave
-   as-is (documented, not changed).
+9. **Length-chip / align-guide labels & the placed-chip surface.**
+   - `.length-chip--live` (L410) and `.align-guide-label` (L359) hardcode dark text
+     (`#14140f`) on a colored chip (gold / align-color) — the chip color is present in
+     both themes, so dark text stays legible; leave as-is (documented, not changed).
+   - `.length-chip--placed` (L414-417) uses a hardcoded **dark** panel background
+     `rgba(20,20,15,0.62)` with `var(--muted)` text and `var(--hairline)` border. The
+     text/border re-theme (they read vars) but the background does **not** — in light mode
+     this is a dark chip with sepia-muted text floating on cream. It stays legible but is
+     visually off-theme. **Decision: re-tokenise the background** to `var(--panel)` (which
+     already flips to translucent cream in light — see palette table), keeping the same
+     translucent-panel look on both grounds. Cheap, on-theme, and removes the last
+     un-tokenised surface the integration test asserts renders correctly in both themes.
+     (The unrelated `rgba(20,20,15,0.92)` at L1389 is a separate chrome surface outside
+     this LLD's editor-canvas scope — noted, not changed.)
 10. **Reduced-motion / no-transition** paths unchanged; theme switch is instantaneous
     (no crossfade required). A CSS `transition` on `--bg` is optional and must respect
     `prefers-reduced-motion`.
@@ -261,14 +336,20 @@ update via existing `onPrefsChange`.
 
 - `prefs.js` (LLD 26) — extended for the `theme` field. Must land first / same change.
 - `surface.js` render loop + `onRender`/`scheduleRender` — used to repaint on toggle.
-- `wallRender.js`, `symbolRender.js`, `exportImg.js` — the hardcoded-palette modules being
-  unified (this is the bulk of the work).
+- `wallRender.js`, `symbolRender.js`, `exportImg.js` — the hardcoded-palette render/export
+  modules being unified (this is the bulk of the work).
+- `wallTool.js`, `symbolTool.js` — the hardcoded snap/alignment palette in the interaction
+  layer, also unified (see Approach → "In-scope hardcoded modules"). Both import
+  `theme.js` and resolve colors at draw time.
 - `grid.js` — no code change (already CSS-var driven); relied upon for auto-theming grid.
 - `index.html` — CSS token additions + `html[data-theme="light"]` block + toggle markup.
 - `main.js` — wire `theme.init()` early and the toggle button’s click handler.
-- Reference mockup `design-mockups/light-mode-editor.html` (frontend-architect) —
-  authoritative for exact light hex values and toggle visual; must exist before final
-  palette values are locked.
+- **Reference mockup `design-mockups/light-mode-editor.html` (frontend-architect) —
+  authoritative for exact light hex values and the toggle visual. This is a HARD BLOCKER:
+  it does not yet exist in the repo. The palette table above (including the new
+  snap/align/room-center light values) is a candidate that MUST be reconciled against the
+  mockup before merge. Implementation must not begin locking palette values until
+  frontend-architect delivers this mockup.**
 - No new runtime deps; no build step (consistent with project principles).
 
 ## Test Requirements
@@ -279,14 +360,23 @@ Unit:
   `"light"`; `matchMedia` absent → `"light"`.
 - `setTheme`/`toggleTheme` persist to localStorage and fire `onPrefsChange`; theme value
   never appears in `serializePlan()` output or the share hash payload.
-- `theme.palette()` returns non-empty concrete strings for every token in both themes;
+- `theme.palette()` returns non-empty concrete strings for every token in both themes —
+  including `snapGrid/snapPoint/snapClose/snapTeal` and `alignEdge/alignCenter/roomCenter`;
   each token has a working fallback when its CSS var resolves to `""`.
+- The snap-color / alignment-color maps in `wallTool.js` and `symbolTool.js` resolve from
+  `palette()` (not their old hardcoded hex), and the same snap type yields matching colors
+  across HUD label, cursor snap-tag, canvas snap glyph, and alignment guide in a given
+  theme (no drift).
 
 Integration (DOM / render):
 - Toggling theme sets `document.documentElement[data-theme]` and triggers exactly one
-  re-render; walls, symbols, door swing arcs, snap glyphs, vertex dots, length chips,
-  dim chips, measure panel, clearance panel, and HUD all render in both themes without
-  missing/invisible strokes.
+  re-render; walls, symbols, door swing arcs, snap glyphs, vertex dots, length chips
+  (both `--live` and `--placed`), dim chips, alignment/flush guide lines + chips, cursor
+  snap-tags, HUD snap label, measure panel, clearance panel, and HUD all render in both
+  themes without missing/invisible strokes and with no color drift between an affordance's
+  render-layer glyph and its tool-layer tag/label/guide.
+- `.length-chip--placed` background reads as a translucent panel matching the active
+  theme (cream-tinted in light, not the old fixed dark), and its text/border stay legible.
 - Boot with no persisted theme + mocked OS light → app loads in light; with OS dark →
   dark. Persisted value overrides OS on reload.
 - Export parity: `buildExportSvg()` background `<rect>` fill equals the themed `bg`
