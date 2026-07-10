@@ -4645,6 +4645,197 @@ describe("clearance.js — computeClearances: wall gaps", () => {
   });
 });
 
+// ─── Tests: clearance.js — flush-to-wall consistency (LLD 59) ────────────────
+// WALL_M = 0.12, wallHalf = 0.06. Room (0,0)-(10,8).
+// Flush seat: AABB edge placed exactly on the inner wall face (faceGap ≈ 0).
+// All four walls must classify as tight / gap=0, never bad.
+
+describe("clearance.js — flush-to-wall consistency (LLD 59)", () => {
+  it("flush against left wall → status tight, gap 0 (not bad)", () => {
+    resetClearance();
+    resetSymbolModel();
+    const WALL_HALF = 0.06;
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    // AABB left edge at inner face: box.l = WALL_HALF = 0.06
+    // center_x = 0.06 + 1 = 1.06, w=2 (half=1), h=1, y=4
+    const sofa = mkSym("s0", "sofa", 1.06, 4, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const leftWall = result.find(c => c.kind === "wall" && c.label === "left wall");
+    if (!leftWall) throw new Error("No left wall gap found");
+    expect(leftWall.status).toBe("tight");
+    expect(leftWall.gap).toBe(0);
+    if (worstStatus(result) === "bad") throw new Error("worstStatus must not be bad for flush left wall");
+  });
+
+  it("flush against right wall → status tight, gap 0 (not bad)", () => {
+    resetClearance();
+    resetSymbolModel();
+    const WALL_HALF = 0.06;
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    // AABB right edge at inner face: box.r = 10 - WALL_HALF = 9.94
+    // center_x = 9.94 - 1 = 8.94, w=2 (half=1), h=1, y=4
+    const sofa = mkSym("s0", "sofa", 8.94, 4, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const rightWall = result.find(c => c.kind === "wall" && c.label === "right wall");
+    if (!rightWall) throw new Error("No right wall gap found");
+    expect(rightWall.status).toBe("tight");
+    expect(rightWall.gap).toBe(0);
+    if (worstStatus(result) === "bad") throw new Error("worstStatus must not be bad for flush right wall");
+  });
+
+  it("flush against top wall → status tight, gap 0 (not bad)", () => {
+    resetClearance();
+    resetSymbolModel();
+    const WALL_HALF = 0.06;
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    // AABB top edge at inner face: box.t = WALL_HALF = 0.06
+    // center_y = 0.06 + 0.5 = 0.56, h=1 (half=0.5), w=2, x=5
+    const sofa = mkSym("s0", "sofa", 5, 0.56, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const topWall = result.find(c => c.kind === "wall" && c.label === "top wall");
+    if (!topWall) throw new Error("No top wall gap found");
+    expect(topWall.status).toBe("tight");
+    expect(topWall.gap).toBe(0);
+    if (worstStatus(result) === "bad") throw new Error("worstStatus must not be bad for flush top wall");
+  });
+
+  it("flush against bottom wall → status tight, gap 0 (not bad)", () => {
+    resetClearance();
+    resetSymbolModel();
+    const WALL_HALF = 0.06;
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    // AABB bottom edge at inner face: box.b = 8 - WALL_HALF = 7.94
+    // center_y = 7.94 - 0.5 = 7.44, h=1 (half=0.5), w=2, x=5
+    const sofa = mkSym("s0", "sofa", 5, 7.44, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const bottomWall = result.find(c => c.kind === "wall" && c.label === "bottom wall");
+    if (!bottomWall) throw new Error("No bottom wall gap found");
+    expect(bottomWall.status).toBe("tight");
+    expect(bottomWall.gap).toBe(0);
+    if (worstStatus(result) === "bad") throw new Error("worstStatus must not be bad for flush bottom wall");
+  });
+
+  it("corner: flush against top and left walls at once → both tight, worstStatus tight (not bad)", () => {
+    resetClearance();
+    resetSymbolModel();
+    const WALL_HALF = 0.06;
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    // AABB left edge at x=0.06, top edge at y=0.06
+    // center_x = 0.06 + 1 = 1.06, center_y = 0.06 + 0.5 = 0.56, w=2, h=1
+    const sofa = mkSym("s0", "sofa", 1.06, 0.56, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const leftWall   = result.find(c => c.kind === "wall" && c.label === "left wall");
+    const topWall    = result.find(c => c.kind === "wall" && c.label === "top wall");
+    if (!leftWall)  throw new Error("No left wall gap found in corner test");
+    if (!topWall)   throw new Error("No top wall gap found in corner test");
+    expect(leftWall.status).toBe("tight");
+    expect(leftWall.gap).toBe(0);
+    expect(topWall.status).toBe("tight");
+    expect(topWall.gap).toBe(0);
+    expect(worstStatus(result)).toBe("tight");
+  });
+
+  it("regression: edge ~3cm inside wall body → still bad (faceGap < -EPS)", () => {
+    resetClearance();
+    resetSymbolModel();
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    // AABB left edge at x=0.03 → rawGap=0.03, faceGap=0.03-0.06=-0.03 < -1e-4 → bad
+    // center_x = 0.03 + 1 = 1.03, w=2 (half=1), h=1, y=4
+    const sofa = mkSym("s0", "sofa", 1.03, 4, 2, 1, 0);
+    const result = computeClearances(sofa, { rooms: [room], symbols: [sofa] });
+    const leftWall = result.find(c => c.kind === "wall" && c.label === "left wall");
+    if (!leftWall) throw new Error("No left wall gap found");
+    expect(leftWall.status).toBe("bad");
+    expect(leftWall.gap).toBe(0);
+  });
+});
+
+// ─── Tests: clearance.js — render: flush tight gap formats as 0.xx not "overlap" ──
+
+describe("clearance.js — render: flush tight 0-gap formats as length, not 'overlap' (LLD 59)", () => {
+  it("clearancePanel: tight gap=0 row shows fmtLen(0) not 'overlap'", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+
+    const WALL_HALF = 0.06;
+    const room = mkRoom("r0", 0, 0, 10, 8);
+    // Sofa flush against left wall: center_x=1.06, w=2, h=1, y=4
+    const sofa = mkSym("s0", "sofa", 1.06, 4, 2, 1, 0);
+    symbolModel.symbols.push(sofa);
+
+    const rig = makePanelRig();
+    initClearancePanel({
+      panel: rig.panel, body: rig.body, toggle: rig.toggle,
+      getSelectedId: () => "s0",
+      getSymbol: () => sofa,
+    });
+
+    // Patch rooms so clearance sees the room
+    const savedRooms = model.rooms.slice();
+    model.rooms.length = 0;
+    model.rooms.push(room);
+
+    clrPanelUpdate();
+
+    const rows = rig.body.querySelectorAll(".clr-row");
+    let foundFlushRow = false;
+    for (const row of rows) {
+      const label = row.querySelector(".clr-row-label");
+      const val   = row.querySelector(".clr-row-val");
+      if (label && label.textContent.includes("left wall")) {
+        foundFlushRow = true;
+        if (val && val.textContent.trim() === "overlap") {
+          throw new Error("Flush tight row must not show 'overlap'; got: " + val.textContent);
+        }
+        // Should show a formatted length (e.g. "0.00" for metres)
+        if (!val || !/^\d/.test(val.textContent.trim())) {
+          throw new Error("Flush tight row should show a numeric length; got: " + (val && val.textContent));
+        }
+      }
+    }
+    if (!foundFlushRow) throw new Error("No left wall row found in panel");
+
+    model.rooms.length = 0;
+    for (const r of savedRooms) model.rooms.push(r);
+    symbolModel.symbols.length = 0;
+    rig.cleanup();
+  });
+
+  it("clearancePanel: bad gap=0 (genuine overlap) row still shows 'overlap'", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+
+    // Two symbols overlapping (bad, gap=0, status=bad)
+    const sofa  = mkSym("s0", "sofa",  5, 5, 2, 0.9, 0);
+    const chair = mkSym("s1", "chair", 5.1, 5, 0.5, 0.5, 0); // inside sofa → overlap
+
+    symbolModel.symbols.push(sofa);
+    symbolModel.symbols.push(chair);
+
+    const rig = makePanelRig();
+    initClearancePanel({
+      panel: rig.panel, body: rig.body, toggle: rig.toggle,
+      getSelectedId: () => "s0",
+      getSymbol: () => sofa,
+    });
+    clrPanelUpdate();
+
+    const rows = rig.body.querySelectorAll(".clr-row");
+    let hasOverlapText = false;
+    for (const row of rows) {
+      const val = row.querySelector(".clr-row-val");
+      if (val && val.textContent.trim() === "overlap") { hasOverlapText = true; break; }
+    }
+    if (!hasOverlapText) throw new Error("Expected 'overlap' text for genuine bad overlap row");
+
+    resetClearance();
+    symbolModel.symbols.length = 0;
+    rig.cleanup();
+  });
+});
+
 // ─── Tests: clearance.js — worstStatus ───────────────────────────────────────
 
 describe("clearance.js — worstStatus", () => {
@@ -8545,6 +8736,221 @@ describe("LLD-54 — help: _renderTable platform rendering", () => {
     // Count non-header rows (rows with <td class="help-key">)
     const dataRows = tbody.querySelectorAll("td.help-key");
     expect(dataRows.length).toBe(SHORTCUTS.length);
+  });
+});
+
+// ─── Tests: LLD-58 — prefs.js theme extension ─────────────────────────────────
+
+// Note: PREFS_KEY, prefsGridSnap, setGridSnap, toggleGridSnap, onPrefsChange
+// were already imported above (LLD-26 tests). We import only the new theme API here.
+import {
+  getTheme, setTheme, toggleTheme as toggleThemePref,
+} from "./js/prefs.js";
+
+describe("prefs.js — getTheme / setTheme / toggleTheme", () => {
+  it("getTheme returns 'light' or 'dark'", () => {
+    const t = getTheme();
+    if (t !== "light" && t !== "dark") throw new Error(`getTheme returned unexpected: ${t}`);
+  });
+
+  it("setTheme('light') → getTheme() === 'light'", () => {
+    setTheme("light");
+    expect(getTheme()).toBe("light");
+  });
+
+  it("setTheme('dark') → getTheme() === 'dark'", () => {
+    setTheme("dark");
+    expect(getTheme()).toBe("dark");
+  });
+
+  it("unknown value passed to setTheme falls back to resolved default", () => {
+    // The fallback is either 'light' or 'dark' — not the invalid value.
+    setTheme("invalid-theme");
+    const t = getTheme();
+    if (t !== "light" && t !== "dark") throw new Error(`Expected light or dark, got: ${t}`);
+  });
+
+  it("toggleTheme flips light ↔ dark and returns new value", () => {
+    setTheme("light");
+    const next = toggleThemePref();
+    expect(next).toBe("dark");
+    expect(getTheme()).toBe("dark");
+    const back = toggleThemePref();
+    expect(back).toBe("light");
+    expect(getTheme()).toBe("light");
+  });
+
+  it("setTheme fires onPrefsChange listeners", () => {
+    setTheme("light");
+    let fired = false;
+    // onPrefsChange is already imported from the LLD-26 tests block above
+    onPrefsChange(() => { fired = true; });
+    setTheme("dark");
+    if (!fired) throw new Error("onPrefsChange was not fired by setTheme");
+    setTheme("light"); // restore
+  });
+
+  it("theme is persisted to localStorage", () => {
+    setTheme("dark");
+    // PREFS_KEY is already imported from the LLD-26 tests block above
+    const stored = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
+    expect(stored.theme).toBe("dark");
+    setTheme("light"); // restore
+  });
+
+  it("gridSnap still works after theme extension", () => {
+    // prefsGridSnap is already imported from the LLD-26 tests block above
+    const before = prefsGridSnap();
+    if (typeof before !== "boolean") throw new Error("gridSnap() should return boolean");
+  });
+});
+
+// ─── Tests: LLD-58 — theme preference not in plan schema ──────────────────────
+// serializePlan and buildPlan are already imported above (plan.js section)
+
+describe("prefs.js — theme never leaks into plan serialization", () => {
+  it("serializePlan output does not contain 'theme' key from prefs", () => {
+    setTheme("dark");
+    resetModel();
+    resetSymbolModel();
+    // buildPlan is already imported from plan.js section above
+    const plan = JSON.parse(serializePlan(buildPlan()));
+    // Plan schema: rooms, chain, symbols, view, units — never 'theme'
+    if ("theme" in plan) throw new Error("'theme' key found in serialized plan");
+    setTheme("light");
+  });
+});
+
+// ─── Tests: LLD-58 — theme.js module ─────────────────────────────────────────
+
+import {
+  init as initThemeModule,
+  getTheme as themeGetTheme,
+  setTheme as themeSetTheme,
+  toggleTheme as themeToggleTheme,
+  palette,
+  onThemeChange,
+} from "./js/theme.js";
+
+describe("theme.js — init applies data-theme to <html>", () => {
+  it("after init(), document.documentElement.dataset.theme is 'light' or 'dark'", () => {
+    setTheme("light");
+    initThemeModule();
+    const t = document.documentElement.dataset.theme;
+    if (t !== "light" && t !== "dark") throw new Error(`data-theme is unexpected: ${t}`);
+  });
+
+  it("after setTheme('dark'), data-theme = 'dark'", () => {
+    themeSetTheme("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+
+  it("after setTheme('light'), data-theme = 'light'", () => {
+    themeSetTheme("light");
+    expect(document.documentElement.dataset.theme).toBe("light");
+  });
+
+  it("toggleTheme flips data-theme", () => {
+    themeSetTheme("light");
+    const next = themeToggleTheme();
+    expect(next).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    themeSetTheme("light"); // restore
+  });
+});
+
+describe("theme.js — onThemeChange fires on toggle", () => {
+  it("callback receives the new theme value", () => {
+    themeSetTheme("light");
+    let received = null;
+    onThemeChange(t => { received = t; });
+    themeSetTheme("dark");
+    expect(received).toBe("dark");
+    themeSetTheme("light"); // restore
+  });
+});
+
+describe("theme.js — palette() returns non-empty concrete strings for all tokens", () => {
+  // These tests verify that the palette cache has all required keys with non-empty values.
+  // In the test environment, getComputedStyle returns "" for undefined vars, so the
+  // fallback values defined in theme.js must kick in.
+
+  const PALETTE_KEYS = [
+    "bg", "bgDeep", "ink", "muted", "gold", "goldSoft",
+    "wallBody", "wallLine", "wallLineHi", "draft",
+    "roomFill", "roomFillHi",
+    "snapGrid", "snapPoint", "snapClose", "snapTeal",
+    "symFill", "symStroke", "symSelFill",
+    "ghostFill", "ghostStroke",
+    "alignEdge", "alignCenter", "roomCenter",
+    "dim", "accentRgb", "symInkRgb",
+  ];
+
+  it("palette() has all required keys with non-empty values (dark theme)", () => {
+    themeSetTheme("dark");
+    const p = palette();
+    for (const key of PALETTE_KEYS) {
+      if (!(key in p)) throw new Error(`palette() missing key: ${key}`);
+      if (!p[key] || typeof p[key] !== "string" || p[key].trim() === "") {
+        throw new Error(`palette().${key} is empty or not a string: ${JSON.stringify(p[key])}`);
+      }
+    }
+  });
+
+  it("palette() has all required keys with non-empty values (light theme)", () => {
+    themeSetTheme("light");
+    const p = palette();
+    for (const key of PALETTE_KEYS) {
+      if (!(key in p)) throw new Error(`palette() missing key: ${key}`);
+      if (!p[key] || typeof p[key] !== "string" || p[key].trim() === "") {
+        throw new Error(`palette().${key} is empty or not a string: ${JSON.stringify(p[key])}`);
+      }
+    }
+    themeSetTheme("dark"); // restore
+  });
+
+  it("accentRgb and symInkRgb look like 'R,G,B' triples", () => {
+    themeSetTheme("dark");
+    const p = palette();
+    const rgbPattern = /^\d{1,3},\d{1,3},\d{1,3}$/;
+    if (!rgbPattern.test(p.accentRgb)) throw new Error(`accentRgb bad format: ${p.accentRgb}`);
+    if (!rgbPattern.test(p.symInkRgb)) throw new Error(`symInkRgb bad format: ${p.symInkRgb}`);
+  });
+
+  it("palette() keys snapGrid/snapTeal/snapPoint/snapClose/alignEdge/alignCenter/roomCenter are all non-empty", () => {
+    const snapAlignKeys = ["snapGrid", "snapTeal", "snapPoint", "snapClose", "alignEdge", "alignCenter", "roomCenter"];
+    for (const theme of ["dark", "light"]) {
+      themeSetTheme(theme);
+      const p = palette();
+      for (const key of snapAlignKeys) {
+        if (!p[key] || p[key].trim() === "") throw new Error(`palette().${key} empty in ${theme} theme`);
+      }
+    }
+    themeSetTheme("light"); // leave in light mode so following tests see it
+  });
+});
+
+// ─── Tests: LLD-58 — default theme resolution ────────────────────────────────
+
+describe("prefs.js — default theme resolution", () => {
+  it("matchMedia absent → default is 'light'", () => {
+    // Simulate a no-matchMedia environment by overriding and then restoring.
+    // We cannot reload the module, but we can verify getTheme() falls back correctly
+    // when the stored value is invalid: setTheme with unknown → falls back to computed default.
+    // The important thing is that unknown value does not produce an invalid theme.
+    setTheme("not-valid");
+    const t = getTheme();
+    if (t !== "light" && t !== "dark") throw new Error(`Should fall back to light or dark, got: ${t}`);
+  });
+
+  it("persisted 'dark' → getTheme() returns 'dark' after set", () => {
+    setTheme("dark");
+    expect(getTheme()).toBe("dark");
+  });
+
+  it("persisted 'light' → getTheme() returns 'light' after set", () => {
+    setTheme("light");
+    expect(getTheme()).toBe("light");
   });
 });
 

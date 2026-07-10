@@ -8,6 +8,7 @@
 import { onChange as onViewChange, resetView } from "./view.js";
 import { onChange as onUnitChange } from "./units.js";
 import { init as initSurface, initWallLayer, onRender, resize, render, scheduleRender, W, H } from "./surface.js";
+import { init as initTheme, toggleTheme, getTheme, onThemeChange } from "./theme.js";
 import { init as initHud } from "./hud.js";
 import { init as initInteractions, setDrawHooks, setSelectHooks, zoomInStep, zoomOutStep, zoomReset } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
@@ -109,6 +110,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnHistoryRedo = document.getElementById("history-redo");
   const btnHelp        = document.getElementById("btn-help");
   const helpOverlayEl  = document.getElementById("help-overlay");
+
+  // Theme toggle button
+  const btnThemeToggle = document.getElementById("btn-theme-toggle");
+
+  // ── Theme init (must run before first render) ──────────────────────────────
+  initTheme();
 
   // ── Initialise modules ─────────────────────────────────────────────────────
   initSurface(stage, svg, gGrid, gWorld);
@@ -230,6 +237,34 @@ document.addEventListener("DOMContentLoaded", () => {
       banner:       bannerEl,
     });
   }
+
+  // ── Theme toggle (LLD-58) ─────────────────────────────────────────────────
+  /** Update toggle button label + aria to reflect the current theme. */
+  function _updateThemeToggle(theme) {
+    if (!btnThemeToggle) return;
+    if (theme === "light") {
+      btnThemeToggle.textContent = "☽";
+      btnThemeToggle.setAttribute("aria-label", "Switch to dark mode");
+      btnThemeToggle.setAttribute("aria-pressed", "true");
+    } else {
+      btnThemeToggle.textContent = "☀";
+      btnThemeToggle.setAttribute("aria-label", "Switch to light mode");
+      btnThemeToggle.setAttribute("aria-pressed", "false");
+    }
+  }
+  // Sync button to persisted theme on load
+  _updateThemeToggle(getTheme());
+
+  if (btnThemeToggle) {
+    btnThemeToggle.addEventListener("click", () => {
+      const next = toggleTheme();
+      _updateThemeToggle(next);
+      scheduleRender();
+    });
+  }
+
+  // Keep toggle label in sync if theme is changed programmatically
+  onThemeChange(_updateThemeToggle);
 
   // ── History (LLD-21) ──────────────────────────────────────────────────────
   // Wire history.reset into actions.js so _confirmReset can call it
