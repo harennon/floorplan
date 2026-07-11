@@ -2893,6 +2893,12 @@ import {
 } from "../src/js/plan.js";
 
 import {
+  model as measurementsModel,
+  hydrate as hydrateMeasurements,
+  newId as newMeasurementId,
+} from "../src/js/measurements.js";
+
+import {
   STORAGE_KEY, init as initStore, loadLocal, saveNow, clearLocal, getState,
 } from "../src/js/store.js";
 
@@ -2927,6 +2933,7 @@ function resetAll() {
   model.rooms.length = 0;
   model.chain.length = 0;
   symbolModel.symbols.length = 0;
+  measurementsModel.measurements.length = 0;
   setUnit("ft");
   view.zoom = 1; view.panX = 0; view.panY = 0;
 }
@@ -13050,6 +13057,479 @@ describe("LLD 77 — backward-compat: pre-existing 'd' and 'u' hashes still deco
       if (!Number.isFinite(sym.w) || !Number.isFinite(sym.h)) throw new Error("NaN/Infinity in decoded sym w/h");
       if (!Number.isFinite(sym.rot)) throw new Error("NaN/Infinity in decoded sym rot");
     }
+  });
+});
+
+// ─── Tests: LLD 81 — measurements.js unit tests ──────────────────────────────
+
+describe("LLD 81 — measurements.js: hydrate replaces in place + counter re-sync", () => {
+  it("hydrate replaces measurements array IN PLACE (same array identity)", () => {
+    const origRef = measurementsModel.measurements;
+    hydrateMeasurements({ measurements: [
+      { id: "m3", a: { x: 0, y: 0 }, b: { x: 1, y: 1 } },
+    ] });
+    if (measurementsModel.measurements !== origRef) throw new Error("measurements array identity changed");
+    if (measurementsModel.measurements.length !== 1) throw new Error(`Expected 1 measurement, got ${measurementsModel.measurements.length}`);
+    if (measurementsModel.measurements[0].id !== "m3") throw new Error("Wrong measurement id");
+    hydrateMeasurements({ measurements: [] }); // cleanup
+  });
+
+  it("hydrate re-syncs counter: next newMeasurementId() does not collide with max loaded id", () => {
+    hydrateMeasurements({ measurements: [
+      { id: "m5", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+      { id: "m2", a: { x: 2, y: 0 }, b: { x: 3, y: 0 } },
+    ] });
+    const id = newMeasurementId();
+    const num = parseInt(id.replace("m", ""), 10);
+    if (num <= 5) throw new Error(`newId() ${id} collides — must be > m5 (max loaded)`);
+    hydrateMeasurements({ measurements: [] }); // cleanup
+  });
+
+  it("hydrate with empty array clears existing measurements", () => {
+    hydrateMeasurements({ measurements: [
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+    ] });
+    hydrateMeasurements({ measurements: [] });
+    if (measurementsModel.measurements.length !== 0) throw new Error("Expected empty after hydrate([])");
+  });
+});
+
+// ─── Tests: LLD 81 — plan.js measurements integration ────────────────────────
+
+describe("LLD 81 — plan.js: buildPlan includes measurements (deep clone)", () => {
+  it("buildPlan snapshots measurements as a deep-cloned array", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
+    const p = buildPlan();
+    if (!Array.isArray(p.measurements)) throw new Error("measurements not an array in buildPlan output");
+    if (p.measurements.length !== 1) throw new Error("Expected 1 measurement");
+    if (p.measurements[0].id !== "m0") throw new Error("Wrong measurement id");
+    // Mutating model after snapshot must not affect the snapshot
+    measurementsModel.measurements[0].a.x = 999;
+    if (p.measurements[0].a.x === 999) throw new Error("buildPlan did not deep-clone measurements");
+    resetAll();
+  });
+
+  it("buildPlan on empty model includes measurements: []", () => {
+    resetAll();
+    const p = buildPlan();
+    if (!Array.isArray(p.measurements)) throw new Error("Missing measurements key");
+    if (p.measurements.length !== 0) throw new Error("Expected []");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: validatePlan measurements acceptance", () => {
+  it("accepts a plan with valid measurements", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } }];
+    const v = validatePlan(p);
+    if (!v) throw new Error("validatePlan rejected a plan with valid measurements");
+    if (v.measurements.length !== 1) throw new Error("measurements not preserved in validated plan");
+    if (v.measurements[0].id !== "m0") throw new Error("measurement id not preserved");
+    resetAll();
+  });
+
+  it("BACKWARD COMPAT: accepts a plan with NO measurements key (normalises to [])", () => {
+    resetAll();
+    const p = buildPlan();
+    delete p.measurements; // simulate old saved plan
+    const v = validatePlan(p);
+    if (v === null) throw new Error("validatePlan MUST NOT return null for missing measurements — backward compat broken");
+    if (!Array.isArray(v.measurements)) throw new Error("measurements must be normalised to an array");
+    if (v.measurements.length !== 0) throw new Error("measurements must be normalised to []");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: validatePlan measurements rejections", () => {
+  function shouldRejectMeas(plan, label) {
+    let result;
+    try { result = validatePlan(plan); } catch (e) { throw new Error(`threw instead of null: ${e}`); }
+    if (result !== null) throw new Error(`Expected null for: ${label}`);
+  }
+
+  it("rejects measurements not an array (object)", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = {};
+    shouldRejectMeas(p, "measurements={}");
+    resetAll();
+  });
+
+  it("rejects measurements not an array (string)", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = "notanarray";
+    shouldRejectMeas(p, "measurements=string");
+    resetAll();
+  });
+
+  it("rejects entry that is not an object", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = ["notanobject"];
+    shouldRejectMeas(p, "entry=string");
+    resetAll();
+  });
+
+  it("rejects entry with non-string id", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: 42, a: { x: 0, y: 0 }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "id=number");
+    resetAll();
+  });
+
+  it("rejects entry missing 'a'", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "missing a");
+    resetAll();
+  });
+
+  it("rejects entry missing 'b'", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 } }];
+    shouldRejectMeas(p, "missing b");
+    resetAll();
+  });
+
+  it("rejects entry with non-finite a.x", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: NaN, y: 0 }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "a.x=NaN");
+    resetAll();
+  });
+
+  it("rejects entry with Infinity a.y", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: Infinity }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "a.y=Infinity");
+    resetAll();
+  });
+
+  it("rejects entry with non-finite b.x", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 }, b: { x: NaN, y: 0 } }];
+    shouldRejectMeas(p, "b.x=NaN");
+    resetAll();
+  });
+
+  it("rejects entry with missing b.y", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 }, b: { x: 1 } }];
+    shouldRejectMeas(p, "b.y missing");
+    resetAll();
+  });
+
+  it("rejects entry with string coord", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: "0", y: 0 }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "a.x=string");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: round-trip applyPlan(validatePlan(buildPlan())) with measurements", () => {
+  it("measurements are lossless through the localStorage round-trip path", () => {
+    resetAll();
+    measurementsModel.measurements.push(
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } },
+      { id: "m1", a: { x: 1.5, y: 2 }, b: { x: -0.5, y: -1 } }
+    );
+    const snapshot = buildPlan();
+    const validated = validatePlan(JSON.parse(JSON.stringify(snapshot)));
+    if (!validated) throw new Error("validatePlan rejected a good snapshot with measurements");
+    applyPlan(validated);
+    if (measurementsModel.measurements.length !== 2) throw new Error("measurement count changed after round-trip");
+    if (JSON.stringify(measurementsModel.measurements) !== JSON.stringify(snapshot.measurements)) {
+      throw new Error("measurements differ after applyPlan round-trip");
+    }
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: serializePlan includes measurements in fixed key order", () => {
+  it("serializePlan output contains measurements key", () => {
+    resetAll();
+    const p = buildPlan();
+    const s = serializePlan(p);
+    const parsed = JSON.parse(s);
+    if (!("measurements" in parsed)) throw new Error("measurements key missing from serializePlan output");
+    resetAll();
+  });
+
+  it("two plans differing only in measurements produce different serialized strings", () => {
+    resetAll();
+    const p1 = buildPlan();
+    const s1 = serializePlan(p1);
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 0 } });
+    const p2 = buildPlan();
+    const s2 = serializePlan(p2);
+    if (s1 === s2) throw new Error("plans with different measurements must produce different serialized strings");
+    resetAll();
+  });
+
+  it("JSON export/import round-trip: validatePlan(JSON.parse(serializePlan(buildPlan()))) preserves measurements", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 5, y: 6 } });
+    const p = buildPlan();
+    const reparsed = validatePlan(JSON.parse(serializePlan(p)));
+    if (!reparsed) throw new Error("validatePlan rejected re-parsed plan");
+    if (reparsed.measurements.length !== 1) throw new Error("measurement lost in JSON export round-trip");
+    if (reparsed.measurements[0].a.x !== 1) throw new Error("measurement a.x wrong after round-trip");
+    if (reparsed.measurements[0].b.y !== 6) throw new Error("measurement b.y wrong after round-trip");
+    resetAll();
+  });
+});
+
+// ─── Tests: LLD 81 — compact codec measurements ───────────────────────────────
+
+describe("LLD 81 — compact codec: buildCompact emits 'm' key", () => {
+  it("buildCompact on empty plan yields m:[]", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    if (!Array.isArray(compact.m)) throw new Error("compact.m must be an array");
+    if (compact.m.length !== 0) throw new Error("compact.m must be [] for empty measurements");
+    resetAll();
+  });
+
+  it("buildCompact encodes measurements as 4-number tuples [ax,ay,bx,by]", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    if (compact.m.length !== 1) throw new Error("Expected 1 measurement tuple");
+    const [ax, ay, bx, by] = compact.m[0];
+    if (ax !== 1 || ay !== 2 || bx !== 3 || by !== 4) throw new Error(`Wrong tuple: ${JSON.stringify(compact.m[0])}`);
+    resetAll();
+  });
+
+  it("compact codec round-trip: geometry preserved (coords on snap multiples)", () => {
+    resetAll();
+    setUnit("m");
+    measurementsModel.measurements.push(
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } },
+      { id: "m1", a: { x: 1, y: 0.5 }, b: { x: 2, y: 0.5 } }
+    );
+    const p = buildPlan();
+    const restored = validatePlan(parseCompact(buildCompact(p)));
+    if (!restored) throw new Error("validatePlan rejected parseCompact output with measurements");
+    if (restored.measurements.length !== 2) throw new Error("measurement count mismatch in compact round-trip");
+    if (restored.measurements[0].a.x !== 0) throw new Error("m[0].a.x wrong");
+    if (restored.measurements[0].b.x !== 3) throw new Error("m[0].b.x wrong");
+    if (restored.measurements[1].a.y !== 0.5) throw new Error("m[1].a.y wrong");
+    resetAll();
+  });
+
+  it("compact codec: mm-rounding on sub-mm endpoint (1.23456 → 1.235)", () => {
+    resetAll();
+    setUnit("m");
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1.23456, y: 0 }, b: { x: 0, y: 0 } });
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    const expected_ax = Math.round(1.23456 * 1000) / 1000; // 1.235
+    if (compact.m[0][0] !== expected_ax) throw new Error(`Expected mm-rounded ${expected_ax}, got ${compact.m[0][0]}`);
+    const restored = validatePlan(parseCompact(compact));
+    if (!restored) throw new Error("validatePlan rejected");
+    if (restored.measurements[0].a.x !== expected_ax) throw new Error("rounded value not preserved in round-trip");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — compact codec: parseCompact absence tolerance (BACKWARD COMPAT)", () => {
+  it("HARD: parseCompact with no 'm' key yields measurements:[] (old 'c' links still work)", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    delete compact.m; // simulate old pre-LLD-81 compact payload
+    const restored = parseCompact(compact);
+    if (!restored) throw new Error("parseCompact returned null for compact without 'm' key");
+    if (!Array.isArray(restored.measurements)) throw new Error("measurements must be an array");
+    if (restored.measurements.length !== 0) throw new Error("measurements must be [] when 'm' absent");
+    resetAll();
+  });
+
+  it("parseCompact returns null for malformed tuple: arity < 4", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    compact.m = [[1, 2, 3]]; // arity 3 instead of 4
+    const result = parseCompact(compact);
+    if (result !== null) throw new Error("Expected null for arity-3 tuple");
+    resetAll();
+  });
+
+  it("parseCompact returns null for non-finite number in tuple", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    compact.m = [[1, 2, NaN, 4]];
+    const result = parseCompact(compact);
+    if (result !== null) throw new Error("Expected null for NaN in tuple");
+    resetAll();
+  });
+
+  it("parseCompact returns null for non-finite Infinity in tuple", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    compact.m = [[1, 2, 3, Infinity]];
+    const result = parseCompact(compact);
+    if (result !== null) throw new Error("Expected null for Infinity in tuple");
+    resetAll();
+  });
+
+  it("HARD: frozen legacy 'd' fixture still decodes to measurements:[]", async () => {
+    const result = await decodeHashToPlan(FIXTURE_D_HASH);
+    if (!result) throw new Error("legacy 'd' fixture failed to decode");
+    if (!Array.isArray(result.measurements)) throw new Error("measurements must be an array");
+    if (result.measurements.length !== 0) throw new Error("legacy 'd' fixture must decode to measurements:[]");
+  });
+
+  it("HARD: frozen legacy 'u' fixture still decodes to measurements:[]", async () => {
+    const result = await decodeHashToPlan(FIXTURE_U_HASH);
+    if (!result) throw new Error("legacy 'u' fixture failed to decode");
+    if (!Array.isArray(result.measurements)) throw new Error("measurements must be an array");
+    if (result.measurements.length !== 0) throw new Error("legacy 'u' fixture must decode to measurements:[]");
+  });
+});
+
+describe("LLD 81 — compact codec: share hash round-trip with measurements", () => {
+  it("encode/decode share hash preserves measurement geometry", async () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } });
+    const p = buildPlan();
+    const hash = await encodePlanToHash(p);
+    const decoded = await decodeHashToPlan(hash);
+    if (!decoded) throw new Error("decodeHashToPlan returned null for plan with measurements");
+    if (decoded.measurements.length !== 1) throw new Error("measurement count mismatch after share round-trip");
+    if (decoded.measurements[0].a.x !== 0) throw new Error("measurement a.x wrong after share round-trip");
+    if (decoded.measurements[0].b.x !== 3) throw new Error("measurement b.x wrong after share round-trip");
+    if (decoded.measurements[0].b.y !== 4) throw new Error("measurement b.y wrong after share round-trip");
+    resetAll();
+  });
+});
+
+// ─── Tests: LLD 81 — backward-compat: old JSON plan without measurements ──────
+
+describe("LLD 81 — backward-compat: old JSON plan without measurements key validates", () => {
+  it("HARD: a frozen legacy JSON plan with no measurements key loads and normalises to []", () => {
+    // This is the pre-LLD-81 plan format — no measurements field at all
+    const legacyPlan = {
+      schema: 1,
+      app: "floorplan",
+      walls: { rooms: [{ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] }], chain: [] },
+      symbols: { symbols: [] },
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "ft",
+    };
+    if ("measurements" in legacyPlan) throw new Error("fixture must not have measurements key");
+    const v = validatePlan(legacyPlan);
+    if (v === null) throw new Error("validatePlan MUST NOT return null for missing measurements — backward-compat broken");
+    if (!Array.isArray(v.measurements)) throw new Error("measurements must be normalised to array");
+    if (v.measurements.length !== 0) throw new Error("measurements must be []");
+  });
+});
+
+// ─── Tests: LLD 81 — exportImg measurements ──────────────────────────────────
+
+describe("LLD 81 — exportImg.contentBounds includes measurement endpoints", () => {
+  it("measurement extending beyond walls expands bounds (Edge Case 7)", () => {
+    resetAll();
+    // A room occupying [0,3]x[0,4]
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    // A measurement extending way beyond the room
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 10, y: 12 } });
+    const b = contentBounds();
+    if (!b) throw new Error("Expected non-null bounds");
+    if (b.maxX < 10) throw new Error(`maxX ${b.maxX} should be >= 10 (measurement endpoint)`);
+    if (b.maxY < 12) throw new Error(`maxY ${b.maxY} should be >= 12 (measurement endpoint)`);
+    resetAll();
+  });
+
+  it("measurement-only plan (no rooms/symbols) produces non-null bounds", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 5, y: 6 } });
+    const b = contentBounds();
+    if (b === null) throw new Error("Expected non-null bounds for measurement-only plan");
+    if (b.minX !== 1 || b.minY !== 2 || b.maxX !== 5 || b.maxY !== 6) {
+      throw new Error(`Wrong bounds: ${JSON.stringify(b)}`);
+    }
+    resetAll();
+  });
+});
+
+describe("LLD 81 — exportImg.buildExportSvg includes measurement lines + labels", () => {
+  it("SVG contains a <line> and <text> for each measurement", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    measurementsModel.measurements.push(
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } },
+      { id: "m1", a: { x: 1, y: 0 }, b: { x: 2, y: 0 } }
+    );
+    const svg = buildExportSvg();
+    // Count <line> elements (wall lines + measurement lines)
+    const lineMatches = svg.match(/<line /g) || [];
+    if (lineMatches.length < 2) throw new Error(`Expected at least 2 <line> elements, got ${lineMatches.length}`);
+    // Count <text> elements — room edges + measurements
+    const textMatches = svg.match(/<text /g) || [];
+    // 4 room-edge labels + 2 measurement labels = at least 6
+    if (textMatches.length < 6) throw new Error(`Expected at least 6 <text> elements, got ${textMatches.length}`);
+    resetAll();
+  });
+
+  it("measurement-only SVG (no rooms): non-null output with line and label", () => {
+    resetAll();
+    setUnit("m");
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 5, y: 0 } });
+    const svg = buildExportSvg();
+    if (!svg.includes("<line ")) throw new Error("No <line> in measurement-only SVG");
+    if (!svg.includes("<text ")) throw new Error("No <text> in measurement-only SVG");
+    // The label should contain a numeric distance (5.00 m)
+    if (!svg.includes("5.00")) throw new Error("Distance label missing in measurement-only SVG");
+    resetAll();
+  });
+
+  it("plan with measurements but no rooms produces valid SVG (non-null bounds)", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 2, y: 3 }, b: { x: 7, y: 8 } });
+    const svg = buildExportSvg();
+    if (!svg.startsWith("<?xml")) throw new Error("SVG does not start with XML declaration");
+    if (!svg.includes("<svg")) throw new Error("SVG missing <svg> element");
+    resetAll();
+  });
+});
+
+// ─── Tests: LLD 81 — no NaN/Infinity from measurements round-trip ─────────────
+
+describe("LLD 81 — safety: no NaN/Infinity from validated measurements", () => {
+  it("validatePlan never lets NaN/Infinity through to measurements", () => {
+    resetAll();
+    const p = buildPlan();
+    // These entries are invalid and must be rejected (null) — not NaN allowed through
+    const badPlans = [
+      { ...p, measurements: [{ id: "m0", a: { x: NaN, y: 0 }, b: { x: 1, y: 0 } }] },
+      { ...p, measurements: [{ id: "m0", a: { x: 0, y: Infinity }, b: { x: 1, y: 0 } }] },
+    ];
+    for (const bad of badPlans) {
+      const v = validatePlan(bad);
+      if (v !== null) throw new Error("validatePlan should reject NaN/Infinity endpoint");
+    }
+    resetAll();
   });
 });
 
