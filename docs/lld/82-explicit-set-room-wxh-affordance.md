@@ -86,16 +86,37 @@ fields still map to the room's two real side lengths. `rectDims` returns the con
 - **Parse** each field with `parseLen` (returns metres or `null`). If **either** field is `null`
   (empty, ≤ 0, non-numeric) or below `MIN_SEG_M`, Apply flags the offending field invalid (same
   `aria-invalid` + red-border treatment `dimEntry.js` uses) and does **not** mutate geometry.
-- **Apply** on valid input: call `rescaleRectEdge(room, wEdge, wM)` then
-  `rescaleRectEdge(room, hEdge, hM)`. Guard: if a field's parsed value equals the current side
-  length within display precision (`fmtLen(target) === fmtLen(current)`, matching the dim-chip
-  no-op check), skip that axis's call. If **both** axes are no-ops, Apply does nothing and does not
-  commit history.
+- **Apply** on valid input: capture `const dims0 = rectDims(room)` **once, before any mutation**,
+  and use `dims0.w` / `dims0.h` as each axis's "current" side length for the no-op guard. Then call
+  `rescaleRectEdge(room, dims0.wEdge, wM)` then `rescaleRectEdge(room, dims0.hEdge, hM)`. Guard: if a
+  field's parsed value equals that pre-mutation side length within display precision
+  (`fmtLen(target) === fmtLen(current)`, matching the dim-chip no-op check), skip that axis's call.
+  Because the two edited edges are perpendicular, a W resize does not change the H side length — but
+  the "current" values must still be read from the **pre-mutation** `dims0` snapshot (not re-derived
+  from geometry after the W call) so the read order is unambiguous. If **both** axes are no-ops,
+  Apply does nothing and does not commit history.
 - **One history entry.** Call `history.commit()` **once** after both `rescaleRectEdge` calls, so a
   single Ctrl+Z reverts the whole W × H change in one step. (`dimEntry.js` commits per single-edge
   edit; here the two edits are one user action, so one commit.)
 - After Apply, `scheduleRender()` refreshes the canvas, dim chips, area/perimeter, and the W × H
   fields (which re-prefill from the new side lengths).
+
+### Decision — the W × H refresh runs on EVERY `update()`, above the dirty-check early return.
+
+`measure.update()` (src/js/measure.js:75–164) has a **dirty-check early return**: when the room set
+is structurally unchanged (`structureUnchanged && newRows.length > 0`, line 109) it patches row text
+in place and `return`s at line 120 — it never reaches the tail of the function. Selecting /
+deselecting a room, toggling units, hovering, and dragging all leave `model.rooms` structurally
+unchanged (the id list is identical), so they all hit this early return.
+
+Therefore the W × H visibility + prefill logic **must NOT be appended to the tail of `update()`** —
+it would never run for exactly the events that must show/hide the block (selection change, unit
+toggle), producing a non-functional feature. Instead, factor it into a dedicated helper
+`_refreshWxh()` and call it **unconditionally near the top of `update()`, before the dirty-check
+branch** (and thus before both the early return and the rebuild path). `_refreshWxh()` reads
+`getSelectedRoomId()` → resolves the room → shows + prefills iff `isRectangle`, else hides. It does
+not depend on `newRows`/`_lastRows` and must be reachable on every invocation regardless of which
+row-update branch `update()` then takes.
 
 ### Where the changes land
 
@@ -131,11 +152,18 @@ Reuses the existing blueprint panel visual language; no new panel or inspector.
 </div>
 ```
 
-**Visibility rule** (evaluated in `measure.update()`, which already runs each `onRender`):
+**Visibility rule** (evaluated by a dedicated `_refreshWxh()` helper called **unconditionally near
+the top of `measure.update()`, above the dirty-check early return** — see Approach; `update()` runs
+each `onRender`):
 - Show iff `getSelectedRoomId()` resolves to a room in `model.rooms` with `isRectangle(room) === true`.
-- Otherwise `hidden`. Because `update()` runs every frame, the block appears/disappears reactively
-  as the selection or the room's shape changes (e.g. a dim-chip edit that keeps it rectangular keeps
-  the block; a move that leaves it rectangular keeps it).
+- Otherwise `hidden`.
+- **Critical:** `_refreshWxh()` must be reached on every `update()` call. `update()`'s dirty-check
+  `return` (measure.js:120) fires whenever the room set is structurally unchanged — which is the case
+  for selection/deselection, unit toggle, hover, and drag. If the W × H logic were placed after that
+  return it would never run for a selection change or unit toggle and the block would never appear.
+  Placing `_refreshWxh()` before the dirty-check makes the block appear/disappear reactively as the
+  selection or the room's shape changes (e.g. a dim-chip edit that keeps it rectangular keeps the
+  block; a move that leaves it rectangular keeps it).
 
 **Prefill + unit reactivity.** When shown, set the two inputs to `fmtLen(w)` / `fmtLen(h)` from
 `rectDims(room)`, and the trailing unit label to `unitLabel()`. On unit toggle the panel re-renders
@@ -194,16 +222,26 @@ export function init(refs) { /* binds Set click, Enter/Escape/blur on inputs */ 
 export function setSelectedRoomAccessor(getSelectedRoomId) { /* ... */ }
 export function setHistoryCommit(fn) { /* ... */ }
 
-/** update() [existing, extended]: after refreshing rows, refresh the W×H block:
- *  resolve getSelectedRoomId() → room; show + prefill iff isRectangle(room);
- *  else hide. Skip prefill of a focused field. */
-export function update() { /* ... */ }
+/** update() [existing, extended]: MUST call _refreshWxh() UNCONDITIONALLY near the
+ *  top, BEFORE the dirty-check early return at measure.js:120 (which fires on
+ *  structurally-unchanged room sets — i.e. selection change, unit toggle, hover,
+ *  drag). Do NOT append the W×H refresh to the tail of update(); it would be
+ *  unreachable for exactly those events. */
+export function update() { /* ... _refreshWxh() first, then existing row logic ... */ }
+
+/** _refreshWxh() [new, private]: resolve getSelectedRoomId() → room;
+ *  show + prefill (fmtLen w/h from rectDims, unitLabel) iff isRectangle(room);
+ *  else hide. Skip prefill of a field that currently has focus (document.activeElement).
+ *  Self-contained: does not read newRows/_lastRows, so it is safe to call before
+ *  either update() branch. */
+function _refreshWxh() { /* ... */ }
 
 /** applyWxH() [new, private → bound to Set/Enter]:
- *  const dims = rectDims(room); parse both fields via parseLen;
- *  validate (null / <MIN_SEG_M → flag field, return);
- *  per axis, skip if fmtLen(target)===fmtLen(current);
- *  rescaleRectEdge(room, dims.wEdge, wM); rescaleRectEdge(room, dims.hEdge, hM);
+ *  const dims0 = rectDims(room);   // capture BEFORE any mutation
+ *  parse both fields via parseLen; validate (null / <MIN_SEG_M → flag field, return);
+ *  per axis, skip if fmtLen(target)===fmtLen(<dims0.w | dims0.h>)  // "current" from
+ *  the pre-mutation snapshot, never re-derived after the W call;
+ *  rescaleRectEdge(room, dims0.wEdge, wM); rescaleRectEdge(room, dims0.hEdge, hM);
  *  if anything changed → historyCommit() once; scheduleRender(). */
 ```
 
@@ -272,10 +310,13 @@ block persists across reload.
    `fmtLen(target)===fmtLen(current)` no-op check → nothing mutated, no history commit. Block stays.
 8. **Only one field changed.** The unchanged axis is skipped (no-op check); the changed axis calls
    `rescaleRectEdge`; **one** commit. Undo reverts the single changed side.
-9. **Unit toggle while block is open.** Fields re-prefill in the new unit on the unit-change
-   re-render — **except** a field the user currently has focused (guard with
+9. **Unit toggle while block is open.** A unit change alters only row/field *text*, not the room set,
+   so `update()` hits the dirty-check early return (measure.js:120) — this is exactly why
+   `_refreshWxh()` runs **before** that return (see Approach). On the unit-change re-render fields
+   re-prefill in the new unit — **except** a field the user currently has focused (guard with
    `document.activeElement`), so mid-typing is not clobbered. `parseLen` still honours an explicit
-   `ft`/`m`/`'` suffix regardless of the active unit.
+   `ft`/`m`/`'` suffix regardless of the active unit. (If `_refreshWxh` were tail-placed, the toggle
+   would never re-prefill because the early return would skip it.)
 10. **Very large value.** No upper clamp (rooms have no catalog max); the far wall slides and the
     room may exceed the viewport — acceptable, matches drawing arbitrarily large rooms and the
     dim-chip path. Autosave + share round-trip.
@@ -288,8 +329,11 @@ block persists across reload.
     geometry at Apply time. If a dim-chip input is mid-open its own commit/cancel is unaffected.
     (They target the same room but distinct user actions; last-committed wins, each its own history
     step.)
-14. **Rapid re-render during typing.** `update()` runs each frame; it must not reset a field the
-    user is focused in (Edge Case 9 guard) — otherwise hover-driven re-renders would wipe input.
+14. **Rapid re-render during typing.** `update()` runs each frame and `_refreshWxh()` runs on every
+    invocation (above the dirty-check return), so it fires even on hover-driven re-renders that leave
+    the room set unchanged. It must therefore **not** reset a field the user is focused in (Edge Case
+    9 guard via `document.activeElement`) — otherwise those frequent re-renders would wipe input
+    mid-type.
 
 ## Dependencies
 
@@ -350,6 +394,12 @@ under `.github/run-tests.mjs`. `rectDims` is imported from `../src/js/walls.js`.
 - Block hidden when the selected room is not `isRectangle`.
 - Block shown + prefilled (in active unit) when a rectangular room is selected.
 - A focused field is NOT re-prefilled on a re-render (mid-edit not clobbered).
+- **Early-return regression:** with the room set structurally unchanged (so `update()` takes the
+  dirty-check in-place path and early-returns at measure.js:120), changing only the selection —
+  select then deselect a rectangular room — still shows then hides the block. This proves
+  `_refreshWxh()` runs before the early return, not after it.
+- **Unit toggle re-prefill:** toggling units on a stable room set (also an early-return frame)
+  re-prefills the (unfocused) fields in the new unit.
 
 ### Integration (Playwright)
 
