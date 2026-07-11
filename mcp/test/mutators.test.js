@@ -90,7 +90,8 @@ test("place_symbol / resize_symbol clamp out-of-range dims and report clamped:tr
 test("place_symbol on an opening ignores h and flags hIgnored", () => {
   session.newPlan();
   tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
-  const p = tools.tool_place_symbol({ type: "door", x: 3, y: 3, h: 1.5 });
+  // Place door on the top wall centerline (y=0) so Gap B passes.
+  const p = tools.tool_place_symbol({ type: "door", x: 3, y: 0, h: 1.5 });
   assert.equal(p.ok, true);
   assert.equal(p.hIgnored, true);
   assert.equal(p.h, CATALOG.door.h); // unchanged catalog depth
@@ -182,4 +183,131 @@ test("check_brief with no brief set is self-healing", () => {
   const r = tools.tool_check_brief();
   assert.equal(r.satisfied, false);
   assert.match(r.unmet[0], /no brief set/);
+});
+
+// ── Gap A: single-room count guard ──────────────────────────────────────────
+
+test("Gap A: second room under single-room brief rejected, no sliver persisted", () => {
+  tools.tool_set_brief({ room: { w: 4, h: 4 } });
+  session.newPlan();
+  const r1 = tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  assert.equal(r1.ok, true);
+  // Second room must be rejected.
+  const r2 = tools.tool_add_room({ rect: { x: 5, y: 0, w: 4, h: 4 } });
+  assert.equal(r2.ok, false);
+  assert.match(r2.reason, /already has a room/);
+  // No second room should have been persisted.
+  assert.equal(wallsModel.rooms.length, 1);
+});
+
+test("Gap A: first room still accepted under single-room brief (regression)", () => {
+  tools.tool_set_brief({ room: { w: 4, h: 4 } });
+  session.newPlan();
+  const r = tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  assert.equal(r.ok, true);
+  assert.equal(wallsModel.rooms.length, 1);
+});
+
+test("Gap A: no brief → multi-room still allowed (regression)", () => {
+  session.newPlan();
+  const r1 = tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  const r2 = tools.tool_add_room({ rect: { x: 5, y: 0, w: 4, h: 4 } });
+  assert.equal(r1.ok, true);
+  assert.equal(r2.ok, true);
+  assert.equal(wallsModel.rooms.length, 2);
+});
+
+test("Gap A: brief without room → multi-room still allowed (regression)", () => {
+  tools.tool_set_brief({ minWalkwayM: 0.90 }); // brief with no room constraint
+  session.newPlan();
+  const r1 = tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  const r2 = tools.tool_add_room({ rect: { x: 5, y: 0, w: 4, h: 4 } });
+  assert.equal(r1.ok, true);
+  assert.equal(r2.ok, true);
+  assert.equal(wallsModel.rooms.length, 2);
+});
+
+test("Gap A: rejected call is a no-op on state (rooms count unchanged)", () => {
+  tools.tool_set_brief({ room: { w: 4, h: 4 } });
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  const countBefore = wallsModel.rooms.length;
+  const chainBefore = wallsModel.chain.length;
+  tools.tool_add_room({ rect: { x: 5, y: 0, w: 4, h: 4 } }); // rejected
+  assert.equal(wallsModel.rooms.length, countBefore);
+  assert.equal(wallsModel.chain.length, chainBefore);
+});
+
+// ── Gap B: opening-on-wall placement guard ───────────────────────────────────
+
+test("Gap B: opening off-wall rejected, no symbol added", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  // Door placed at room center (2,2) — far from every wall.
+  const r = tools.tool_place_symbol({ type: "door", x: 2, y: 2 });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /must sit on a wall/);
+  assert.equal(symbolsModel.symbols.length, 0);
+});
+
+test("Gap B: opening on-wall accepted (centered on top wall)", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  // Top wall is at y=0 (centerline). Door default h=0.12 (WALL_M). Center at y=0 → on wall.
+  const r = tools.tool_place_symbol({ type: "door", x: 2, y: 0 });
+  assert.equal(r.ok, true);
+  assert.equal(symbolsModel.symbols.length, 1);
+});
+
+test("Gap B: move_symbol opening off-wall → rejected + position restored", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  // Place door on top wall.
+  const placed = tools.tool_place_symbol({ type: "door", x: 2, y: 0 });
+  assert.equal(placed.ok, true);
+  const doorId = placed.id;
+  const originalX = symbolsModel.symbols[0].x;
+  const originalY = symbolsModel.symbols[0].y;
+  // Move to room center — should be rejected, position restored.
+  const moved = tools.tool_move_symbol({ id: doorId, x: 2, y: 2 });
+  assert.equal(moved.ok, false);
+  assert.match(moved.reason, /must sit on a wall/);
+  assert.equal(symbolsModel.symbols[0].x, originalX);
+  assert.equal(symbolsModel.symbols[0].y, originalY);
+});
+
+test("Gap B: move_symbol opening to still-valid on-wall spot → accepted", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  const placed = tools.tool_place_symbol({ type: "door", x: 2, y: 0 });
+  assert.equal(placed.ok, true);
+  // Move along the top wall (still y=0).
+  const moved = tools.tool_move_symbol({ id: placed.id, x: 1, y: 0 });
+  assert.equal(moved.ok, true);
+});
+
+test("Gap B: furniture (non-opening) unaffected — place anywhere succeeds (regression)", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "bed", x: 6, y: 6 });
+  assert.equal(p.ok, true);
+  assert.equal(symbolsModel.symbols.length, 1);
+});
+
+test("Gap B: furniture move unaffected — move to any position succeeds (regression)", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const placed = tools.tool_place_symbol({ type: "sofa", x: 3, y: 3 });
+  assert.equal(placed.ok, true);
+  const moved = tools.tool_move_symbol({ id: placed.id, x: 6, y: 6 });
+  assert.equal(moved.ok, true);
+});
+
+test("Gap B: no walls → opening rejected", () => {
+  session.newPlan();
+  // No room drawn at all.
+  const r = tools.tool_place_symbol({ type: "window", x: 1, y: 1 });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /must sit on a wall/);
+  assert.equal(symbolsModel.symbols.length, 0);
 });
