@@ -36,6 +36,17 @@ already done and MUST NOT be re-invented here.
   inspector panel.
 - Any change to the LLD 81 schema/serialization/compact/export code paths.
 
+**Naming caveat (avoid confusing two subsystems):** an existing unrelated module
+`src/js/measure.js` (the area/perimeter **Measure inspector**, on the `onRender` chain as
+`measureUpdate`) already owns the `.measure-row` / `.measure*` CSS namespace and the
+`.measure` aside. This LLD's `measureTool.js` / `measureRender.js`, the `.measure-chip`
+class, the `--measure-line` var, and the `<g id="measure">` group are the **point-to-point
+distance-annotation** subsystem — a different thing. They do not collide technically (no
+existing `#measure` element id; `.measure-chip` is distinct from `.measure-row`/`.measure-header`),
+but the names are close. Implementer note: keep the two mentally separate, and if any name
+still reads ambiguously in review, prefer a distinguishing token (e.g. `measureLine` /
+`dim-note`) and flag it in the PR description.
+
 ## Approach
 
 ### 1. Tool ownership: extend `wallTool` mode; new `measureTool.js` owns behavior
@@ -51,6 +62,14 @@ already done and MUST NOT be re-invented here.
   pattern as `setHistoryCommit`) to avoid a `wallTool → measureTool` import cycle.
 - `_updateRail()` sets `aria-pressed` on the measure button; `_updateCursor()` toggles a
   `measure-mode` class on the stage (crosshair cursor, mirrors `draw-mode`).
+- `_updateToggleIcon()` (the collapsed-rail toggle glyph, the default on mobile) must handle
+  `_tool === "measure"`. Today it uses `const activeBtn = _tool === "wall" ? _btnWall :
+  _btnSelect;` and the aria-label ternary `_tool === "wall" ? "Draw wall…" : "Select tool…"`;
+  both fall through to Select for the new mode, so the collapsed rail would show the Select
+  icon and announce "Select tool" while Measure is active. Extend both to a three-way choice:
+  the `activeBtn` map picks `_btnMeasure` when `_tool === "measure"`, and the aria-label reads
+  `"Measure tool — tap to expand tool rail"` in that case. (Cleanest as a small lookup keyed
+  by `_tool` rather than nested ternaries.)
 
 **New module `src/js/measureTool.js`** (mirrors `symbolTool`/`roomTool` as the DOM/interaction
 layer; imports pure geometry, no cycles). It owns:
@@ -161,11 +180,24 @@ clears `.dim-labels`).
   `measurements.model`, clears selection, `history.commit()`, "Deleted" toast with scoped
   one-tap Undo, `scheduleRender()`), mirroring `symbolTool.deleteSelected`. Because of the
   mutex, only one of symbol/measure is selected, so branch order is safe.
-- **Escape (in-progress cancel):** `measureTool` registers its own bubble-phase keydown
-  (mirrors wallTool): when `isMeasureMode()` and `_pendingA !== null`, `Escape` calls
-  `cancel()` + `scheduleRender()` (guarded by `isHelpOpen()` and editable-focus, like
-  wallTool). It does not `stopPropagation`; the main.js Escape branch no-ops because
-  `isDrawMode()` is false and symbol `hasSelection()` is false.
+- **Escape — two roles:**
+  - *In-progress cancel:* `measureTool` registers its own bubble-phase keydown (mirrors
+    wallTool): when `isMeasureMode()` and `_pendingA !== null`, `Escape` calls `cancel()` +
+    `scheduleRender()` (guarded by `isHelpOpen()` and editable-focus, like wallTool). It does
+    not `stopPropagation`.
+  - *Deselect a committed measurement (Select mode):* the main.js global `Escape` branch
+    (currently `if (hasSelection()) { … onTapEmpty(); }`, where `hasSelection()` is the
+    **symbol** predicate) must also clear a lone measurement selection. A measurement can be
+    selected while no symbol/room is (symbol `hasSelection()` false, `isDrawMode()` false), so
+    today Esc would be a no-op for it — inconsistent with the shortcuts overlay's "Deselect /
+    cancel — Esc" and with symbol/room behavior. Extend the branch to also check
+    `measureTool.hasSelection()`: when either the symbol selection **or** the measurement
+    selection is present, `e.preventDefault()`, `flushNudge()`, and route to the dispatcher's
+    `onTapEmpty()` (which clears symbol + room + measure per §5) followed by `scheduleRender()`.
+    The mutex guarantees at most one of symbol/measurement is set, so the combined condition is
+    safe. (The in-progress-cancel path above runs first via measureTool's own listener when
+    `_pendingA` is set; the two roles do not overlap because a pending placement means no
+    committed selection.)
 
 ### 6. History: include measurements in snapshots (required for undo/redo)
 
@@ -264,6 +296,7 @@ export function isMeasureMode()                // -> _tool === "measure"
 export function setToolChangeHook(fn)          // fn(newTool) fired at end of setTool
 // init(refs): refs gains { btnMeasure }
 // _onKeyDown: add case "m"/"M" → setTool("measure")
+// _updateToggleIcon(): handle _tool === "measure" (collapsed-rail glyph + aria-label)
 ```
 
 ### `src/js/interactions.js` (extended)
@@ -411,6 +444,8 @@ Frontend tests extend `test/tests.html` (in-page `describe`/`it`/`expect`, run h
   commits once; no-op when nothing selected.
 - Mutex: selecting a measurement clears symbol + room selection; selecting a symbol/room
   clears the measurement selection.
+- Escape with only a measurement selected (no symbol/room) clears the measurement selection
+  via the main.js Escape branch (regression guard for GAP B).
 
 **Unit — history (§6):**
 - After an add, `historyUndo()` removes the measurement and `historyRedo()` restores it
