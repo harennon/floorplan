@@ -12,6 +12,7 @@
 
 /** @typedef {"door"|"window"|"bed"|"sofa"|"table"|"chair"|"desk"|"fridge"
  *   |"toilet"|"bathtub"|"sink"|"stove"|"wardrobe"|"bookshelf"|"tv"|"washer"
+ *   |"armchair"|"coffee-table"|"dining-table-round"
  *   |"nightstand"|"dresser"|"cabinet"} SymbolType */
 /** @typedef {{ id:string, type:SymbolType, x:number, y:number, w:number, h:number, rot:number }} Sym */
 /** @typedef {"openings"|"living"|"kitchen"|"bedroom"|"bath"} SymCategory */
@@ -43,6 +44,9 @@ export const CATALOG = {
   desk:      { label: "Desk",      category: "living",   w: 1.40, h: 0.70, min: 0.30, max: 2.50 },
   tv:        { label: "TV",        category: "living",   w: 1.20, h: 0.40, min: 0.30, max: 2.50 },
   bookshelf: { label: "Bookshelf", category: "living",   w: 0.80, h: 0.30, min: 0.30, max: 3.00 },
+  armchair:            { label: "Armchair",           category: "living", w: 0.80, h: 0.80, min: 0.40, max: 1.20 },
+  "coffee-table":      { label: "Coffee Table",       category: "living", w: 1.10, h: 0.55, min: 0.30, max: 2.00 },
+  "dining-table-round":{ label: "Round Dining Table", category: "living", w: 1.20, h: 1.20, min: 0.60, max: 2.50 },
   fridge:    { label: "Fridge",    category: "kitchen",  w: 0.70, h: 0.70, min: 0.30, max: 1.20 },
   stove:     { label: "Stove",     category: "kitchen",  w: 0.60, h: 0.60, min: 0.30, max: 1.20 },
   sink:      { label: "Sink",      category: "kitchen",  w: 0.60, h: 0.45, min: 0.30, max: 1.50 },

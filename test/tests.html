@@ -8962,7 +8962,7 @@ function _makeDockDOM() {
   // Item types per category (matching CATALOG)
   const itemsByCategory = {
     openings: ["door", "window"],
-    living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf"],
+    living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf", "armchair", "coffee-table", "dining-table-round"],
     kitchen:  ["fridge", "stove", "sink", "washer"],
     bedroom:  ["bed", "wardrobe", "nightstand", "dresser", "cabinet"],
     bath:     ["toilet", "bathtub"],
@@ -9024,7 +9024,7 @@ describe("LLD-50 — dock tabs: structure integrity", () => {
     expect(rows.length).toBe(5);
   });
 
-  it("union of all dock-item[data-type] equals the 19 catalog keys", () => {
+  it("union of all dock-item[data-type] equals the catalog keys", () => {
     const dock = _makeDockDOM();
     const types = Array.from(dock.querySelectorAll(".dock-item[data-type]")).map(b => b.dataset.type);
     _removeDockDOM(dock);
@@ -9033,7 +9033,9 @@ describe("LLD-50 — dock tabs: structure integrity", () => {
     if (JSON.stringify(dockTypes) !== JSON.stringify(catalogKeys)) {
       throw new Error(`Dock types don't match catalog keys.\nDock: ${dockTypes.join(", ")}\nCatalog: ${catalogKeys.join(", ")}`);
     }
-    expect(types.length).toBe(19);
+    // Count is derived from the catalog so it doesn't need a manual bump each time
+    // a symbol type is added (this line has churned 16→19→22 across catalog PRs).
+    expect(types.length).toBe(Object.keys(CATALOG).length);
   });
 
   it("no tab button has a data-type attribute", () => {
@@ -11456,6 +11458,246 @@ describe("grid.drawGrid — line placement", () => {
       throw new Error(`Idempotent redraw: first=${count1}, second=${count2}`);
     }
     if (count1 === 0) throw new Error("drawGrid emitted 0 lines");
+  });
+});
+
+// ─── Tests: LLD-69 — armchair, coffee-table, dining-table-round ──────────────
+
+const LLD69_TYPES = ["armchair", "coffee-table", "dining-table-round"];
+
+describe("LLD-69 — catalog integrity: three new living types", () => {
+  it("every new type exists in CATALOG with category 'living'", () => {
+    for (const t of LLD69_TYPES) {
+      if (!(t in CATALOG)) throw new Error(t + " missing from CATALOG");
+      if (CATALOG[t].category !== "living") throw new Error(t + " category should be 'living', got '" + CATALOG[t].category + "'");
+    }
+  });
+
+  it("every new type has a non-empty label", () => {
+    for (const t of LLD69_TYPES) {
+      const label = CATALOG[t].label;
+      if (!label || label.trim() === "") throw new Error(t + " has empty label");
+    }
+  });
+
+  it("every new type has finite w, h, min, max", () => {
+    for (const t of LLD69_TYPES) {
+      const cat = CATALOG[t];
+      for (const key of ["w", "h", "min", "max"]) {
+        if (!isFinite(cat[key])) throw new Error(t + "." + key + " is not finite: " + cat[key]);
+      }
+    }
+  });
+
+  it("min <= w <= max and min <= h <= max for every new type", () => {
+    for (const t of LLD69_TYPES) {
+      const cat = CATALOG[t];
+      const w = cat.w, h = cat.h, min = cat.min, max = cat.max;
+      if (w < min || w > max) throw new Error(t + ": w=" + w + " not in [" + min + "," + max + "]");
+      if (h < min || h > max) throw new Error(t + ": h=" + h + " not in [" + min + "," + max + "]");
+    }
+  });
+
+  it("no new type has openings:true", () => {
+    for (const t of LLD69_TYPES) {
+      if (CATALOG[t].openings) throw new Error(t + " unexpectedly has openings:true");
+    }
+  });
+
+  it("armchair: w=0.80, h=0.80, min=0.40, max=1.20", () => {
+    const cat = CATALOG["armchair"];
+    expect(cat.w).toBeCloseTo(0.80, 9);
+    expect(cat.h).toBeCloseTo(0.80, 9);
+    expect(cat.min).toBeCloseTo(0.40, 9);
+    expect(cat.max).toBeCloseTo(1.20, 9);
+  });
+
+  it("coffee-table: w=1.10, h=0.55, min=0.30, max=2.00", () => {
+    const cat = CATALOG["coffee-table"];
+    expect(cat.w).toBeCloseTo(1.10, 9);
+    expect(cat.h).toBeCloseTo(0.55, 9);
+    expect(cat.min).toBeCloseTo(0.30, 9);
+    expect(cat.max).toBeCloseTo(2.00, 9);
+  });
+
+  it("dining-table-round: w=1.20, h=1.20, min=0.60, max=2.50", () => {
+    const cat = CATALOG["dining-table-round"];
+    expect(cat.w).toBeCloseTo(1.20, 9);
+    expect(cat.h).toBeCloseTo(1.20, 9);
+    expect(cat.min).toBeCloseTo(0.60, 9);
+    expect(cat.max).toBeCloseTo(2.50, 9);
+  });
+});
+
+describe("LLD-69 — createSymbol: new types return correct Sym", () => {
+  it("createSymbol returns correct type, catalog defaults, rot:0, and string id", () => {
+    resetSymbolModel();
+    for (const t of LLD69_TYPES) {
+      const s = createSymbol(t, 1, 2);
+      if (s.type !== t) throw new Error(t + ": type mismatch");
+      if (Math.abs(s.w - CATALOG[t].w) > 1e-9) throw new Error(t + ": w mismatch");
+      if (Math.abs(s.h - CATALOG[t].h) > 1e-9) throw new Error(t + ": h mismatch");
+      if (s.rot !== 0) throw new Error(t + ": rot should be 0");
+      if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(t + ": invalid id " + s.id);
+    }
+  });
+
+  it("armchair and chair have distinct default sizes", () => {
+    const arm = CATALOG["armchair"];
+    const ch = CATALOG["chair"];
+    if (arm.w === ch.w && arm.h === ch.h) throw new Error("armchair and chair should have different default sizes");
+  });
+});
+
+describe("LLD-69 — clampDim: new types clamp at min and max", () => {
+  it("dining-table-round: below min (0.60) clamps to 0.60", () => {
+    expect(clampDim("dining-table-round", 0.10)).toBeCloseTo(0.60, 9);
+  });
+
+  it("dining-table-round: above max (2.50) clamps to 2.50", () => {
+    expect(clampDim("dining-table-round", 9.99)).toBeCloseTo(2.50, 9);
+  });
+
+  it("dining-table-round: in-range value 1.50 passes through unchanged", () => {
+    expect(clampDim("dining-table-round", 1.50)).toBeCloseTo(1.50, 9);
+  });
+
+  it("coffee-table: in-range value 0.80 passes through unchanged", () => {
+    expect(clampDim("coffee-table", 0.80)).toBeCloseTo(0.80, 9);
+  });
+
+  it("armchair: below min (0.40) clamps to 0.40", () => {
+    expect(clampDim("armchair", 0.10)).toBeCloseTo(0.40, 9);
+  });
+
+  it("armchair: above max (1.20) clamps to 1.20", () => {
+    expect(clampDim("armchair", 5.00)).toBeCloseTo(1.20, 9);
+  });
+});
+
+describe("LLD-69 — resizeSymbol: clamp on huge/tiny inputs", () => {
+  it("dining-table-round w tiny clamps to min=0.60 and returns changed=true", () => {
+    const s = createSymbol("dining-table-round", 0, 0);
+    const changed = resizeSymbol(s, "w", 0.01);
+    expect(s.w).toBeCloseTo(0.60, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("dining-table-round h huge clamps to max=2.50 and returns changed=true", () => {
+    const s = createSymbol("dining-table-round", 0, 0);
+    const changed = resizeSymbol(s, "h", 99);
+    expect(s.h).toBeCloseTo(2.50, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("coffee-table w in-range returns correct changed flag", () => {
+    const s = createSymbol("coffee-table", 0, 0);
+    // current w=1.10, set to 0.80 — should change
+    const changed = resizeSymbol(s, "w", 0.80);
+    expect(s.w).toBeCloseTo(0.80, 9);
+    expect(changed).toBe(true);
+  });
+});
+
+describe("LLD-69 — round table footprint (box hit-test semantics)", () => {
+  it("hitTest true at center of dining-table-round", () => {
+    const s = createSymbol("dining-table-round", 5, 5);
+    if (!hitTest(s, 5, 5)) throw new Error("hitTest should be true at center");
+  });
+
+  it("hitTest: point inside box corner (outside inscribed circle) is INSIDE (box governs)", () => {
+    // dining-table-round default: w=1.20, h=1.20, center=(5,5)
+    // Box extends ±0.60 in each axis. Inscribed circle radius ~0.60.
+    // Corner of box at (5+0.55, 5+0.55) — inside box, outside inscribed circle
+    const s = createSymbol("dining-table-round", 5, 5);
+    const cornerX = 5 + 0.55;
+    const cornerY = 5 + 0.55;
+    // Verify this point IS outside the inscribed circle
+    const dist = Math.sqrt((cornerX - 5) * (cornerX - 5) + (cornerY - 5) * (cornerY - 5));
+    if (dist <= s.w / 2) throw new Error("Test point should be outside inscribed circle, dist=" + dist);
+    // But should be inside box
+    if (!hitTest(s, cornerX, cornerY)) throw new Error("hitTest should be true for point inside box (corner area)");
+  });
+
+  it("hitTest: point just outside the w*h box (but inside circumscribed circle) is OUTSIDE", () => {
+    // dining-table-round default: w=1.20, h=1.20, center=(5,5)
+    // Point at (5+0.65, 5) — outside box (0.65 > 0.60 half-width), inside circumscribed circle
+    const s = createSymbol("dining-table-round", 5, 5);
+    const outsideX = 5 + 0.65;
+    if (hitTest(s, outsideX, 5)) throw new Error("hitTest should be false for point outside box");
+  });
+
+  it("corners() for rotated round table match the box (geometry unchanged)", () => {
+    const s = createSymbol("dining-table-round", 0, 0);
+    s.rot = 45;
+    const cs = corners(s);
+    // 4 corners returned
+    if (cs.length !== 4) throw new Error("corners() should return 4 points");
+    // Each corner should be at distance sqrt(2)*0.6 from center (diagonal of 1.2x1.2 box)
+    const expectedDist = Math.sqrt(2) * 0.60;
+    for (const c of cs) {
+      const d = Math.sqrt(c.x * c.x + c.y * c.y);
+      if (Math.abs(d - expectedDist) > 1e-6) throw new Error("Corner distance wrong: " + d + " expected ~" + expectedDist);
+    }
+  });
+
+  it("aabb() for rotated round table returns bounding box", () => {
+    const s = createSymbol("dining-table-round", 2, 3);
+    s.rot = 45;
+    const box = symAabb34(s);
+    // For a 1.2x1.2 square rotated 45 degrees, the AABB is sqrt(2)*1.2/2 wider
+    const expectedHalfSpan = Math.sqrt(2) * 0.60;
+    if (Math.abs(box.cx - 2) > 1e-6) throw new Error("aabb cx wrong: " + box.cx);
+    if (Math.abs(box.cy - 3) > 1e-6) throw new Error("aabb cy wrong: " + box.cy);
+    if (Math.abs((box.maxX - box.minX) / 2 - expectedHalfSpan) > 1e-6) throw new Error("aabb half-width wrong");
+  });
+});
+
+describe("LLD-69 — DOM: dock #row-living contains three new buttons", () => {
+  it("#row-living in test dock has armchair, coffee-table, dining-table-round buttons", () => {
+    const dock = _makeDockDOM();
+    const row = dock.querySelector("#test-row-living");
+    if (!row) throw new Error("#test-row-living not found");
+    for (const t of LLD69_TYPES) {
+      const btn = row.querySelector(".dock-item[data-type='" + t + "']");
+      if (!btn) { _removeDockDOM(dock); throw new Error("Missing dock button for: " + t); }
+      if (!btn.getAttribute("aria-label")) { _removeDockDOM(dock); throw new Error(t + " button missing aria-label"); }
+      if (btn.getAttribute("role") === "tab") { _removeDockDOM(dock); throw new Error(t + " button should not have role=tab"); }
+    }
+    _removeDockDOM(dock);
+  });
+});
+
+describe("LLD-69 — plan round-trip: new types serialize and validate", () => {
+  it("plan with one of each new type passes validatePlan", () => {
+    resetAll();
+    for (const t of LLD69_TYPES) {
+      addSymbol(createSymbol(t, 1, 1));
+    }
+    const p = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(p)));
+    if (!v) throw new Error("validatePlan rejected plan containing LLD-69 symbol types");
+    resetAll();
+  });
+
+  it("new types survive serializePlan -> JSON.parse -> validatePlan", () => {
+    resetAll();
+    addSymbol(createSymbol("armchair", 2, 3));
+    addSymbol(createSymbol("coffee-table", 4, 5));
+    addSymbol(createSymbol("dining-table-round", 6, 7));
+    const p = buildPlan();
+    const serialized = serializePlan(p);
+    const reparsed = validatePlan(JSON.parse(serialized));
+    if (!reparsed) throw new Error("validatePlan rejected re-parsed plan with LLD-69 types");
+    if (reparsed.symbols.symbols.length !== 3) throw new Error("Symbol count mismatch after round-trip: " + reparsed.symbols.symbols.length);
+    resetAll();
+  });
+
+  it("hyphenated type keys resolve correctly: coffee-table type in CATALOG", () => {
+    if (!("coffee-table" in CATALOG)) throw new Error("coffee-table not in CATALOG");
+    if (!("dining-table-round" in CATALOG)) throw new Error("dining-table-round not in CATALOG");
+    const s = createSymbol("coffee-table", 0, 0);
+    if (s.type !== "coffee-table") throw new Error("coffee-table type not preserved: " + s.type);
   });
 });
 

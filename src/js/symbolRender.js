@@ -509,6 +509,82 @@ function _renderInterior(parent, sym, cs, p) {
     return;
   }
 
+  if (sym.type === "armchair") {
+    // Back strip across the top ~22% depth
+    const bw = sw * 0.9;
+    const bh = sh * 0.22;
+    const b0 = lp(-bw / 2, -sh / 2 + 2);
+    const b1 = lp( bw / 2, -sh / 2 + 2);
+    const b2 = lp( bw / 2, -sh / 2 + 2 + bh);
+    const b3 = lp(-bw / 2, -sh / 2 + 2 + bh);
+    const backPts = [b0, b1, b2, b3].map(v => `${v.x},${v.y}`).join(" ");
+    const back = document.createElementNS(NS, "polygon");
+    back.setAttribute("points", backPts);
+    back.setAttribute("fill", `rgba(${rgb},0.15)`);
+    back.setAttribute("stroke", p.symStroke);
+    back.setAttribute("stroke-width", "0.8");
+    parent.appendChild(back);
+    // Two armrests down the sides
+    for (const side of [-1, 1]) {
+      const ax = side * (sw / 2 - (sw * 0.10));
+      const a0 = lp(ax - sw * 0.06, -sh / 2 + bh + 2);
+      const a1 = lp(ax + sw * 0.06, -sh / 2 + bh + 2);
+      const a2 = lp(ax + sw * 0.06,  sh / 2 - 2);
+      const a3 = lp(ax - sw * 0.06,  sh / 2 - 2);
+      const armPts = [a0, a1, a2, a3].map(v => `${v.x},${v.y}`).join(" ");
+      const arm = document.createElementNS(NS, "polygon");
+      arm.setAttribute("points", armPts);
+      arm.setAttribute("fill", `rgba(${rgb},0.1)`);
+      arm.setAttribute("stroke", p.symStroke);
+      arm.setAttribute("stroke-width", "0.7");
+      parent.appendChild(arm);
+    }
+    return;
+  }
+
+  if (sym.type === "coffee-table") {
+    // Inset inner rectangle tabletop (~11% inset on each side)
+    const inset = 0.11;
+    const iw = sw * (1 - 2 * inset);
+    const ih = sh * (1 - 2 * inset);
+    const i0 = lp(-iw / 2, -ih / 2);
+    const i1 = lp( iw / 2, -ih / 2);
+    const i2 = lp( iw / 2,  ih / 2);
+    const i3 = lp(-iw / 2,  ih / 2);
+    const insetPts = [i0, i1, i2, i3].map(v => `${v.x},${v.y}`).join(" ");
+    const tabletop = document.createElementNS(NS, "polygon");
+    tabletop.setAttribute("points", insetPts);
+    tabletop.setAttribute("fill", `rgba(${rgb},0.06)`);
+    tabletop.setAttribute("stroke", p.symStroke);
+    tabletop.setAttribute("stroke-width", "0.8");
+    parent.appendChild(tabletop);
+    return;
+  }
+
+  if (sym.type === "dining-table-round") {
+    // Outer circle filling the box (inscribed)
+    const r = Math.min(sw, sh) / 2 * 0.94;
+    const outer = document.createElementNS(NS, "circle");
+    outer.setAttribute("cx", String(sc.x));
+    outer.setAttribute("cy", String(sc.y));
+    outer.setAttribute("r", String(r));
+    outer.setAttribute("fill", "none");
+    outer.setAttribute("stroke", p.symStroke);
+    outer.setAttribute("stroke-width", "1");
+    parent.appendChild(outer);
+    // Concentric inner ring for tabletop read
+    const inner = document.createElementNS(NS, "circle");
+    inner.setAttribute("cx", String(sc.x));
+    inner.setAttribute("cy", String(sc.y));
+    inner.setAttribute("r", String(r * 0.6));
+    inner.setAttribute("fill", "none");
+    inner.setAttribute("stroke", p.symStroke);
+    inner.setAttribute("stroke-width", "0.7");
+    inner.setAttribute("opacity", "0.4");
+    parent.appendChild(inner);
+    return;
+  }
+
   if (sym.type === "nightstand") {
     // Single horizontal drawer line across ~40% depth + center handle dot
     const drawerY = -sh / 2 + sh * 0.40;
