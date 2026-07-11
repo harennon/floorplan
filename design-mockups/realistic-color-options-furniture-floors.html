@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Realistic Colors — Furniture &amp; Floors · floorplan mockup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Design tokens (mirrors src/index.html) ─────────────────────────── */
+    :root {
+      --bg: #14140f; --bg-deep: #100f0b; --ink: #ece7d6; --muted: #8f8a78;
+      --gold: #c9a84c; --gold-soft: rgba(201,168,76,0.55);
+      --grid-fine: rgba(201,168,76,0.055); --grid-major: rgba(201,168,76,0.14);
+      --panel: rgba(20,20,15,0.72); --hairline: rgba(201,168,76,0.18);
+      --font-ui: "DM Sans", system-ui, sans-serif;
+      --font-mono: "DM Mono", "Courier New", monospace;
+      --font-display: "Libre Baskerville", Georgia, serif;
+      --sym-stroke: #d9be6e; --snap-teal: #7fd0c8;
+      --shadow: 0 8px 30px rgba(0,0,0,0.45);
+    }
+    html[data-theme="light"] {
+      --bg: #f3ecda; --bg-deep: #e7dcc2; --ink: #3a3020; --muted: #8a7c60;
+      --gold: #a9812a; --gold-soft: rgba(169,129,42,0.5);
+      --grid-fine: rgba(120,96,50,0.07); --grid-major: rgba(120,96,50,0.16);
+      --panel: rgba(248,242,228,0.82); --hairline: rgba(120,96,50,0.22);
+      --sym-stroke: #6b5836; --snap-teal: #2f8f86;
+      --shadow: 0 8px 30px rgba(80,60,20,0.22);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: var(--font-ui); color: var(--ink);
+      background:
+        radial-gradient(120% 90% at 50% 0%, var(--bg) 0%, var(--bg-deep) 100%);
+      min-height: 100%;
+      -webkit-font-smoothing: antialiased;
+    }
+    /* faint graph-paper grid behind everything */
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image:
+        linear-gradient(var(--grid-fine) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+        linear-gradient(var(--grid-major) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+      background-size: 24px 24px, 24px 24px, 120px 120px, 120px 120px;
+    }
+  </style>
+  <style id="layout-styles">
+    .wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: 2.2rem 1.5rem 5rem; }
+    header.page { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+    header.page h1 { font-family: var(--font-display); font-weight: 400; font-size: 1.7rem; color: var(--gold); margin: 0; letter-spacing: 0.01em; }
+    header.page p { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); margin: 0.15rem 0 0; max-width: 46ch; line-height: 1.5; }
+    .theme-toggle {
+      font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted);
+      background: var(--panel); border: 1px solid var(--hairline); border-radius: 999px;
+      padding: 0.35rem 0.85rem; cursor: pointer; letter-spacing: 0.05em;
+      backdrop-filter: blur(10px); transition: color .15s, border-color .15s;
+    }
+    .theme-toggle:hover { color: var(--gold); border-color: var(--gold-soft); }
+
+    /* Section label */
+    .sec-label {
+      font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--muted); margin: 2.4rem 0 0.9rem;
+      display: flex; align-items: center; gap: 0.7rem;
+    }
+    .sec-label::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+
+    /* Stage: faux canvas holding a couple of symbols to anchor the popover */
+    .stage {
+      position: relative; border: 1px solid var(--hairline); border-radius: 12px;
+      background:
+        radial-gradient(140% 120% at 50% -10%, rgba(201,168,76,0.05), transparent 60%);
+      height: 460px; overflow: hidden;
+    }
+    .stage .cap {
+      position: absolute; top: 0.7rem; left: 0.9rem; font-family: var(--font-mono);
+      font-size: 0.62rem; color: var(--muted); letter-spacing: 0.04em; z-index: 5;
+    }
+
+    /* A drawn room floor + furniture rendered as flat SVG-ish blocks */
+    .floor {
+      position: absolute; border: 2px solid var(--sym-stroke); border-radius: 2px;
+    }
+    .floor-a { left: 90px; top: 120px; width: 430px; height: 250px; }
+    .piece {
+      position: absolute; border: 1.5px solid var(--sym-stroke); border-radius: 3px;
+      display: grid; place-items: center; font-family: var(--font-mono);
+      font-size: 0.55rem; color: rgba(0,0,0,0.35); text-transform: lowercase;
+    }
+    html[data-theme="dark"] .piece { color: rgba(255,255,255,0.28); }
+    .piece.sel { outline: 2px dashed var(--gold); outline-offset: 2px; }
+    .piece.sofa { left: 130px; top: 150px; width: 200px; height: 82px; }
+    .piece.bed  { left: 360px; top: 250px; width: 130px; height: 100px; }
+    .piece.rug  { left: 150px; top: 250px; width: 150px; height: 90px; opacity: .9; }
+  </style>
+  <style id="picker-styles">
+    /* ── Inspector toolbar (mirrors real .symbol-inspector) ─────────────── */
+    .inspector {
+      display: inline-flex; align-items: center; gap: 0.2rem;
+      background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: 8px; padding: 0.3rem 0.4rem; box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .insp-btn {
+      background: transparent; border: 1px solid transparent; color: var(--muted);
+      width: 2rem; height: 2rem; border-radius: 5px; cursor: pointer;
+      display: grid; place-items: center; transition: color .12s, border-color .12s, background .12s;
+    }
+    .insp-btn:hover { color: var(--gold); border-color: var(--gold-soft); }
+    .insp-btn[aria-pressed="true"] { color: var(--gold); background: rgba(201,168,76,0.12); border-color: var(--gold-soft); }
+    .insp-sep { width: 1px; height: 1.4rem; background: var(--hairline); }
+
+    /* The swatch trigger button — shows current material as a filled disc */
+    .swatch-trigger {
+      position: relative; width: 2rem; height: 2rem; border-radius: 5px;
+      border: 1px solid transparent; background: transparent; cursor: pointer;
+      display: grid; place-items: center; transition: border-color .12s, background .12s;
+    }
+    .swatch-trigger:hover { border-color: var(--gold-soft); background: rgba(201,168,76,0.08); }
+    .swatch-trigger .disc {
+      width: 17px; height: 17px; border-radius: 50%;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.28), 0 0 0 1px rgba(255,255,255,0.06);
+    }
+    /* "auto/theme" state = diagonal split disc telling user no explicit color set */
+    .swatch-trigger .disc.auto {
+      background:
+        linear-gradient(135deg, var(--sym-stroke) 0 50%, transparent 50% 100%),
+        repeating-linear-gradient(135deg, var(--muted) 0 2px, transparent 2px 4px);
+      opacity: .8;
+    }
+    .swatch-trigger[aria-expanded="true"] { border-color: var(--gold-soft); background: rgba(201,168,76,0.12); }
+
+    /* ── Popover ────────────────────────────────────────────────────────── */
+    .popover {
+      position: absolute; z-index: 40; width: 236px;
+      background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: 12px; padding: 0.85rem 0.85rem 0.75rem;
+      box-shadow: var(--shadow); backdrop-filter: blur(14px);
+      animation: pop .13s ease-out;
+    }
+    @keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
+    .popover .pop-head {
+      display: flex; align-items: center; justify-content: space-between;
+      font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.14em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 0.6rem;
+    }
+    .popover .pop-head b { color: var(--ink); font-weight: 500; letter-spacing: 0.04em; text-transform: none; font-size: 0.72rem; }
+
+    /* material group */
+    .grp-name { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0.55rem 0 0.4rem; }
+    .grp-name:first-of-type { margin-top: 0; }
+
+    .swatch-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.4rem; }
+    .swatch {
+      position: relative; aspect-ratio: 1; border-radius: 6px; cursor: pointer;
+      border: 1px solid rgba(0,0,0,0.25); padding: 0;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+      transition: transform .1s, box-shadow .1s;
+    }
+    .swatch:hover { transform: scale(1.12); box-shadow: 0 0 0 2px var(--gold-soft); z-index: 2; }
+    .swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--gold), 0 0 0 4px rgba(201,168,76,0.25); }
+    .swatch[aria-checked="true"]::after {
+      content: ""; position: absolute; inset: 0; margin: auto; width: 8px; height: 8px;
+      border-radius: 50%; background: #fff; mix-blend-mode: difference;
+    }
+    .swatch .tip {
+      position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+      background: var(--bg-deep); color: var(--ink); border: 1px solid var(--hairline);
+      font-family: var(--font-mono); font-size: 0.6rem; padding: 0.15rem 0.4rem; border-radius: 4px;
+      white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .1s; z-index: 5;
+    }
+    .swatch:hover .tip { opacity: 1; }
+
+    /* "auto" reset chip: first cell, dashed, restores theme default */
+    .swatch.reset {
+      background: transparent; border: 1px dashed var(--gold-soft);
+      display: grid; place-items: center; color: var(--muted);
+    }
+    .swatch.reset svg { width: 14px; height: 14px; }
+    .swatch.reset:hover { color: var(--gold); }
+
+    /* footer note */
+    .pop-foot {
+      margin-top: 0.7rem; padding-top: 0.6rem; border-top: 1px solid var(--hairline);
+      font-family: var(--font-mono); font-size: 0.58rem; color: var(--muted); line-height: 1.5;
+      display: flex; align-items: center; gap: 0.4rem;
+    }
+    .pop-foot .apply-scope {
+      margin-left: auto; color: var(--gold); cursor: pointer; text-decoration: underline dotted;
+    }
+
+    /* Variant B: single row inline strip (no popover) */
+    .strip {
+      display: inline-flex; align-items: center; gap: 0.3rem; background: var(--panel);
+      border: 1px solid var(--hairline); border-radius: 8px; padding: 0.35rem 0.5rem;
+      box-shadow: var(--shadow); backdrop-filter: blur(10px);
+    }
+    .strip .s { width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 1px solid rgba(0,0,0,0.25); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05); transition: transform .1s; }
+    .strip .s:hover { transform: scale(1.18); }
+    .strip .s[aria-checked="true"] { box-shadow: 0 0 0 2px var(--gold); }
+    .strip .more { font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted); background: none; border: none; cursor: pointer; padding: 0 0.2rem; }
+    .strip .more:hover { color: var(--gold); }
+
+    /* explanatory rationale cards under each variant */
+    .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.8rem; margin-top: 1.1rem; }
+    .note { border: 1px solid var(--hairline); border-radius: 10px; padding: 0.85rem 0.95rem; background: var(--panel); backdrop-filter: blur(8px); }
+    .note h4 { margin: 0 0 0.4rem; font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold); }
+    .note p { margin: 0; font-size: 0.78rem; line-height: 1.55; color: var(--muted); }
+    .note p b { color: var(--ink); font-weight: 500; }
+
+    .legend { font-family: var(--font-mono); font-size: 0.66rem; color: var(--muted); margin: 0.4rem 0 0; line-height: 1.6; }
+    .kbd { border: 1px solid var(--hairline); border-radius: 4px; padding: 0.05rem 0.35rem; color: var(--ink); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="page">
+      <div>
+        <h1>Realistic colors — furniture &amp; floors</h1>
+        <p>Curated material swatches on the symbol inspector and a floor/room equivalent. Falls back to the theme ink when unset, so existing plans are untouched.</p>
+      </div>
+      <button class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark theme">◐ toggle theme</button>
+    </header>
+
+    <!-- ══ Variant A: popover swatch board (RECOMMENDED) ══ -->
+    <div class="sec-label">Direction A · popover swatch board</div>
+    <div class="stage">
+      <span class="cap">select a sofa → tap the material chip in the inspector</span>
+
+      <!-- Floor + furniture on the faux canvas -->
+      <div class="floor floor-a" id="floorA" style="background: rgba(201,168,76,0.05);"></div>
+      <div class="piece rug"  style="background:#c96f4a;">rug</div>
+      <div class="piece sofa sel" id="sofaA" style="background:#3f5a73;">sofa</div>
+      <div class="piece bed"  style="background:#e6e2d8;">bed</div>
+
+      <!-- Inspector toolbar anchored above the selected sofa -->
+      <div class="inspector" style="position:absolute; left:130px; top:104px;">
+        <button class="insp-btn" title="Rotate 90°" aria-label="Rotate 90 degrees">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8 A5 5 0 1 1 8 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><polyline points="3,5 3,8 6,8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+        </button>
+        <button class="insp-btn" title="Duplicate" aria-label="Duplicate symbol">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="2" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/><rect x="2" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="var(--bg-deep)"/></svg>
+        </button>
+        <div class="insp-sep"></div>
+        <!-- NEW: material swatch trigger -->
+        <button class="swatch-trigger" id="triggerA" aria-haspopup="true" aria-expanded="true" aria-label="Material color: Denim Blue">
+          <span class="disc" style="background:#3f5a73;"></span>
+        </button>
+        <div class="insp-sep"></div>
+        <button class="insp-btn" title="Delete" aria-label="Delete symbol">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><polyline points="2,4 14,4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5 4 V13 H11 V4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/><polyline points="6,4 6,2 10,2 10,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+        </button>
+      </div>
+
+      <!-- Popover, shown open -->
+      <div class="popover" id="popoverA" style="left:130px; top:150px;"></div>
+    </div>
+
+    <div class="notes">
+      <div class="note"><h4>Why a popover</h4><p>Keeps the inspector chrome tiny — one <b>material chip</b> whose disc shows the current color. Tapping opens a grouped board of ~24 curated swatches. Scales to more materials without crowding the toolbar.</p></div>
+      <div class="note"><h4>Curated, not a hex wheel</h4><p>Swatches are grouped by <b>real material families</b> (woods, upholstery neutrals, appliance finishes, accents). Realistic defaults beat infinite choice — matches the "fun but real tool" philosophy.</p></div>
+      <div class="note"><h4>Auto = theme ink</h4><p>The first dashed cell resets to <b>Auto</b> (unset). Renders with today's theme fill and stays legible in both light &amp; dark. Old plans / share links keep working with no <code>color</code> field.</p></div>
+    </div>
+
+    <!-- ══ Variant B: inline quick strip ══ -->
+    <div class="sec-label">Direction B · inline quick strip</div>
+    <div class="stage" style="height:180px;">
+      <span class="cap">most-common swatches inline; “+” opens the full board</span>
+      <div class="strip" style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);">
+        <span class="s" style="background:#8a5a3c;" aria-checked="false" title="Walnut"></span>
+        <span class="s" style="background:#c8a878;" aria-checked="false" title="Oak"></span>
+        <span class="s" style="background:#3f5a73;" aria-checked="true" title="Denim Blue"></span>
+        <span class="s" style="background:#7d8471;" aria-checked="false" title="Sage"></span>
+        <span class="s" style="background:#e6e2d8;" aria-checked="false" title="Bone White"></span>
+        <span class="s" style="background:#2b2b2b;" aria-checked="false" title="Charcoal"></span>
+        <div class="insp-sep" style="height:1.1rem;"></div>
+        <button class="more" aria-label="More colors">+18 ▾</button>
+      </div>
+    </div>
+    <div class="notes">
+      <div class="note"><h4>Trade-off</h4><p>Zero-click access to the 6 most-used materials, but eats horizontal space and pushes the rarer swatches behind a “+”. Better on desktop, awkward on the mobile bottom-sheet inspector.</p></div>
+    </div>
+
+    <!-- ══ Floor / room picker ══ -->
+    <div class="sec-label">Floor &amp; room picker (applies to either direction)</div>
+    <div class="stage" style="height:360px;">
+      <span class="cap">select a room’s floor → same board, seeded to wood tones</span>
+      <div class="floor" id="floorRoom" style="left:120px; top:70px; width:420px; height:230px; background:#c8a878; opacity:.32; outline:2px dashed var(--gold); outline-offset:3px;"></div>
+      <!-- floor toolbar (a room has no rotate/duplicate — just material + area readout) -->
+      <div class="inspector" style="position:absolute; left:120px; top:26px;">
+        <span style="font-family:var(--font-mono); font-size:0.66rem; color:var(--muted); padding:0 0.5rem;">Living room · 21.4 m²</span>
+        <div class="insp-sep"></div>
+        <button class="swatch-trigger" id="triggerFloor" aria-haspopup="true" aria-expanded="true" aria-label="Floor material: Oak">
+          <span class="disc" style="background:#c8a878;"></span>
+        </button>
+      </div>
+      <div class="popover" id="popoverFloor" style="left:120px; top:72px;"></div>
+    </div>
+    <div class="notes">
+      <div class="note"><h4>Shared component</h4><p>The floor picker is the <b>same swatch board</b>, opened from a room’s inspector. Floors render at low opacity so furniture stays legible on top; the board seeds the <b>Floors</b> group (woods, tile, concrete) first.</p></div>
+      <div class="note"><h4>Category-aware defaults</h4><p>New pieces can seed a sensible default per category — floors → oak, appliances → white — so a plan looks good with <b>zero picking</b>. Optional; Auto remains the true fallback.</p></div>
+    </div>
+
+    <p class="legend">Toolbar and swatch chrome reuse the live app tokens. <span class="kbd">◐ toggle theme</span> to verify every swatch stays legible against both blueprint backgrounds.</p>
+
+  </div>
+  <script id="data-script">
+    // Curated material palette — grouped, named, literal hex (theme-independent).
+    // Each entry: { id, name, hex }. Kept small & tasteful (realistic > infinite).
+    const PALETTE = {
+      "Woods": [
+        { id: "oak",     name: "Oak",        hex: "#c8a878" },
+        { id: "walnut",  name: "Walnut",     hex: "#8a5a3c" },
+        { id: "maple",   name: "Maple",      hex: "#dcc39a" },
+        { id: "cherry",  name: "Cherry",     hex: "#9d5a3f" },
+        { id: "ebony",   name: "Ebony",      hex: "#3a2e26" },
+        { id: "ash",     name: "Ash Grey",   hex: "#b7a894" },
+      ],
+      "Upholstery": [
+        { id: "denim",   name: "Denim Blue", hex: "#3f5a73" },
+        { id: "sage",    name: "Sage",       hex: "#7d8471" },
+        { id: "clay",    name: "Terracotta", hex: "#c96f4a" },
+        { id: "mustard", name: "Mustard",    hex: "#c69a3e" },
+        { id: "plum",    name: "Plum",       hex: "#6e4a63" },
+        { id: "linen",   name: "Linen",      hex: "#d8cbb2" },
+      ],
+      "Neutrals & finishes": [
+        { id: "bone",    name: "Bone White", hex: "#e6e2d8" },
+        { id: "cloud",   name: "Cloud Grey", hex: "#c3c1ba" },
+        { id: "stone",   name: "Stone",      hex: "#9a958a" },
+        { id: "slate",   name: "Slate",      hex: "#5c636b" },
+        { id: "charcoal",name: "Charcoal",   hex: "#2b2b2b" },
+        { id: "steel",   name: "Steel",      hex: "#aeb4b8" },
+      ],
+      "Floors & surfaces": [
+        { id: "tile",    name: "Tile Grey",  hex: "#b9bdbd" },
+        { id: "concrete",name: "Concrete",   hex: "#9fa0a0" },
+        { id: "terrazzo",name: "Terrazzo",   hex: "#d9d4c6" },
+        { id: "brick",   name: "Brick",      hex: "#a05743" },
+        { id: "moss",    name: "Moss Green", hex: "#6a7a4f" },
+        { id: "sand",    name: "Sand",       hex: "#d7c39b" },
+      ],
+    };
+  </script>
+  <script id="behavior-script">
+    const RESET_SVG = '<svg viewBox="0 0 16 16" fill="none"><path d="M3 8a5 5 0 1 1 1.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><polyline points="3,11 3,8 6,8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+
+    function buildBoard(target, opts) {
+      const { title, selectedId, floorFirst, onPick } = opts;
+      const groups = Object.entries(PALETTE);
+      if (floorFirst) groups.sort((a, b) => (a[0] === "Floors & surfaces" ? -1 : b[0] === "Floors & surfaces" ? 1 : 0));
+
+      let html = '<div class="pop-head"><span>Material</span><b>' + title + '</b></div>';
+      // reset row lives in the first grid, as cell 0
+      groups.forEach(([name, items], gi) => {
+        html += '<div class="grp-name">' + name + '</div><div class="swatch-grid">';
+        if (gi === 0) {
+          html += '<button class="swatch reset" role="radio" aria-checked="' + (!selectedId) + '" title="Auto (theme default)" data-id="">' + RESET_SVG + '<span class="tip">Auto</span></button>';
+        }
+        items.forEach(sw => {
+          const on = sw.id === selectedId;
+          html += '<button class="swatch" role="radio" aria-checked="' + on + '" data-id="' + sw.id + '" data-hex="' + sw.hex + '" style="background:' + sw.hex + '" title="' + sw.name + '"><span class="tip">' + sw.name + '</span></button>';
+        });
+        html += '</div>';
+      });
+      html += '<div class="pop-foot"><span>Legible in light &amp; dark. Exports to PNG/SVG.</span></div>';
+      target.innerHTML = html;
+
+      target.querySelectorAll('.swatch').forEach(btn => {
+        btn.addEventListener('click', () => {
+          target.querySelectorAll('.swatch').forEach(b => b.setAttribute('aria-checked', 'false'));
+          btn.setAttribute('aria-checked', 'true');
+          onPick(btn.dataset.id || null, btn.dataset.hex || null);
+        });
+      });
+    }
+
+    // Variant A — sofa
+    buildBoard(document.getElementById('popoverA'), {
+      title: 'Sofa', selectedId: 'denim',
+      onPick: (id, hex) => {
+        const disc = document.querySelector('#triggerA .disc');
+        const piece = document.getElementById('sofaA');
+        if (hex) { disc.classList.remove('auto'); disc.style.background = hex; piece.style.background = hex; }
+        else { disc.classList.add('auto'); disc.style.background = 'transparent'; piece.style.background = 'var(--sym-fill, rgba(201,168,76,0.12))'; }
+      }
+    });
+
+    // Floor picker — seeded to floors group first, oak selected
+    buildBoard(document.getElementById('popoverFloor'), {
+      title: 'Living room floor', selectedId: 'oak', floorFirst: true,
+      onPick: (id, hex) => {
+        const disc = document.querySelector('#triggerFloor .disc');
+        const floor = document.getElementById('floorRoom');
+        if (hex) { disc.classList.remove('auto'); disc.style.background = hex; floor.style.background = hex; }
+        else { disc.classList.add('auto'); disc.style.background = 'transparent'; floor.style.background = 'rgba(201,168,76,0.07)'; }
+      }
+    });
+
+    // Theme toggle
+    const tbtn = document.getElementById('themeToggle');
+    tbtn.addEventListener('click', () => {
+      const el = document.documentElement;
+      el.dataset.theme = el.dataset.theme === 'dark' ? 'light' : 'dark';
+    });
+  </script>
+</body>
+</html>
