@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Room · set W×H affordance — mockups</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg:         #14140f;
+        --bg-deep:    #100f0b;
+        --ink:        #ece7d6;
+        --muted:      #8f8a78;
+        --gold:       #c9a84c;
+        --gold-soft:  rgba(201, 168, 76, 0.55);
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --grid-axis:  rgba(201, 168, 76, 0.34);
+        --panel:      rgba(20, 20, 15, 0.72);
+        --hairline:   rgba(201, 168, 76, 0.18);
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+        --wall-line:     #d9be6e;
+        --room-fill:     rgba(201,168,76,0.07);
+        --room-fill-hi:  rgba(201,168,76,0.15);
+        --snap-point:    #e0b64f;
+        --error: #e57373;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        background: var(--bg-deep);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        line-height: 1.5;
+        padding: 2rem 1.5rem 5rem;
+      }
+
+      .page-head {
+        max-width: 60rem;
+        margin: 0 auto 2rem;
+      }
+      .page-head h1 {
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 1.5rem;
+        margin: 0 0 0.4rem;
+        color: var(--ink);
+      }
+      .page-head p {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin: 0.2rem 0;
+        max-width: 46rem;
+      }
+      .page-head code {
+        font-family: var(--font-mono);
+        color: var(--gold);
+        font-size: 0.85em;
+      }
+
+      /* ── Option section scaffold ─────────────────────────────────────── */
+      .option {
+        max-width: 60rem;
+        margin: 0 auto 2.5rem;
+        border: 1px solid var(--hairline);
+        border-radius: 12px;
+        overflow: hidden;
+        background: rgba(20,20,15,0.4);
+      }
+      .option-head {
+        padding: 0.9rem 1.2rem;
+        border-bottom: 1px solid var(--hairline);
+        display: flex;
+        align-items: baseline;
+        gap: 0.8rem;
+        flex-wrap: wrap;
+      }
+      .option-tag {
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--bg-deep);
+        background: var(--gold);
+        padding: 0.15rem 0.5rem;
+        border-radius: 4px;
+        font-weight: 500;
+      }
+      .option-title {
+        font-family: var(--font-display);
+        font-size: 1.05rem;
+        color: var(--ink);
+      }
+      .option-note {
+        flex-basis: 100%;
+        color: var(--muted);
+        font-size: 0.82rem;
+        margin-top: 0.1rem;
+      }
+
+      /* ── Stage (blueprint canvas) ────────────────────────────────────── */
+      .stage-wrap {
+        position: relative;
+        height: 22rem;
+        background:
+          linear-gradient(var(--grid-fine) 1px, transparent 1px) 0 0 / 22px 22px,
+          linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px) 0 0 / 22px 22px,
+          linear-gradient(var(--grid-major) 1px, transparent 1px) 0 0 / 110px 110px,
+          linear-gradient(90deg, var(--grid-major) 1px, transparent 1px) 0 0 / 110px 110px,
+          var(--bg);
+        overflow: hidden;
+      }
+      .stage-caption {
+        position: absolute;
+        left: 0.8rem;
+        bottom: 0.7rem;
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        color: var(--muted);
+        background: rgba(16,15,11,0.7);
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        max-width: 20rem;
+        z-index: 6;
+      }
+      .stage-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+      /* Room polygon + selection outline */
+      .room-fill { fill: var(--room-fill); }
+      .room-wall {
+        fill: none;
+        stroke: var(--wall-line);
+        stroke-width: 5;
+        stroke-linejoin: round;
+        opacity: 0.85;
+      }
+      .room-sel-outline {
+        fill: none;
+        stroke: var(--snap-point);
+        stroke-width: 1.5;
+        stroke-dasharray: 6 4;
+      }
+      .dim-tick { stroke: var(--muted); stroke-width: 1; opacity: 0.5; }
+
+      /* Dimension chip on a wall (existing affordance) */
+      .dim-chip {
+        fill: rgba(16,15,11,0.82);
+        stroke: var(--hairline);
+        stroke-width: 1;
+      }
+      .dim-chip-txt {
+        fill: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .dim-chip-grp.is-hot .dim-chip { stroke: var(--gold); }
+      .dim-chip-grp.is-hot .dim-chip-txt { fill: var(--gold); }
+
+      /* ── Right rail: Measure inspector (production styles) ───────────── */
+      .right-rail {
+        position: absolute;
+        top: 0.8rem;
+        right: 0.8rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        z-index: 5;
+        width: 14rem;
+      }
+      .measure {
+        width: 14rem;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        backdrop-filter: blur(8px);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        overflow: hidden;
+      }
+      .measure-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.5rem 0.7rem 0.35rem;
+        gap: 0.5rem;
+      }
+      .measure-header-label {
+        color: var(--muted);
+        font-size: 0.62rem;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+      .measure-total-val {
+        color: var(--gold);
+        font-size: 0.88rem;
+        font-weight: 500;
+        flex: 1;
+        text-align: right;
+      }
+      .measure-toggle {
+        background: transparent; border: none; color: var(--muted);
+        cursor: pointer; font-family: var(--font-mono); font-size: 0.7rem;
+        padding: 0; line-height: 1;
+      }
+      .measure-body { border-top: 1px solid var(--hairline); }
+      .measure-row {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.3rem 0.7rem;
+        border-bottom: 1px solid rgba(201,168,76,0.07);
+        transition: background 0.12s;
+      }
+      .measure-row:last-child { border-bottom: none; }
+      .measure-row.is-selected {
+        background: rgba(224,182,79,0.10);
+        box-shadow: inset 2px 0 0 var(--snap-point);
+      }
+      .measure-row-label { color: var(--muted); font-size: 0.65rem; white-space: nowrap; }
+      .measure-row-area { color: var(--ink); text-align: right; font-size: 0.65rem; }
+      .measure-row-perim { color: var(--muted); font-size: 0.62rem; }
+
+      /* ── Shared W×H input group ──────────────────────────────────────── */
+      .wxh {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-family: var(--font-mono);
+      }
+      .wxh input {
+        width: 3.1rem;
+        background: rgba(16,15,11,0.6);
+        border: 1px solid var(--hairline);
+        border-radius: 4px;
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        padding: 0.22rem 0.35rem;
+        text-align: right;
+        outline: none;
+      }
+      .wxh input:focus { border-color: var(--gold); }
+      .wxh input.err { border-color: var(--error); }
+      .wxh .times { color: var(--muted); font-size: 0.72rem; }
+      .wxh .unit { color: var(--muted); font-size: 0.6rem; }
+      .wxh-apply {
+        margin-left: 0.15rem;
+        background: var(--gold);
+        color: var(--bg-deep);
+        border: none;
+        border-radius: 4px;
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        letter-spacing: 0.05em;
+        padding: 0.28rem 0.5rem;
+        cursor: pointer;
+        font-weight: 500;
+      }
+      .wxh-apply:disabled { opacity: 0.4; cursor: default; }
+
+      /* Option A: W×H block inside measure panel */
+      .measure-setsize {
+        border-top: 1px solid var(--hairline);
+        padding: 0.5rem 0.7rem 0.6rem;
+        background: rgba(224,182,79,0.05);
+      }
+      .measure-setsize.is-empty { display: none; }
+      .measure-setsize-label {
+        color: var(--muted);
+        font-size: 0.58rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 0.35rem;
+        display: flex;
+        justify-content: space-between;
+      }
+      .measure-setsize-label .subj { color: var(--snap-point); }
+      .measure-setsize-hint {
+        color: var(--muted);
+        font-size: 0.56rem;
+        margin-top: 0.35rem;
+        font-style: italic;
+      }
+
+      /* Option B: floating popover pinned to the selected room centroid */
+      .room-popover {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        background: var(--panel);
+        border: 1px solid var(--gold-soft);
+        border-radius: 8px;
+        padding: 0.45rem 0.55rem;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+        z-index: 7;
+        animation: pop-in 0.14s ease-out;
+      }
+      @keyframes pop-in {
+        from { opacity: 0; transform: translate(-50%, calc(-50% + 6px)); }
+        to   { opacity: 1; transform: translate(-50%, -50%); }
+      }
+      .room-popover-label {
+        font-family: var(--font-mono);
+        font-size: 0.56rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 0.35rem;
+        text-align: center;
+      }
+
+      /* Option C: context toolbar (small pill above the selected room) */
+      .room-toolbar {
+        position: absolute;
+        transform: translate(-50%, -100%);
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 999px;
+        padding: 0.28rem 0.4rem 0.28rem 0.6rem;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+        z-index: 7;
+        font-family: var(--font-mono);
+      }
+      .room-toolbar .rt-dims {
+        color: var(--ink);
+        font-size: 0.72rem;
+        white-space: nowrap;
+      }
+      .room-toolbar .rt-dims b { color: var(--gold); font-weight: 500; }
+      .room-toolbar-btn {
+        background: transparent;
+        border: 1px solid var(--hairline);
+        border-radius: 999px;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.6rem;
+        letter-spacing: 0.04em;
+        padding: 0.22rem 0.55rem;
+        cursor: pointer;
+        transition: all 0.12s;
+      }
+      .room-toolbar-btn:hover { color: var(--ink); border-color: var(--gold-soft); }
+      .room-toolbar-btn.active { color: var(--bg-deep); background: var(--gold); border-color: var(--gold); }
+      .rt-editor { display: none; align-items: center; gap: 0.3rem; }
+      .room-toolbar.editing .rt-dims { display: none; }
+      .room-toolbar.editing .rt-open { display: none; }
+      .room-toolbar.editing .rt-editor { display: flex; }
+
+      /* Reduced motion */
+      @media (prefers-reduced-motion: reduce) {
+        .room-popover { animation: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="page-head">
+      <h1>Set room to W×H — affordance directions</h1>
+      <p>
+        LLD 63 follow-up. LLD 63 already made the wall dim-chip edit rectangle-preserving,
+        so the gesture people reach for first is fixed. This explores an <em>explicit</em>
+        way to type both dimensions at once for a selected rectangular room — for users who
+        know the exact target size and don't want to edit two edges in sequence.
+      </p>
+      <p>
+        All three build on the existing <code>isRectangle</code> + <code>rescaleRectEdge</code>
+        geometry and appear only when a <strong>rectangular room is selected</strong> (the
+        dashed-gold outline from LLD 63). Weigh each against the minimal-chrome principle.
+      </p>
+    </header>
+
+    <!-- ══════════════════ OPTION A ══════════════════ -->
+    <section class="option">
+      <div class="option-head">
+        <span class="option-tag">Option A</span>
+        <span class="option-title">W×H field docked in the Measure panel</span>
+        <p class="option-note">
+          The panel already lists the selected room's area & perimeter. When a rectangular
+          room is selected, a compact <b>W × H</b> field slides in at the bottom of the panel,
+          pre-filled with the current dimensions. Zero canvas chrome — reuses the panel users
+          already read numbers from. Lives beside the source of truth; no floating layer.
+        </p>
+      </div>
+      <div class="stage-wrap">
+        <svg class="stage-svg" viewBox="0 0 700 350" preserveAspectRatio="none">
+          <polygon class="room-fill" points="120,95 430,95 430,285 120,285" />
+          <polygon class="room-wall" points="120,95 430,95 430,285 120,285" />
+          <polygon class="room-sel-outline" points="128,103 422,103 422,277 128,277" />
+        </svg>
+        <div class="right-rail">
+          <aside class="measure">
+            <div class="measure-header">
+              <span class="measure-header-label">Floor Area</span>
+              <span class="measure-total-val">204 ft²</span>
+              <button class="measure-toggle">▾</button>
+            </div>
+            <div class="measure-body">
+              <div class="measure-row is-selected">
+                <span class="measure-row-label">Room 1</span>
+                <span class="measure-row-area">204 ft²</span>
+                <span class="measure-row-perim">58.0 ft</span>
+              </div>
+              <div class="measure-row">
+                <span class="measure-row-label">Room 2</span>
+                <span class="measure-row-area">96 ft²</span>
+                <span class="measure-row-perim">40.0 ft</span>
+              </div>
+            </div>
+            <div class="measure-setsize" id="a-setsize">
+              <div class="measure-setsize-label">
+                <span>Set size</span><span class="subj">Room 1</span>
+              </div>
+              <div class="wxh">
+                <input id="a-w" value="17.0" aria-label="Width in feet" />
+                <span class="times">×</span>
+                <input id="a-h" value="12.0" aria-label="Height in feet" />
+                <span class="unit">ft</span>
+                <button class="wxh-apply" id="a-apply">SET</button>
+              </div>
+              <div class="measure-setsize-hint">Anchors the top-left corner.</div>
+            </div>
+          </aside>
+        </div>
+        <div class="stage-caption">Selected rectangular room → W×H appears in panel. Edit a field, press Enter or SET.</div>
+      </div>
+    </section>
+
+    <!-- ══════════════════ OPTION B ══════════════════ -->
+    <section class="option">
+      <div class="option-head">
+        <span class="option-tag">Option B</span>
+        <span class="option-title">Floating W×H popover pinned to the room</span>
+        <p class="option-note">
+          On selecting a rectangular room, a small W×H card appears at the room centroid,
+          right where the eye already is. Direct, spatially connected to the thing you're
+          sizing. Costs a floating layer that must track pan/zoom and dismiss on
+          deselect/Escape — more moving parts than A.
+        </p>
+      </div>
+      <div class="stage-wrap">
+        <svg class="stage-svg" viewBox="0 0 700 350" preserveAspectRatio="none">
+          <polygon class="room-fill" points="150,80 470,80 470,270 150,270" />
+          <polygon class="room-wall" points="150,80 470,80 470,270 150,270" />
+          <polygon class="room-sel-outline" points="158,88 462,88 462,262 158,262" />
+        </svg>
+        <div class="room-popover" style="left:44.5%; top:50%;">
+          <div class="room-popover-label">Room 1 · set size</div>
+          <div class="wxh">
+            <input id="b-w" value="17.0" aria-label="Width in feet" />
+            <span class="times">×</span>
+            <input id="b-h" value="12.0" aria-label="Height in feet" />
+            <span class="unit">ft</span>
+            <button class="wxh-apply" id="b-apply">SET</button>
+          </div>
+        </div>
+        <div class="right-rail">
+          <aside class="measure">
+            <div class="measure-header">
+              <span class="measure-header-label">Floor Area</span>
+              <span class="measure-total-val">204 ft²</span>
+              <button class="measure-toggle">▾</button>
+            </div>
+            <div class="measure-body">
+              <div class="measure-row is-selected">
+                <span class="measure-row-label">Room 1</span>
+                <span class="measure-row-area">204 ft²</span>
+                <span class="measure-row-perim">58.0 ft</span>
+              </div>
+            </div>
+          </aside>
+        </div>
+        <div class="stage-caption">Popover floats at the room center; follows pan/zoom, dismisses on Escape or deselect.</div>
+      </div>
+    </section>
+
+    <!-- ══════════════════ OPTION C ══════════════════ -->
+    <section class="option">
+      <div class="option-head">
+        <span class="option-tag">Option C</span>
+        <span class="option-title">Context toolbar pill above the room (dims shown, tap to edit)</span>
+        <p class="option-note">
+          A slim pill floats above the selected room showing the live <b>W × H</b> read-out;
+          tapping <em>Resize</em> turns it into an inline W×H editor. Doubles as a passive
+          dimension read-out and an editing entry point, and is a natural home for future
+          room actions (delete, duplicate). Most chrome of the three. Toggle the two states
+          in the preview below.
+        </p>
+      </div>
+      <div class="stage-wrap">
+        <svg class="stage-svg" viewBox="0 0 700 350" preserveAspectRatio="none">
+          <polygon class="room-fill" points="180,120 480,120 480,300 180,300" />
+          <polygon class="room-wall" points="180,120 480,120 480,300 180,300" />
+          <polygon class="room-sel-outline" points="188,128 472,128 472,292 188,292" />
+        </svg>
+        <div class="room-toolbar" id="c-toolbar" style="left:47%; top:33%;">
+          <span class="rt-dims">Room 1 · <b>17.0 × 12.0 ft</b></span>
+          <button class="room-toolbar-btn rt-open" id="c-open">Resize</button>
+          <div class="rt-editor">
+            <div class="wxh">
+              <input id="c-w" value="17.0" aria-label="Width in feet" />
+              <span class="times">×</span>
+              <input id="c-h" value="12.0" aria-label="Height in feet" />
+              <span class="unit">ft</span>
+            </div>
+            <button class="wxh-apply" id="c-apply">SET</button>
+          </div>
+        </div>
+        <div class="right-rail">
+          <aside class="measure">
+            <div class="measure-header">
+              <span class="measure-header-label">Floor Area</span>
+              <span class="measure-total-val">204 ft²</span>
+              <button class="measure-toggle">▾</button>
+            </div>
+            <div class="measure-body">
+              <div class="measure-row is-selected">
+                <span class="measure-row-label">Room 1</span>
+                <span class="measure-row-area">204 ft²</span>
+                <span class="measure-row-perim">58.0 ft</span>
+              </div>
+            </div>
+          </aside>
+        </div>
+        <div class="stage-caption">Pill shows live dims. Click "Resize" to edit inline; ESC / deselect dismisses.</div>
+      </div>
+    </section>
+
+    <script>
+      // Minimal validation demo shared across options: flash the SET button and
+      // mark a field invalid if it isn't a positive number. This is a mockup, so
+      // "SET" just confirms visually — no geometry engine here.
+      const MIN = 0.3; // ~1 ft floor, mirrors MIN_SEG_M feel
+
+      function validPair(wEl, hEl) {
+        let ok = true;
+        for (const el of [wEl, hEl]) {
+          const v = parseFloat(el.value);
+          const bad = !(v > MIN);
+          el.classList.toggle("err", bad);
+          if (bad) ok = false;
+        }
+        return ok;
+      }
+
+      function wireApply(wId, hId, applyId) {
+        const w = document.getElementById(wId);
+        const h = document.getElementById(hId);
+        const apply = document.getElementById(applyId);
+        if (!w || !h || !apply) return;
+        const commit = () => {
+          if (!validPair(w, h)) return;
+          const orig = apply.textContent;
+          apply.textContent = "✓";
+          apply.disabled = true;
+          setTimeout(() => { apply.textContent = orig; apply.disabled = false; }, 750);
+        };
+        apply.addEventListener("click", commit);
+        for (const el of [w, h]) {
+          el.addEventListener("input", () => el.classList.remove("err"));
+          el.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") { e.preventDefault(); commit(); }
+          });
+        }
+      }
+
+      wireApply("a-w", "a-h", "a-apply");
+      wireApply("b-w", "b-h", "b-apply");
+      wireApply("c-w", "c-h", "c-apply");
+
+      // Option C: toggle read-out ↔ inline editor
+      const cBar = document.getElementById("c-toolbar");
+      document.getElementById("c-open").addEventListener("click", () => {
+        cBar.classList.add("editing");
+        document.getElementById("c-w").focus();
+        document.getElementById("c-w").select();
+      });
+      cBar.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") cBar.classList.remove("editing");
+      });
+    </script>
+  </body>
+</html>
