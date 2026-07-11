@@ -2,43 +2,50 @@
  * share.js — URL-hash encode/decode for share links
  *
  * Hash format: <codec-byte><payload>
- *   'd' = deflate-raw compressed, base64url
- *   'u' = uncompressed, base64url (fallback when CompressionStream unavailable)
+ *   'c' = compact lean payload, deflate-raw compressed, base64url (default)
+ *   'd' = full JSON, deflate-raw compressed, base64url (legacy — decode only)
+ *   'u' = full JSON, uncompressed, base64url (fallback when CompressionStream unavailable)
  *
  * Nothing is sent to a server. All encoding is client-side only.
  */
 
-import { buildPlan, validatePlan, serializePlan } from "./plan.js";
+import { buildPlan, validatePlan, serializePlan, buildCompact, parseCompact } from "./plan.js";
 
-const CODEC_COMPRESSED   = "d";
-const CODEC_UNCOMPRESSED = "u";
+const CODEC_COMPACT      = "c";  // compact payload + deflate-raw + base64url (new default)
+const CODEC_COMPRESSED   = "d";  // full JSON + deflate-raw (legacy, decode-only)
+const CODEC_UNCOMPRESSED = "u";  // full JSON, no compression (fallback)
 
 // ── Encoding ──────────────────────────────────────────────────────────────────
 
 /**
- * Plan → compressed base64url hash string (prefixed with codec byte).
- * Falls back to uncompressed base64url if CompressionStream is unavailable.
+ * Plan → compact base64url hash string (prefixed with codec byte).
+ * Emits 'c' (compact + deflate) when CompressionStream is available;
+ * falls back to 'u' (full JSON, uncompressed) otherwise.
+ * The legacy 'd' codec is no longer emitted but remains decodable.
  * @param {import("./plan.js").Plan} plan
  * @returns {Promise<string>}
  */
 export async function encodePlanToHash(plan) {
-  const json = serializePlan(plan);
-  const bytes = new TextEncoder().encode(json);
-
   if (typeof CompressionStream !== "undefined") {
     try {
+      const compactObj = buildCompact(plan);
+      const json = JSON.stringify(compactObj);
+      const bytes = new TextEncoder().encode(json);
       const compressed = await _compress(bytes);
-      return CODEC_COMPRESSED + _bytesToBase64url(compressed);
+      return CODEC_COMPACT + _bytesToBase64url(compressed);
     } catch {
       // Fallback to uncompressed on any compression error
     }
   }
 
+  const json = serializePlan(plan);
+  const bytes = new TextEncoder().encode(json);
   return CODEC_UNCOMPRESSED + _bytesToBase64url(bytes);
 }
 
 /**
  * Hash string → Plan|null (validated). Never throws.
+ * Supports all codecs: 'c' (compact), 'd' (legacy compressed), 'u' (uncompressed).
  * @param {string} hash  (without leading '#')
  * @returns {Promise<import("./plan.js").Plan|null>}
  */
@@ -49,19 +56,25 @@ export async function decodeHashToPlan(hash) {
     const codec = hash[0];
     const payload = hash.slice(1);
 
-    let bytes;
-    if (codec === CODEC_COMPRESSED) {
+    if (codec === CODEC_COMPACT) {
       const compressed = _base64urlToBytes(payload);
-      bytes = await _decompress(compressed);
+      const bytes = await _decompress(compressed);
+      const compact = JSON.parse(new TextDecoder().decode(bytes));
+      return validatePlan(parseCompact(compact));
+    } else if (codec === CODEC_COMPRESSED) {
+      const compressed = _base64urlToBytes(payload);
+      const bytes = await _decompress(compressed);
+      const json = new TextDecoder().decode(bytes);
+      const parsed = JSON.parse(json);
+      return validatePlan(parsed);
     } else if (codec === CODEC_UNCOMPRESSED) {
-      bytes = _base64urlToBytes(payload);
+      const bytes = _base64urlToBytes(payload);
+      const json = new TextDecoder().decode(bytes);
+      const parsed = JSON.parse(json);
+      return validatePlan(parsed);
     } else {
       return null; // unknown codec
     }
-
-    const json = new TextDecoder().decode(bytes);
-    const parsed = JSON.parse(json);
-    return validatePlan(parsed);
   } catch {
     return null;
   }

@@ -1,0 +1,338 @@
+# LLD 77: Compact share-link codec — shorter share URLs (~75% smaller) via a schema-lean encoding
+
+## Scope
+
+**Problem.** Share URLs are longer than they need to be for the headline "text it to a
+roommate" flow. A simple 2-desk gaming room encodes to **403 URL chars** (a 372-char
+hash). It is well under `URL_SOFT_LIMIT = 8000` (`actions.js:64`) so it *works*
+everywhere, but it reads as unwieldy. The bytes come from `serializePlan`
+(`plan.js:153`) emitting the full plan JSON before deflate+base64url. That JSON carries
+avoidable weight: per-symbol `id`s (regenerated on load), a `view` block (irrelevant to
+a *shared* plan), the `app:"floorplan"` tag, verbose `{"x":..,"y":..}` vertex objects,
+and `w`/`h`/`rot` values that are usually catalog defaults.
+
+**This LLD covers:**
+- A **third codec `c` (compact)** added to `share.js`, alongside the existing `d`
+  (deflate) and `u` (uncompressed). The `c` encoder emits a **lean payload**
+  (tuple arrays instead of `{x,y}` objects; view/ids/app dropped; `w`/`h`/`rot` omitted
+  when equal to catalog defaults; coordinates rounded to millimetres), then
+  deflate+base64url exactly as the `d` path does today.
+- A **compact (de)serializer** (`buildCompact` / `parseCompact`) that converts between a
+  validated `Plan` and the lean payload. It reuses the existing `validatePlan` on the way
+  in so decode remains "never throws, returns null on garbage".
+- **Backward-compatible decode (hard requirement):** `decodeHashToPlan` must still accept
+  `d` and `u`, so **every already-shared link keeps working**. `c` is added to the codec
+  dispatch, never replacing the others.
+- Making `encodePlanToHash` emit `c` by default. Because `get_share_url` in the MCP
+  server (`mcp/src/tools.js:153`) reuses `encodePlanToHash`, it gets the shorter URL for
+  free with no MCP changes.
+
+**Explicitly NOT covered:**
+- Changing `URL_SOFT_LIMIT` or its warning behavior (`actions.js`). Compact encoding only
+  reduces how often the limit is hit; the guard is unchanged.
+- Changing the localStorage or JSON-export format. Those keep using `serializePlan`
+  (full, human-readable, lossless). Compact encoding is a **share-hash-only** transport.
+- Any change to drawing/snapping/measurement/units logic.
+- A new plan `schema` bump. The compact payload is a *transport encoding* of an existing
+  schema-1 Plan, not a new schema; it carries its own internal `v` version byte.
+
+## Approach
+
+### 1. A third codec byte, decode stays a superset
+
+`share.js` already uses a **1-char codec prefix** (`d` / `u`, lines 13-14) precisely so
+"future codecs stay decodable" (LLD 16 Approach note 5). We add:
+
+```js
+const CODEC_COMPACT = "c";   // compact lean payload, then deflate-raw + base64url
+```
+
+- **Encode:** `encodePlanToHash` builds the lean payload via `buildCompact(plan)`,
+  `JSON.stringify`s it, then runs the **same** deflate+base64url pipeline as `d`.
+  The output is `"c" + base64url(deflate(compactJson))`.
+- **Decode:** `decodeHashToPlan` gains a `c` branch: base64url→bytes→inflate→JSON.parse
+  →`parseCompact(obj)`→`validatePlan(...)`. The existing `d` and `u` branches are **left
+  untouched**, and the unknown-codec `return null` fallback stays. Decode is therefore a
+  strict superset of today — no pre-existing link changes meaning.
+
+### 2. Compression fallback interaction (`c` requires CompressionStream)
+
+The `c` payload is only worth emitting deflated (its win compounds with deflate). If
+`CompressionStream` is unavailable, the encoder falls back to the existing **uncompressed
+`u`** path using the *full* `serializePlan` JSON (unchanged today's fallback), **not** a
+compact-but-uncompressed variant. Rationale: keeping exactly one un-deflated wire form
+(`u` = full JSON) avoids a fourth codec and keeps decode simple; the fallback is the rare
+path (only very old browsers) and correctness matters more than size there. So:
+
+- `CompressionStream` present → emit `c` (compact + deflate).  ← new default
+- `CompressionStream` absent OR compression throws → emit `u` (full JSON, uncompressed).
+
+The old `d` codec (full JSON + deflate) is **no longer emitted** by the encoder but
+**remains decodable forever** for links already in the wild.
+
+### 3. Lean payload shape — what is dropped and why
+
+The compact object is an ordered set of short keys; arrays are tuples, not objects.
+
+| Full plan field | Compact treatment | Rationale |
+|---|---|---|
+| `app: "floorplan"` | **dropped** | Constant; re-added on decode. Guard is re-applied by `validatePlan`. |
+| `schema: 1` | **dropped** | Constant for v1; re-added on decode. Compact carries its own `v`. |
+| `view {zoom,panX,panY}` | **dropped** | Share-open ignores the sender's frame anyway — it reframes via `fitToContent` (LLD 16). A shared plan's view is meaningless on the opener's device, so shipping it is pure waste. Decode synthesizes a default view for `validatePlan` to accept. |
+| symbol `id` (`s<n>`) | **dropped** | Regenerated by `symbols.hydrate` (re-syncs `_counter`); ids are never referenced across symbols. |
+| room `id` (`w<n>`) | **dropped** | Regenerated by `walls.hydrate`; ids are internal, not cross-referenced. |
+| vertex `{x,y}` | **tuple `[x,y]`** | Drops the `"x":`/`"y":` key overhead per vertex (dominant cost for wall-heavy plans). |
+| symbol `w`/`h`/`rot` | **omitted iff equal to catalog default** (`CATALOG[type].w/.h`, `rot===0`) | Most placed symbols keep default size and 0° rotation; re-supplied from `CATALOG` on decode. Any non-default value is written explicitly (see pitfall below). |
+| symbol `x`/`y`, vertex `x`/`y` | **rounded to mm** (3 decimals) | See §4. |
+
+**Pitfall guard (per issue notes):** a field is omitted **only** when it strictly equals
+the catalog default for *that symbol's type* — `w === CATALOG[type].w`,
+`h === CATALOG[type].h`, `rot === 0` (after `[0,360)` normalisation). A resized desk that
+happens to differ is written explicitly. Openings (`door`/`window`) have their `h`
+force-fixed to the catalog value by the app, so `h` will normally be omittable, but the
+same strict-equality rule applies uniformly — no type-specific omission shortcut.
+
+### 4. Coordinate rounding to millimetres — justified against snap precision (LLD 22)
+
+World coordinates are in **metres**. Rounding to **3 decimals (1 mm)** is lossless at
+every snap granularity the app can produce:
+
+- The finest **user-selectable** snap is **0.025 m (~1 in)** and the finest **grid**
+  cell is `NICE_STEPS[0] = 0.1 m` (`grid.js:25`); Auto never snaps finer than 0.1 m
+  (LLD 22). Every snapped coordinate is thus a multiple of ≥ 0.025 m = 25 mm — exactly
+  representable at 1 mm resolution.
+- **Off / Alt free placement** (LLD 22) can produce arbitrary sub-mm values, but these
+  are unsnapped "eyeball" positions where a ≤ 0.5 mm shift is far below the ~1 in snap
+  the same feature offers and far below on-screen pixel resolution at any zoom. No
+  *meaningful* geometry is lost.
+- 1 mm is ~0.04 in, i.e. finer than the app's tightest deliberate increment, so rounding
+  never collapses two intentionally-distinct positions. Rounding uses
+  `Math.round(v * 1000) / 1000` and is applied symmetrically to `x`/`y` of vertices and
+  symbol centers, and to `w`/`h` when written.
+
+**Round-trip is therefore lossless at snap granularity**, not bit-exact for free-placed
+sub-mm coords — an explicit, justified tradeoff. (`serializePlan`-based JSON export
+remains bit-exact for users who need that.)
+
+### 5. Where the code lives
+
+- **`share.js`** — the `CODEC_COMPACT` constant, the encode default switch, and the
+  decode `c` branch. Deflate/base64url helpers are reused as-is.
+- **`plan.js`** — `buildCompact(plan)` and `parseCompact(compact)`. Placed next to
+  `serializePlan` since they are pure, DOM-free plan transforms and need `CATALOG`
+  (already imported in `plan.js` via `symbols.js`). No new module; consistent with
+  "one encoder, one validator" living in the plan core.
+
+## Interfaces / Types
+
+### Compact payload shape (`plan.js`)
+
+```js
+/**
+ * @typedef {Object} CompactPlan
+ * @property {number} v   compact-format version (COMPACT_VERSION = 1)
+ * @property {"ft"|"m"} u unit
+ * @property {CompactRoom[]} r  rooms
+ * @property {number[][]} k     chain vertices (draft), tuple [x,y] each (may be [])
+ * @property {CompactSym[]} s   symbols
+ *
+ * @typedef {[number, number][] | { c:0|1, p:number[][] }} CompactRoom
+ *   Encoded as { c: closed?1:0, p: [[x,y],...] }.
+ *
+ * @typedef {Object} CompactSym
+ * @property {string} t   type (catalog key)
+ * @property {number} x   center x (mm-rounded)
+ * @property {number} y   center y (mm-rounded)
+ * @property {number} [w] width  — present ONLY if !== CATALOG[t].w
+ * @property {number} [h] depth  — present ONLY if !== CATALOG[t].h
+ * @property {number} [d] rot    — present ONLY if !== 0  ('d' = degrees)
+ */
+export const COMPACT_VERSION = 1;
+
+/**
+ * Validated Plan → lean CompactPlan (drops app/schema/view/ids/defaults,
+ * tuple vertices, mm-rounded coords). Pure. Assumes `plan` is already a
+ * well-formed Plan (as produced by buildPlan/validatePlan).
+ * @param {Plan} plan
+ * @returns {CompactPlan}
+ */
+export function buildCompact(plan)
+
+/**
+ * Lean CompactPlan → full Plan-shaped object (re-adds app/schema/default view,
+ * synthesises ids, re-expands vertices and omitted catalog defaults). Returns a
+ * plain object suitable to hand to validatePlan; does NOT itself validate.
+ * Returns null if `compact` is structurally unusable (wrong version, missing
+ * arrays) so the caller can treat it like any decode failure.
+ * @param {unknown} compact
+ * @returns {object|null}
+ */
+export function parseCompact(compact)
+```
+
+`parseCompact` re-synthesises fields so the result passes the **unchanged** `validatePlan`:
+- `app: "floorplan"`, `schema: PLAN_SCHEMA`.
+- `view: { zoom: 1, panX: 0, panY: 0 }` — a valid, finite placeholder. (Share-open
+  overrides the frame via `fitToContent`, so the exact value is irrelevant; it exists
+  only to satisfy `validatePlan`'s finite-number checks.)
+- room `id: "w"+i`, symbol `id: "s"+i` (index-based; `hydrate` re-syncs counters on apply,
+  so these transient ids never collide).
+- vertices expanded `[x,y]` → `{x,y}`; symbol `w`/`h` defaulted from `CATALOG[t]` and
+  `rot` defaulted to `0` when omitted. Unknown `t` (not in `CATALOG`) → the field is left
+  as-is and `validatePlan` rejects it (returns null). 
+
+### `share.js`
+
+```js
+const CODEC_COMPACT = "c";   // NEW — compact payload + deflate-raw + base64url
+
+// encodePlanToHash: emit 'c' when CompressionStream is available; else 'u' (full JSON).
+//   'd' is no longer emitted but stays decodable.
+// decodeHashToPlan: add
+//   else if (codec === CODEC_COMPACT) {
+//     const bytes = await _decompress(_base64urlToBytes(payload));
+//     const compact = JSON.parse(new TextDecoder().decode(bytes));
+//     return validatePlan(parseCompact(compact));   // null-safe: parseCompact may return null
+//   }
+```
+
+Signatures of `encodePlanToHash`, `decodeHashToPlan`, `buildShareUrl`, `readBootHash`
+are **unchanged**. `validatePlan(null)` must return `null` (it already guards
+`!raw || typeof raw !== "object"`), so `validatePlan(parseCompact(x))` is safe when
+`parseCompact` returns `null`.
+
+## State Model
+
+- **No persisted state changes.** Compact encoding is purely a **wire transform** for the
+  URL hash. Sources of truth (`walls.model`, `symbols.model`, `view.view`, `units.unit`)
+  and the localStorage/JSON formats (`serializePlan`) are untouched.
+- **In-flight only:** `buildCompact` reads a snapshot `Plan`, produces a transient
+  `CompactPlan` object that lives only until it is stringified+deflated. `parseCompact`
+  produces a transient plain object consumed immediately by `validatePlan`.
+- **Codec byte is the only forward/backward-compat state on the wire.** A hash's first
+  char (`c`/`d`/`u`) selects the decode path. The compact payload additionally carries an
+  internal `v` (COMPACT_VERSION) so a future compact revision can be distinguished and
+  rejected/handled without a new codec byte.
+- **Ids and view are ephemeral across a share round-trip.** They are dropped on encode and
+  synthesised on decode; `hydrate` re-syncs id counters and `fitToContent` sets the frame.
+  This is consistent with LLD 16, where share-open already discards the sender's frame.
+- **The cached hash URL in `actions.js`** (`_cachedHashUrl`) is rebuilt from
+  `encodePlanToHash` on each render-invalidation, so it automatically becomes the shorter
+  `c` URL with no change to the caching logic.
+
+## Edge Cases
+
+1. **Pre-existing `d`/`u` links (backward compat — hard requirement).** Any hash minted
+   before this change begins with `d` or `u`. Both branches are retained verbatim in
+   `decodeHashToPlan`, so those links decode identically. Guarded by an explicit
+   "old-link-still-decodes" test using frozen fixture hashes.
+2. **`CompressionStream` unavailable.** Encoder emits `u` (full JSON, uncompressed) as
+   today — NOT a compact-uncompressed form. Decode of `u` is unchanged. Link is longer but
+   works.
+3. **Symbol with a resized dimension equal to another type's default but not its own.**
+   Omission is keyed strictly on `CATALOG[thisType]` — a 0.70 m-wide `desk` (default 1.40)
+   is written explicitly even though 0.70 is `fridge`'s default. No cross-type leakage.
+4. **Symbol at exactly the catalog default.** `w`/`h`/`rot` omitted; `parseCompact`
+   re-fills from `CATALOG[t]` / `0`. Round-trip equal.
+5. **Free-placed (Alt/Off) sub-mm coordinate.** Rounded to 1 mm on encode. Round-trip is
+   lossless at snap granularity but not bit-exact for the sub-mm remainder — accepted
+   tradeoff (§4). Test asserts equality after rounding, not bit-identity, for free coords.
+6. **Unknown symbol `type` in a (hand-tampered) compact payload.** `parseCompact` passes
+   the bad `t` through; `validatePlan` rejects (`type in CATALOG` fails) → `decodeHashToPlan`
+   returns `null` → "couldn't be opened" toast. Never throws.
+7. **Malformed compact payload** (wrong `v`, missing `r`/`s` arrays, non-array vertex
+   tuple, non-finite number). `parseCompact` returns `null` on structural failure, or
+   produces an object `validatePlan` rejects. Either way `decodeHashToPlan` → `null`.
+8. **Truncated/garbage base64 under `c`.** `_base64urlToBytes`/`_decompress`/`JSON.parse`
+   throw; the existing `try/catch` in `decodeHashToPlan` returns `null`. Same as the `d`
+   path today.
+9. **Empty plan.** `buildCompact` yields `{v:1,u:"ft",r:[],k:[],s:[]}`; round-trips to an
+   empty valid plan. Hash is short and valid.
+10. **Active draft chain present at share time.** `chain` is encoded as `k` (tuple array)
+    and restored, matching LLD 16 Edge Case 10 (draft preserved, lossless).
+11. **Rotation normalisation.** `rot` is normalised to `[0,360)` by the app
+    (`rotateSymbol`). Omit only when strictly `0`; e.g. `359.9` is written. mm-style
+    rounding is NOT applied to `rot` beyond what the model stores (rot is degrees, not a
+    coordinate); write it verbatim (already normalised) to avoid changing orientation.
+12. **`URL_SOFT_LIMIT` still enforced.** A pathologically large plan can still exceed 8000
+    chars even compacted; `actions.js`'s existing length check and warning toast are
+    unchanged and simply fire less often. No new behavior.
+13. **MCP `get_share_url`.** `tool_get_share_url` snapshots via `dumpPlan()` then awaits
+    `encodePlanToHash` — now returns a `c` URL. No MCP code change; a smoke test confirms
+    the returned URL's hash decodes back to the same plan via `decodeHashToPlan`.
+14. **Coordinate exactly on a rounding boundary** (e.g. `x = 1.2345`). `Math.round(1234.5)`
+    → `1235` (banker's-rounding not used by JS `Math.round`; rounds half up). Deterministic
+    and applied identically on encode; decode does not re-round, so round-trip of the
+    already-rounded value is exact.
+
+## Dependencies
+
+**Must exist (all shipped):**
+- `share.js` — `encodePlanToHash`, `decodeHashToPlan`, `_compress`/`_decompress`,
+  `_bytesToBase64url`/`_base64urlToBytes`, `CODEC_COMPRESSED`/`CODEC_UNCOMPRESSED` (LLD 16).
+- `plan.js` — `validatePlan`, `serializePlan`, `PLAN_SCHEMA`, `APP_TAG` semantics (LLD 16).
+- `symbols.js` — `CATALOG` (per-type default `w`/`h`), `hydrate` id re-sync (LLD 12/16).
+- `walls.js` — `hydrate` id re-sync; `{id,closed,verts}` room shape (LLD 4/16).
+- `view.js` — `fitToContent` used by share-open, so the dropped view is acceptable (LLD 16).
+
+**New additions:**
+- `plan.js`: `buildCompact`, `parseCompact`, `COMPACT_VERSION` (pure; import `CATALOG`
+  which `plan.js` already pulls from `symbols.js`).
+- `share.js`: `CODEC_COMPACT` const; encode default switch; decode `c` branch; import
+  `buildCompact`/`parseCompact` from `plan.js`.
+
+**No changes required:** `mcp/src/tools.js`/`server.js` (benefit automatically via
+`encodePlanToHash`); `actions.js` (`URL_SOFT_LIMIT` and hash cache unchanged);
+localStorage/JSON export paths.
+
+**No new libraries, no build step, no backend** — consistent with client-side-only v1.
+
+## Test Requirements
+
+Extend `src/tests.html` (in-page `describe`/`it`/`expect`). Reset `walls.model`,
+`symbols.model`, `units.unit`, `view` between suites (existing pattern).
+
+**Unit — `buildCompact`/`parseCompact` (`plan.js`):**
+- Round-trip: `validatePlan(parseCompact(buildCompact(p)))` deep-equals `p` for a plan
+  whose coords are on snap multiples (0.1 / 0.025 m) — **lossless** (rooms, chain, symbols,
+  unit; ids/view intentionally regenerated, so compare geometry/type/unit, not ids/view).
+- Catalog-default omission: a symbol at default `w`/`h`/`rot` produces a compact sym with
+  **no** `w`/`h`/`d` keys; a resized/rotated symbol includes exactly the differing keys;
+  both round-trip to the original values.
+- Cross-type default guard (Edge Case 3): a `desk` resized to `fridge`'s default width is
+  written explicitly and round-trips correctly.
+- mm rounding (§4 / Edge Case 5): a free-placed coord like `1.23456` becomes `1.235` and
+  round-trips to `1.235` (assert to-mm equality, documented as intentional).
+- `parseCompact` returns `null` (or yields a plan `validatePlan` rejects) for: wrong `v`,
+  missing `r`/`s`, non-array vertex tuple, unknown symbol `t`, non-finite number.
+- Empty plan (Edge Case 9): compact is `{v,u,r:[],k:[],s:[]}`; round-trips to empty valid.
+
+**Unit — `share.js` codec:**
+- `decodeHashToPlan(await encodePlanToHash(p))` deep-equals `p` (the new `c` default path)
+  for a non-trivial plan.
+- The emitted hash starts with `c` when `CompressionStream` is available.
+- **Compactness sanity:** the `c` hash is materially shorter than the pre-change `d` hash
+  for the reported gaming-room fixture (target ≈ 149 vs ≈ 375 hash chars; assert a
+  substantial reduction, not an exact count).
+
+**Backward-compat (HARD requirement — explicit "old-link-still-decodes"):**
+- Frozen fixture hashes: at least one real `d` hash and one `u` hash captured from the
+  current code, checked in as constants. Assert `decodeHashToPlan(fixture)` returns the
+  expected plan for **each**. This must fail if a future change breaks legacy decode.
+- `decodeHashToPlan` returns `null` (never throws) for: unknown codec byte, truncated `c`
+  payload, non-base64 body, `c` payload that inflates to invalid JSON, and a `c` payload
+  with an unknown symbol type.
+
+**Integration / MCP:**
+- MCP `tool_get_share_url()` returns a URL whose hash (after the `#`) begins with `c` and
+  `decodeHashToPlan` reconstructs the same plan the session held (Edge Case 13).
+- Share-open flow (LLD 16) with a `c` hash reconstructs walls/symbols/unit byte-exact
+  (at snap granularity) and reframes via `fitToContent` (view dropped, as designed).
+
+**Regression / safety:**
+- Encoding falls back to `u` (full JSON) when `CompressionStream` is stubbed undefined;
+  that `u` hash still decodes (Edge Case 2).
+- No `NaN`/`Infinity` coordinates ever reach the model from a decoded compact plan
+  (`validatePlan` finite-checks guard this).
+- `URL_SOFT_LIMIT` warning path in `actions.js` is unchanged (no test regression there).
+
