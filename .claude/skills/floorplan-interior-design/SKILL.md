@@ -60,7 +60,7 @@ Design rules talk about *roles* (seating, the focal element, storage), but the c
 
 ## Critical: walkway vs closeness
 
-This is the load-bearing rule. The MCP walkway gate (default **0.915 m**, clamped to `[0.76, 1.20] m`) governs **traffic paths between zones** — it is **not** a rule about gaps between members of one seating group or one work zone.
+This is the load-bearing rule. The MCP walkway gate (default **0.915 m**; a `minWalkwayM` you pass must fall in `[0.76, 1.20] m` or `set_brief`/`check_clearance` **reject** it with `{ok:false}`) governs **traffic paths between zones** — it is **not** a rule about gaps between members of one seating group or one work zone.
 
 Seats in a conversation group belong **0.46–0.76 m** apart; beyond 0.76 m the group "feels disconnected." **Do NOT spread a group to satisfy the walkway number.** Keep members close and route the ≥ 0.915 m path *around* the group. Treat an intra-group `check_clearance` "tight" as **expected, not a defect** to fix.
 
