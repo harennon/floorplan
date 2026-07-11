@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Room keyboard nudge — mockup (LLD 63 follow-up)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:         #14140f;
+    --bg-deep:    #100f0b;
+    --ink:        #ece7d6;
+    --muted:      #8f8a78;
+    --gold:       #c9a84c;
+    --gold-soft:  rgba(201, 168, 76, 0.55);
+    --grid-fine:  rgba(201, 168, 76, 0.055);
+    --grid-major: rgba(201, 168, 76, 0.14);
+    --grid-axis:  rgba(201, 168, 76, 0.34);
+    --panel:      rgba(20, 20, 15, 0.72);
+    --hairline:   rgba(201, 168, 76, 0.18);
+    --font-ui:      "DM Sans", system-ui, sans-serif;
+    --font-mono:    "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+    --wall-line:     #d9be6e;
+    --room-fill:     rgba(201,168,76,0.07);
+    --room-fill-hi:  rgba(201,168,76,0.15);
+    --snap-point:    #e0b64f;
+    --snap-teal:     #7fd0c8;
+    --sym-fill:      rgba(201,168,76,0.12);
+    --sym-stroke:    #d9be6e;
+    --sym-sel-fill:  rgba(201,168,76,0.18);
+  }
+  * , *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--font-ui);
+    color: var(--ink);
+    background:
+      radial-gradient(ellipse 90% 80% at 50% 45%, var(--bg) 0%, var(--bg-deep) 100%);
+    -webkit-font-smoothing: antialiased;
+  }
+  .shell { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+
+  /* ── Page header ─────────────────────────────────────────── */
+  .page-head { border-bottom: 1px solid var(--hairline); padding-bottom: 18px; margin-bottom: 26px; }
+  .eyebrow {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--gold); margin: 0 0 8px;
+  }
+  .page-head h1 {
+    font-family: var(--font-display); font-weight: 400; font-size: 26px;
+    margin: 0 0 10px; line-height: 1.25;
+  }
+  .page-head p { color: var(--muted); max-width: 68ch; line-height: 1.6; margin: 0 0 4px; font-size: 14px; }
+  .page-head .feedback {
+    margin-top: 14px; padding: 10px 14px; border-left: 2px solid var(--gold-soft);
+    background: rgba(201,168,76,0.05); font-size: 13.5px; color: var(--ink);
+  }
+  .page-head .feedback b { color: var(--gold); font-weight: 600; }
+
+  /* ── Direction tabs ──────────────────────────────────────── */
+  .tabs { display: flex; gap: 8px; margin: 24px 0 22px; flex-wrap: wrap; }
+  .tab {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.04em;
+    padding: 9px 15px; border: 1px solid var(--hairline); background: transparent;
+    color: var(--muted); border-radius: 3px; cursor: pointer; transition: all .18s ease;
+  }
+  .tab:hover { color: var(--ink); border-color: var(--gold-soft); }
+  .tab[aria-selected="true"] {
+    color: var(--gold); border-color: var(--gold); background: rgba(201,168,76,0.08);
+  }
+  .tab .tab-tag { display: block; font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.6; margin-top: 3px; }
+
+  .panelblock { display: none; }
+  .panelblock.active { display: block; animation: fade .25s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  .block-intro { margin-bottom: 18px; }
+  .block-intro h2 { font-family: var(--font-display); font-weight: 400; font-size: 20px; margin: 0 0 6px; }
+  .block-intro p { color: var(--muted); font-size: 13.5px; line-height: 1.6; max-width: 74ch; margin: 0; }
+
+  /* ── Editor stage (shared) ───────────────────────────────── */
+  .stage-wrap {
+    position: relative; margin: 20px 0; border: 1px solid var(--hairline);
+    border-radius: 6px; overflow: hidden;
+    background:
+      radial-gradient(ellipse 90% 80% at 50% 50%, var(--bg) 0%, var(--bg-deep) 100%);
+  }
+  .stage-svg { display: block; width: 100%; height: 440px; }
+
+  /* Grid via SVG pattern defined inline. Room + symbols drawn as SVG. */
+  .wall { stroke: var(--wall-line); stroke-width: 6; fill: none; stroke-linejoin: round; }
+  .room-fill { fill: var(--room-fill); }
+  .room-fill.hover { fill: var(--room-fill-hi); }
+  .sym {
+    fill: var(--sym-fill); stroke: var(--sym-stroke); stroke-width: 1.4;
+  }
+  .sym-label { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+
+  /* Selection outline — dashed gold, matches LLD 63 spec */
+  .room-sel {
+    fill: none; stroke: var(--snap-point); stroke-width: 2;
+    stroke-dasharray: 7 5;
+  }
+  .room-sel.animated { animation: march 0.9s linear infinite; }
+  @keyframes march { to { stroke-dashoffset: -24; } }
+
+  /* Dimension chips on room edges */
+  .dimchip {
+    fill: var(--panel); stroke: var(--hairline); stroke-width: 1;
+  }
+  .dimtext { fill: var(--ink); font-family: var(--font-mono); font-size: 11px; text-anchor: middle; }
+
+  /* ── HUD-ish controls row ─────────────────────────────────── */
+  .stage-hud {
+    position: absolute; left: 12px; bottom: 12px; display: flex; gap: 8px; align-items: center;
+    font-family: var(--font-mono); font-size: 11px; color: var(--muted);
+  }
+  .stage-hud .chip {
+    padding: 4px 9px; border: 1px solid var(--hairline); border-radius: 3px;
+    background: var(--panel); backdrop-filter: blur(4px);
+  }
+  .tool-rail {
+    position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .tool-btn {
+    width: 38px; height: 38px; border: 1px solid var(--hairline); border-radius: 4px;
+    background: var(--panel); color: var(--muted); cursor: pointer; font-size: 15px;
+    display: grid; place-items: center; backdrop-filter: blur(4px);
+  }
+  .tool-btn.active { color: var(--gold); border-color: var(--gold); background: rgba(201,168,76,0.10); }
+
+  /* ── Legend / caption below stage ────────────────────────── */
+  .caption { display: flex; gap: 22px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin-top: -4px; }
+  .caption .swatch { display: inline-flex; align-items: center; gap: 7px; }
+  .caption .dot { width: 22px; height: 0; border-top: 2px dashed var(--snap-point); display: inline-block; }
+  .caption .dot.solid { border-top-style: solid; border-color: var(--wall-line); }
+  .caption .dot.teal { border-top-color: var(--snap-teal); border-top-style: dotted; }
+
+  /* ── Key hint / kbd ──────────────────────────────────────── */
+  kbd {
+    font-family: var(--font-mono); font-size: 11px; background: rgba(201,168,76,0.10);
+    border: 1px solid var(--gold-soft); border-bottom-width: 2px; border-radius: 4px;
+    padding: 2px 7px; color: var(--gold); min-width: 20px; display: inline-block; text-align: center;
+  }
+
+  /* ── Measure panel (right dock) — shared demo of keyboard reachability ── */
+  .measure {
+    position: absolute; top: 12px; right: 12px; width: 214px; background: var(--panel);
+    border: 1px solid var(--hairline); border-radius: 6px; padding: 10px 12px;
+    backdrop-filter: blur(6px); font-size: 12px;
+  }
+  .measure h3 {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 8px; font-weight: 500;
+  }
+  .measure-row {
+    display: flex; justify-content: space-between; padding: 6px 8px; border-radius: 4px;
+    cursor: pointer; margin: 0 -6px;
+  }
+  .measure-row .rname { color: var(--ink); }
+  .measure-row .rval { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+  .measure-row.selected { background: rgba(201,168,76,0.12); box-shadow: inset 0 0 0 1px var(--gold-soft); }
+  .measure-row.selected .rname { color: var(--gold); }
+
+  /* ── Info cards (specs) ──────────────────────────────────── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 22px 0; }
+  .card { border: 1px solid var(--hairline); border-radius: 6px; padding: 16px 18px; background: rgba(201,168,76,0.03); }
+  .card h4 { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold); margin: 0 0 10px; }
+  .card ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+  .card ul b { color: var(--ink); font-weight: 600; }
+  .card p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0 0 8px; }
+
+  /* ── Toast (feedback direction) ──────────────────────────── */
+  .toast-demo {
+    position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--gold-soft); border-radius: 6px;
+    padding: 9px 16px; font-size: 13px; color: var(--ink); backdrop-filter: blur(6px);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .toast-demo .t-icon { color: var(--gold); }
+
+  /* ── Nudge readout badge (feedback direction) ───────────── */
+  .nudge-badge {
+    font-family: var(--font-mono); font-size: 11px; color: var(--snap-teal);
+    fill: var(--snap-teal);
+  }
+
+  /* Focus ring demo */
+  .focus-ring { fill: none; stroke: var(--snap-teal); stroke-width: 1.5; stroke-dasharray: 3 3; opacity: 0.8; }
+
+  .controls-note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .controls-note kbd { margin: 0 1px; }
+
+  .live-hint {
+    margin-top: 14px; padding: 12px 16px; border: 1px dashed var(--hairline); border-radius: 6px;
+    font-size: 13px; color: var(--muted); line-height: 1.6;
+  }
+  .live-hint b { color: var(--ink); }
+  .btnrow { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .demo-btn {
+    font-family: var(--font-mono); font-size: 12px; padding: 8px 13px; cursor: pointer;
+    border: 1px solid var(--gold-soft); background: rgba(201,168,76,0.06); color: var(--gold);
+    border-radius: 4px;
+  }
+  .demo-btn:active { transform: translateY(1px); }
+  .demo-btn.ghost { border-color: var(--hairline); color: var(--muted); background: transparent; }
+</style>
+</head>
+<body>
+  <div class="shell">
+    <header class="page-head">
+      <p class="eyebrow">LLD 63 follow-up · Issue #82</p>
+      <h1>Room selection &amp; arrow-key nudge</h1>
+      <p>Rooms already move by pointer-drag (LLD 63). This adds the <b>keyboard nudge</b> path
+        that symbols got in LLD 54 — so a selected room can be moved with the arrow keys, at the
+        same step, with the same one-undo-per-burst behavior.</p>
+      <div class="feedback">
+        <b>User feedback carried in:</b> &ldquo;I'd prefer if the room selection works the same way
+        as object selection — <b>select via click, move via arrow keys</b>.&rdquo; So there is
+        <b>no Tab-cycling</b>: selection stays pointer-click (identical to symbols), and only the
+        nudge is added. The directions below differ only in the <b>feedback / discoverability</b>
+        layer that LLD 63 left open.
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Design directions">
+      <button class="tab" role="tab" aria-selected="true" data-target="A">
+        Direction A — Silent parity
+        <span class="tab-tag">match symbols exactly</span>
+      </button>
+      <button class="tab" role="tab" aria-selected="false" data-target="B">
+        Direction B — Nudge readout
+        <span class="tab-tag">live delta badge</span>
+      </button>
+      <button class="tab" role="tab" aria-selected="false" data-target="C">
+        Direction C — Discoverable
+        <span class="tab-tag">hint + focus ring</span>
+      </button>
+    </nav>
+    <!-- direction panels injected below -->
+
+    <!-- ═══ DIRECTION A ═══ -->
+    <section class="panelblock active" data-panel="A">
+      <div class="block-intro">
+        <h2>Direction A — Silent parity with symbols</h2>
+        <p>The room nudge behaves <b>exactly</b> like the symbol nudge: click a room to select
+          (dashed gold outline), press an arrow key to move by one grid step, <kbd>Shift</kbd>+arrow
+          for a coarse 4× step. No new chrome at all — the moving outline is its own feedback, just
+          as a moving symbol is. Lowest cost, most consistent, invisible until used.</p>
+      </div>
+
+      <div class="stage-wrap">
+        <svg class="stage-svg" viewBox="0 0 900 440" id="stageA" aria-label="Editor with a selected room">
+          <defs>
+            <pattern id="gridA" width="26" height="26" patternUnits="userSpaceOnUse">
+              <path d="M26 0H0V26" fill="none" stroke="var(--grid-fine)" stroke-width="1"/>
+            </pattern>
+            <pattern id="gridAmaj" width="130" height="130" patternUnits="userSpaceOnUse">
+              <path d="M130 0H0V130" fill="none" stroke="var(--grid-major)" stroke-width="1"/>
+            </pattern>
+          </defs>
+          <rect x="0" y="0" width="900" height="440" fill="url(#gridA)"/>
+          <rect x="0" y="0" width="900" height="440" fill="url(#gridAmaj)"/>
+
+          <!-- Kitchen room (not selected) -->
+          <g>
+            <polygon class="room-fill" points="120,120 330,120 330,300 120,300"/>
+            <polyline class="wall" points="120,120 330,120 330,300 120,300 120,120"/>
+            <rect class="sym" x="150" y="150" width="55" height="34"/>
+            <text class="sym-label" x="177" y="205" text-anchor="middle">stove</text>
+          </g>
+
+          <!-- Bedroom room (SELECTED + being nudged) -->
+          <g id="roomA">
+            <polygon class="room-fill" points="430,150 700,150 700,340 430,340"/>
+            <polyline class="wall" points="430,150 700,150 700,340 430,340 430,150"/>
+            <!-- carried furniture -->
+            <rect class="sym" x="470" y="185" width="90" height="60"/>
+            <text class="sym-label" x="515" y="220" text-anchor="middle">bed</text>
+            <rect class="sym" x="610" y="270" width="46" height="46"/>
+            <text class="sym-label" x="633" y="298" text-anchor="middle">rug</text>
+            <!-- selection outline -->
+            <polygon class="room-sel animated" points="430,150 700,150 700,340 430,340"/>
+          </g>
+
+          <!-- tool rail -->
+          <foreignObject x="0" y="0" width="0" height="0"></foreignObject>
+        </svg>
+
+        <div class="tool-rail">
+          <div class="tool-btn active" title="Select (V)">▤</div>
+          <div class="tool-btn" title="Draw wall (W)">✎</div>
+        </div>
+
+        <div class="measure">
+          <h3>Rooms</h3>
+          <div class="measure-row"><span class="rname">Kitchen</span><span class="rval">9.7 m²</span></div>
+          <div class="measure-row selected"><span class="rname">Bedroom</span><span class="rval">12.4 m²</span></div>
+        </div>
+
+        <div class="stage-hud">
+          <span class="chip">Snap: 0.1 m</span>
+          <span class="chip">Select</span>
+        </div>
+      </div>
+
+      <div class="caption">
+        <span class="swatch"><span class="dot"></span> selected room outline (dashed gold)</span>
+        <span class="swatch"><span class="dot solid"></span> wall</span>
+      </div>
+
+      <div class="btnrow">
+        <button class="demo-btn" data-nudge="A" data-dir="up">↑ nudge</button>
+        <button class="demo-btn" data-nudge="A" data-dir="down">↓ nudge</button>
+        <button class="demo-btn" data-nudge="A" data-dir="left">← nudge</button>
+        <button class="demo-btn" data-nudge="A" data-dir="right">→ nudge</button>
+        <button class="demo-btn ghost" data-nudge="A" data-dir="reset">reset</button>
+      </div>
+      <p class="controls-note">Try it: click a nudge button (or focus this page and press
+        <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd>). The whole room + its furniture move together.</p>
+
+      <div class="cards">
+        <div class="card">
+          <h4>Interaction model</h4>
+          <ul>
+            <li><b>Select:</b> click/tap room interior (unchanged from LLD 63)</li>
+            <li><b>Nudge:</b> <kbd>↑↓←→</kbd> = one grid step</li>
+            <li><b>Coarse:</b> <kbd>Shift</kbd>+arrow = 4× step</li>
+            <li><b>Undo:</b> one burst (≤400 ms gap) = one undo step</li>
+            <li>Carried furniture moves with the room (LLD 63 rule)</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Why this direction</h4>
+          <p>Perfect symmetry with symbols means <b>zero new mental model</b> and near-zero code:
+            main.js already owns the arrow-key handler for symbols. We only branch it to route to
+            a new <code>roomTool.nudgeSelected</code> when a room is selected.</p>
+          <p>Risk: no explicit signal that keyboard nudge exists — discovered by trying, or via the
+            <kbd>?</kbd> shortcuts overlay (which we'd extend).</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ DIRECTION B ═══ -->
+    <section class="panelblock" data-panel="B">
+      <div class="block-intro">
+        <h2>Direction B — Nudge readout badge</h2>
+        <p>Same click-select + arrow-nudge as A, but during an active nudge burst a small
+          <b>live delta badge</b> tracks the room, showing how far it has moved
+          (e.g. <span style="color:var(--snap-teal)">+0.30 m →</span>). It fades out shortly after
+          the burst commits. Gives a numeric anchor for &ldquo;does my couch fit&rdquo; nudging
+          without any persistent chrome.</p>
+      </div>
+
+      <div class="stage-wrap">
+        <svg class="stage-svg" viewBox="0 0 900 440" id="stageB" aria-label="Editor with nudge readout">
+          <defs>
+            <pattern id="gridB" width="26" height="26" patternUnits="userSpaceOnUse">
+              <path d="M26 0H0V26" fill="none" stroke="var(--grid-fine)" stroke-width="1"/>
+            </pattern>
+            <pattern id="gridBmaj" width="130" height="130" patternUnits="userSpaceOnUse">
+              <path d="M130 0H0V130" fill="none" stroke="var(--grid-major)" stroke-width="1"/>
+            </pattern>
+          </defs>
+          <rect x="0" y="0" width="900" height="440" fill="url(#gridB)"/>
+          <rect x="0" y="0" width="900" height="440" fill="url(#gridBmaj)"/>
+
+          <g>
+            <polygon class="room-fill" points="120,120 330,120 330,300 120,300"/>
+            <polyline class="wall" points="120,120 330,120 330,300 120,300 120,120"/>
+            <text class="sym-label" x="225" y="215" text-anchor="middle">Kitchen</text>
+          </g>
+
+          <g id="roomB">
+            <polygon class="room-fill" points="430,150 700,150 700,340 430,340"/>
+            <polyline class="wall" points="430,150 700,150 700,340 430,340 430,150"/>
+            <rect class="sym" x="470" y="185" width="90" height="60"/>
+            <text class="sym-label" x="515" y="220" text-anchor="middle">bed</text>
+            <polygon class="room-sel animated" points="430,150 700,150 700,340 430,340"/>
+            <!-- live nudge delta badge, follows the room top-edge -->
+            <g id="badgeB">
+              <rect x="527" y="120" width="86" height="22" rx="4" fill="var(--panel)" stroke="var(--snap-teal)" stroke-width="1"/>
+              <text class="nudge-badge" x="570" y="135" text-anchor="middle" id="badgeTextB">+0.0 m</text>
+            </g>
+          </g>
+        </svg>
+
+        <div class="tool-rail">
+          <div class="tool-btn active" title="Select (V)">▤</div>
+          <div class="tool-btn" title="Draw wall (W)">✎</div>
+        </div>
+
+        <div class="measure">
+          <h3>Rooms</h3>
+          <div class="measure-row"><span class="rname">Kitchen</span><span class="rval">9.7 m²</span></div>
+          <div class="measure-row selected"><span class="rname">Bedroom</span><span class="rval">12.4 m²</span></div>
+        </div>
+
+        <div class="stage-hud">
+          <span class="chip">Snap: 0.1 m</span>
+          <span class="chip">Select</span>
+        </div>
+      </div>
+
+      <div class="caption">
+        <span class="swatch"><span class="dot"></span> selected outline</span>
+        <span class="swatch"><span class="dot teal"></span> live nudge delta (transient)</span>
+      </div>
+
+      <div class="btnrow">
+        <button class="demo-btn" data-nudge="B" data-dir="up">↑ nudge</button>
+        <button class="demo-btn" data-nudge="B" data-dir="down">↓ nudge</button>
+        <button class="demo-btn" data-nudge="B" data-dir="left">← nudge</button>
+        <button class="demo-btn" data-nudge="B" data-dir="right">→ nudge</button>
+        <button class="demo-btn ghost" data-nudge="B" data-dir="reset">reset</button>
+      </div>
+      <p class="controls-note">The badge accumulates the burst delta and fades ~1 s after you stop.
+        Coarse (<kbd>Shift</kbd>) jumps show as 4× steps.</p>
+
+      <div class="cards">
+        <div class="card">
+          <h4>What it adds over A</h4>
+          <ul>
+            <li>A <b>transient badge</b> pinned to the room during a burst</li>
+            <li>Reads <b>signed distance</b> from the burst start, in current units</li>
+            <li>Fades out after the debounce commit (~400 ms + fade)</li>
+            <li>Nothing persistent; silent when idle</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Trade-offs</h4>
+          <p><b>Pro:</b> supports the &ldquo;fit&rdquo; use-case — you can nudge a room a precise
+            0.30 m and see it. Reinforces that arrows moved something.</p>
+          <p><b>Con:</b> a little more render code (a positioned overlay that tracks the room),
+            and symbols don't have this today — so it introduces a small asymmetry unless we later
+            add the same badge to symbol nudge.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ DIRECTION C ═══ -->
+    <section class="panelblock" data-panel="C">
+      <div class="block-intro">
+        <h2>Direction C — Discoverable (hint + focus ring)</h2>
+        <p>Same click-select + arrow-nudge, plus two discoverability cues: (1) a faint teal
+          <b>focus ring</b> just outside the selection outline signals &ldquo;this is keyboard-active
+          — arrows will move it,&rdquo; and (2) a one-time <b>coach hint</b> the first time a room is
+          selected: <em>&ldquo;Arrow keys nudge · Shift = bigger step.&rdquo;</em> Highest
+          discoverability, most chrome.</p>
+      </div>
+
+      <div class="stage-wrap">
+        <svg class="stage-svg" viewBox="0 0 900 440" id="stageC" aria-label="Editor with focus ring and hint">
+          <defs>
+            <pattern id="gridC" width="26" height="26" patternUnits="userSpaceOnUse">
+              <path d="M26 0H0V26" fill="none" stroke="var(--grid-fine)" stroke-width="1"/>
+            </pattern>
+            <pattern id="gridCmaj" width="130" height="130" patternUnits="userSpaceOnUse">
+              <path d="M130 0H0V130" fill="none" stroke="var(--grid-major)" stroke-width="1"/>
+            </pattern>
+          </defs>
+          <rect x="0" y="0" width="900" height="440" fill="url(#gridC)"/>
+          <rect x="0" y="0" width="900" height="440" fill="url(#gridCmaj)"/>
+
+          <g>
+            <polygon class="room-fill" points="120,120 330,120 330,300 120,300"/>
+            <polyline class="wall" points="120,120 330,120 330,300 120,300 120,120"/>
+            <text class="sym-label" x="225" y="215" text-anchor="middle">Kitchen</text>
+          </g>
+
+          <g id="roomC">
+            <polygon class="room-fill" points="430,150 700,150 700,340 430,340"/>
+            <polyline class="wall" points="430,150 700,150 700,340 430,340 430,150"/>
+            <rect class="sym" x="470" y="185" width="90" height="60"/>
+            <text class="sym-label" x="515" y="220" text-anchor="middle">bed</text>
+            <!-- focus ring OUTSIDE the selection outline -->
+            <rect class="focus-ring" x="422" y="142" width="286" height="206" rx="4"/>
+            <polygon class="room-sel animated" points="430,150 700,150 700,340 430,340"/>
+          </g>
+        </svg>
+
+        <div class="tool-rail">
+          <div class="tool-btn active" title="Select (V)">▤</div>
+          <div class="tool-btn" title="Draw wall (W)">✎</div>
+        </div>
+
+        <div class="measure">
+          <h3>Rooms</h3>
+          <div class="measure-row"><span class="rname">Kitchen</span><span class="rval">9.7 m²</span></div>
+          <div class="measure-row selected"><span class="rname">Bedroom</span><span class="rval">12.4 m²</span></div>
+        </div>
+
+        <div class="stage-hud">
+          <span class="chip">Snap: 0.1 m</span>
+          <span class="chip">Select</span>
+        </div>
+
+        <!-- one-time coach hint -->
+        <div class="toast-demo" id="coachC">
+          <span class="t-icon">⌨</span>
+          <span>Arrow keys nudge this room · <kbd>Shift</kbd> = bigger step</span>
+        </div>
+      </div>
+
+      <div class="caption">
+        <span class="swatch"><span class="dot"></span> selection outline</span>
+        <span class="swatch"><span class="dot teal"></span> keyboard focus ring</span>
+      </div>
+
+      <div class="btnrow">
+        <button class="demo-btn" data-nudge="C" data-dir="up">↑ nudge</button>
+        <button class="demo-btn" data-nudge="C" data-dir="down">↓ nudge</button>
+        <button class="demo-btn" data-nudge="C" data-dir="left">← nudge</button>
+        <button class="demo-btn" data-nudge="C" data-dir="right">→ nudge</button>
+        <button class="demo-btn ghost" data-nudge="C" data-dir="reset">reset</button>
+        <button class="demo-btn ghost" data-hint="C">show hint again</button>
+      </div>
+      <p class="controls-note">The coach hint appears once per session on first room-select, then
+        auto-dismisses. The focus ring stays while the room is selected.</p>
+
+      <div class="cards">
+        <div class="card">
+          <h4>What it adds over A</h4>
+          <ul>
+            <li><b>Focus ring:</b> dotted teal, outside the gold outline — reads as &ldquo;keyboard target&rdquo;</li>
+            <li><b>Coach hint:</b> one-time toast on first room selection</li>
+            <li>Session-only flag (never persisted) tracks &ldquo;hint shown&rdquo;</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>Trade-offs</h4>
+          <p><b>Pro:</b> most accessible — the keyboard capability announces itself, aiding the
+            stated a11y goal. Best for first-time users.</p>
+          <p><b>Con:</b> most chrome and the biggest departure from the minimal-chrome principle and
+            from symbol parity (symbols show no ring / hint). Two extra visual elements to build,
+            theme, and test across light/dark.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="live-hint">
+      <b>Recommendation:</b> ship <b>Direction A</b> for v1 — it is the literal reading of the user's
+      feedback (&ldquo;works the same way as object selection&rdquo;), the cheapest to build, and keeps
+      symbol/room behavior symmetric. The <kbd>?</kbd> shortcuts overlay is extended with a
+      &ldquo;Nudge selected (symbol or room)&rdquo; row so it is still discoverable. Direction B's
+      readout badge is a strong <b>later</b> add-on for the &ldquo;does it fit&rdquo; wedge (ideally
+      added to symbols too, for symmetry). Direction C is the fallback if QA finds the keyboard path
+      too hidden.
+    </div>
+  </div>
+
+<script>
+  // ── Tab switching ──────────────────────────────────────────
+  const tabs = document.querySelectorAll('.tab');
+  const panels = document.querySelectorAll('.panelblock');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
+      const target = tab.dataset.target;
+      panels.forEach(p => p.classList.toggle('active', p.dataset.panel === target));
+    });
+  });
+
+  // ── Nudge demo: translate the selected room group ──────────
+  const STEP = 26;              // px per grid step in the mock (0.1 m)
+  const state = { A: {x:0,y:0}, B: {x:0,y:0}, C: {x:0,y:0} };
+
+  function applyTransform(dir) {
+    const g = document.getElementById('room' + dir);
+    if (g) g.setAttribute('transform', `translate(${state[dir].x} ${state[dir].y})`);
+  }
+
+  function nudge(dir, way) {
+    const s = state[dir];
+    if (way === 'reset') { s.x = 0; s.y = 0; }
+    if (way === 'up')    s.y -= STEP;
+    if (way === 'down')  s.y += STEP;
+    if (way === 'left')  s.x -= STEP;
+    if (way === 'right') s.x += STEP;
+    applyTransform(dir);
+
+    // Direction B: update + flash the delta badge
+    if (dir === 'B') {
+      const t = document.getElementById('badgeTextB');
+      const badge = document.getElementById('badgeB');
+      const dxm = (s.x / STEP * 0.1).toFixed(1);
+      const dym = (s.y / STEP * 0.1).toFixed(1);
+      let label = '±0.0 m';
+      if (Math.abs(s.x) >= Math.abs(s.y)) {
+        label = (s.x === 0 ? '±0.0' : (s.x > 0 ? '+' : '') + dxm) + ' m ' + (s.x > 0 ? '→' : s.x < 0 ? '←' : '');
+      } else {
+        label = (s.y > 0 ? '+' : '') + dym + ' m ' + (s.y > 0 ? '↓' : '↑');
+      }
+      t.textContent = label.trim();
+      badge.style.opacity = '1';
+      badge.style.transition = 'opacity .3s';
+      clearTimeout(badge._to);
+      badge._to = setTimeout(() => { badge.style.opacity = '0.15'; }, 1100);
+    }
+  }
+
+  document.querySelectorAll('[data-nudge]').forEach(btn => {
+    btn.addEventListener('click', () => nudge(btn.dataset.nudge, btn.dataset.dir));
+  });
+
+  // Direction C: re-show hint button
+  const coachC = document.getElementById('coachC');
+  document.querySelectorAll('[data-hint]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      coachC.style.opacity = '1';
+      coachC.style.transition = 'opacity .3s';
+      clearTimeout(coachC._to);
+      coachC._to = setTimeout(() => { coachC.style.opacity = '0'; }, 2600);
+    });
+  });
+  // auto-dismiss the C hint on load after a beat
+  if (coachC) { coachC._to = setTimeout(() => { coachC.style.transition = 'opacity .5s'; coachC.style.opacity = '0'; }, 3200); }
+
+  // ── Keyboard arrows drive the active panel ─────────────────
+  window.addEventListener('keydown', (e) => {
+    const active = document.querySelector('.panelblock.active');
+    if (!active) return;
+    const dir = active.dataset.panel;
+    const map = { ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right' };
+    if (map[e.key]) {
+      e.preventDefault();
+      const mult = e.shiftKey ? 4 : 1;
+      for (let i = 0; i < mult; i++) nudge(dir, map[e.key]);
+    }
+  });
+</script>
+</body>
+</html>
