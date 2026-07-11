@@ -63,6 +63,13 @@ export function setClearRoomSelection(fn) {
   _clearRoomSelection = fn;
 }
 
+// Injected from main.js so selecting a symbol can drop any live measure selection
+// (the selection mutex, mirrors setClearRoomSelection).
+let _clearMeasureSelection = null;
+export function setClearMeasureSelection(fn) {
+  _clearMeasureSelection = fn;
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 /**
@@ -346,11 +353,12 @@ export function onDrawModeEnter() {
  * Select a symbol by id (e.g. after placement).
  */
 export function selectSymbol(id) {
-  // Selection mutex: a symbol selection clears any room selection. This lives in
-  // selectSymbol (not just the dispatcher) so dock drag-drop placement — which
-  // calls selectSymbol directly, bypassing the dispatcher — also upholds the
-  // "≤1 of {room, symbol} selected" invariant.
+  // Selection mutex: a symbol selection clears any room/measure selection. This
+  // lives in selectSymbol (not just the dispatcher) so dock drag-drop placement —
+  // which calls selectSymbol directly, bypassing the dispatcher — also upholds
+  // the "≤1 selected" invariant.
   if (_clearRoomSelection) _clearRoomSelection();
+  if (_clearMeasureSelection) _clearMeasureSelection();
   _selectedId = id;
   const sym = getSymbol(id);
   if (sym) _showInspector(sym);

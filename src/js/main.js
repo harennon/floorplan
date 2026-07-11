@@ -37,7 +37,7 @@ import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from
 import { init as initDimEntry, reposition as dimReposition, getEditingEdge, setHistoryCommit as dimSetHistoryCommit } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim, setHistoryCommit as symDimSetHistoryCommit } from "./symbolDimEntry.js";
-import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, repositionFlushGuide, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast, nudgeSelected, rotateSelected, flushNudge, clearSelection as symClearSelection, setClearRoomSelection as symSetClearRoomSelection } from "./symbolTool.js";
+import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, repositionFlushGuide, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast, nudgeSelected, rotateSelected, flushNudge, clearSelection as symClearSelection, setClearRoomSelection as symSetClearRoomSelection, setClearMeasureSelection as symSetClearMeasureSelection } from "./symbolTool.js";
 import {
   init as initRoomTool,
   onSelectDown as roomOnSelectDown,
@@ -317,6 +317,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // And the reverse: any symbol selection (incl. dock drag-drop placement, which
   // bypasses the dispatcher via selectSymbol) drops a live room selection.
   symSetClearRoomSelection(roomClearSelection);
+  // Symbol selection (incl. dock drag-drop via selectSymbol) drops measure selection.
+  symSetClearMeasureSelection(measureClearSelection);
   // Measurement mutex injections: selecting a symbol clears measure selection
   measureToolSetClearRoomSelection(roomClearSelection);
   measureToolSetClearSymbolSelection(symClearSelection);

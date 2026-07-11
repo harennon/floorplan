@@ -12307,6 +12307,7 @@ import {
   getSelectedId as symGetSelectedIdMutex,
   selectSymbol as symSelectSymbolMutex,
   setClearRoomSelection as symSetClearRoomSelectionMutex,
+  setClearMeasureSelection as symSetClearMeasureSelectionMutex,
 } from "../src/js/symbolTool.js";
 
 // Reset both models + view for roomTool tests.
@@ -13814,6 +13815,9 @@ import {
   hasSelection as measureToolHasSelection,
   deleteSelected as measureToolDeleteSelected,
   setHistoryCommit as measureToolSetHistoryCommit_test,
+  setClearSymbolSelection as measureToolSetClearSymbolSelection_test,
+  setClearRoomSelection as measureToolSetClearRoomSelection_test,
+  setAltHeld as measureToolSetAltHeld,
 } from "../src/js/measureTool.js";
 
 import {
@@ -14113,6 +14117,395 @@ describe("LLD 85 — integration: measureTool creates measurement that survives 
     const mr = validated.measurements[0];
     if (Math.abs(mr.a.x - m0.a.x) > 1e-9) throw new Error("a.x mismatch after round-trip");
     if (Math.abs(mr.b.x - m0.b.x) > 1e-9) throw new Error("b.x mismatch after round-trip");
+  });
+});
+
+// ─── LLD 85: additional snap tests ───────────────────────────────────────────
+
+describe("LLD 85 — measureTool.resolveMeasureSnap: point snap to symbol corner", () => {
+  it("snaps to a symbol corner within SNAP_PT_PX", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Add a chair at world (4, 5). zoom=1 pan=0 → screen = world * 40
+    const sym = createSymbol("chair", 4, 5);
+    symbolModel.symbols.push(sym);
+    const symCornersArr = corners(sym);
+    const c = symCornersArr[0]; // first corner in world coords
+    // Screen coords: cx = c.x * 40, cy = c.y * 40. Cursor 2px from corner.
+    const csx = c.x * 40 + 2;
+    const csy = c.y * 40 + 2;
+    const result = resolveMeasureSnap(csx, csy);
+    expect(result.type).toBe("point");
+    if (Math.abs(result.x - c.x) > 0.05 || Math.abs(result.y - c.y) > 0.05) {
+      throw new Error(`Expected corner (${c.x},${c.y}), got (${result.x},${result.y})`);
+    }
+    symbolModel.symbols.length = 0;
+  });
+});
+
+describe("LLD 85 — measureTool.resolveMeasureSnap: point snap to symbol AABB center", () => {
+  it("snaps to a symbol AABB center within SNAP_PT_PX", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // A chair (rot=0): AABB center is the symbol position (cx=x, cy=y).
+    const sym = createSymbol("chair", 3, 6);
+    symbolModel.symbols.push(sym);
+    const box = symAabb34(sym);
+    // Screen coords at zoom=1 pan=0: sx = cx * 40. Cursor 1px from center.
+    const csx = box.cx * 40 + 1;
+    const csy = box.cy * 40 + 1;
+    const result = resolveMeasureSnap(csx, csy);
+    expect(result.type).toBe("point");
+    if (Math.abs(result.x - box.cx) > 0.05 || Math.abs(result.y - box.cy) > 0.05) {
+      throw new Error(`Expected center (${box.cx},${box.cy}), got (${result.x},${result.y})`);
+    }
+    symbolModel.symbols.length = 0;
+  });
+});
+
+describe("LLD 85 — measureTool.resolveMeasureSnap: wall-edge projection snap", () => {
+  it("snaps to the closest point on a wall segment (not near a vertex)", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Horizontal wall from (0,0) to (10,0); vertices at (0,0) and (10,0) in world.
+    // Screen at zoom=1 pan=0: (0,0)→(0,0)px, (10,0)→(400,0)px.
+    // Midpoint world (5,0) → screen (200,0).
+    model.rooms.push({ id: "we0", closed: false, verts: [
+      { x: 0, y: 0 }, { x: 10, y: 0 },
+    ]});
+    // Cursor at world midpoint (5,0) displaced 3px perpendicular (below in screen).
+    // Not near either vertex (SNAP_PT_PX = 20, and midpoint is 200px from each end).
+    const result = resolveMeasureSnap(200, 3);
+    expect(result.type).toBe("point");
+    if (Math.abs(result.x - 5) > 0.1) throw new Error(`Expected x≈5, got ${result.x}`);
+    if (Math.abs(result.y - 0) > 0.1) throw new Error(`Expected y≈0, got ${result.y}`);
+    model.rooms.length = 0;
+  });
+});
+
+describe("LLD 85 — measureTool.resolveMeasureSnap: Alt-free bypasses all snapping", () => {
+  it("Alt held resolves to raw world point (type:free) regardless of grid or targets", () => {
+    resetForMeasure();
+    setSnapMode("auto"); // grid snap ON
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Cursor at world (0.3, 0): with snap ON this would grid-snap to (0,0).
+    // With Alt held, should return type:"free" and world x ≈ 0.3.
+    const sx = 0.3 * 40; // 12px screen → world 0.3m
+    const sy = 0;
+    measureToolSetAltHeld(true);
+    const result = resolveMeasureSnap(sx, sy);
+    measureToolSetAltHeld(false); // restore
+    expect(result.type).toBe("free");
+    if (Math.abs(result.x - 0.3) > 0.05) {
+      throw new Error(`Expected free x ≈ 0.3, got ${result.x}`);
+    }
+  });
+});
+
+// ─── LLD 85: mutex tests ─────────────────────────────────────────────────────
+
+describe("LLD 85 — mutex: selecting a measurement clears symbol + room selection", () => {
+  it("onSelectDown on a hit returns true and measurement is selected", () => {
+    // The actual mutex clears (symClear + roomClear) are called by the dispatcher
+    // in main.js after a hit. Unit test verifies the precondition: the hit returns
+    // true and sets selection so the dispatcher can execute the mutex.
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measurementsModelT.measurements.push({ id: "mx0", a: { x: 0, y: 0 }, b: { x: 10, y: 0 } });
+    const hit = measureToolOnSelectDown(200, 3);
+    expect(hit).toBe(true);
+    expect(measureToolHasSelection()).toBe(true);
+    measurementsModelT.measurements.length = 0;
+    measureToolClearSelection();
+  });
+
+  it("selecting a symbol via selectSymbol clears measure selection", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolToolMutex({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+    // Wire symSetClearMeasureSelectionMutex → measureTool.clearSelection
+    symSetClearMeasureSelectionMutex(() => { measureToolClearSelection(); });
+
+    // Set a measure selection
+    measurementsModelT.measurements.push({ id: "mm0", a: { x: 0, y: 0 }, b: { x: 10, y: 0 } });
+    measureToolOnSelectDown(200, 3);
+    expect(measureToolHasSelection()).toBe(true);
+
+    // Now select a symbol directly (simulates dock drag-drop bypassing dispatcher)
+    const sym = createSymbol("chair", 2, 2);
+    symbolModel.symbols.push(sym);
+    symSelectSymbolMutex(sym.id);
+
+    // Measure selection must be cleared
+    expect(measureToolHasSelection()).toBe(false);
+
+    // Clean up
+    symbolModel.symbols.length = 0;
+    measurementsModelT.measurements.length = 0;
+    symSetClearMeasureSelectionMutex(null);
+  });
+});
+
+describe("LLD 85 — mutex: selecting a room clears measurement selection", () => {
+  it("roomClearSelection drops measure selection (dispatcher pattern)", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // Set a measure selection
+    measurementsModelT.measurements.push({ id: "mr0", a: { x: 0, y: 0 }, b: { x: 10, y: 0 } });
+    measureToolOnSelectDown(200, 3);
+    expect(measureToolHasSelection()).toBe(true);
+
+    // Simulate the dispatcher clearing measure selection when a room is selected
+    // (main.js calls measureClearSelection on a room hit)
+    measureToolClearSelection();
+    expect(measureToolHasSelection()).toBe(false);
+
+    measurementsModelT.measurements.length = 0;
+  });
+});
+
+// ─── LLD 85: Escape-deselect regression guard (GAP B) ─────────────────────────
+
+describe("LLD 85 — Escape-deselect: clearSelection + onTapEmpty clears measure selection", () => {
+  it("when only a measurement is selected, clearSelection() clears it (Esc path)", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measurementsModelT.measurements.push({ id: "esc0", a: { x: 0, y: 0 }, b: { x: 10, y: 0 } });
+    measureToolOnSelectDown(200, 3);
+    expect(measureToolHasSelection()).toBe(true);
+
+    // The main.js Escape branch calls: onTapEmpty() [clears symbol+room] +
+    // measureClearSelection() [clears measure]. Unit-test: call clearSelection directly.
+    measureToolClearSelection();
+    expect(measureToolHasSelection()).toBe(false);
+
+    // Also confirm hasSelection() is false (no regression to truthy state)
+    expect(measureToolGetSelectedId()).toBe(null);
+
+    measurementsModelT.measurements.length = 0;
+  });
+
+  it("hasSelection() is false after cancel() — in-progress cancel does not leave a stale selection", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Simulate pendingA set then cancelled
+    measureToolOnClick(0, 0);
+    if (getPendingA() === null) throw new Error("Expected pendingA to be set after first click");
+    measureToolCancel();
+    expect(getPendingA()).toBe(null);
+    expect(measureToolHasSelection()).toBe(false);
+  });
+});
+
+// ─── LLD 85: measureRender structural tests ───────────────────────────────────
+
+import {
+  init as initMeasureRender,
+  render as measureRenderFn,
+} from "../src/js/measureRender.js";
+
+const NS_SVG_85 = "http://www.w3.org/2000/svg";
+
+/** Build minimal DOM rig for measureRender (distance annotation) tests. */
+function makeMeasureLineRig() {
+  const svg = document.createElementNS(NS_SVG_85, "svg");
+  const gMeasure = document.createElementNS(NS_SVG_85, "g");
+  gMeasure.id = "measure";
+  svg.appendChild(gMeasure);
+  const dimLabels = document.createElement("div");
+  dimLabels.className = "dim-labels";
+  document.body.appendChild(svg);
+  document.body.appendChild(dimLabels);
+  return {
+    gMeasure, dimLabels,
+    cleanup() {
+      document.body.removeChild(svg);
+      document.body.removeChild(dimLabels);
+    },
+  };
+}
+
+describe("LLD 85 — measureRender: N lines + 2N ticks for N committed measurements", () => {
+  it("2 measurements → 2 line elements, 4 end ticks in #measure group", () => {
+    resetForMeasure();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    measurementsModelT.measurements.push(
+      { id: "r0", a: { x: 0, y: 0 }, b: { x: 5, y: 0 } },
+      { id: "r1", a: { x: 0, y: 2 }, b: { x: 5, y: 2 } },
+    );
+
+    const rig = makeMeasureLineRig();
+    initMeasureRender(
+      rig.gMeasure, rig.dimLabels,
+      () => measurementsModelT.measurements,
+      () => null, // no selection
+      () => null, // no pendingA
+      () => null, // no previewSnap
+    );
+    measureRenderFn();
+
+    // Count lines and ticks: lines have x1/x2/y1/y2; ticks are also <line> elements
+    const allLines = rig.gMeasure.querySelectorAll("line");
+    // For N=2: N main lines + 2N ticks = 2 + 4 = 6 line elements total
+    if (allLines.length !== 6) {
+      throw new Error(`Expected 6 line elements (2 main + 4 ticks), got ${allLines.length}`);
+    }
+
+    // .dim-labels must have 2 .measure-chip elements
+    const chips = rig.dimLabels.querySelectorAll(".measure-chip");
+    if (chips.length !== 2) {
+      throw new Error(`Expected 2 .measure-chip elements, got ${chips.length}`);
+    }
+
+    rig.cleanup();
+    measurementsModelT.measurements.length = 0;
+  });
+});
+
+describe("LLD 85 — measureRender: .measure-chip text matches fmtLen + unitLabel", () => {
+  it("chip text is 'fmtLen(len) unitLabel()' for each measurement", () => {
+    resetForMeasure();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // 3m horizontal measurement
+    measurementsModelT.measurements.push({ id: "ct0", a: { x: 0, y: 0 }, b: { x: 3, y: 0 } });
+
+    const rig = makeMeasureLineRig();
+    initMeasureRender(
+      rig.gMeasure, rig.dimLabels,
+      () => measurementsModelT.measurements,
+      () => null, () => null, () => null,
+    );
+    measureRenderFn();
+
+    const chip = rig.dimLabels.querySelector(".measure-chip");
+    if (!chip) throw new Error("No .measure-chip rendered");
+    const expectedText = fmtLen(3) + " " + unitLabel();
+    if (chip.textContent !== expectedText) {
+      throw new Error(`Expected chip text "${expectedText}", got "${chip.textContent}"`);
+    }
+
+    rig.cleanup();
+    measurementsModelT.measurements.length = 0;
+  });
+});
+
+describe("LLD 85 — measureRender: selected measurement carries data-selected attribute", () => {
+  it("selected measurement's main line has data-selected='true'", () => {
+    resetForMeasure();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    measurementsModelT.measurements.push({ id: "sel0", a: { x: 0, y: 0 }, b: { x: 4, y: 0 } });
+
+    const rig = makeMeasureLineRig();
+    initMeasureRender(
+      rig.gMeasure, rig.dimLabels,
+      () => measurementsModelT.measurements,
+      () => "sel0", // selected
+      () => null, () => null,
+    );
+    measureRenderFn();
+
+    // The main line for a selected measurement has data-selected="true"
+    const selectedLine = rig.gMeasure.querySelector("[data-selected='true']");
+    if (!selectedLine) throw new Error("No line with data-selected='true' found for selected measurement");
+
+    rig.cleanup();
+    measurementsModelT.measurements.length = 0;
+  });
+});
+
+describe("LLD 85 — measureRender: preview line present iff pendingA + previewSnap are set", () => {
+  it("no preview line when pendingA is null", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    const rig = makeMeasureLineRig();
+    initMeasureRender(
+      rig.gMeasure, rig.dimLabels,
+      () => [],
+      () => null,
+      () => null, // no pendingA
+      () => null,
+    );
+    measureRenderFn();
+
+    const lines = rig.gMeasure.querySelectorAll("line");
+    if (lines.length !== 0) throw new Error(`Expected 0 lines (no measurements, no preview), got ${lines.length}`);
+
+    rig.cleanup();
+  });
+
+  it("dashed preview line rendered when pendingA and previewSnap are both set", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    const rig = makeMeasureLineRig();
+    initMeasureRender(
+      rig.gMeasure, rig.dimLabels,
+      () => [],
+      () => null,
+      () => ({ x: 0, y: 0 }),          // pendingA
+      () => ({ x: 3, y: 0, type: "grid" }), // previewSnap
+    );
+    measureRenderFn();
+
+    // Should have a dashed preview line
+    const lines = rig.gMeasure.querySelectorAll("line");
+    if (lines.length === 0) throw new Error("Expected preview line, found none");
+    let hasDash = false;
+    for (const l of lines) {
+      if (l.getAttribute("stroke-dasharray")) { hasDash = true; break; }
+    }
+    if (!hasDash) throw new Error("Expected a dashed preview line");
+
+    rig.cleanup();
+  });
+});
+
+describe("LLD 85 — measureRender: unit toggle re-renders chip text (ft ↔ m)", () => {
+  it("chip text changes when unit is toggled between renders", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // 5m horizontal measurement
+    measurementsModelT.measurements.push({ id: "ut0", a: { x: 0, y: 0 }, b: { x: 5, y: 0 } });
+
+    const rig = makeMeasureLineRig();
+    initMeasureRender(
+      rig.gMeasure, rig.dimLabels,
+      () => measurementsModelT.measurements,
+      () => null, () => null, () => null,
+    );
+
+    // Render in metres
+    setUnit("m");
+    measureRenderFn();
+    const textM = rig.dimLabels.querySelector(".measure-chip")?.textContent;
+    if (!textM) throw new Error("No chip in metric render");
+
+    // Clear dim-labels and re-render in feet
+    while (rig.dimLabels.firstChild) rig.dimLabels.removeChild(rig.dimLabels.firstChild);
+    setUnit("ft");
+    measureRenderFn();
+    const textFt = rig.dimLabels.querySelector(".measure-chip")?.textContent;
+    if (!textFt) throw new Error("No chip in imperial render");
+
+    if (textM === textFt) throw new Error(`Chip text unchanged after unit toggle: "${textM}"`);
+    if (!textFt.includes("ft")) throw new Error(`Expected ft in chip text, got "${textFt}"`);
+
+    rig.cleanup();
+    measurementsModelT.measurements.length = 0;
+    setUnit("m");
   });
 });
 

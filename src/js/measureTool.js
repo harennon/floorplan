@@ -91,6 +91,14 @@ let _snap = null;
 /** Whether Alt is held (free snap). */
 let _altHeld = false;
 
+/**
+ * Test-only setter for Alt-held state (bypasses keyboard event wiring).
+ * @param {boolean} v
+ */
+export function setAltHeld(v) {
+  _altHeld = !!v;
+}
+
 /** Currently selected measurement id. */
 let _selectedId = null;
 
@@ -239,6 +247,7 @@ export function onSelectDown(sx, sy) {
     const dist = _pointToSegmentDist(sx, sy, sa.x, sa.y, sb.x, sb.y);
     if (dist <= hitPx) {
       _selectedId = m.id;
+      scheduleRender();
       return true;
     }
   }
