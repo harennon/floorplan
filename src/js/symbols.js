@@ -13,9 +13,10 @@
 /** @typedef {"door"|"window"|"bed"|"sofa"|"table"|"chair"|"desk"|"fridge"
  *   |"toilet"|"bathtub"|"sink"|"stove"|"wardrobe"|"bookshelf"|"tv"|"washer"
  *   |"armchair"|"coffee-table"|"dining-table-round"
- *   |"nightstand"|"dresser"|"cabinet"} SymbolType */
+ *   |"nightstand"|"dresser"|"cabinet"
+ *   |"patio-table"|"patio-chair"|"parasol"|"planter"} SymbolType */
 /** @typedef {{ id:string, type:SymbolType, x:number, y:number, w:number, h:number, rot:number }} Sym */
-/** @typedef {"openings"|"living"|"kitchen"|"bedroom"|"bath"} SymCategory */
+/** @typedef {"openings"|"living"|"kitchen"|"bedroom"|"bath"|"outdoor"} SymCategory */
 
 // ── In-memory model ───────────────────────────────────────────────────────────
 
@@ -226,6 +227,40 @@ export const CATALOG = {
       { name: "60\"", w: 1.52, h: 0.76 },
       { name: "66\"", w: 1.68, h: 0.76 },
       { name: "72\"", w: 1.83, h: 0.76 },
+    ],
+  },
+
+  // Outdoor — patio dining tables/chairs snap to bistro/4-seat/6-seat sizes;
+  // parasol footprint is the market-umbrella canopy circle (w===h; kept symmetric).
+  "patio-table": {
+    label: "Patio Table", category: "outdoor", w: 0.90, h: 0.90,
+    min_w: 0.60, max_w: 1.83, min_h: 0.60, max_h: 1.00,
+    presets: [
+      { name: "Bistro 24\"", w: 0.61, h: 0.61 },
+      { name: "4-seat 36\"", w: 0.91, h: 0.91 },
+      { name: "6-seat 72\"", w: 1.83, h: 0.91 },
+    ],
+  },
+  "patio-chair": { label: "Patio Chair", category: "outdoor", w: 0.60, h: 0.65, min_w: 0.50, max_w: 0.80, min_h: 0.55, max_h: 0.90 },
+  parasol: {
+    label: "Parasol", category: "outdoor", w: 2.74, h: 2.74,
+    min_w: 1.83, max_w: 3.35, min_h: 1.83, max_h: 3.35,
+    presets: [
+      { name: "6 ft",   w: 1.83, h: 1.83 },
+      { name: "7.5 ft", w: 2.29, h: 2.29 },
+      { name: "9 ft",   w: 2.74, h: 2.74 },
+      { name: "10 ft",  w: 3.05, h: 3.05 },
+      { name: "11 ft",  w: 3.35, h: 3.35 },
+    ],
+  },
+  planter: {
+    label: "Planter", category: "outdoor", w: 0.50, h: 0.50,
+    min_w: 0.25, max_w: 1.00, min_h: 0.25, max_h: 0.60,
+    presets: [
+      { name: "Small pot",  w: 0.30, h: 0.30 },
+      { name: "Medium pot", w: 0.45, h: 0.45 },
+      { name: "Large pot",  w: 0.60, h: 0.60 },
+      { name: "Trough",     w: 0.90, h: 0.35 },
     ],
   },
 };

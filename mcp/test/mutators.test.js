@@ -312,6 +312,59 @@ test("Gap B: no walls → opening rejected", () => {
   assert.equal(symbolsModel.symbols.length, 0);
 });
 
+// ── LLD 76: outdoor / patio types ────────────────────────────────────────────
+
+test("LLD 76: place_symbol({type:'parasol'}) returns ok:true with clamped dims", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "parasol", x: 5, y: 5 });
+  assert.equal(p.ok, true);
+  assert.equal(p.type, "parasol");
+  assert.equal(p.w, CATALOG.parasol.w);
+  assert.equal(p.h, CATALOG.parasol.h);
+});
+
+test("LLD 76: place_symbol({type:'parasol'}) out-of-range w clamps and reports clamped:true", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "parasol", x: 5, y: 5, w: 99 });
+  assert.equal(p.ok, true);
+  assert.equal(p.clamped, true);
+  assert.equal(p.w, CATALOG.parasol.max_w);
+});
+
+test("LLD 76: place_symbol({type:'patio-table'}) returns ok:true at default dims", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "patio-table", x: 3, y: 3 });
+  assert.equal(p.ok, true);
+  assert.equal(p.type, "patio-table");
+  assert.equal(p.w, CATALOG["patio-table"].w);
+});
+
+test("LLD 76: place_symbol({type:'patio-chair'}) returns ok:true", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "patio-chair", x: 4, y: 4 });
+  assert.equal(p.ok, true);
+  assert.equal(p.type, "patio-chair");
+});
+
+test("LLD 76: place_symbol({type:'planter'}) returns ok:true", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "planter", x: 2, y: 2 });
+  assert.equal(p.ok, true);
+  assert.equal(p.type, "planter");
+});
+
+test("LLD 76: bogus type still returns ok:false (rejection unaffected)", () => {
+  session.newPlan();
+  const p = tools.tool_place_symbol({ type: "patio-bench", x: 1, y: 1 });
+  assert.equal(p.ok, false);
+  assert.equal(p.reason, "unknown symbol type");
+});
+
 // ── resize_room (LLD 78) ─────────────────────────────────────────────────────
 
 test("resize_room: resizes a rectangle to exact w×h non-destructively", () => {
