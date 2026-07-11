@@ -104,6 +104,13 @@ export function setEnabled(on) {
  *  overlapping. 0.1mm — below the 0.01m display precision, far above FP noise (~1e-17). */
 const WALL_FLUSH_EPS = 1e-4;
 
+/** Symbol-to-symbol contact tolerance: an AABB axis-separation within ±this (metres) of
+ *  0 counts as touching (a fit), not overlapping. 0.1mm — below the 0.01m display
+ *  precision (a contact still reads 0.0m) and above any drag/round-trip float noise.
+ *  Symbol AABB gaps carry no WALL_M/2 face offset, so — unlike WALL_FLUSH_EPS — this is
+ *  not absorbing an FP residue; it classifies exact/near-exact contact as a fit. */
+const SYM_CONTACT_EPS = 1e-4;
+
 /**
  * Classify a symbol's near edge against a wall inner face.
  * @param {number} faceGap  metres from AABB edge to wall inner face
@@ -518,15 +525,51 @@ export function computeClearances(sym, world) {
         });
       }
     } else {
-      // dx <= 0 AND dy <= 0: true 2-D overlap → gap 0, leader center-to-center
-      const gap = 0;
-      results.push({
-        label, kind: "symbol", gap,
-        status: "bad",
-        a: { x: cx, y: cy },
-        b: { x: (ob.l + ob.r) / 2, y: (ob.t + ob.b) / 2 },
-        neighbourId: other.id,
-      });
+      // dx <= 0 AND dy <= 0. Split 1-D contact (touch on one axis, overlap on
+      // the other) from genuine 2-D interpenetration (LLD 60 Defect 3). The
+      // nearest-axis separation sep = max(dx, dy) is the least-negative axis.
+      const sep = Math.max(dx, dy); // ≤ 0 here
+      if (sep >= -SYM_CONTACT_EPS) {
+        // 1-D contact → a fit. Leader along the touching faces (zero-length at
+        // the shared face midpoint), reusing the face-pair leader math from the
+        // positive-gap branches: dx >= dy → X-axis contact reuses the dx>0
+        // horizontal-face block; else Y-axis contact reuses the dy>0
+        // vertical-face block.
+        let a, b;
+        if (dx >= dy) {
+          // Horizontal face pair (x-facing edges touch), overlap on y.
+          const sharedT = Math.max(box.t, ob.t);
+          const sharedB = Math.min(box.b, ob.b);
+          const midY = sharedT < sharedB ? (sharedT + sharedB) / 2 : (box.t + box.b) / 2;
+          const faceX = ob.l >= box.r ? box.r : box.l;
+          a = { x: faceX, y: midY };
+          b = { x: faceX, y: midY };
+        } else {
+          // Vertical face pair (y-facing edges touch), overlap on x.
+          const sharedL = Math.max(box.l, ob.l);
+          const sharedR = Math.min(box.r, ob.r);
+          const midX = sharedL < sharedR ? (sharedL + sharedR) / 2 : (box.l + box.r) / 2;
+          const faceY = ob.t >= box.b ? box.b : box.t;
+          a = { x: midX, y: faceY };
+          b = { x: midX, y: faceY };
+        }
+        results.push({
+          label, kind: "symbol", gap: 0,
+          status: "tight",
+          a, b,
+          neighbourId: other.id,
+        });
+      } else {
+        // genuine 2-D interpenetration → overlap (unchanged), leader center-to-center
+        const gap = 0;
+        results.push({
+          label, kind: "symbol", gap,
+          status: "bad",
+          a: { x: cx, y: cy },
+          b: { x: (ob.l + ob.r) / 2, y: (ob.t + ob.b) / 2 },
+          neighbourId: other.id,
+        });
+      }
     }
   }
 

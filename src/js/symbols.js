@@ -394,8 +394,14 @@ export function nearestWallFlush(corners4, segments, wallM, thresholdM, parallel
 
 // ── Object alignment snapping (LLD 34) ───────────────────────────────────────
 
-/** Screen-px alignment threshold; converted to metres by the caller before use. */
+/** Screen-px alignment threshold for same-side edge + center matches; converted
+ *  to metres by the caller before use. */
 export const ALIGN_PX = 8;
+
+/** Screen-px threshold for FACING-edge (contact / place-beside) alignment; wider than
+ *  ALIGN_PX so "make two pieces touch" is easier to hit. Converted to metres by caller.
+ *  Kept < WALL_FLUSH_PX (12) so a nearby wall still wins a contested axis by feel. */
+export const ALIGN_CONTACT_PX = 11;
 
 /** Screen-px room-center threshold; converted to metres by the caller before use. */
 export const ROOM_CENTER_PX = 8;
@@ -406,7 +412,8 @@ export const ROOM_CENTER_PX = 8;
  *   line: number,
  *   kind: "edge"|"center"|"room-center",
  *   guide: { a: {x:number,y:number}, b: {x:number,y:number} },
- *   center?: { x:number, y:number }
+ *   center?: { x:number, y:number },
+ *   facing?: boolean
  * }} AlignAxisMatch
  *
  * @typedef {{ x: AlignAxisMatch|null, y: AlignAxisMatch|null }} AlignResult
@@ -431,103 +438,200 @@ export function aabb(sym) {
   return { minX, maxX, cx: (minX + maxX) / 2, minY, maxY, cy: (minY + maxY) / 2 };
 }
 
+// Tiny epsilon for floating-point tie comparisons (avoids FP equality issues).
+const TIE_EPS = 1e-9;
+
+/**
+ * Best in-threshold X-axis match of the dragged AABB against ONE candidate.
+ *
+ * Scans the 3×3 reference/line index pairs (0=min, 1=max, 2=center). A pair is
+ * a *facing* (contact / place-beside) pair iff it is drag.max↔cand.min (1,0) or
+ * drag.min↔cand.max (0,1) — those use `contactThresholdM`; every other pair uses
+ * `edgeThresholdM`. Within the candidate, prefers the smaller |gap|; on a tie
+ * prefers a center match, then first-seen. Returns the AlignAxisMatch or null.
+ *
+ * @param {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }} dragAABB
+ * @param {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }} cand
+ * @param {number} edgeThresholdM
+ * @param {number} contactThresholdM
+ * @returns {AlignAxisMatch|null}
+ */
+function _bestAxisMatchX(dragAABB, cand, edgeThresholdM, contactThresholdM) {
+  const dragRefs = [dragAABB.minX, dragAABB.maxX, dragAABB.cx];
+  const candLines = [cand.minX, cand.maxX, cand.cx];
+  /** @type {AlignAxisMatch|null} */
+  let best = null;
+  let bestGapAbs = Infinity;
+
+  for (let ri = 0; ri < dragRefs.length; ri++) {
+    for (let ci = 0; ci < candLines.length; ci++) {
+      const gap = candLines[ci] - dragRefs[ri];
+      const gapAbs = Math.abs(gap);
+      // Facing (contact) pair gets the wider threshold; all others the edge threshold.
+      const facing = (ri === 1 && ci === 0) || (ri === 0 && ci === 1);
+      const threshold = facing ? contactThresholdM : edgeThresholdM;
+      if (gapAbs > threshold) continue;
+
+      const isCenterMatch = ri === 2 && ci === 2;
+      const existingIsCenterMatch = best !== null && best.kind === "center";
+      const strictlyBetter = gapAbs < bestGapAbs - TIE_EPS;
+      const tieAndCenter = gapAbs <= bestGapAbs + TIE_EPS && isCenterMatch && !existingIsCenterMatch;
+      if (strictlyBetter || tieAndCenter) {
+        bestGapAbs = gapAbs;
+        const kind = isCenterMatch ? "center" : "edge";
+        // Vertical guide spanning both symbols' Y extents
+        const guideMinY = Math.min(dragAABB.minY, cand.minY);
+        const guideMaxY = Math.max(dragAABB.maxY, cand.maxY);
+        const lineX = candLines[ci];
+        best = {
+          delta: gap,
+          line: lineX,
+          kind,
+          guide: {
+            a: { x: lineX, y: guideMinY },
+            b: { x: lineX, y: guideMaxY },
+          },
+          facing,
+        };
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Best in-threshold Y-axis match of the dragged AABB against ONE candidate.
+ * Mirror of `_bestAxisMatchX` on the Y axis (facing pairs, tie rule identical).
+ *
+ * @param {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }} dragAABB
+ * @param {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }} cand
+ * @param {number} edgeThresholdM
+ * @param {number} contactThresholdM
+ * @returns {AlignAxisMatch|null}
+ */
+function _bestAxisMatchY(dragAABB, cand, edgeThresholdM, contactThresholdM) {
+  const dragRefs = [dragAABB.minY, dragAABB.maxY, dragAABB.cy];
+  const candLines = [cand.minY, cand.maxY, cand.cy];
+  /** @type {AlignAxisMatch|null} */
+  let best = null;
+  let bestGapAbs = Infinity;
+
+  for (let ri = 0; ri < dragRefs.length; ri++) {
+    for (let ci = 0; ci < candLines.length; ci++) {
+      const gap = candLines[ci] - dragRefs[ri];
+      const gapAbs = Math.abs(gap);
+      const facing = (ri === 1 && ci === 0) || (ri === 0 && ci === 1);
+      const threshold = facing ? contactThresholdM : edgeThresholdM;
+      if (gapAbs > threshold) continue;
+
+      const isCenterMatch = ri === 2 && ci === 2;
+      const existingIsCenterMatch = best !== null && best.kind === "center";
+      const strictlyBetter = gapAbs < bestGapAbs - TIE_EPS;
+      const tieAndCenter = gapAbs <= bestGapAbs + TIE_EPS && isCenterMatch && !existingIsCenterMatch;
+      if (strictlyBetter || tieAndCenter) {
+        bestGapAbs = gapAbs;
+        const kind = isCenterMatch ? "center" : "edge";
+        // Horizontal guide spanning both symbols' X extents
+        const guideMinX = Math.min(dragAABB.minX, cand.minX);
+        const guideMaxX = Math.max(dragAABB.maxX, cand.maxX);
+        const lineY = candLines[ci];
+        best = {
+          delta: gap,
+          line: lineY,
+          kind,
+          guide: {
+            a: { x: guideMinX, y: lineY },
+            b: { x: guideMaxX, y: lineY },
+          },
+          facing,
+        };
+      }
+    }
+  }
+  return best;
+}
+
 /**
  * Find the nearest per-axis alignment of a dragged symbol's AABB to any
  * candidate AABB.
  *
  * Pure: no global reads.
  *
+ * Coherent-corner model (LLD 60 Defect 1): rather than picking bestX and bestY
+ * independently across all candidates (which let X snap to one neighbour and Y
+ * to another — a "phantom corner" belonging to no object), this computes each
+ * candidate's OWN best X and Y match, then selects a single "primary" candidate
+ * and emits ONLY its two axes. Both applied axes therefore always originate from
+ * one object; when the primary matches both axes the crossing guides form a real
+ * corner. Removing simultaneous two-object alignment is a deliberate simplicity
+ * tradeoff, not solely a bug fix — a corner now means exactly one neighbour.
+ *
+ * Primary-candidate comparator (deterministic):
+ *   1. Smaller `bestAxisGap` = min(|mx.delta|, |my.delta|) over the candidate's
+ *      non-null axis matches — the object the drag is most clearly aligning to.
+ *   2. Tie within TIE_EPS: the candidate matching BOTH axes wins (corner-affinity),
+ *      without overriding a clearly-tighter single-edge alignment.
+ *   3. Further tie: more center matches, then first-seen.
+ *
+ * Two-tier threshold (LLD 60 Defect 2): facing-edge (contact / place-beside)
+ * pairs use the wider `contactThresholdM`; same-side edge, center, and edge↔center
+ * pairs use `edgeThresholdM`. `contactThresholdM` defaults to `edgeThresholdM` so
+ * every pre-existing three-arg caller keeps its single-window behaviour.
+ *
  * @param {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }} dragAABB
  * @param {{ minX:number, maxX:number, cx:number, minY:number, maxY:number, cy:number }[]} candidates
- * @param {number} thresholdM  world-metre snap threshold
+ * @param {number} edgeThresholdM  gates same-side edge, center, edge↔center pairs
+ * @param {number} [contactThresholdM=edgeThresholdM]  gates facing-edge (contact) pairs
  * @returns {AlignResult}
  */
-export function nearestObjectAlignment(dragAABB, candidates, thresholdM) {
+export function nearestObjectAlignment(dragAABB, candidates, edgeThresholdM, contactThresholdM = edgeThresholdM) {
   /** @type {AlignAxisMatch|null} */
-  let bestX = null;
-  let bestXGapAbs = Infinity;
-
+  let primaryX = null;
   /** @type {AlignAxisMatch|null} */
-  let bestY = null;
-  let bestYGapAbs = Infinity;
-
-  // Reference points for the dragged symbol on each axis
-  const dragXRefs = [dragAABB.minX, dragAABB.maxX, dragAABB.cx];
-  const dragYRefs = [dragAABB.minY, dragAABB.maxY, dragAABB.cy];
-
-  // Tiny epsilon for floating-point tie comparisons (avoids FP equality issues)
-  const TIE_EPS = 1e-9;
+  let primaryY = null;
+  let primaryBestAxisGap = Infinity;
+  let primaryBothAxes = false;
+  let primaryCenterCount = -1;
 
   for (const cand of candidates) {
-    // Candidate lines for each axis
-    const candXLines = [cand.minX, cand.maxX, cand.cx];
-    const candYLines = [cand.minY, cand.maxY, cand.cy];
+    const mx = _bestAxisMatchX(dragAABB, cand, edgeThresholdM, contactThresholdM);
+    const my = _bestAxisMatchY(dragAABB, cand, edgeThresholdM, contactThresholdM);
+    if (mx === null && my === null) continue; // candidate matches nothing in range
 
-    // ── X axis ──────────────────────────────────────────────────────────────
-    for (let ri = 0; ri < dragXRefs.length; ri++) {
-      for (let ci = 0; ci < candXLines.length; ci++) {
-        const gap = candXLines[ci] - dragXRefs[ri];
-        const gapAbs = Math.abs(gap);
-        if (gapAbs > thresholdM) continue;
+    // The gap of the axis this candidate aligns to most clearly.
+    let bestAxisGap = Infinity;
+    if (mx !== null) bestAxisGap = Math.min(bestAxisGap, Math.abs(mx.delta));
+    if (my !== null) bestAxisGap = Math.min(bestAxisGap, Math.abs(my.delta));
+    const bothAxes = mx !== null && my !== null;
+    const centerCount = (mx !== null && mx.kind === "center" ? 1 : 0)
+                      + (my !== null && my.kind === "center" ? 1 : 0);
 
-        // Prefer smaller gap; on tie (within epsilon) prefer center, then first-seen
-        const isCenterMatch = ri === 2 && ci === 2;
-        const existingIsCenterMatch = bestX !== null && bestX.kind === "center";
-        const strictlyBetter = gapAbs < bestXGapAbs - TIE_EPS;
-        const tieAndCenter = gapAbs <= bestXGapAbs + TIE_EPS && isCenterMatch && !existingIsCenterMatch;
-        if (strictlyBetter || tieAndCenter) {
-          bestXGapAbs = gapAbs;
-          const kind = isCenterMatch ? "center" : "edge";
-          // Vertical guide spanning both symbols' Y extents
-          const guideMinY = Math.min(dragAABB.minY, cand.minY);
-          const guideMaxY = Math.max(dragAABB.maxY, cand.maxY);
-          const lineX = candXLines[ci];
-          bestX = {
-            delta: gap,
-            line: lineX,
-            kind,
-            guide: {
-              a: { x: lineX, y: guideMinY },
-              b: { x: lineX, y: guideMaxY },
-            },
-          };
-        }
-      }
+    // Compare against the current primary (comparator rules above; first-seen keeps).
+    let better;
+    if (primaryX === null && primaryY === null) {
+      better = true;
+    } else if (bestAxisGap < primaryBestAxisGap - TIE_EPS) {
+      better = true;                                   // rule 1: strictly tighter
+    } else if (bestAxisGap > primaryBestAxisGap + TIE_EPS) {
+      better = false;
+    } else if (bothAxes !== primaryBothAxes) {
+      better = bothAxes;                               // rule 2: corner-affinity on tie
+    } else if (centerCount !== primaryCenterCount) {
+      better = centerCount > primaryCenterCount;       // rule 3: more center matches
+    } else {
+      better = false;                                  // rule 3b: first-seen keeps
     }
 
-    // ── Y axis ──────────────────────────────────────────────────────────────
-    for (let ri = 0; ri < dragYRefs.length; ri++) {
-      for (let ci = 0; ci < candYLines.length; ci++) {
-        const gap = candYLines[ci] - dragYRefs[ri];
-        const gapAbs = Math.abs(gap);
-        if (gapAbs > thresholdM) continue;
-
-        const isCenterMatch = ri === 2 && ci === 2;
-        const existingIsCenterMatch = bestY !== null && bestY.kind === "center";
-        const strictlyBetter = gapAbs < bestYGapAbs - TIE_EPS;
-        const tieAndCenter = gapAbs <= bestYGapAbs + TIE_EPS && isCenterMatch && !existingIsCenterMatch;
-        if (strictlyBetter || tieAndCenter) {
-          bestYGapAbs = gapAbs;
-          const kind = isCenterMatch ? "center" : "edge";
-          // Horizontal guide spanning both symbols' X extents
-          const guideMinX = Math.min(dragAABB.minX, cand.minX);
-          const guideMaxX = Math.max(dragAABB.maxX, cand.maxX);
-          const lineY = candYLines[ci];
-          bestY = {
-            delta: gap,
-            line: lineY,
-            kind,
-            guide: {
-              a: { x: guideMinX, y: lineY },
-              b: { x: guideMaxX, y: lineY },
-            },
-          };
-        }
-      }
+    if (better) {
+      primaryX = mx;
+      primaryY = my;
+      primaryBestAxisGap = bestAxisGap;
+      primaryBothAxes = bothAxes;
+      primaryCenterCount = centerCount;
     }
   }
 
-  return { x: bestX, y: bestY };
+  return { x: primaryX, y: primaryY };
 }
 
 // ── Room-center snapping (LLD 37) ─────────────────────────────────────────────
