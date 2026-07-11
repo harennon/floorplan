@@ -1453,7 +1453,8 @@ describe("symbols.js — units reuse: fmtLen/parseLen round-trip for w/h", () =>
 
 // ─── Tests: LLD-45 — new furniture types ─────────────────────────────────────
 
-const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer"];
+const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer",
+                     "nightstand", "dresser", "cabinet"];
 
 describe("LLD-45 — catalog integrity: all new types present and valid", () => {
   it("every new type exists in CATALOG with a valid category (updated by LLD-50)", () => {
@@ -8492,7 +8493,7 @@ function _makeDockDOM() {
     openings: ["door", "window"],
     living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf"],
     kitchen:  ["fridge", "stove", "sink", "washer"],
-    bedroom:  ["bed", "wardrobe"],
+    bedroom:  ["bed", "wardrobe", "nightstand", "dresser", "cabinet"],
     bath:     ["toilet", "bathtub"],
   };
 
@@ -8552,7 +8553,7 @@ describe("LLD-50 — dock tabs: structure integrity", () => {
     expect(rows.length).toBe(5);
   });
 
-  it("union of all dock-item[data-type] equals the 16 catalog keys", () => {
+  it("union of all dock-item[data-type] equals the 19 catalog keys", () => {
     const dock = _makeDockDOM();
     const types = Array.from(dock.querySelectorAll(".dock-item[data-type]")).map(b => b.dataset.type);
     _removeDockDOM(dock);
@@ -8561,7 +8562,7 @@ describe("LLD-50 — dock tabs: structure integrity", () => {
     if (JSON.stringify(dockTypes) !== JSON.stringify(catalogKeys)) {
       throw new Error(`Dock types don't match catalog keys.\nDock: ${dockTypes.join(", ")}\nCatalog: ${catalogKeys.join(", ")}`);
     }
-    expect(types.length).toBe(16);
+    expect(types.length).toBe(19);
   });
 
   it("no tab button has a data-type attribute", () => {
@@ -8690,6 +8691,259 @@ describe("LLD-50 — plan round-trip: new-type symbol survives serialize→valid
     const v = validatePlan(JSON.parse(json));
     if (!v) throw new Error("validatePlan rejected plan after serialize of all new types");
     if (v.symbols.symbols.length !== newTypes.length) throw new Error(`Expected ${newTypes.length} symbols, got ${v.symbols.symbols.length}`);
+    resetSymbolModel();
+  });
+});
+
+// ─── LLD 70: bedroom & storage pieces (nightstand, dresser, cabinet) ─────────
+
+const LLD70_TYPES = ["nightstand", "dresser", "cabinet"];
+
+describe("LLD 70 — catalog integrity: nightstand, dresser, cabinet", () => {
+  it("all three types exist in CATALOG", () => {
+    for (const t of LLD70_TYPES) {
+      if (!(t in CATALOG)) throw new Error(`${t} missing from CATALOG`);
+    }
+  });
+
+  it("all three have category 'bedroom'", () => {
+    for (const t of LLD70_TYPES) {
+      if (CATALOG[t].category !== "bedroom") {
+        throw new Error(`${t}.category should be 'bedroom', got '${CATALOG[t].category}'`);
+      }
+    }
+  });
+
+  it("all three have non-empty label", () => {
+    for (const t of LLD70_TYPES) {
+      const label = CATALOG[t].label;
+      if (!label || label.trim() === "") throw new Error(`${t} has empty label`);
+    }
+  });
+
+  it("all three have finite w, h, min, max", () => {
+    for (const t of LLD70_TYPES) {
+      const cat = CATALOG[t];
+      for (const key of ["w", "h", "min", "max"]) {
+        if (!isFinite(cat[key])) throw new Error(`${t}.${key} is not finite: ${cat[key]}`);
+      }
+    }
+  });
+
+  it("min <= w <= max and min <= h <= max for all three", () => {
+    for (const t of LLD70_TYPES) {
+      const { w, h, min, max } = CATALOG[t];
+      if (w < min || w > max) throw new Error(`${t}: w=${w} not in [${min},${max}]`);
+      if (h < min || h > max) throw new Error(`${t}: h=${h} not in [${min},${max}]`);
+    }
+  });
+
+  it("none of the three has openings:true", () => {
+    for (const t of LLD70_TYPES) {
+      if (CATALOG[t].openings) throw new Error(`${t} unexpectedly has openings:true`);
+    }
+  });
+
+  it("spot-check: CATALOG.nightstand.category === 'bedroom'", () => {
+    expect(CATALOG.nightstand.category).toBe("bedroom");
+  });
+
+  it("spot-check: CATALOG.dresser.category === 'bedroom'", () => {
+    expect(CATALOG.dresser.category).toBe("bedroom");
+  });
+
+  it("spot-check: CATALOG.cabinet.category === 'bedroom'", () => {
+    expect(CATALOG.cabinet.category).toBe("bedroom");
+  });
+});
+
+describe("LLD 70 — createSymbol: new types return correct Sym", () => {
+  it("createSymbol returns correct type, catalog defaults, rot:0, and string id", () => {
+    resetSymbolModel();
+    for (const t of LLD70_TYPES) {
+      const s = createSymbol(t, 1, 2);
+      if (s.type !== t) throw new Error(`${t}: type mismatch`);
+      if (Math.abs(s.w - CATALOG[t].w) > 1e-9) throw new Error(`${t}: w mismatch`);
+      if (Math.abs(s.h - CATALOG[t].h) > 1e-9) throw new Error(`${t}: h mismatch`);
+      if (s.rot !== 0) throw new Error(`${t}: rot should be 0`);
+      if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(`${t}: invalid id ${s.id}`);
+    }
+  });
+});
+
+describe("LLD 70 — clampDim: new types clamp at min and max", () => {
+  it("nightstand: clampDim below min clamps to min", () => {
+    const { min } = CATALOG.nightstand;
+    expect(clampDim("nightstand", min - 0.1)).toBeCloseTo(min, 9);
+  });
+
+  it("nightstand: clampDim above max clamps to max", () => {
+    const { max } = CATALOG.nightstand;
+    expect(clampDim("nightstand", max + 1)).toBeCloseTo(max, 9);
+  });
+
+  it("dresser: clampDim below min clamps to min", () => {
+    const { min } = CATALOG.dresser;
+    expect(clampDim("dresser", min - 0.1)).toBeCloseTo(min, 9);
+  });
+
+  it("dresser: clampDim above max clamps to max", () => {
+    const { max } = CATALOG.dresser;
+    expect(clampDim("dresser", max + 1)).toBeCloseTo(max, 9);
+  });
+
+  it("cabinet: clampDim below min clamps to min", () => {
+    const { min } = CATALOG.cabinet;
+    expect(clampDim("cabinet", min - 0.1)).toBeCloseTo(min, 9);
+  });
+
+  it("cabinet: clampDim above max clamps to max", () => {
+    const { max } = CATALOG.cabinet;
+    expect(clampDim("cabinet", max + 1)).toBeCloseTo(max, 9);
+  });
+});
+
+describe("LLD 70 — resizeSymbol: new types clamp on huge/tiny inputs", () => {
+  it("nightstand w huge clamps to max, returns changed=true", () => {
+    const s = createSymbol("nightstand", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG.nightstand.max, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("nightstand h tiny clamps to min, returns changed=true", () => {
+    const s = createSymbol("nightstand", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG.nightstand.min, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("dresser w huge clamps to max, returns changed=true", () => {
+    const s = createSymbol("dresser", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG.dresser.max, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("dresser h tiny clamps to min, returns changed=true", () => {
+    const s = createSymbol("dresser", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG.dresser.min, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("cabinet w huge clamps to max, returns changed=true", () => {
+    const s = createSymbol("cabinet", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG.cabinet.max, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("cabinet h tiny clamps to min, returns changed=true", () => {
+    const s = createSymbol("cabinet", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG.cabinet.min, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("in-range value unchanged, returns changed=false", () => {
+    const s = createSymbol("dresser", 0, 0);
+    const orig = s.w;
+    const changed = resizeSymbol(s, "w", orig);
+    expect(changed).toBe(false);
+    expect(s.w).toBeCloseTo(orig, 9);
+  });
+});
+
+describe("LLD 70 — dock: bedroom row contains all five bedroom types", () => {
+  it("bedroom row has 5 dock-item buttons including nightstand, dresser, cabinet", () => {
+    const dock = _makeDockDOM();
+    const bedroomRow = dock.querySelector("[role='tabpanel'][data-category='bedroom']");
+    if (!bedroomRow) { _removeDockDOM(dock); throw new Error("No bedroom tabpanel row found"); }
+    const items = Array.from(bedroomRow.querySelectorAll(".dock-item[data-type]"));
+    const types = items.map(b => b.dataset.type);
+    _removeDockDOM(dock);
+    if (types.length !== 5) throw new Error(`Expected 5 bedroom items, got ${types.length}: ${types.join(", ")}`);
+    for (const t of ["bed", "wardrobe", "nightstand", "dresser", "cabinet"]) {
+      if (!types.includes(t)) throw new Error(`Missing type '${t}' in bedroom row`);
+    }
+  });
+
+  it("each new bedroom button has a descriptive aria-label", () => {
+    const dock = _makeDockDOM();
+    const bedroomRow = dock.querySelector("[role='tabpanel'][data-category='bedroom']");
+    if (!bedroomRow) { _removeDockDOM(dock); throw new Error("No bedroom tabpanel row found"); }
+    for (const t of LLD70_TYPES) {
+      const btn = bedroomRow.querySelector(`[data-type="${t}"]`);
+      if (!btn) { _removeDockDOM(dock); throw new Error(`No button for ${t} in bedroom row`); }
+      const label = btn.getAttribute("aria-label");
+      if (!label || label.trim() === "") {
+        _removeDockDOM(dock);
+        throw new Error(`${t} button missing aria-label`);
+      }
+    }
+    _removeDockDOM(dock);
+  });
+
+  it("no new bedroom tab carries a data-type attribute", () => {
+    const dock = _makeDockDOM();
+    const tabs = dock.querySelectorAll("[role='tab']");
+    for (const tab of tabs) {
+      if (tab.dataset.type) {
+        _removeDockDOM(dock);
+        throw new Error(`Tab for category "${tab.dataset.category}" has data-type="${tab.dataset.type}"`);
+      }
+    }
+    _removeDockDOM(dock);
+  });
+});
+
+describe("LLD 70 — round-trip: new bedroom types survive serialize→validate", () => {
+  it("plan with nightstand/dresser/cabinet passes validatePlan", () => {
+    resetSymbolModel();
+    for (const t of LLD70_TYPES) addSymbol(createSymbol(t, 1, 1));
+    const plan = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(plan)));
+    if (!v) throw new Error("validatePlan rejected plan with LLD-70 types");
+    resetSymbolModel();
+  });
+
+  it("nightstand survives serializePlan → JSON.parse → validatePlan with type intact", () => {
+    resetSymbolModel();
+    const s = createSymbol("nightstand", 3, 4);
+    addSymbol(s);
+    const json = serializePlan(buildPlan());
+    const v = validatePlan(JSON.parse(json));
+    if (!v) throw new Error("validatePlan rejected re-parsed plan with nightstand");
+    if (v.symbols.symbols[0].type !== "nightstand") {
+      throw new Error("nightstand type lost after round-trip");
+    }
+    resetSymbolModel();
+  });
+
+  it("dresser survives serializePlan → JSON.parse → validatePlan with type intact", () => {
+    resetSymbolModel();
+    const s = createSymbol("dresser", 1, 2);
+    addSymbol(s);
+    const json = serializePlan(buildPlan());
+    const v = validatePlan(JSON.parse(json));
+    if (!v) throw new Error("validatePlan rejected re-parsed plan with dresser");
+    if (v.symbols.symbols[0].type !== "dresser") {
+      throw new Error("dresser type lost after round-trip");
+    }
+    resetSymbolModel();
+  });
+
+  it("cabinet survives serializePlan → JSON.parse → validatePlan with type intact", () => {
+    resetSymbolModel();
+    const s = createSymbol("cabinet", 2, 3);
+    addSymbol(s);
+    const json = serializePlan(buildPlan());
+    const v = validatePlan(JSON.parse(json));
+    if (!v) throw new Error("validatePlan rejected re-parsed plan with cabinet");
+    if (v.symbols.symbols[0].type !== "cabinet") {
+      throw new Error("cabinet type lost after round-trip");
+    }
     resetSymbolModel();
   });
 });
@@ -10015,6 +10269,61 @@ describe("symbolRender.render", () => {
     }
   });
 
+});
+
+// ─── LLD 70 — render suite (requires makeRenderRig61 + symbolRenderRender) ────
+
+describe("LLD 70 — render: new types produce base polygon plus glyph children", () => {
+  it("nightstand renders base <polygon> plus at least one glyph child in #symbols", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("nightstand", 2, 2));
+    symbolRenderRender();
+    const children = Array.from(rig.gSymbols.children);
+    if (children.length === 0) throw new Error("No children in #symbols for nightstand");
+    const poly = children[0];
+    if (poly.tagName !== "polygon") throw new Error(`First child should be polygon, got ${poly.tagName}`);
+    const glyphChildren = children.slice(1);
+    if (glyphChildren.length === 0) throw new Error("nightstand produced no glyph children");
+    const hasLineOrCircle = glyphChildren.some(el => el.tagName === "line" || el.tagName === "circle");
+    if (!hasLineOrCircle) throw new Error("nightstand glyph has no line or circle");
+  });
+
+  it("dresser renders base <polygon> plus at least one glyph child in #symbols", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("dresser", 2, 2));
+    symbolRenderRender();
+    const children = Array.from(rig.gSymbols.children);
+    if (children.length === 0) throw new Error("No children in #symbols for dresser");
+    const poly = children[0];
+    if (poly.tagName !== "polygon") throw new Error(`First child should be polygon, got ${poly.tagName}`);
+    const glyphChildren = children.slice(1);
+    if (glyphChildren.length === 0) throw new Error("dresser produced no glyph children");
+    const hasLine = glyphChildren.some(el => el.tagName === "line");
+    if (!hasLine) throw new Error("dresser glyph has no line");
+  });
+
+  it("cabinet renders base <polygon> plus at least one glyph child in #symbols", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("cabinet", 2, 2));
+    symbolRenderRender();
+    const children = Array.from(rig.gSymbols.children);
+    if (children.length === 0) throw new Error("No children in #symbols for cabinet");
+    const poly = children[0];
+    if (poly.tagName !== "polygon") throw new Error(`First child should be polygon, got ${poly.tagName}`);
+    const glyphChildren = children.slice(1);
+    if (glyphChildren.length === 0) throw new Error("cabinet produced no glyph children");
+    const hasLineOrCircle = glyphChildren.some(el => el.tagName === "line" || el.tagName === "circle");
+    if (!hasLineOrCircle) throw new Error("cabinet glyph has no line or circle");
+  });
 });
 
 // ─── LLD 62: Layout / Geometry assertions ─────────────────────────────────────
