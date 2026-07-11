@@ -1665,43 +1665,43 @@ describe("symbols.js — pickSymbol", () => {
 
 describe("symbols.js — clampDim", () => {
   it("passes through in-range value", () => {
-    expect(clampDim("bed", 1.5)).toBeCloseTo(1.5, 9);
+    expect(clampDim("bed", "w", 1.5)).toBeCloseTo(1.5, 9);
   });
 
-  it("clamps below min → min", () => {
-    expect(clampDim("chair", 0.1)).toBeCloseTo(CATALOG.chair.min, 9);
+  it("clamps below min → min (width axis)", () => {
+    expect(clampDim("chair", "w", 0.1)).toBeCloseTo(CATALOG.chair.min_w, 9);
   });
 
-  it("clamps above max → max", () => {
-    expect(clampDim("sofa", 99)).toBeCloseTo(CATALOG.sofa.max, 9);
+  it("clamps above max → max (width axis)", () => {
+    expect(clampDim("sofa", "w", 99)).toBeCloseTo(CATALOG.sofa.max_w, 9);
   });
 });
 
 describe("symbols.js — resizeSymbol", () => {
   it("sets width to clamped value", () => {
     resetSymbolModel();
-    const s = createSymbol("bed", 0, 0);
+    const s = createSymbol("sofa", 0, 0); // 2.0 is in-range for sofa width
     addSymbol(s);
     resizeSymbol(s, "w", 2.0);
     expect(s.w).toBeCloseTo(2.0, 9);
   });
 
-  it("clamps value to [min, max]", () => {
+  it("clamps value to [min_w, max_w]", () => {
     resetSymbolModel();
     const s = createSymbol("chair", 0, 0);
-    resizeSymbol(s, "w", 0.01); // below min=0.30
-    expect(s.w).toBeCloseTo(CATALOG.chair.min, 9);
-    resizeSymbol(s, "w", 999); // above max=1.00
-    expect(s.w).toBeCloseTo(CATALOG.chair.max, 9);
+    resizeSymbol(s, "w", 0.01); // below min_w
+    expect(s.w).toBeCloseTo(CATALOG.chair.min_w, 9);
+    resizeSymbol(s, "w", 999); // above max_w
+    expect(s.w).toBeCloseTo(CATALOG.chair.max_w, 9);
   });
 
   it("lockAspect scales both dims proportionally", () => {
     resetSymbolModel();
-    const s = createSymbol("bed", 0, 0); // w=1.5, h=2.0, ratio h/w = 4/3
+    const s = createSymbol("table", 0, 0); // w=1.20, h=0.80; ratio stays in both axes' bounds
     const origRatio = s.h / s.w;
-    resizeSymbol(s, "w", 1.2, true);
-    expect(s.w).toBeCloseTo(1.2, 5);
-    expect(s.h).toBeCloseTo(1.2 * origRatio, 5);
+    resizeSymbol(s, "w", 1.0, true);
+    expect(s.w).toBeCloseTo(1.0, 5);
+    expect(s.h).toBeCloseTo(1.0 * origRatio, 5);
   });
 
   it("openings ignore dim='h'", () => {
@@ -1841,20 +1841,20 @@ describe("LLD-45 — catalog integrity: all new types present and valid", () => 
     }
   });
 
-  it("every new type has finite w, h, min, max", () => {
+  it("every new type has finite w, h, and per-axis bounds", () => {
     for (const t of LLD45_TYPES) {
       const cat = CATALOG[t];
-      for (const key of ["w", "h", "min", "max"]) {
+      for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
         if (!isFinite(cat[key])) throw new Error(`${t}.${key} is not finite: ${cat[key]}`);
       }
     }
   });
 
-  it("min <= w <= max and min <= h <= max for every new type (single-range guard)", () => {
+  it("min_w <= w <= max_w and min_h <= h <= max_h for every new type (per-axis guard)", () => {
     for (const t of LLD45_TYPES) {
-      const { w, h, min, max } = CATALOG[t];
-      if (w < min || w > max) throw new Error(`${t}: w=${w} not in [${min},${max}]`);
-      if (h < min || h > max) throw new Error(`${t}: h=${h} not in [${min},${max}]`);
+      const { w, h, min_w, max_w, min_h, max_h } = CATALOG[t];
+      if (w < min_w || w > max_w) throw new Error(`${t}: w=${w} not in [${min_w},${max_w}]`);
+      if (h < min_h || h > max_h) throw new Error(`${t}: h=${h} not in [${min_h},${max_h}]`);
     }
   });
 
@@ -1893,48 +1893,53 @@ describe("LLD-45 — createSymbol: new types return correct Sym", () => {
   });
 });
 
-describe("LLD-45 — clampDim: new types clamp at min and max", () => {
-  it("bathtub (asymmetric): clampDim below min clamps to min", () => {
-    const { min } = CATALOG.bathtub;
-    expect(clampDim("bathtub", min - 0.1)).toBeCloseTo(min, 9);
+describe("LLD-45 — clampDim: new types clamp at per-axis min and max", () => {
+  it("bathtub: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG.bathtub;
+    expect(clampDim("bathtub", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
   });
-  it("bathtub (asymmetric): clampDim above max clamps to max", () => {
-    const { max } = CATALOG.bathtub;
-    expect(clampDim("bathtub", max + 1)).toBeCloseTo(max, 9);
+  it("bathtub: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG.bathtub;
+    expect(clampDim("bathtub", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
-  it("washer (symmetric): clampDim below min clamps to min", () => {
-    const { min } = CATALOG.washer;
-    expect(clampDim("washer", min - 0.1)).toBeCloseTo(min, 9);
+  it("bathtub: depth below min_h clamps to min_h", () => {
+    const { min_h } = CATALOG.bathtub;
+    expect(clampDim("bathtub", "h", min_h - 0.1)).toBeCloseTo(min_h, 9);
   });
-  it("washer (symmetric): clampDim above max clamps to max", () => {
-    const { max } = CATALOG.washer;
-    expect(clampDim("washer", max + 1)).toBeCloseTo(max, 9);
+  it("washer: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG.washer;
+    expect(clampDim("washer", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
+  });
+  it("washer: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG.washer;
+    expect(clampDim("washer", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
 });
 
 describe("LLD-45 — resizeSymbol: clamp on huge/tiny inputs", () => {
-  it("bathtub w huge clamps to max and returns changed=true", () => {
+  it("bathtub w huge clamps to max_w and returns changed=true", () => {
     const s = createSymbol("bathtub", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.bathtub.max, 9);
+    expect(s.w).toBeCloseTo(CATALOG.bathtub.max_w, 9);
     expect(changed).toBe(true);
   });
-  it("bathtub h tiny clamps to min and returns changed=true", () => {
+  it("bathtub h tiny clamps to min_h and returns changed=true", () => {
     const s = createSymbol("bathtub", 0, 0);
+    resizeSymbol(s, "h", CATALOG.bathtub.max_h); // move off the min_h default first
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG.bathtub.min, 9);
+    expect(s.h).toBeCloseTo(CATALOG.bathtub.min_h, 9);
     expect(changed).toBe(true);
   });
-  it("washer w huge clamps to max and returns changed=true", () => {
+  it("washer w huge clamps to max_w and returns changed=true", () => {
     const s = createSymbol("washer", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.washer.max, 9);
+    expect(s.w).toBeCloseTo(CATALOG.washer.max_w, 9);
     expect(changed).toBe(true);
   });
-  it("washer h tiny clamps to min and returns changed=true", () => {
+  it("washer h tiny clamps to min_h and returns changed=true", () => {
     const s = createSymbol("washer", 0, 0);
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG.washer.min, 9);
+    expect(s.h).toBeCloseTo(CATALOG.washer.min_h, 9);
     expect(changed).toBe(true);
   });
 });
@@ -2050,7 +2055,7 @@ describe("symbolDimEntry — commit resizes symbol", () => {
     const input = rig.stage.querySelector(".sym-dim-input");
     input.value = "99m";
     commitSymbol();
-    expect(s.w).toBeCloseTo(CATALOG.chair.max, 5);
+    expect(s.w).toBeCloseTo(CATALOG.chair.max_w, 5);
     rig.cleanup();
   });
 
@@ -2065,7 +2070,7 @@ describe("symbolDimEntry — commit resizes symbol", () => {
     const input = rig.stage.querySelector(".sym-dim-input");
     input.value = "0.01m";
     commitSymbol();
-    expect(s.w).toBeCloseTo(CATALOG.chair.min, 5);
+    expect(s.w).toBeCloseTo(CATALOG.chair.min_w, 5);
     rig.cleanup();
   });
 
@@ -2129,17 +2134,17 @@ describe("symbolDimEntry — lock-aspect is forwarded to resizeSymbol", () => {
     resetSymbolModel();
     setUnit("m");
     view.zoom = 1; view.panX = 0; view.panY = 0;
-    const s = createSymbol("bed", 5, 5); // w=1.5, h=2.0
+    const s = createSymbol("table", 5, 5); // w=1.20, h=0.80; ratio stays in both axes' bounds
     addSymbol(s);
     const origRatio = s.h / s.w;
     const rig = makeSymbolDimRig(true); // lockAspect ON
     beginSymbolEdit(s.id, "w");
     const input = rig.stage.querySelector(".sym-dim-input");
-    input.value = "1.2m";
+    input.value = "1.0m";
     commitSymbol();
-    expect(s.w).toBeCloseTo(1.2, 5);
+    expect(s.w).toBeCloseTo(1.0, 5);
     // h should scale to preserve the ratio (within clamp)
-    const expectedH = clampDim("bed", 1.2 * origRatio);
+    const expectedH = clampDim("table", "h", 1.0 * origRatio);
     expect(s.h).toBeCloseTo(expectedH, 4);
     rig.cleanup();
   });
@@ -2884,7 +2889,14 @@ describe("security — no innerHTML from user input in DOM", () => {
 
 import {
   PLAN_SCHEMA, buildPlan, validatePlan, applyPlan, isEmptyPlan, serializePlan,
+  buildCompact, parseCompact, COMPACT_VERSION,
 } from "../src/js/plan.js";
+
+import {
+  model as measurementsModel,
+  hydrate as hydrateMeasurements,
+  newId as newMeasurementId,
+} from "../src/js/measurements.js";
 
 import {
   STORAGE_KEY, init as initStore, loadLocal, saveNow, clearLocal, getState,
@@ -2910,6 +2922,10 @@ import {
   setView as setViewDirect, fitToContent,
 } from "../src/js/view.js";
 
+import {
+  showConflictBanner,
+} from "../src/js/actions.js";
+
 // ─── LLD-16 test helpers ──────────────────────────────────────────────────────
 
 /** Reset all model state cleanly for LLD-16 test suites */
@@ -2917,6 +2933,7 @@ function resetAll() {
   model.rooms.length = 0;
   model.chain.length = 0;
   symbolModel.symbols.length = 0;
+  measurementsModel.measurements.length = 0;
   setUnit("ft");
   view.zoom = 1; view.panX = 0; view.panY = 0;
 }
@@ -3334,8 +3351,37 @@ describe("view.fitToContent — fits bounds in viewport with margin", () => {
 
 // ─── Tests: share.js codec ────────────────────────────────────────────────────
 
+// Helper: compare plan geometry/unit (not ids/view, which are intentionally dropped by compact codec)
+function planGeomEqual(a, b) {
+  // rooms: same vert coords + closed
+  if (a.walls.rooms.length !== b.walls.rooms.length) return false;
+  for (let i = 0; i < a.walls.rooms.length; i++) {
+    const ra = a.walls.rooms[i], rb = b.walls.rooms[i];
+    if (ra.closed !== rb.closed) return false;
+    if (ra.verts.length !== rb.verts.length) return false;
+    for (let j = 0; j < ra.verts.length; j++) {
+      if (ra.verts[j].x !== rb.verts[j].x || ra.verts[j].y !== rb.verts[j].y) return false;
+    }
+  }
+  // chain
+  if (a.walls.chain.length !== b.walls.chain.length) return false;
+  for (let i = 0; i < a.walls.chain.length; i++) {
+    if (a.walls.chain[i].x !== b.walls.chain[i].x || a.walls.chain[i].y !== b.walls.chain[i].y) return false;
+  }
+  // symbols: same type/x/y/w/h/rot
+  if (a.symbols.symbols.length !== b.symbols.symbols.length) return false;
+  for (let i = 0; i < a.symbols.symbols.length; i++) {
+    const sa = a.symbols.symbols[i], sb = b.symbols.symbols[i];
+    if (sa.type !== sb.type || sa.x !== sb.x || sa.y !== sb.y ||
+        sa.w !== sb.w || sa.h !== sb.h || sa.rot !== sb.rot) return false;
+  }
+  // unit
+  if (a.unit !== b.unit) return false;
+  return true;
+}
+
 describe("share.js — compress/decompress round-trip", () => {
-  it("decodeHashToPlan(encodePlanToHash(p)) deep-equals p", async () => {
+  it("decodeHashToPlan(encodePlanToHash(p)) deep-equals p (geometry/unit; ids/view intentionally regenerated)", async () => {
     resetAll();
     setUnit("m");
     model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
@@ -3344,8 +3390,8 @@ describe("share.js — compress/decompress round-trip", () => {
     const hash = await encodePlanToHash(p);
     const decoded = await decodeHashToPlan(hash);
     if (!decoded) throw new Error("decodeHashToPlan returned null");
-    if (serializePlan(decoded) !== serializePlan(p)) {
-      throw new Error("Decoded plan does not deep-equal original");
+    if (!planGeomEqual(decoded, p)) {
+      throw new Error("Decoded plan does not deep-equal original (geometry/unit)");
     }
   });
 
@@ -3360,8 +3406,8 @@ describe("share.js — compress/decompress round-trip", () => {
     const hash = await encodePlanToHash(p);
     const decoded = await decodeHashToPlan(hash);
     if (!decoded) throw new Error("round-trip failed for non-trivial plan");
-    if (serializePlan(decoded) !== serializePlan(p)) {
-      throw new Error("round-trip mismatch for non-trivial plan");
+    if (!planGeomEqual(decoded, p)) {
+      throw new Error("round-trip mismatch for non-trivial plan (geometry/unit)");
     }
   });
 
@@ -3705,7 +3751,7 @@ describe("share-open — applyPlan + fitToContent frames content on current view
     if (screenCY < 0 || screenCY > receiverH) throw new Error(`Content center Y ${screenCY} off-screen for receiver [0,${receiverH}]`);
   });
 
-  it("rooms/symbols/unit are byte-exact after share open (content correct)", async () => {
+  it("rooms/symbols/unit are geometry-exact after share open (ids/view intentionally regenerated by compact codec)", async () => {
     resetAll();
     setUnit("m");
     model.rooms.push({ id: "w0", closed: true, verts: [{ x:0,y:0 },{ x:3,y:0 },{ x:3,y:4 },{ x:0,y:4 }] });
@@ -3716,11 +3762,20 @@ describe("share-open — applyPlan + fitToContent frames content on current view
     if (!decoded) throw new Error("decodeHashToPlan returned null");
     resetAll();
     applyPlan(decoded);
-    if (JSON.stringify(model.rooms) !== JSON.stringify(plan.walls.rooms)) {
-      throw new Error("rooms differ after share-open applyPlan");
+    // Compare verts (geometry), not ids
+    if (model.rooms.length !== plan.walls.rooms.length) throw new Error("room count differs after share-open");
+    for (let i = 0; i < model.rooms.length; i++) {
+      const ra = model.rooms[i], rb = plan.walls.rooms[i];
+      if (JSON.stringify(ra.verts) !== JSON.stringify(rb.verts) || ra.closed !== rb.closed) {
+        throw new Error("room verts differ after share-open applyPlan");
+      }
     }
-    if (JSON.stringify(symbolModel.symbols) !== JSON.stringify(plan.symbols.symbols)) {
-      throw new Error("symbols differ after share-open applyPlan");
+    if (symbolModel.symbols.length !== plan.symbols.symbols.length) throw new Error("symbol count differs");
+    for (let i = 0; i < symbolModel.symbols.length; i++) {
+      const sa = symbolModel.symbols[i], sb = plan.symbols.symbols[i];
+      if (sa.type !== sb.type || sa.x !== sb.x || sa.y !== sb.y || sa.w !== sb.w || sa.h !== sb.h || sa.rot !== sb.rot) {
+        throw new Error("symbol geometry differs after share-open applyPlan");
+      }
     }
     if (unit !== "m") throw new Error("unit not restored after share-open");
   });
@@ -3751,6 +3806,178 @@ describe("share-open conflict logic — identical plans skip banner (Edge Case 1
     const plan2 = buildPlan();
     const isConflict = serializePlan(plan1) !== serializePlan(plan2);
     if (!isConflict) throw new Error("Expected differing plans to trigger conflict");
+  });
+});
+
+// ─── Tests: LLD-80 — boot conflict favors shared intent ──────────────────────
+//
+// These tests verify the regression guard from LLD 80: when a hash is present
+// and conflicts with a differing local plan, the shared plan is applied (never
+// silently local-wins), and the undo action restores local from the in-memory
+// closure snapshot.
+
+describe("LLD-80 — boot conflict: hash+differing local → shared applied, not local-wins", () => {
+  it("conflict path applies shared plan (model equals hashPlan, not localPlan)", async () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+
+    // Build plan A (local) — a 2×2 room
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const planA = buildPlan();
+    localStorage.setItem(STORAGE_KEY, serializePlan(planA));
+
+    // Build plan B (shared) — a 5×3 room
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:5,y:0 },{ x:5,y:3 },{ x:0,y:3 }] });
+    const planB = buildPlan();
+
+    // Verify they differ (precondition)
+    if (serializePlan(planA) === serializePlan(planB)) {
+      throw new Error("Test setup error: planA and planB must differ");
+    }
+
+    // Simulate the conflict boot path: apply shared (hashPlan = planB)
+    resetAll();
+    const localPlan = loadLocal();
+    if (!localPlan) throw new Error("loadLocal returned null — localStorage not seeded");
+
+    applyPlan(planB); // shared plan applied immediately (the LLD-80 behavior)
+
+    // Assert: live model equals planB (shared), not planA (local)
+    const liveSer = serializePlan(buildPlan());
+    const planBSer = serializePlan(planB);
+    const planASer = serializePlan(planA);
+
+    if (liveSer !== planBSer) {
+      throw new Error("Shared plan (planB) was NOT applied — conflict path must apply shared");
+    }
+    if (liveSer === planASer) {
+      throw new Error("Local plan (planA) was silently applied — this is the silent local-wins bug");
+    }
+
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("undo action (onClick) restores local plan from in-memory snapshot", async () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+
+    // Build plan A (local)
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const planA = buildPlan();
+    localStorage.setItem(STORAGE_KEY, serializePlan(planA));
+
+    // Build plan B (shared)
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:5,y:0 },{ x:5,y:3 },{ x:0,y:3 }] });
+    const planB = buildPlan();
+
+    // Simulate conflict path: apply shared first
+    resetAll();
+    const localPlan = loadLocal();
+    applyPlan(planB); // shared applied
+
+    // Simulate the undo (applyLocal closure): restore localPlan from snapshot
+    applyPlan(localPlan);
+
+    // Assert: live model now equals planA (local)
+    const liveSer = serializePlan(buildPlan());
+    const planASer = serializePlan(planA);
+    if (liveSer !== planASer) {
+      throw new Error("Undo did not restore local plan — applyPlan(localPlan) should match planA");
+    }
+
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("undo after simulated autosave overwrite still restores local from in-memory snapshot (Edge Case 5)", async () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+
+    // Build plan A (local)
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:3,y:0 },{ x:3,y:3 },{ x:0,y:3 }] });
+    const planA = buildPlan();
+    localStorage.setItem(STORAGE_KEY, serializePlan(planA));
+
+    // Build plan B (shared)
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:7,y:0 },{ x:7,y:4 },{ x:0,y:4 }] });
+    const planB = buildPlan();
+
+    // Simulate conflict: apply shared, capture localPlan in closure
+    resetAll();
+    const localPlan = loadLocal(); // snapshot captured at boot
+    applyPlan(planB); // shared applied
+
+    // Simulate autosave overwriting localStorage with shared-derived data
+    saveNow(); // writes current model (planB) to localStorage
+
+    // Simulate undo tap: restore from in-memory snapshot, not from localStorage
+    // This must not throw, and must restore planA geometry
+    let threw = false;
+    try {
+      applyPlan(localPlan);
+    } catch (e) {
+      threw = true;
+    }
+    if (threw) throw new Error("applyPlan(localPlan) threw after autosave overwrite");
+
+    const liveSer = serializePlan(buildPlan());
+    const planASer = serializePlan(planA);
+    if (liveSer !== planASer) {
+      throw new Error("Undo did not restore local plan after autosave overwrite — in-memory snapshot must be authoritative");
+    }
+
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("identical hash+local → no conflict (unchanged fast path)", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const plan = buildPlan();
+
+    const hashSer = serializePlan(plan);
+    const localSer = serializePlan(plan);
+
+    // No conflict when serializations are equal
+    const isConflict = hashSer !== localSer;
+    if (isConflict) throw new Error("Identical plans must not trigger the conflict path");
+    expect(isConflict).toBe(false);
+  });
+});
+
+// ─── Tests: LLD-80 — showConflictBanner fallback favors shared ────────────────
+
+describe("LLD-80 — showConflictBanner: no-element fallback invokes onChoice('shared')", () => {
+  it("with _bannerEl unset, showConflictBanner calls onChoice('shared'), not 'local'", () => {
+    // actions.js _bannerEl is null when init() has not been called with a banner element.
+    // The module-level _bannerEl starts null (no init called in this test env).
+    // We call showConflictBanner directly and capture the choice.
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const planA = buildPlan();
+    model.rooms[0].verts[1].x = 5;
+    const planB = buildPlan();
+
+    let capturedChoice = null;
+    // showConflictBanner will hit the no-element fallback because actions.init()
+    // was not called in the test harness (no DOM banner element injected).
+    showConflictBanner(planB, planA, (choice) => { capturedChoice = choice; });
+
+    if (capturedChoice !== "shared") {
+      throw new Error(
+        `showConflictBanner fallback chose '${capturedChoice}' — must choose 'shared' to favor explicit share intent, never silently discard the hash`
+      );
+    }
+    expect(capturedChoice).toBe("shared");
   });
 });
 
@@ -8878,20 +9105,28 @@ describe("LLD-50 — catalog: every entry has a valid category", () => {
 });
 
 describe("LLD-50 — catalog: regression guard (dimensions + labels)", () => {
-  it("all entries have finite w, h, min, max; non-openings satisfy min <= w,h <= max", () => {
+  it("all entries have finite w, h, per-axis bounds; defaults + presets lie within bounds", () => {
     for (const [type, entry] of Object.entries(CATALOG)) {
-      for (const field of ["w", "h", "min", "max"]) {
+      for (const field of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
         if (!isFinite(entry[field])) {
           throw new Error(`${type}.${field} is not finite: ${entry[field]}`);
         }
       }
-      // openings (door/window) have a fixed thin depth (h) that is intentionally below
-      // the user-editable min — only the width (w) is user-resizable for openings.
-      if (entry.min > entry.w) throw new Error(`${type}: min(${entry.min}) > w(${entry.w})`);
-      if (entry.w > entry.max) throw new Error(`${type}: w(${entry.w}) > max(${entry.max})`);
-      if (!entry.openings) {
-        if (entry.min > entry.h) throw new Error(`${type}: min(${entry.min}) > h(${entry.h})`);
-        if (entry.h > entry.max) throw new Error(`${type}: h(${entry.h}) > max(${entry.max})`);
+      // Default footprint must sit inside the per-axis envelope.
+      if (entry.w < entry.min_w || entry.w > entry.max_w) {
+        throw new Error(`${type}: w(${entry.w}) not in [${entry.min_w},${entry.max_w}]`);
+      }
+      if (entry.h < entry.min_h || entry.h > entry.max_h) {
+        throw new Error(`${type}: h(${entry.h}) not in [${entry.min_h},${entry.max_h}]`);
+      }
+      // Every named preset must also be a real, in-bounds size.
+      for (const p of entry.presets || []) {
+        if (p.w < entry.min_w || p.w > entry.max_w) {
+          throw new Error(`${type} preset ${p.name}: w(${p.w}) not in [${entry.min_w},${entry.max_w}]`);
+        }
+        if (p.h < entry.min_h || p.h > entry.max_h) {
+          throw new Error(`${type} preset ${p.name}: h(${p.h}) not in [${entry.min_h},${entry.max_h}]`);
+        }
       }
     }
   });
@@ -8918,27 +9153,27 @@ describe("LLD-50 — createSymbol + clampDim for new-type spot-checks", () => {
     }
   });
 
-  it("clampDim: asymmetric type (bathtub) clamps min and max correctly", () => {
-    // bathtub: min=0.30, max=2.20
-    expect(clampDim("bathtub", 0.20)).toBeCloseTo(0.30, 9); // below min → min
-    expect(clampDim("bathtub", 3.00)).toBeCloseTo(2.20, 9); // above max → max
-    expect(clampDim("bathtub", 1.00)).toBeCloseTo(1.00, 9); // in range → unchanged
+  it("clampDim: bathtub clamps width axis to [min_w, max_w]", () => {
+    // bathtub width: min_w=1.37, max_w=1.83
+    expect(clampDim("bathtub", "w", 0.20)).toBeCloseTo(1.37, 9); // below min_w → min_w
+    expect(clampDim("bathtub", "w", 3.00)).toBeCloseTo(1.83, 9); // above max_w → max_w
+    expect(clampDim("bathtub", "w", 1.50)).toBeCloseTo(1.50, 9); // in range → unchanged
   });
 
-  it("clampDim: symmetric type (washer) clamps min and max correctly", () => {
-    // washer: min=0.30, max=1.00
-    expect(clampDim("washer", 0.10)).toBeCloseTo(0.30, 9); // below min → min
-    expect(clampDim("washer", 1.50)).toBeCloseTo(1.00, 9); // above max → max
-    expect(clampDim("washer", 0.60)).toBeCloseTo(0.60, 9); // in range → unchanged
+  it("clampDim: washer clamps width axis to [min_w, max_w]", () => {
+    // washer width: min_w=0.60, max_w=0.70
+    expect(clampDim("washer", "w", 0.10)).toBeCloseTo(0.60, 9); // below min_w → min_w
+    expect(clampDim("washer", "w", 1.50)).toBeCloseTo(0.70, 9); // above max_w → max_w
+    expect(clampDim("washer", "w", 0.65)).toBeCloseTo(0.65, 9); // in range → unchanged
   });
 
   it("resizeSymbol clamps and returns changed flag correctly", () => {
     resetSymbolModel();
     const s = createSymbol("bathtub", 0, 0);
-    // Resize to below min — should clamp and return true (changed)
+    // Resize width to below min_w — should clamp and return true (changed)
     const changed = resizeSymbol(s, "w", 0.10);
     expect(changed).toBe(true);
-    expect(s.w).toBeCloseTo(0.30, 9);
+    expect(s.w).toBeCloseTo(1.37, 9); // bathtub min_w
     // Resize to same clamped value — should return false (no change)
     const notChanged = resizeSymbol(s, "w", 0.10);
     expect(notChanged).toBe(false);
@@ -9195,20 +9430,20 @@ describe("LLD 70 — catalog integrity: nightstand, dresser, cabinet", () => {
     }
   });
 
-  it("all three have finite w, h, min, max", () => {
+  it("all three have finite w, h, and per-axis bounds", () => {
     for (const t of LLD70_TYPES) {
       const cat = CATALOG[t];
-      for (const key of ["w", "h", "min", "max"]) {
+      for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
         if (!isFinite(cat[key])) throw new Error(`${t}.${key} is not finite: ${cat[key]}`);
       }
     }
   });
 
-  it("min <= w <= max and min <= h <= max for all three", () => {
+  it("min_w <= w <= max_w and min_h <= h <= max_h for all three", () => {
     for (const t of LLD70_TYPES) {
-      const { w, h, min, max } = CATALOG[t];
-      if (w < min || w > max) throw new Error(`${t}: w=${w} not in [${min},${max}]`);
-      if (h < min || h > max) throw new Error(`${t}: h=${h} not in [${min},${max}]`);
+      const { w, h, min_w, max_w, min_h, max_h } = CATALOG[t];
+      if (w < min_w || w > max_w) throw new Error(`${t}: w=${w} not in [${min_w},${max_w}]`);
+      if (h < min_h || h > max_h) throw new Error(`${t}: h=${h} not in [${min_h},${max_h}]`);
     }
   });
 
@@ -9245,78 +9480,78 @@ describe("LLD 70 — createSymbol: new types return correct Sym", () => {
   });
 });
 
-describe("LLD 70 — clampDim: new types clamp at min and max", () => {
-  it("nightstand: clampDim below min clamps to min", () => {
-    const { min } = CATALOG.nightstand;
-    expect(clampDim("nightstand", min - 0.1)).toBeCloseTo(min, 9);
+describe("LLD 70 — clampDim: new types clamp at per-axis min_w and max_w", () => {
+  it("nightstand: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG.nightstand;
+    expect(clampDim("nightstand", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
   });
 
-  it("nightstand: clampDim above max clamps to max", () => {
-    const { max } = CATALOG.nightstand;
-    expect(clampDim("nightstand", max + 1)).toBeCloseTo(max, 9);
+  it("nightstand: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG.nightstand;
+    expect(clampDim("nightstand", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
 
-  it("dresser: clampDim below min clamps to min", () => {
-    const { min } = CATALOG.dresser;
-    expect(clampDim("dresser", min - 0.1)).toBeCloseTo(min, 9);
+  it("dresser: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG.dresser;
+    expect(clampDim("dresser", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
   });
 
-  it("dresser: clampDim above max clamps to max", () => {
-    const { max } = CATALOG.dresser;
-    expect(clampDim("dresser", max + 1)).toBeCloseTo(max, 9);
+  it("dresser: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG.dresser;
+    expect(clampDim("dresser", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
 
-  it("cabinet: clampDim below min clamps to min", () => {
-    const { min } = CATALOG.cabinet;
-    expect(clampDim("cabinet", min - 0.1)).toBeCloseTo(min, 9);
+  it("cabinet: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG.cabinet;
+    expect(clampDim("cabinet", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
   });
 
-  it("cabinet: clampDim above max clamps to max", () => {
-    const { max } = CATALOG.cabinet;
-    expect(clampDim("cabinet", max + 1)).toBeCloseTo(max, 9);
+  it("cabinet: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG.cabinet;
+    expect(clampDim("cabinet", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
 });
 
 describe("LLD 70 — resizeSymbol: new types clamp on huge/tiny inputs", () => {
-  it("nightstand w huge clamps to max, returns changed=true", () => {
+  it("nightstand w huge clamps to max_w, returns changed=true", () => {
     const s = createSymbol("nightstand", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.nightstand.max, 9);
+    expect(s.w).toBeCloseTo(CATALOG.nightstand.max_w, 9);
     expect(changed).toBe(true);
   });
 
-  it("nightstand h tiny clamps to min, returns changed=true", () => {
+  it("nightstand h tiny clamps to min_h, returns changed=true", () => {
     const s = createSymbol("nightstand", 0, 0);
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG.nightstand.min, 9);
+    expect(s.h).toBeCloseTo(CATALOG.nightstand.min_h, 9);
     expect(changed).toBe(true);
   });
 
-  it("dresser w huge clamps to max, returns changed=true", () => {
+  it("dresser w huge clamps to max_w, returns changed=true", () => {
     const s = createSymbol("dresser", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.dresser.max, 9);
+    expect(s.w).toBeCloseTo(CATALOG.dresser.max_w, 9);
     expect(changed).toBe(true);
   });
 
-  it("dresser h tiny clamps to min, returns changed=true", () => {
+  it("dresser h tiny clamps to min_h, returns changed=true", () => {
     const s = createSymbol("dresser", 0, 0);
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG.dresser.min, 9);
+    expect(s.h).toBeCloseTo(CATALOG.dresser.min_h, 9);
     expect(changed).toBe(true);
   });
 
-  it("cabinet w huge clamps to max, returns changed=true", () => {
+  it("cabinet w huge clamps to max_w, returns changed=true", () => {
     const s = createSymbol("cabinet", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.cabinet.max, 9);
+    expect(s.w).toBeCloseTo(CATALOG.cabinet.max_w, 9);
     expect(changed).toBe(true);
   });
 
-  it("cabinet h tiny clamps to min, returns changed=true", () => {
+  it("cabinet h tiny clamps to min_h, returns changed=true", () => {
     const s = createSymbol("cabinet", 0, 0);
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG.cabinet.min, 9);
+    expect(s.h).toBeCloseTo(CATALOG.cabinet.min_h, 9);
     expect(changed).toBe(true);
   });
 
@@ -11820,21 +12055,21 @@ describe("LLD-69 — catalog integrity: three new living types", () => {
     }
   });
 
-  it("every new type has finite w, h, min, max", () => {
+  it("every new type has finite w, h, and per-axis bounds", () => {
     for (const t of LLD69_TYPES) {
       const cat = CATALOG[t];
-      for (const key of ["w", "h", "min", "max"]) {
+      for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
         if (!isFinite(cat[key])) throw new Error(t + "." + key + " is not finite: " + cat[key]);
       }
     }
   });
 
-  it("min <= w <= max and min <= h <= max for every new type", () => {
+  it("min_w <= w <= max_w and min_h <= h <= max_h for every new type", () => {
     for (const t of LLD69_TYPES) {
       const cat = CATALOG[t];
-      const w = cat.w, h = cat.h, min = cat.min, max = cat.max;
-      if (w < min || w > max) throw new Error(t + ": w=" + w + " not in [" + min + "," + max + "]");
-      if (h < min || h > max) throw new Error(t + ": h=" + h + " not in [" + min + "," + max + "]");
+      const w = cat.w, h = cat.h, min_w = cat.min_w, max_w = cat.max_w, min_h = cat.min_h, max_h = cat.max_h;
+      if (w < min_w || w > max_w) throw new Error(t + ": w=" + w + " not in [" + min_w + "," + max_w + "]");
+      if (h < min_h || h > max_h) throw new Error(t + ": h=" + h + " not in [" + min_h + "," + max_h + "]");
     }
   });
 
@@ -11844,28 +12079,34 @@ describe("LLD-69 — catalog integrity: three new living types", () => {
     }
   });
 
-  it("armchair: w=0.80, h=0.80, min=0.40, max=1.20", () => {
+  it("armchair: w=0.80, h=0.80, per-axis bounds w[0.65,1.10] h[0.68,1.00]", () => {
     const cat = CATALOG["armchair"];
     expect(cat.w).toBeCloseTo(0.80, 9);
     expect(cat.h).toBeCloseTo(0.80, 9);
-    expect(cat.min).toBeCloseTo(0.40, 9);
-    expect(cat.max).toBeCloseTo(1.20, 9);
+    expect(cat.min_w).toBeCloseTo(0.65, 9);
+    expect(cat.max_w).toBeCloseTo(1.10, 9);
+    expect(cat.min_h).toBeCloseTo(0.68, 9);
+    expect(cat.max_h).toBeCloseTo(1.00, 9);
   });
 
-  it("coffee-table: w=1.10, h=0.55, min=0.30, max=2.00", () => {
+  it("coffee-table: w=1.10, h=0.55, per-axis bounds w[0.90,1.50] h[0.40,0.78]", () => {
     const cat = CATALOG["coffee-table"];
     expect(cat.w).toBeCloseTo(1.10, 9);
     expect(cat.h).toBeCloseTo(0.55, 9);
-    expect(cat.min).toBeCloseTo(0.30, 9);
-    expect(cat.max).toBeCloseTo(2.00, 9);
+    expect(cat.min_w).toBeCloseTo(0.90, 9);
+    expect(cat.max_w).toBeCloseTo(1.50, 9);
+    expect(cat.min_h).toBeCloseTo(0.40, 9);
+    expect(cat.max_h).toBeCloseTo(0.78, 9);
   });
 
-  it("dining-table-round: w=1.20, h=1.20, min=0.60, max=2.50", () => {
+  it("dining-table-round: w=1.20, h=1.20, per-axis bounds [0.60,1.83]", () => {
     const cat = CATALOG["dining-table-round"];
     expect(cat.w).toBeCloseTo(1.20, 9);
     expect(cat.h).toBeCloseTo(1.20, 9);
-    expect(cat.min).toBeCloseTo(0.60, 9);
-    expect(cat.max).toBeCloseTo(2.50, 9);
+    expect(cat.min_w).toBeCloseTo(0.60, 9);
+    expect(cat.max_w).toBeCloseTo(1.83, 9);
+    expect(cat.min_h).toBeCloseTo(0.60, 9);
+    expect(cat.max_h).toBeCloseTo(1.83, 9);
   });
 });
 
@@ -11889,29 +12130,29 @@ describe("LLD-69 — createSymbol: new types return correct Sym", () => {
   });
 });
 
-describe("LLD-69 — clampDim: new types clamp at min and max", () => {
-  it("dining-table-round: below min (0.60) clamps to 0.60", () => {
-    expect(clampDim("dining-table-round", 0.10)).toBeCloseTo(0.60, 9);
+describe("LLD-69 — clampDim: new types clamp at per-axis min and max", () => {
+  it("dining-table-round: width below min_w (0.60) clamps to 0.60", () => {
+    expect(clampDim("dining-table-round", "w", 0.10)).toBeCloseTo(0.60, 9);
   });
 
-  it("dining-table-round: above max (2.50) clamps to 2.50", () => {
-    expect(clampDim("dining-table-round", 9.99)).toBeCloseTo(2.50, 9);
+  it("dining-table-round: width above max_w (1.83) clamps to 1.83", () => {
+    expect(clampDim("dining-table-round", "w", 9.99)).toBeCloseTo(1.83, 9);
   });
 
-  it("dining-table-round: in-range value 1.50 passes through unchanged", () => {
-    expect(clampDim("dining-table-round", 1.50)).toBeCloseTo(1.50, 9);
+  it("dining-table-round: in-range width 1.50 passes through unchanged", () => {
+    expect(clampDim("dining-table-round", "w", 1.50)).toBeCloseTo(1.50, 9);
   });
 
-  it("coffee-table: in-range value 0.80 passes through unchanged", () => {
-    expect(clampDim("coffee-table", 0.80)).toBeCloseTo(0.80, 9);
+  it("coffee-table: in-range width 1.20 passes through unchanged", () => {
+    expect(clampDim("coffee-table", "w", 1.20)).toBeCloseTo(1.20, 9);
   });
 
-  it("armchair: below min (0.40) clamps to 0.40", () => {
-    expect(clampDim("armchair", 0.10)).toBeCloseTo(0.40, 9);
+  it("armchair: width below min_w (0.65) clamps to 0.65", () => {
+    expect(clampDim("armchair", "w", 0.10)).toBeCloseTo(0.65, 9);
   });
 
-  it("armchair: above max (1.20) clamps to 1.20", () => {
-    expect(clampDim("armchair", 5.00)).toBeCloseTo(1.20, 9);
+  it("armchair: width above max_w (1.10) clamps to 1.10", () => {
+    expect(clampDim("armchair", "w", 5.00)).toBeCloseTo(1.10, 9);
   });
 });
 
@@ -11923,18 +12164,18 @@ describe("LLD-69 — resizeSymbol: clamp on huge/tiny inputs", () => {
     expect(changed).toBe(true);
   });
 
-  it("dining-table-round h huge clamps to max=2.50 and returns changed=true", () => {
+  it("dining-table-round h huge clamps to max_h=1.83 and returns changed=true", () => {
     const s = createSymbol("dining-table-round", 0, 0);
     const changed = resizeSymbol(s, "h", 99);
-    expect(s.h).toBeCloseTo(2.50, 9);
+    expect(s.h).toBeCloseTo(1.83, 9);
     expect(changed).toBe(true);
   });
 
   it("coffee-table w in-range returns correct changed flag", () => {
     const s = createSymbol("coffee-table", 0, 0);
-    // current w=1.10, set to 0.80 — should change
-    const changed = resizeSymbol(s, "w", 0.80);
-    expect(s.w).toBeCloseTo(0.80, 9);
+    // current w=1.10, set to 1.30 (in [0.90,1.50]) — should change
+    const changed = resizeSymbol(s, "w", 1.30);
+    expect(s.w).toBeCloseTo(1.30, 9);
     expect(changed).toBe(true);
   });
 });
@@ -12441,20 +12682,30 @@ describe("LLD 76 — catalog integrity: patio-table, patio-chair, parasol, plant
     }
   });
 
-  it("all four have finite w, h, min, max", () => {
+  it("all four have finite w, h, per-axis bounds", () => {
     for (const t of LLD76_TYPES) {
       const cat = CATALOG[t];
-      for (const key of ["w", "h", "min", "max"]) {
+      for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
         if (!isFinite(cat[key])) throw new Error(`${t}.${key} is not finite: ${cat[key]}`);
       }
     }
   });
 
-  it("min <= w <= max and min <= h <= max for all four", () => {
+  it("min_w <= w <= max_w and min_h <= h <= max_h for all four", () => {
     for (const t of LLD76_TYPES) {
-      const { w, h, min, max } = CATALOG[t];
-      if (w < min || w > max) throw new Error(`${t}: w=${w} not in [${min},${max}]`);
-      if (h < min || h > max) throw new Error(`${t}: h=${h} not in [${min},${max}]`);
+      const { w, h, min_w, max_w, min_h, max_h } = CATALOG[t];
+      if (w < min_w || w > max_w) throw new Error(`${t}: w=${w} not in [${min_w},${max_w}]`);
+      if (h < min_h || h > max_h) throw new Error(`${t}: h=${h} not in [${min_h},${max_h}]`);
+    }
+  });
+
+  it("every named preset lies within its per-axis bounds", () => {
+    for (const t of LLD76_TYPES) {
+      const { min_w, max_w, min_h, max_h, presets } = CATALOG[t];
+      for (const p of presets || []) {
+        if (p.w < min_w || p.w > max_w) throw new Error(`${t} preset ${p.name}: w=${p.w} not in [${min_w},${max_w}]`);
+        if (p.h < min_h || p.h > max_h) throw new Error(`${t} preset ${p.name}: h=${p.h} not in [${min_h},${max_h}]`);
+      }
     }
   });
 
@@ -12495,64 +12746,74 @@ describe("LLD 76 — createSymbol: new types return correct Sym", () => {
   });
 });
 
-describe("LLD 76 — clampDim: new types clamp at min and max", () => {
-  it("patio-table: clampDim below min clamps to min", () => {
-    const { min } = CATALOG["patio-table"];
-    expect(clampDim("patio-table", min - 0.1)).toBeCloseTo(min, 9);
+describe("LLD 76 — clampDim: new types clamp per-axis at min and max", () => {
+  it("patio-table: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG["patio-table"];
+    expect(clampDim("patio-table", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
   });
 
-  it("patio-table: clampDim above max clamps to max", () => {
-    const { max } = CATALOG["patio-table"];
-    expect(clampDim("patio-table", max + 1)).toBeCloseTo(max, 9);
+  it("patio-table: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG["patio-table"];
+    expect(clampDim("patio-table", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
 
-  it("parasol: clampDim below min clamps to min", () => {
-    const { min } = CATALOG["parasol"];
-    expect(clampDim("parasol", min - 0.1)).toBeCloseTo(min, 9);
+  it("patio-table: depth below min_h clamps to min_h", () => {
+    const { min_h } = CATALOG["patio-table"];
+    expect(clampDim("patio-table", "h", min_h - 0.1)).toBeCloseTo(min_h, 9);
   });
 
-  it("parasol: clampDim above max clamps to max", () => {
-    const { max } = CATALOG["parasol"];
-    expect(clampDim("parasol", max + 1)).toBeCloseTo(max, 9);
+  it("patio-table: depth above max_h clamps to max_h", () => {
+    const { max_h } = CATALOG["patio-table"];
+    expect(clampDim("patio-table", "h", max_h + 1)).toBeCloseTo(max_h, 9);
   });
 
-  it("planter: clampDim below min clamps to min", () => {
-    const { min } = CATALOG["planter"];
-    expect(clampDim("planter", min - 0.1)).toBeCloseTo(min, 9);
+  it("parasol: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG["parasol"];
+    expect(clampDim("parasol", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
   });
 
-  it("planter: clampDim above max clamps to max", () => {
-    const { max } = CATALOG["planter"];
-    expect(clampDim("planter", max + 1)).toBeCloseTo(max, 9);
+  it("parasol: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG["parasol"];
+    expect(clampDim("parasol", "w", max_w + 1)).toBeCloseTo(max_w, 9);
+  });
+
+  it("planter: depth below min_h clamps to min_h", () => {
+    const { min_h } = CATALOG["planter"];
+    expect(clampDim("planter", "h", min_h - 0.1)).toBeCloseTo(min_h, 9);
+  });
+
+  it("planter: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG["planter"];
+    expect(clampDim("planter", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
 });
 
 describe("LLD 76 — resizeSymbol: new types clamp on huge/tiny inputs", () => {
-  it("patio-table w huge clamps to max, returns changed=true", () => {
+  it("patio-table w huge clamps to max_w, returns changed=true", () => {
     const s = createSymbol("patio-table", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG["patio-table"].max, 9);
+    expect(s.w).toBeCloseTo(CATALOG["patio-table"].max_w, 9);
     expect(changed).toBe(true);
   });
 
-  it("patio-table h tiny clamps to min, returns changed=true", () => {
+  it("patio-table h tiny clamps to min_h, returns changed=true", () => {
     const s = createSymbol("patio-table", 0, 0);
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG["patio-table"].min, 9);
+    expect(s.h).toBeCloseTo(CATALOG["patio-table"].min_h, 9);
     expect(changed).toBe(true);
   });
 
-  it("parasol w huge clamps to max, returns changed=true", () => {
+  it("parasol w huge clamps to max_w, returns changed=true", () => {
     const s = createSymbol("parasol", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG["parasol"].max, 9);
+    expect(s.w).toBeCloseTo(CATALOG["parasol"].max_w, 9);
     expect(changed).toBe(true);
   });
 
-  it("planter h tiny clamps to min, returns changed=true", () => {
+  it("planter h tiny clamps to min_h, returns changed=true", () => {
     const s = createSymbol("planter", 0, 0);
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG["planter"].min, 9);
+    expect(s.h).toBeCloseTo(CATALOG["planter"].min_h, 9);
     expect(changed).toBe(true);
   });
 
@@ -12657,6 +12918,884 @@ describe("LLD 76 — round-trip: outdoor types survive serialize→validate", ()
       throw new Error(`Expected ${LLD76_TYPES.length} symbols, got ${v.symbols.symbols.length}`);
     }
     resetSymbolModel();
+  });
+});
+
+// ─── Tests: LLD 77 — compact codec (buildCompact / parseCompact / 'c' share) ───
+
+// Frozen fixture hashes for backward-compat testing.
+// These encode a simple plan: one closed 4-vert room, no symbols, unit='ft'
+// using plan JSON: {"schema":1,"app":"floorplan","walls":{"rooms":[{"id":"w0","closed":true,"verts":[{"x":0,"y":0},{"x":3,"y":0},{"x":3,"y":4},{"x":0,"y":4}]}],"chain":[]},"symbols":{"symbols":[]},"view":{"zoom":1,"panX":0,"panY":0},"unit":"ft"}
+const FIXTURE_D_HASH = "dbY-xDoMwDET_5WYPVO3kL2mFGFJIRaQkjpIApSj_XhFQp25-d5bvvCH1o3YKfCGoEMB4WZEYrPIgLMraBN4QRVwCtxvMAMbSgNBbSXoA5zhpwqxjPjbe4IawgptCla5_6HZSc1JXOkI_KuPBbVcIaXVPOcJ_YzVmo5dd_Yi4Wjsof6-HgvKPmoPJm7y_klG-";
+// Plan B: no rooms, chain=[{x:0,y:0},{x:2,y:0}], unit='m' (uncompressed)
+const FIXTURE_U_HASH = "ueyJzY2hlbWEiOjEsImFwcCI6ImZsb29ycGxhbiIsIndhbGxzIjp7InJvb21zIjpbXSwiY2hhaW4iOlt7IngiOjAsInkiOjB9LHsieCI6MiwieSI6MH1dfSwic3ltYm9scyI6eyJzeW1ib2xzIjpbXX0sInZpZXciOnsiem9vbSI6MSwicGFuWCI6MCwicGFuWSI6MH0sInVuaXQiOiJtIn0";
+
+describe("LLD 77 — buildCompact / parseCompact: round-trip (plan.js)", () => {
+  it("round-trip on a snapped plan is lossless (geometry/unit; ids/view regenerated)", () => {
+    resetAll();
+    setUnit("m");
+    // Snapped coords: multiples of 0.1 m — lossless at 1 mm resolution
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    model.chain.push({ x: 0.5, y: 0.5 });
+    const sym = createSymbol("bed", 1.5, 2);
+    addSymbol(sym);
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    const restored = parseCompact(compact);
+    if (!restored) throw new Error("parseCompact returned null");
+    const validated = validatePlan(restored);
+    if (!validated) throw new Error("validatePlan rejected parseCompact output");
+    // Geometry equal
+    if (!planGeomEqual(validated, p)) throw new Error("round-trip geometry differs from original");
+    // unit preserved
+    if (validated.unit !== p.unit) throw new Error("unit not preserved in round-trip");
+  });
+
+  it("compact payload has no id/view/app/schema keys", () => {
+    resetAll();
+    setUnit("ft");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }] });
+    const sym = createSymbol("sofa", 1, 1);
+    addSymbol(sym);
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    if ("app" in compact) throw new Error("compact must not have 'app'");
+    if ("schema" in compact) throw new Error("compact must not have 'schema'");
+    if ("view" in compact) throw new Error("compact must not have 'view'");
+    // rooms must not have ids
+    for (const room of compact.r) {
+      if ("id" in room) throw new Error("compact room must not have 'id'");
+    }
+    // symbols must not have ids
+    for (const s of compact.s) {
+      if ("id" in s) throw new Error("compact sym must not have 'id'");
+    }
+  });
+
+  it("catalog-default w/h/rot are omitted; non-default values are written", () => {
+    resetAll();
+    setUnit("ft");
+    // Default bed: w=1.50, h=2.00, rot=0 → all omitted
+    const bedDefault = createSymbol("bed", 1, 1);
+    addSymbol(bedDefault);
+    // Resized desk: w differs from CATALOG.desk.w → written
+    const desk = createSymbol("desk", 3, 3);
+    desk.w = 1.20; // CATALOG.desk.w = 1.40, so 1.20 != 1.40 → written
+    addSymbol(desk);
+    // Rotated chair: rot=90 → written
+    const chair = createSymbol("chair", 5, 5);
+    chair.rot = 90;
+    addSymbol(chair);
+
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    const [cBed, cDesk, cChair] = compact.s;
+
+    // Bed at catalog defaults: no w, h, d
+    if ("w" in cBed) throw new Error("bed w should be omitted (catalog default)");
+    if ("h" in cBed) throw new Error("bed h should be omitted (catalog default)");
+    if ("d" in cBed) throw new Error("bed rot should be omitted (0)");
+
+    // Desk with non-default w: w is written; h is catalog default → omitted
+    if (!("w" in cDesk)) throw new Error("desk w should be written (non-default)");
+    if ("h" in cDesk) throw new Error("desk h should be omitted (catalog default)");
+
+    // Chair with non-zero rot: d is written
+    if (!("d" in cChair)) throw new Error("chair rot=90 should write 'd' field");
+    if (cChair.d !== 90) throw new Error(`chair d should be 90, got ${cChair.d}`);
+
+    // Round-trip: all values preserved
+    const restored = validatePlan(parseCompact(compact));
+    if (!restored) throw new Error("validatePlan rejected after default-omission round-trip");
+    const syms = restored.symbols.symbols;
+    if (syms[0].w !== CATALOG.bed.w) throw new Error("bed w not restored from catalog");
+    if (syms[0].h !== CATALOG.bed.h) throw new Error("bed h not restored from catalog");
+    if (syms[0].rot !== 0) throw new Error("bed rot not restored to 0");
+    if (syms[1].w !== 1.20) throw new Error("desk w not preserved");
+    if (syms[2].rot !== 90) throw new Error("chair rot not restored");
+  });
+
+  it("cross-type default guard: desk resized to fridge's default width is written explicitly", () => {
+    resetAll();
+    setUnit("ft");
+    const desk = createSymbol("desk", 2, 2);
+    desk.w = CATALOG.fridge.w; // 0.70 — not desk's default (1.40)
+    addSymbol(desk);
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    // The compact sym for desk must have 'w' written (fridge's default != desk's default)
+    if (!("w" in compact.s[0])) throw new Error("desk resized to fridge.w should write 'w' explicitly");
+    if (compact.s[0].w !== CATALOG.fridge.w) throw new Error("desk w value is wrong");
+    // Round-trip
+    const restored = validatePlan(parseCompact(compact));
+    if (!restored) throw new Error("validatePlan rejected");
+    if (restored.symbols.symbols[0].w !== CATALOG.fridge.w) throw new Error("desk w not preserved after round-trip");
+  });
+
+  it("mm rounding: sub-mm coord rounds to 3dp and round-trips to rounded value", () => {
+    resetAll();
+    setUnit("m");
+    // Free-placed coord with sub-mm precision
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 1.23456, y: 2.34567 }] });
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    // After rounding: 1.23456 → 1.235 (Math.round(1234.56)/1000), 2.34567 → 2.346
+    const [cx, cy] = compact.r[0].p[0];
+    const expected_x = Math.round(1.23456 * 1000) / 1000;
+    const expected_y = Math.round(2.34567 * 1000) / 1000;
+    if (cx !== expected_x) throw new Error(`x rounded to ${cx}, expected ${expected_x}`);
+    if (cy !== expected_y) throw new Error(`y rounded to ${cy}, expected ${expected_y}`);
+    // Round-trip produces the rounded value (not original)
+    const restored = validatePlan(parseCompact(compact));
+    if (!restored) throw new Error("validatePlan rejected");
+    if (restored.walls.rooms[0].verts[0].x !== expected_x) throw new Error("x not round-tripped correctly");
+  });
+
+  it("empty plan round-trips to empty valid plan (Edge Case 9)", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    if (compact.v !== COMPACT_VERSION) throw new Error("wrong compact version");
+    if (!Array.isArray(compact.r) || compact.r.length !== 0) throw new Error("r should be empty array");
+    if (!Array.isArray(compact.k) || compact.k.length !== 0) throw new Error("k should be empty array");
+    if (!Array.isArray(compact.s) || compact.s.length !== 0) throw new Error("s should be empty array");
+    const restored = validatePlan(parseCompact(compact));
+    if (!restored) throw new Error("validatePlan rejected empty compact plan");
+    if (restored.walls.rooms.length !== 0) throw new Error("rooms not empty after round-trip");
+  });
+
+  it("parseCompact returns null for wrong version", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    compact.v = 99;
+    const result = parseCompact(compact);
+    if (result !== null) throw new Error("Expected null for wrong version");
+  });
+
+  it("parseCompact returns null for missing r array", () => {
+    const result = parseCompact({ v: COMPACT_VERSION, u: "ft", k: [], s: [] });
+    if (result !== null) throw new Error("Expected null for missing r");
+  });
+
+  it("parseCompact returns null for missing s array", () => {
+    const result = parseCompact({ v: COMPACT_VERSION, u: "ft", r: [], k: [] });
+    if (result !== null) throw new Error("Expected null for missing s");
+  });
+
+  it("parseCompact passes unknown type through; validatePlan rejects it (Edge Case 6)", () => {
+    const compact = { v: COMPACT_VERSION, u: "ft", r: [], k: [], s: [{ t: "ufo_machine", x: 1, y: 1 }] };
+    const restored = parseCompact(compact);
+    // Either parseCompact returns null OR validatePlan rejects it
+    if (restored !== null) {
+      const validated = validatePlan(restored);
+      if (validated !== null) throw new Error("validatePlan should reject unknown symbol type");
+    }
+  });
+
+  it("parseCompact returns null for non-array vertex tuple (Edge Case 7)", () => {
+    const compact = {
+      v: COMPACT_VERSION, u: "ft",
+      r: [{ c: 1, p: ["not-a-tuple"] }],
+      k: [], s: []
+    };
+    const result = parseCompact(compact);
+    if (result !== null) throw new Error("Expected null for non-array vertex tuple");
+  });
+
+  it("parseCompact returns null for non-finite coordinate", () => {
+    const compact = {
+      v: COMPACT_VERSION, u: "ft",
+      r: [{ c: 1, p: [[Infinity, 0]] }],
+      k: [], s: []
+    };
+    const result = parseCompact(compact);
+    // Either null or validatePlan rejects it
+    if (result !== null) {
+      const validated = validatePlan(result);
+      if (validated !== null) throw new Error("Expected validatePlan to reject non-finite coord");
+    }
+  });
+
+  it("chain vertices (draft) are preserved in round-trip", () => {
+    resetAll();
+    setUnit("m");
+    model.chain.push({ x: 0.1, y: 0.2 }, { x: 1.0, y: 0.5 });
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    if (compact.k.length !== 2) throw new Error("chain not encoded");
+    const restored = validatePlan(parseCompact(compact));
+    if (!restored) throw new Error("validatePlan rejected");
+    if (restored.walls.chain.length !== 2) throw new Error("chain not restored");
+    if (restored.walls.chain[0].x !== 0.1 || restored.walls.chain[0].y !== 0.2) {
+      throw new Error("chain vertex 0 coords wrong");
+    }
+  });
+});
+
+describe("LLD 77 — share.js compact 'c' codec", () => {
+  it("encodePlanToHash emits hash starting with 'c' when CompressionStream is available", async () => {
+    resetAll();
+    setUnit("ft");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }] });
+    const p = buildPlan();
+    const hash = await encodePlanToHash(p);
+    if (hash[0] !== "c") throw new Error(`Expected 'c' codec, got '${hash[0]}'`);
+  });
+
+  it("'c' codec round-trips a non-trivial plan (geometry/unit equal)", async () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }] });
+    model.rooms.push({ id: "w1", closed: true, verts: [{ x: 5, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 4 }, { x: 5, y: 4 }] });
+    addSymbol(createSymbol("sofa", 2.5, 2));
+    addSymbol(createSymbol("bed", 7, 2));
+    const p = buildPlan();
+    const hash = await encodePlanToHash(p);
+    if (hash[0] !== "c") throw new Error(`Expected 'c' codec, got '${hash[0]}'`);
+    const decoded = await decodeHashToPlan(hash);
+    if (!decoded) throw new Error("decodeHashToPlan returned null for 'c' hash");
+    if (!planGeomEqual(decoded, p)) throw new Error("'c' round-trip geometry mismatch");
+  });
+
+  it("'c' hash is materially shorter than the old 'd' hash (compactness sanity)", async () => {
+    // Gaming room fixture: two desks + monitor + chair (representative plan)
+    resetAll();
+    setUnit("ft");
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3.5 }, { x: 0, y: 3.5 }
+    ]});
+    addSymbol(createSymbol("desk", 1, 1));
+    addSymbol(createSymbol("desk", 3, 1));
+    addSymbol(createSymbol("chair", 2, 2));
+    const p = buildPlan();
+
+    // Build 'c' hash using new encoder
+    const cHash = await encodePlanToHash(p);
+
+    // Build legacy 'd' hash manually (full JSON + deflate)
+    const fullJson = serializePlan(p);
+    const fullBytes = new TextEncoder().encode(fullJson);
+    const cs = new CompressionStream("deflate-raw");
+    const writer = cs.writable.getWriter();
+    writer.write(fullBytes); writer.close();
+    const chunks = [];
+    const reader = cs.readable.getReader();
+    while (true) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); }
+    const total = chunks.reduce((n, a) => n + a.length, 0);
+    const comp = new Uint8Array(total); let off = 0;
+    for (const c of chunks) { comp.set(c, off); off += c.length; }
+    let bin = ""; for (let i = 0; i < comp.length; i++) bin += String.fromCharCode(comp[i]);
+    const dHash = "d" + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+    // The compact hash should be substantially shorter
+    if (cHash.length >= dHash.length) {
+      throw new Error(`'c' hash (${cHash.length}) should be shorter than 'd' hash (${dHash.length})`);
+    }
+    // Sanity: at least 20% shorter
+    const reduction = 1 - cHash.length / dHash.length;
+    if (reduction < 0.20) throw new Error(`Expected ≥20% reduction, got ${(reduction * 100).toFixed(1)}%`);
+  });
+
+  it("decodeHashToPlan returns null for unknown codec byte (never throws)", async () => {
+    let result;
+    try { result = await decodeHashToPlan("zsome_payload_here"); } catch { throw new Error("threw instead of returning null"); }
+    if (result !== null) throw new Error("Expected null for unknown codec byte");
+  });
+
+  it("decodeHashToPlan returns null for truncated 'c' payload (never throws)", async () => {
+    resetAll();
+    const p = buildPlan();
+    const hash = await encodePlanToHash(p);
+    const truncated = hash.slice(0, 4); // 'c' + 3 chars — definitely invalid
+    let threw = false;
+    try { await decodeHashToPlan(truncated); } catch { threw = true; }
+    if (threw) throw new Error("decodeHashToPlan threw on truncated 'c' payload");
+  });
+
+  it("decodeHashToPlan returns null for 'c' payload inflating to invalid JSON (never throws)", async () => {
+    // Compress a non-JSON string, prefix with 'c'
+    const bytes = new TextEncoder().encode("this is not json at all");
+    const cs = new CompressionStream("deflate-raw");
+    const writer = cs.writable.getWriter();
+    writer.write(bytes); writer.close();
+    const chunks = []; const reader = cs.readable.getReader();
+    while (true) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); }
+    const total = chunks.reduce((n, a) => n + a.length, 0);
+    const comp = new Uint8Array(total); let off = 0;
+    for (const c of chunks) { comp.set(c, off); off += c.length; }
+    let bin = ""; for (let i = 0; i < comp.length; i++) bin += String.fromCharCode(comp[i]);
+    const badHash = "c" + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    let result;
+    try { result = await decodeHashToPlan(badHash); } catch { throw new Error("threw instead of returning null"); }
+    if (result !== null) throw new Error("Expected null for invalid JSON payload");
+  });
+
+  it("decodeHashToPlan returns null for 'c' hash with unknown symbol type (Edge Case 6)", async () => {
+    // Build a compact payload with an unknown type, compress it, hash it
+    const bad = { v: COMPACT_VERSION, u: "ft", r: [], k: [], s: [{ t: "time_machine", x: 1, y: 1 }] };
+    const bytes = new TextEncoder().encode(JSON.stringify(bad));
+    const cs = new CompressionStream("deflate-raw");
+    const writer = cs.writable.getWriter();
+    writer.write(bytes); writer.close();
+    const chunks = []; const reader = cs.readable.getReader();
+    while (true) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); }
+    const total = chunks.reduce((n, a) => n + a.length, 0);
+    const comp = new Uint8Array(total); let off = 0;
+    for (const c of chunks) { comp.set(c, off); off += c.length; }
+    let bin = ""; for (let i = 0; i < comp.length; i++) bin += String.fromCharCode(comp[i]);
+    const badHash = "c" + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    let result;
+    try { result = await decodeHashToPlan(badHash); } catch { throw new Error("threw instead of returning null"); }
+    if (result !== null) throw new Error("Expected null for unknown symbol type in 'c' hash");
+  });
+
+  it("CompressionStream fallback: when stubbed undefined, emits 'u' codec that still decodes", async () => {
+    // Temporarily stub out CompressionStream
+    const orig = globalThis.CompressionStream;
+    globalThis.CompressionStream = undefined;
+    let hash;
+    try {
+      resetAll();
+      setUnit("ft");
+      model.rooms.push({ id: "w0", closed: false, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }] });
+      const p = buildPlan();
+      hash = await encodePlanToHash(p);
+    } finally {
+      globalThis.CompressionStream = orig;
+    }
+    if (hash[0] !== "u") throw new Error(`Expected 'u' fallback codec, got '${hash[0]}'`);
+    const decoded = await decodeHashToPlan(hash);
+    if (!decoded) throw new Error("'u' fallback hash failed to decode");
+  });
+});
+
+describe("LLD 77 — backward-compat: pre-existing 'd' and 'u' hashes still decode", () => {
+  it("frozen 'd' fixture hash decodes to the expected plan (never broken by future changes)", async () => {
+    let result;
+    try { result = await decodeHashToPlan(FIXTURE_D_HASH); } catch (e) { throw new Error(`threw: ${e}`); }
+    if (!result) throw new Error("Legacy 'd' fixture hash failed to decode — backward-compat broken");
+    // Expected: 1 closed room with 4 verts, no symbols, unit='ft'
+    if (result.walls.rooms.length !== 1) throw new Error("Expected 1 room in 'd' fixture");
+    if (!result.walls.rooms[0].closed) throw new Error("Expected closed room in 'd' fixture");
+    if (result.walls.rooms[0].verts.length !== 4) throw new Error("Expected 4 verts in 'd' fixture");
+    if (result.symbols.symbols.length !== 0) throw new Error("Expected no symbols in 'd' fixture");
+    if (result.unit !== "ft") throw new Error(`Expected unit 'ft' in 'd' fixture, got '${result.unit}'`);
+  });
+
+  it("frozen 'u' fixture hash decodes to the expected plan (never broken by future changes)", async () => {
+    let result;
+    try { result = await decodeHashToPlan(FIXTURE_U_HASH); } catch (e) { throw new Error(`threw: ${e}`); }
+    if (!result) throw new Error("Legacy 'u' fixture hash failed to decode — backward-compat broken");
+    // Expected: no rooms, chain=[{x:0,y:0},{x:2,y:0}], no symbols, unit='m'
+    if (result.walls.rooms.length !== 0) throw new Error("Expected 0 rooms in 'u' fixture");
+    if (result.walls.chain.length !== 2) throw new Error("Expected chain of 2 in 'u' fixture");
+    if (result.symbols.symbols.length !== 0) throw new Error("Expected no symbols in 'u' fixture");
+    if (result.unit !== "m") throw new Error(`Expected unit 'm' in 'u' fixture, got '${result.unit}'`);
+  });
+
+  it("decodeHashToPlan never throws for any codec byte (unknown codec → null)", async () => {
+    for (const garbage of ["xpayload", "zyyyy", "0stuff", ""]) {
+      let threw = false;
+      let result;
+      try { result = await decodeHashToPlan(garbage); } catch { threw = true; }
+      if (threw) throw new Error(`decodeHashToPlan threw for input '${garbage}'`);
+      if (result !== null) throw new Error(`Expected null for '${garbage}', got plan`);
+    }
+  });
+
+  it("no NaN/Infinity ever reaches the model from a decoded 'c' plan", async () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    addSymbol(createSymbol("desk", 1.5, 2));
+    const p = buildPlan();
+    const hash = await encodePlanToHash(p);
+    const decoded = await decodeHashToPlan(hash);
+    if (!decoded) throw new Error("decodeHashToPlan returned null");
+    for (const room of decoded.walls.rooms) {
+      for (const v of room.verts) {
+        if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) throw new Error("NaN/Infinity in decoded room verts");
+      }
+    }
+    for (const sym of decoded.symbols.symbols) {
+      if (!Number.isFinite(sym.x) || !Number.isFinite(sym.y)) throw new Error("NaN/Infinity in decoded sym x/y");
+      if (!Number.isFinite(sym.w) || !Number.isFinite(sym.h)) throw new Error("NaN/Infinity in decoded sym w/h");
+      if (!Number.isFinite(sym.rot)) throw new Error("NaN/Infinity in decoded sym rot");
+    }
+  });
+});
+
+// ─── Tests: LLD 81 — measurements.js unit tests ──────────────────────────────
+
+describe("LLD 81 — measurements.js: hydrate replaces in place + counter re-sync", () => {
+  it("hydrate replaces measurements array IN PLACE (same array identity)", () => {
+    const origRef = measurementsModel.measurements;
+    hydrateMeasurements({ measurements: [
+      { id: "m3", a: { x: 0, y: 0 }, b: { x: 1, y: 1 } },
+    ] });
+    if (measurementsModel.measurements !== origRef) throw new Error("measurements array identity changed");
+    if (measurementsModel.measurements.length !== 1) throw new Error(`Expected 1 measurement, got ${measurementsModel.measurements.length}`);
+    if (measurementsModel.measurements[0].id !== "m3") throw new Error("Wrong measurement id");
+    hydrateMeasurements({ measurements: [] }); // cleanup
+  });
+
+  it("hydrate re-syncs counter: next newMeasurementId() does not collide with max loaded id", () => {
+    hydrateMeasurements({ measurements: [
+      { id: "m5", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+      { id: "m2", a: { x: 2, y: 0 }, b: { x: 3, y: 0 } },
+    ] });
+    const id = newMeasurementId();
+    const num = parseInt(id.replace("m", ""), 10);
+    if (num <= 5) throw new Error(`newId() ${id} collides — must be > m5 (max loaded)`);
+    hydrateMeasurements({ measurements: [] }); // cleanup
+  });
+
+  it("hydrate with empty array clears existing measurements", () => {
+    hydrateMeasurements({ measurements: [
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+    ] });
+    hydrateMeasurements({ measurements: [] });
+    if (measurementsModel.measurements.length !== 0) throw new Error("Expected empty after hydrate([])");
+  });
+});
+
+// ─── Tests: LLD 81 — plan.js measurements integration ────────────────────────
+
+describe("LLD 81 — plan.js: buildPlan includes measurements (deep clone)", () => {
+  it("buildPlan snapshots measurements as a deep-cloned array", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
+    const p = buildPlan();
+    if (!Array.isArray(p.measurements)) throw new Error("measurements not an array in buildPlan output");
+    if (p.measurements.length !== 1) throw new Error("Expected 1 measurement");
+    if (p.measurements[0].id !== "m0") throw new Error("Wrong measurement id");
+    // Mutating model after snapshot must not affect the snapshot
+    measurementsModel.measurements[0].a.x = 999;
+    if (p.measurements[0].a.x === 999) throw new Error("buildPlan did not deep-clone measurements");
+    resetAll();
+  });
+
+  it("buildPlan on empty model includes measurements: []", () => {
+    resetAll();
+    const p = buildPlan();
+    if (!Array.isArray(p.measurements)) throw new Error("Missing measurements key");
+    if (p.measurements.length !== 0) throw new Error("Expected []");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: validatePlan measurements acceptance", () => {
+  it("accepts a plan with valid measurements", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } }];
+    const v = validatePlan(p);
+    if (!v) throw new Error("validatePlan rejected a plan with valid measurements");
+    if (v.measurements.length !== 1) throw new Error("measurements not preserved in validated plan");
+    if (v.measurements[0].id !== "m0") throw new Error("measurement id not preserved");
+    resetAll();
+  });
+
+  it("BACKWARD COMPAT: accepts a plan with NO measurements key (normalises to [])", () => {
+    resetAll();
+    const p = buildPlan();
+    delete p.measurements; // simulate old saved plan
+    const v = validatePlan(p);
+    if (v === null) throw new Error("validatePlan MUST NOT return null for missing measurements — backward compat broken");
+    if (!Array.isArray(v.measurements)) throw new Error("measurements must be normalised to an array");
+    if (v.measurements.length !== 0) throw new Error("measurements must be normalised to []");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: validatePlan measurements rejections", () => {
+  function shouldRejectMeas(plan, label) {
+    let result;
+    try { result = validatePlan(plan); } catch (e) { throw new Error(`threw instead of null: ${e}`); }
+    if (result !== null) throw new Error(`Expected null for: ${label}`);
+  }
+
+  it("rejects measurements not an array (object)", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = {};
+    shouldRejectMeas(p, "measurements={}");
+    resetAll();
+  });
+
+  it("rejects measurements not an array (string)", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = "notanarray";
+    shouldRejectMeas(p, "measurements=string");
+    resetAll();
+  });
+
+  it("rejects entry that is not an object", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = ["notanobject"];
+    shouldRejectMeas(p, "entry=string");
+    resetAll();
+  });
+
+  it("rejects entry with non-string id", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: 42, a: { x: 0, y: 0 }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "id=number");
+    resetAll();
+  });
+
+  it("rejects entry missing 'a'", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "missing a");
+    resetAll();
+  });
+
+  it("rejects entry missing 'b'", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 } }];
+    shouldRejectMeas(p, "missing b");
+    resetAll();
+  });
+
+  it("rejects entry with non-finite a.x", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: NaN, y: 0 }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "a.x=NaN");
+    resetAll();
+  });
+
+  it("rejects entry with Infinity a.y", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: Infinity }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "a.y=Infinity");
+    resetAll();
+  });
+
+  it("rejects entry with non-finite b.x", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 }, b: { x: NaN, y: 0 } }];
+    shouldRejectMeas(p, "b.x=NaN");
+    resetAll();
+  });
+
+  it("rejects entry with missing b.y", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 }, b: { x: 1 } }];
+    shouldRejectMeas(p, "b.y missing");
+    resetAll();
+  });
+
+  it("rejects entry with string coord", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: "0", y: 0 }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "a.x=string");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: round-trip applyPlan(validatePlan(buildPlan())) with measurements", () => {
+  it("measurements are lossless through the localStorage round-trip path", () => {
+    resetAll();
+    measurementsModel.measurements.push(
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } },
+      { id: "m1", a: { x: 1.5, y: 2 }, b: { x: -0.5, y: -1 } }
+    );
+    const snapshot = buildPlan();
+    const validated = validatePlan(JSON.parse(JSON.stringify(snapshot)));
+    if (!validated) throw new Error("validatePlan rejected a good snapshot with measurements");
+    applyPlan(validated);
+    if (measurementsModel.measurements.length !== 2) throw new Error("measurement count changed after round-trip");
+    if (JSON.stringify(measurementsModel.measurements) !== JSON.stringify(snapshot.measurements)) {
+      throw new Error("measurements differ after applyPlan round-trip");
+    }
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: serializePlan includes measurements in fixed key order", () => {
+  it("serializePlan output contains measurements key", () => {
+    resetAll();
+    const p = buildPlan();
+    const s = serializePlan(p);
+    const parsed = JSON.parse(s);
+    if (!("measurements" in parsed)) throw new Error("measurements key missing from serializePlan output");
+    resetAll();
+  });
+
+  it("two plans differing only in measurements produce different serialized strings", () => {
+    resetAll();
+    const p1 = buildPlan();
+    const s1 = serializePlan(p1);
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 0 } });
+    const p2 = buildPlan();
+    const s2 = serializePlan(p2);
+    if (s1 === s2) throw new Error("plans with different measurements must produce different serialized strings");
+    resetAll();
+  });
+
+  it("JSON export/import round-trip: validatePlan(JSON.parse(serializePlan(buildPlan()))) preserves measurements", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 5, y: 6 } });
+    const p = buildPlan();
+    const reparsed = validatePlan(JSON.parse(serializePlan(p)));
+    if (!reparsed) throw new Error("validatePlan rejected re-parsed plan");
+    if (reparsed.measurements.length !== 1) throw new Error("measurement lost in JSON export round-trip");
+    if (reparsed.measurements[0].a.x !== 1) throw new Error("measurement a.x wrong after round-trip");
+    if (reparsed.measurements[0].b.y !== 6) throw new Error("measurement b.y wrong after round-trip");
+    resetAll();
+  });
+});
+
+// ─── Tests: LLD 81 — compact codec measurements ───────────────────────────────
+
+describe("LLD 81 — compact codec: buildCompact emits 'm' key", () => {
+  it("buildCompact on empty plan yields m:[]", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    if (!Array.isArray(compact.m)) throw new Error("compact.m must be an array");
+    if (compact.m.length !== 0) throw new Error("compact.m must be [] for empty measurements");
+    resetAll();
+  });
+
+  it("buildCompact encodes measurements as 4-number tuples [ax,ay,bx,by]", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    if (compact.m.length !== 1) throw new Error("Expected 1 measurement tuple");
+    const [ax, ay, bx, by] = compact.m[0];
+    if (ax !== 1 || ay !== 2 || bx !== 3 || by !== 4) throw new Error(`Wrong tuple: ${JSON.stringify(compact.m[0])}`);
+    resetAll();
+  });
+
+  it("compact codec round-trip: geometry preserved (coords on snap multiples)", () => {
+    resetAll();
+    setUnit("m");
+    measurementsModel.measurements.push(
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } },
+      { id: "m1", a: { x: 1, y: 0.5 }, b: { x: 2, y: 0.5 } }
+    );
+    const p = buildPlan();
+    const restored = validatePlan(parseCompact(buildCompact(p)));
+    if (!restored) throw new Error("validatePlan rejected parseCompact output with measurements");
+    if (restored.measurements.length !== 2) throw new Error("measurement count mismatch in compact round-trip");
+    if (restored.measurements[0].a.x !== 0) throw new Error("m[0].a.x wrong");
+    if (restored.measurements[0].b.x !== 3) throw new Error("m[0].b.x wrong");
+    if (restored.measurements[1].a.y !== 0.5) throw new Error("m[1].a.y wrong");
+    resetAll();
+  });
+
+  it("compact codec: mm-rounding on sub-mm endpoint (1.23456 → 1.235)", () => {
+    resetAll();
+    setUnit("m");
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1.23456, y: 0 }, b: { x: 0, y: 0 } });
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    const expected_ax = Math.round(1.23456 * 1000) / 1000; // 1.235
+    if (compact.m[0][0] !== expected_ax) throw new Error(`Expected mm-rounded ${expected_ax}, got ${compact.m[0][0]}`);
+    const restored = validatePlan(parseCompact(compact));
+    if (!restored) throw new Error("validatePlan rejected");
+    if (restored.measurements[0].a.x !== expected_ax) throw new Error("rounded value not preserved in round-trip");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — compact codec: parseCompact absence tolerance (BACKWARD COMPAT)", () => {
+  it("HARD: parseCompact with no 'm' key yields measurements:[] (old 'c' links still work)", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    delete compact.m; // simulate old pre-LLD-81 compact payload
+    const restored = parseCompact(compact);
+    if (!restored) throw new Error("parseCompact returned null for compact without 'm' key");
+    if (!Array.isArray(restored.measurements)) throw new Error("measurements must be an array");
+    if (restored.measurements.length !== 0) throw new Error("measurements must be [] when 'm' absent");
+    resetAll();
+  });
+
+  it("parseCompact returns null for malformed tuple: arity < 4", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    compact.m = [[1, 2, 3]]; // arity 3 instead of 4
+    const result = parseCompact(compact);
+    if (result !== null) throw new Error("Expected null for arity-3 tuple");
+    resetAll();
+  });
+
+  it("parseCompact returns null for non-finite number in tuple", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    compact.m = [[1, 2, NaN, 4]];
+    const result = parseCompact(compact);
+    if (result !== null) throw new Error("Expected null for NaN in tuple");
+    resetAll();
+  });
+
+  it("parseCompact returns null for non-finite Infinity in tuple", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    compact.m = [[1, 2, 3, Infinity]];
+    const result = parseCompact(compact);
+    if (result !== null) throw new Error("Expected null for Infinity in tuple");
+    resetAll();
+  });
+
+  it("HARD: frozen legacy 'd' fixture still decodes to measurements:[]", async () => {
+    const result = await decodeHashToPlan(FIXTURE_D_HASH);
+    if (!result) throw new Error("legacy 'd' fixture failed to decode");
+    if (!Array.isArray(result.measurements)) throw new Error("measurements must be an array");
+    if (result.measurements.length !== 0) throw new Error("legacy 'd' fixture must decode to measurements:[]");
+  });
+
+  it("HARD: frozen legacy 'u' fixture still decodes to measurements:[]", async () => {
+    const result = await decodeHashToPlan(FIXTURE_U_HASH);
+    if (!result) throw new Error("legacy 'u' fixture failed to decode");
+    if (!Array.isArray(result.measurements)) throw new Error("measurements must be an array");
+    if (result.measurements.length !== 0) throw new Error("legacy 'u' fixture must decode to measurements:[]");
+  });
+});
+
+describe("LLD 81 — compact codec: share hash round-trip with measurements", () => {
+  it("encode/decode share hash preserves measurement geometry", async () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } });
+    const p = buildPlan();
+    const hash = await encodePlanToHash(p);
+    const decoded = await decodeHashToPlan(hash);
+    if (!decoded) throw new Error("decodeHashToPlan returned null for plan with measurements");
+    if (decoded.measurements.length !== 1) throw new Error("measurement count mismatch after share round-trip");
+    if (decoded.measurements[0].a.x !== 0) throw new Error("measurement a.x wrong after share round-trip");
+    if (decoded.measurements[0].b.x !== 3) throw new Error("measurement b.x wrong after share round-trip");
+    if (decoded.measurements[0].b.y !== 4) throw new Error("measurement b.y wrong after share round-trip");
+    resetAll();
+  });
+});
+
+// ─── Tests: LLD 81 — backward-compat: old JSON plan without measurements ──────
+
+describe("LLD 81 — backward-compat: old JSON plan without measurements key validates", () => {
+  it("HARD: a frozen legacy JSON plan with no measurements key loads and normalises to []", () => {
+    // This is the pre-LLD-81 plan format — no measurements field at all
+    const legacyPlan = {
+      schema: 1,
+      app: "floorplan",
+      walls: { rooms: [{ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] }], chain: [] },
+      symbols: { symbols: [] },
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "ft",
+    };
+    if ("measurements" in legacyPlan) throw new Error("fixture must not have measurements key");
+    const v = validatePlan(legacyPlan);
+    if (v === null) throw new Error("validatePlan MUST NOT return null for missing measurements — backward-compat broken");
+    if (!Array.isArray(v.measurements)) throw new Error("measurements must be normalised to array");
+    if (v.measurements.length !== 0) throw new Error("measurements must be []");
+  });
+});
+
+// ─── Tests: LLD 81 — exportImg measurements ──────────────────────────────────
+
+describe("LLD 81 — exportImg.contentBounds includes measurement endpoints", () => {
+  it("measurement extending beyond walls expands bounds (Edge Case 7)", () => {
+    resetAll();
+    // A room occupying [0,3]x[0,4]
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    // A measurement extending way beyond the room
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 10, y: 12 } });
+    const b = contentBounds();
+    if (!b) throw new Error("Expected non-null bounds");
+    if (b.maxX < 10) throw new Error(`maxX ${b.maxX} should be >= 10 (measurement endpoint)`);
+    if (b.maxY < 12) throw new Error(`maxY ${b.maxY} should be >= 12 (measurement endpoint)`);
+    resetAll();
+  });
+
+  it("measurement-only plan (no rooms/symbols) produces non-null bounds", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 5, y: 6 } });
+    const b = contentBounds();
+    if (b === null) throw new Error("Expected non-null bounds for measurement-only plan");
+    if (b.minX !== 1 || b.minY !== 2 || b.maxX !== 5 || b.maxY !== 6) {
+      throw new Error(`Wrong bounds: ${JSON.stringify(b)}`);
+    }
+    resetAll();
+  });
+});
+
+describe("LLD 81 — exportImg.buildExportSvg includes measurement lines + labels", () => {
+  it("SVG contains a <line> and <text> for each measurement", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    measurementsModel.measurements.push(
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } },
+      { id: "m1", a: { x: 1, y: 0 }, b: { x: 2, y: 0 } }
+    );
+    const svg = buildExportSvg();
+    // Count <line> elements (wall lines + measurement lines)
+    const lineMatches = svg.match(/<line /g) || [];
+    if (lineMatches.length < 2) throw new Error(`Expected at least 2 <line> elements, got ${lineMatches.length}`);
+    // Count <text> elements — room edges + measurements
+    const textMatches = svg.match(/<text /g) || [];
+    // 4 room-edge labels + 2 measurement labels = at least 6
+    if (textMatches.length < 6) throw new Error(`Expected at least 6 <text> elements, got ${textMatches.length}`);
+    resetAll();
+  });
+
+  it("measurement-only SVG (no rooms): non-null output with line and label", () => {
+    resetAll();
+    setUnit("m");
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 5, y: 0 } });
+    const svg = buildExportSvg();
+    if (!svg.includes("<line ")) throw new Error("No <line> in measurement-only SVG");
+    if (!svg.includes("<text ")) throw new Error("No <text> in measurement-only SVG");
+    // The label should contain a numeric distance (5.00 m)
+    if (!svg.includes("5.00")) throw new Error("Distance label missing in measurement-only SVG");
+    resetAll();
+  });
+
+  it("plan with measurements but no rooms produces valid SVG (non-null bounds)", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 2, y: 3 }, b: { x: 7, y: 8 } });
+    const svg = buildExportSvg();
+    if (!svg.startsWith("<?xml")) throw new Error("SVG does not start with XML declaration");
+    if (!svg.includes("<svg")) throw new Error("SVG missing <svg> element");
+    resetAll();
+  });
+});
+
+// ─── Tests: LLD 81 — no NaN/Infinity from measurements round-trip ─────────────
+
+describe("LLD 81 — safety: no NaN/Infinity from validated measurements", () => {
+  it("validatePlan never lets NaN/Infinity through to measurements", () => {
+    resetAll();
+    const p = buildPlan();
+    // These entries are invalid and must be rejected (null) — not NaN allowed through
+    const badPlans = [
+      { ...p, measurements: [{ id: "m0", a: { x: NaN, y: 0 }, b: { x: 1, y: 0 } }] },
+      { ...p, measurements: [{ id: "m0", a: { x: 0, y: Infinity }, b: { x: 1, y: 0 } }] },
+    ];
+    for (const bad of badPlans) {
+      const v = validatePlan(bad);
+      if (v !== null) throw new Error("validatePlan should reject NaN/Infinity endpoint");
+    }
+    resetAll();
   });
 });
 

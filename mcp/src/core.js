@@ -33,6 +33,10 @@ export {
   perimeter,
   roomMetrics,
   wallSegments,
+  moveRoom,
+  rescaleRectEdge,
+  isRectangle,
+  pointNearRoomWall,
   WALL_M,
   MIN_SEG_M,
 } from "../../src/js/walls.js";
@@ -65,6 +69,11 @@ export {
   THRESH_MAX,
   DEFAULT_THRESHOLD,
 } from "../../src/js/clearance.js";
+
+export {
+  model as measurementsModel,
+  hydrate as hydrateMeasurements,
+} from "../../src/js/measurements.js";
 
 // Live-binding read of the effective (post-clamp) threshold. A named import of
 // `threshold` is a live binding, but re-reading via a namespace import is the

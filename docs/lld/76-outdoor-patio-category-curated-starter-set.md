@@ -61,15 +61,21 @@ entries (`coffee-table`, `dining-table-round`): `"patio-table"`, `"patio-chair"`
 
 **Dimensions (to-scale defaults; recommended, implementer may fine-tune).**
 
-| type          | label        | w    | h    | min  | max  | rationale |
-|---------------|--------------|------|------|------|------|-----------|
-| `patio-table` | Patio Table  | 0.90 | 0.90 | 0.40 | 2.00 | square outdoor table |
-| `patio-chair` | Patio Chair  | 0.65 | 0.70 | 0.40 | 1.10 | outdoor seat/lounge |
-| `parasol`     | Parasol      | 2.00 | 2.00 | 0.90 | 3.50 | round shade footprint |
-| `planter`     | Planter      | 0.50 | 0.50 | 0.20 | 1.50 | potted plant / box |
+Updated to the per-axis schema (`min_w/max_w/min_h/max_h` + real-product
+`presets`) that landed in PR #98, grounded in real buyable outdoor furniture
+(market-umbrella canopy sizes; IKEA/Wayfair/Article patio dining norms):
 
-All satisfy `min ≤ w,h ≤ max` (the catalog regression guard). None set
-`openings:true`.
+| type          | label        | w    | h    | min_w | max_w | min_h | max_h | presets | rationale |
+|---------------|--------------|------|------|-------|-------|-------|-------|---------|-----------|
+| `patio-table` | Patio Table  | 0.90 | 0.90 | 0.60  | 1.83  | 0.60  | 1.00  | Bistro 24″ 0.61², 4-seat 36″ 0.91², 6-seat 72″ 1.83×0.91 | outdoor dining table |
+| `patio-chair` | Patio Chair  | 0.60 | 0.65 | 0.50  | 0.80  | 0.55  | 0.90  | — | dining/lounge seat (incl. Adirondack) |
+| `parasol`     | Parasol      | 2.74 | 2.74 | 1.83  | 3.35  | 1.83  | 3.35  | 6/7.5/9/10/11 ft canopy | market-umbrella canopy circle (w==h) |
+| `planter`     | Planter      | 0.50 | 0.50 | 0.25  | 1.00  | 0.25  | 0.60  | Small 0.30², Medium 0.45², Large 0.60², Trough 0.90×0.35 | pot / trough |
+
+All satisfy `min_w ≤ w ≤ max_w` and `min_h ≤ h ≤ max_h` (the catalog regression
+guard), and every preset lies within its own per-axis bounds. Parasol keeps its
+w/h bounds symmetric so it stays circular (full circularity enforcement is
+deferred — issue #97). None set `openings:true`.
 ## Frontend Design
 
 Frontend decision: **proceed** — no visual-design risk. The dock, tabs, glyphs, and
@@ -138,10 +144,37 @@ No function signatures change. Only typedefs and the `CATALOG` literal grow.
 **`src/js/symbols.js` — `CATALOG` additions** (append after the `bath` block; grouping
 is cosmetic since consumers iterate `Object.entries`):
 ```js
-"patio-table": { label: "Patio Table", category: "outdoor", w: 0.90, h: 0.90, min: 0.40, max: 2.00 },
-"patio-chair": { label: "Patio Chair", category: "outdoor", w: 0.65, h: 0.70, min: 0.40, max: 1.10 },
-parasol:       { label: "Parasol",     category: "outdoor", w: 2.00, h: 2.00, min: 0.90, max: 3.50 },
-planter:       { label: "Planter",     category: "outdoor", w: 0.50, h: 0.50, min: 0.20, max: 1.50 },
+"patio-table": {
+  label: "Patio Table", category: "outdoor", w: 0.90, h: 0.90,
+  min_w: 0.60, max_w: 1.83, min_h: 0.60, max_h: 1.00,
+  presets: [
+    { name: "Bistro 24\"", w: 0.61, h: 0.61 },
+    { name: "4-seat 36\"", w: 0.91, h: 0.91 },
+    { name: "6-seat 72\"", w: 1.83, h: 0.91 },
+  ],
+},
+"patio-chair": { label: "Patio Chair", category: "outdoor", w: 0.60, h: 0.65, min_w: 0.50, max_w: 0.80, min_h: 0.55, max_h: 0.90 },
+parasol: {
+  label: "Parasol", category: "outdoor", w: 2.74, h: 2.74,
+  min_w: 1.83, max_w: 3.35, min_h: 1.83, max_h: 3.35,
+  presets: [
+    { name: "6 ft",   w: 1.83, h: 1.83 },
+    { name: "7.5 ft", w: 2.29, h: 2.29 },
+    { name: "9 ft",   w: 2.74, h: 2.74 },
+    { name: "10 ft",  w: 3.05, h: 3.05 },
+    { name: "11 ft",  w: 3.35, h: 3.35 },
+  ],
+},
+planter: {
+  label: "Planter", category: "outdoor", w: 0.50, h: 0.50,
+  min_w: 0.25, max_w: 1.00, min_h: 0.25, max_h: 0.60,
+  presets: [
+    { name: "Small pot",  w: 0.30, h: 0.30 },
+    { name: "Medium pot", w: 0.45, h: 0.45 },
+    { name: "Large pot",  w: 0.60, h: 0.60 },
+    { name: "Trough",     w: 0.90, h: 0.35 },
+  ],
+},
 ```
 
 **`src/js/symbolRender.js` — new branches** in `_renderInterior(parent, sym, cs, p)`,
@@ -177,7 +210,7 @@ resets to the first tab (Openings). Adding the sixth tab does not change this co
    rotations; acceptable (round objects have no meaningful orientation). Glyphs must
    still render correctly via `lp()` at arbitrary `rot` — verified by the existing
    rotation-aware render path.
-4. **Glyph legibility at min size.** At `min` (e.g. planter 0.20 m) the glyph shrinks;
+4. **Glyph legibility at min size.** At the per-axis minimum (e.g. planter 0.25 m) the glyph shrinks;
    use `Math.max(…)` floors on radii/insets as the existing branches do (e.g. `bathtub`
    drain uses `Math.max(2, sw*0.04)`) so features don't collapse to zero.
 5. **Sixth tab overflow on narrow screens.** `.dock-tabs` already scrolls horizontally;
@@ -209,7 +242,8 @@ Extend `test/tests.html` (no new file). Organize as below.
 **Catalog / type enumeration (unit):**
 - Add an `LLD76_TYPES = ["patio-table","patio-chair","parasol","planter"]` block mirroring
   the `LLD45_TYPES` suite: each exists in `CATALOG`; each has a non-empty label; finite
-  `w,h,min,max`; `min ≤ w,h ≤ max`; none has `openings:true`; `createSymbol` returns the
+  `w,h,min_w,max_w,min_h,max_h`; `min_w ≤ w ≤ max_w` and `min_h ≤ h ≤ max_h`; every preset in
+  bounds; none has `openings:true`; `createSymbol` returns the
   right type/defaults/`rot:0`/string id.
 - Update the `VALID_CATS` sets (currently `{"openings","living","kitchen","bedroom","bath"}`
   at `tests.html:1830`, `:8833`, `:8843` region) to include `"outdoor"`.
@@ -235,7 +269,7 @@ Extend `test/tests.html` (no new file). Organize as below.
   existing place_symbol suite if present; otherwise a small new case.)
 
 **Manual verification (QA, no automated test needed):**
-- Each piece places, resizes within min/max, rotates, and fit-tests through the existing
+- Each piece places, resizes within its per-axis bounds, rotates, and fit-tests through the existing
   clearance path with no special-casing.
 - Each exports to PNG, SVG, JSON and round-trips through the URL-hash share link.
 - The Outdoor tab appears, activates on click, hides the others, and is reachable via

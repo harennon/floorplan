@@ -140,6 +140,19 @@ export function buildServer() {
     inputSchema: { roomId: z.string(), edgeIndex: z.number().int(), lengthM: z.number() },
   }, (args) => asResult(tools.tool_set_edge_length(args)));
 
+  server.registerTool("move_room", {
+    description: "Move a whole room by (dx,dy), carrying its furniture and its own doors/windows. " +
+      "Non-destructive; returns the carried symbol ids." + FRAME,
+    inputSchema: { roomId: z.string(), dx: z.number(), dy: z.number() },
+  }, (args) => asResult(tools.tool_move_room(args)));
+
+  server.registerTool("resize_room", {
+    description: "Resize a RECTANGULAR room to exact target w×h metres (anchored at its origin " +
+      "corner), non-destructively — use this instead of rebuilding a mis-sized room. " +
+      "Fails on non-rectangular rooms.",
+    inputSchema: { roomId: z.string(), w: z.number(), h: z.number() },
+  }, (args) => asResult(tools.tool_resize_room(args)));
+
   server.registerTool("place_symbol", {
     description: "Place a furniture/opening symbol at center (x,y). Optional w,h,rot; dims are clamped to the catalog range." + FRAME,
     inputSchema: {
@@ -204,7 +217,7 @@ export function buildServer() {
     }));
 
   server.registerResource("catalog", "floorplan://catalog",
-    { description: "The symbol catalog: types, default w/h, and min/max clamp bounds.", mimeType: "application/json" },
+    { description: "The symbol catalog: types, default w/h, per-axis clamp bounds (min_w/max_w/min_h/max_h), and named real-product presets (e.g. bed sizes, appliance widths, door leaves) where the type is standardized. All bounds/presets are grounded in real, buyable furniture — resize within these to keep a plan realizable.", mimeType: "application/json" },
     async (uri) => ({
       contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(CATALOG) }],
     }));

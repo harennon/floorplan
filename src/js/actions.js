@@ -181,8 +181,9 @@ export function showToast(msg, action) {
  */
 export function showConflictBanner(hashPlan, localPlan, onChoice) {
   if (!_bannerEl) {
-    // No banner element: silently apply local plan
-    onChoice("local");
+    // No banner element: favor explicit share intent (a hash was present), never
+    // silently discard the shared plan in favor of background autosave.
+    onChoice("shared");
     return;
   }
 
