@@ -10,9 +10,29 @@ import { onChange as onUnitChange } from "./units.js";
 import { init as initSurface, initWallLayer, onRender, resize, render, scheduleRender, W, H } from "./surface.js";
 import { init as initTheme, toggleTheme, getTheme, onThemeChange } from "./theme.js";
 import { init as initHud } from "./hud.js";
-import { init as initInteractions, setDrawHooks, setSelectHooks, zoomInStep, zoomOutStep, zoomReset } from "./interactions.js";
+import { init as initInteractions, setDrawHooks, setSelectHooks, setMeasureHooks, zoomInStep, zoomOutStep, zoomReset } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
-import { init as initWallTool, isDrawMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit } from "./wallTool.js";
+import { init as initWallTool, isDrawMode, isMeasureMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit, setToolChangeHook } from "./wallTool.js";
+import {
+  init as initMeasureTool,
+  isMeasureMode as measureToolIsMeasureMode,
+  setActive as measureToolSetActive,
+  setHistoryCommit as measureToolSetHistoryCommit,
+  setToastAndHistory as measureToolSetToastAndHistory,
+  setClearRoomSelection as measureToolSetClearRoomSelection,
+  setClearSymbolSelection as measureToolSetClearSymbolSelection,
+  setIsMeasureMode as measureToolSetIsMeasureMode,
+  onHover as measureOnHover, onClick as measureOnClick, onLeave as measureOnLeave,
+  onSelectDown as measureOnSelectDown,
+  clearSelection as measureClearSelection,
+  hasSelection as measureHasSelection,
+  deleteSelected as measureDeleteSelected,
+  getPendingA as measureGetPendingA,
+  getPreviewSnap as measureGetPreviewSnap,
+  getSelectedId as measureGetSelectedId,
+} from "./measureTool.js";
+import { init as initMeasureRender, render as measureRenderFn } from "./measureRender.js";
+import { model as measurementsModel } from "./measurements.js";
 import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from "./measure.js";
 import { init as initDimEntry, reposition as dimReposition, getEditingEdge, setHistoryCommit as dimSetHistoryCommit } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
@@ -63,6 +83,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const gDraft   = document.getElementById("draft");
   const gSnap    = document.getElementById("snap");
   const gSymbols    = document.getElementById("symbols");
+  const gMeasure    = document.getElementById("measure");
   const gSymOverlay = document.getElementById("symbol-overlay");
   const labelsEl    = document.querySelector(".labels");
   const dimLabelsEl = document.querySelector(".dim-labels");
@@ -89,6 +110,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const snapTagEl    = document.querySelector(".snap-tag");
   const btnSelect    = document.getElementById("tool-select");
   const btnWall      = document.getElementById("tool-wall");
+  const btnMeasure   = document.getElementById("tool-measure");
   const btnUndo      = document.getElementById("tool-undo");
   const btnFinish    = document.getElementById("tool-finish");
   const railEl        = document.querySelector(".tool-rail");
@@ -143,6 +165,7 @@ document.addEventListener("DOMContentLoaded", () => {
     snapTag:     snapTagEl,
     btnSelect,
     btnWall,
+    btnMeasure,
     btnUndo,
     btnFinish,
     stage,
@@ -156,6 +179,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Inject draw hooks into interactions (no static wall import there)
   setDrawHooks({ isDrawMode, onHover, onClick, onLeave });
+
+  // measureTool — interaction + selection controller
+  initMeasureTool({ stage, snapTag: snapTagEl });
+  // Inject isMeasureMode into measureTool (avoid circular wallTool→measureTool import)
+  measureToolSetIsMeasureMode(isMeasureMode);
+  // Wire tool-change hook so leaving measure mode cancels any pending placement
+  setToolChangeHook((t) => measureToolSetActive(t === "measure"));
+
+  // Inject measure hooks into interactions
+  setMeasureHooks({
+    isMeasureMode: measureToolIsMeasureMode,
+    onHover: measureOnHover,
+    onClick: measureOnClick,
+    onLeave: measureOnLeave,
+  });
 
   initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
 
@@ -198,6 +236,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // symbolRender — reads symbols.model + selection/ghost state, appends to .dim-labels AFTER wall chips
   initSymbolRender(gSymbols, gSymOverlay, dimLabelsEl, getSelectedId, getPlacementGhost, getEditingDim);
 
+  // measureRender — distance annotation lines/ticks/chips, appends to .dim-labels AFTER symbol chips
+  if (gMeasure) {
+    initMeasureRender(
+      gMeasure,
+      dimLabelsEl,
+      () => measurementsModel.measurements,
+      measureGetSelectedId,
+      measureGetPendingA,
+      measureGetPreviewSnap,
+    );
+  }
+
   // symbolTool — placement, selection, inspector
   initSymbolTool({
     stage,
@@ -218,16 +268,26 @@ document.addEventListener("DOMContentLoaded", () => {
   // Wire select hooks into interactions (no static symbol/room import there).
   // Dispatcher composes symbolTool + roomTool over the one Select tool: symbols
   // win ties, else rooms; selections are mutually exclusive (LLD 63 HIGH fix).
-  let _activeSelectOwner = null; // "symbol" | "room" | null
+  let _activeSelectOwner = null; // "symbol" | "measure" | "room" | null
   setSelectHooks({
     onDown(sx, sy) {
+      // Symbol wins ties (checked first)
       if (onSelectDown(sx, sy)) {
         roomClearSelection();          // MUTEX: picking a symbol drops the room
+        measureClearSelection();       // MUTEX: picking a symbol drops the measure
         _activeSelectOwner = "symbol";
         return true;
       }
+      // Measurement: checked before room (line hit-test is narrow, beats room interior)
+      if (measureOnSelectDown(sx, sy)) {
+        symClearSelection();           // MUTEX: picking a measure drops the symbol
+        roomClearSelection();          // MUTEX: picking a measure drops the room
+        _activeSelectOwner = "measure";
+        return true;
+      }
       if (roomOnSelectDown(sx, sy)) {  // roomTool clears the symbol selection itself
-        _activeSelectOwner = "room";   // via the injected clearSymbolSelection()
+        measureClearSelection();       // MUTEX: picking a room drops the measure
+        _activeSelectOwner = "room";
         return true;
       }
       _activeSelectOwner = null;
@@ -236,13 +296,19 @@ document.addEventListener("DOMContentLoaded", () => {
     onMove(sx, sy) {
       if (_activeSelectOwner === "symbol") onSelectMove(sx, sy);
       else if (_activeSelectOwner === "room") roomOnSelectMove(sx, sy);
+      // measure: no-op move (fixed endpoints this phase)
     },
     onUp(sx, sy) {
       if (_activeSelectOwner === "symbol") onSelectUp(sx, sy);
       else if (_activeSelectOwner === "room") roomOnSelectUp(sx, sy);
       _activeSelectOwner = null;
     },
-    onTapEmpty() { onTapEmpty(); roomOnTapEmpty(); }, // clear both
+    onTapEmpty() {
+      onTapEmpty();
+      roomOnTapEmpty();
+      measureClearSelection(); // clear measurement selection on empty tap
+      scheduleRender();
+    },
   });
 
   // Wire the mutex injection so roomTool can drop the symbol selection without
@@ -251,17 +317,25 @@ document.addEventListener("DOMContentLoaded", () => {
   // And the reverse: any symbol selection (incl. dock drag-drop placement, which
   // bypasses the dispatcher via selectSymbol) drops a live room selection.
   symSetClearRoomSelection(roomClearSelection);
+  // Measurement mutex injections: selecting a symbol clears measure selection
+  measureToolSetClearRoomSelection(roomClearSelection);
+  measureToolSetClearSymbolSelection(symClearSelection);
 
-  // When switching to draw mode, clear both symbol and room selection
+  // When switching to draw mode, clear symbol, room, and measure selection
   document.getElementById("tool-wall")?.addEventListener("click", () => {
     onDrawModeEnter();
     roomOnDrawModeEnter();
+    measureClearSelection();
   });
   window.addEventListener("keydown", (e) => {
     if (e.ctrlKey || e.metaKey) return;
     const tag = document.activeElement?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    if (e.key === "w" || e.key === "W") { onDrawModeEnter(); roomOnDrawModeEnter(); }
+    if (e.key === "w" || e.key === "W") {
+      onDrawModeEnter();
+      roomOnDrawModeEnter();
+      measureClearSelection();
+    }
   });
 
   // Register post-render hooks
@@ -269,6 +343,7 @@ document.addEventListener("DOMContentLoaded", () => {
   //        symbolDimReposition → repositionInspector → dimReposition →
   //        measureUpdate → clearancePanelUpdate → loupeReposition
   onRender(symbolRenderFn);
+  onRender(measureRenderFn);      // distance annotations above furniture, below selection overlay
   onRender(repositionFlushGuide); // re-append guide line after symbolRender clears overlay
   onRender(clearanceRenderFn);   // leaders above symbol bodies, below #symbol-overlay
   onRender(symbolDimReposition);
@@ -330,6 +405,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Wire history.commit into tool modules (injection to avoid circular imports)
   wallSetHistoryCommit(historyCommit);
+  measureToolSetHistoryCommit(historyCommit);
+  measureToolSetToastAndHistory(showToast, { undo: historyUndo, depth: historyDepth });
   symDimSetHistoryCommit(historyCommit);
   dimSetHistoryCommit(historyCommit); // wall-edge resize (dimEntry.js)
 
@@ -421,6 +498,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // to wallTool._onKeyDown which removes the last chain vertex (undoPoint).
     // If in select mode (or draw mode with no chain) and a symbol is selected:
     // consume the event and delegate to the committing deleteSelected().
+    // If a measurement is selected: delete it.
     if (e.key === "Delete" || e.key === "Backspace") {
       if (isDrawMode() && wallsModel.chain.length > 0) {
         // Let wallTool bubble-phase listener handle vertex removal
@@ -429,25 +507,39 @@ document.addEventListener("DOMContentLoaded", () => {
       if (hasSelection()) {
         e.preventDefault();
         deleteSelected(); // deleteSelected flushes nudge internally
+        return;
+      }
+      if (measureHasSelection()) {
+        e.preventDefault();
+        measureDeleteSelected();
       }
       return;
     }
 
-    // Esc — deselect selected symbol (LLD-54 extension: symbolTool "extended").
+    // Esc — deselect selected symbol/measurement (LLD-54 extension).
     // help.js capture-phase listener stops propagation when overlay is open, so
     // this branch only fires when the overlay is already closed.
     // wallTool handles Esc for active wall chains in its own bubble-phase listener
     // (registered earlier); it does not stopPropagation, so we still receive the
     // event — but we must not deselect when wallTool is about to finish a chain.
+    // measureTool handles Esc for in-progress placement in its own bubble-phase
+    // listener; this branch handles deselect of a committed measurement.
     if (!meta && e.key === "Escape") {
       if (isDrawMode() && wallsModel.chain.length > 0) {
         // Let wallTool bubble-phase listener handle chain finish/cancel
         return;
       }
-      if (hasSelection()) {
+      if (isMeasureMode()) {
+        // measureTool's own listener handles in-progress cancel (pendingA set).
+        // If no pendingA, nothing to do in measure mode here.
+        return;
+      }
+      if (hasSelection() || measureHasSelection()) {
         e.preventDefault();
         flushNudge(); // commit any pending nudge before clearing selection
-        onTapEmpty(); // clears selection + hides inspector; no-op if dim edit active
+        onTapEmpty(); // clears symbol + inspector
+        measureClearSelection(); // clears measure selection
+        scheduleRender();
       }
       return;
     }

@@ -10002,6 +10002,7 @@ const EXPECTED_ACTIONS = new Set([
   "Rotate 90° CCW",
   "Draw wall",
   "Select",
+  "Measure (distance)",
   "Zoom in",
   "Zoom out",
   "Reset zoom",
@@ -13796,6 +13797,322 @@ describe("LLD 81 — safety: no NaN/Infinity from validated measurements", () =>
       if (v !== null) throw new Error("validatePlan should reject NaN/Infinity endpoint");
     }
     resetAll();
+  });
+});
+
+// ─── LLD 85 — measureTool tests ──────────────────────────────────────────────
+
+import {
+  resolveMeasureSnap,
+  onClick as measureToolOnClick,
+  cancel as measureToolCancel,
+  setActive as measureToolSetActive,
+  getPendingA,
+  getSelectedId as measureToolGetSelectedId,
+  onSelectDown as measureToolOnSelectDown,
+  clearSelection as measureToolClearSelection,
+  hasSelection as measureToolHasSelection,
+  deleteSelected as measureToolDeleteSelected,
+  setHistoryCommit as measureToolSetHistoryCommit_test,
+} from "../src/js/measureTool.js";
+
+import {
+  model as measurementsModelT,
+  hydrate as hydrateMeasurementsT,
+  newId as newMeasurementIdT,
+} from "../src/js/measurements.js";
+
+/** Reset for measureTool tests */
+function resetForMeasure() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  measurementsModelT.measurements.length = 0;
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  hydrateWalls({ rooms: [], chain: [] });
+  hydrateSymbols({ symbols: [] });
+  hydrateMeasurementsT({ measurements: [] });
+  // Reset pendingA and selection by calling cancel + clearSelection
+  measureToolCancel();
+  measureToolClearSelection();
+  // Wire a no-op history commit for tests that check commit call count
+  let _commitCount = 0;
+  measureToolSetHistoryCommit_test(() => { _commitCount++; });
+  return { get commitCount() { return _commitCount; } };
+}
+
+// ─── Unit: resolveMeasureSnap ──────────────────────────────────────────────────
+
+describe("LLD 85 — measureTool.resolveMeasureSnap: grid snap", () => {
+  it("snaps to grid when toggle ON and no nearby targets", () => {
+    resetForMeasure();
+    setSnapMode("auto"); // ensure grid snap on
+    // Place cursor at a world position that should round to 0,0
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const step = snapStep();
+    if (step == null) return; // skip if no grid step
+    // Raw cursor at exactly (step * 0.4, step * 0.3) — should round to (0, 0)
+    const wx = step * 0.4;
+    const wy = step * 0.3;
+    const sx = wx * 40; // worldToScreen at zoom=1 pan=0
+    const sy = wy * 40;
+    const result = resolveMeasureSnap(sx, sy);
+    expect(result.type).toBe("grid");
+    expect(result.x).toBe(0);
+    expect(result.y).toBe(0);
+  });
+});
+
+describe("LLD 85 — measureTool.resolveMeasureSnap: point snap to wall vertex", () => {
+  it("snaps to a wall vertex within SNAP_PT_PX", () => {
+    resetForMeasure();
+    // Add a vertex at world (2, 3)
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 2, y: 3 }, { x: 5, y: 3 }, { x: 5, y: 6 }, { x: 2, y: 6 }
+    ]});
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // screenToWorld: sx = wx*40; cursor 2px away from vertex (2,3)
+    const sx = 2 * 40 + 2;
+    const sy = 3 * 40 + 2;
+    const result = resolveMeasureSnap(sx, sy);
+    expect(result.type).toBe("point");
+    // Should snap to exactly (2, 3)
+    if (Math.abs(result.x - 2) > 0.01 || Math.abs(result.y - 3) > 0.01) {
+      throw new Error(`Expected (2,3), got (${result.x}, ${result.y})`);
+    }
+  });
+});
+
+describe("LLD 85 — measureTool.resolveMeasureSnap: toggle OFF falls back to free", () => {
+  it("no grid snap when snap toggle is OFF and no targets", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const sx = 0.4 * 40; // world 0.4m — would round to 0 if snap ON
+    const sy = 0;
+    const result = resolveMeasureSnap(sx, sy);
+    expect(result.type).toBe("free");
+    // x should not be rounded to 0
+    if (result.x === 0) {
+      throw new Error("Expected free (unsnapped) x, got 0 (grid snapped)");
+    }
+  });
+});
+
+// ─── Unit: onClick placement ───────────────────────────────────────────────────
+
+describe("LLD 85 — measureTool.onClick: placement", () => {
+  it("first onClick sets pendingA, creates no measurement", () => {
+    const ctx = resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measureToolOnClick(100, 100);
+    const pA = getPendingA();
+    if (pA === null) throw new Error("Expected pendingA to be set after first click");
+    expect(measurementsModelT.measurements.length).toBe(0);
+    expect(ctx.commitCount).toBe(0);
+  });
+
+  it("second onClick at a distinct point pushes a measurement and commits", () => {
+    const ctx = resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measureToolOnClick(0, 0);    // A at world (0, 0)
+    measureToolOnClick(400, 0);  // B at world (10, 0) — 400px / 40px/m = 10m
+    expect(measurementsModelT.measurements.length).toBe(1);
+    expect(ctx.commitCount).toBe(1);
+    const m = measurementsModelT.measurements[0];
+    if (!m.id || !m.id.startsWith("m")) throw new Error(`Bad id: ${m.id}`);
+    if (Math.abs(m.a.x - 0) > 0.001) throw new Error(`a.x wrong: ${m.a.x}`);
+    if (Math.abs(m.b.x - 10) > 0.001) throw new Error(`b.x wrong: ${m.b.x}`);
+    const pA = getPendingA();
+    if (pA !== null) throw new Error("pendingA should be cleared after commit");
+  });
+
+  it("degenerate second tap (same point) does not commit and keeps pendingA", () => {
+    const ctx = resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measureToolOnClick(100, 100);  // set A
+    measureToolOnClick(100, 100);  // same point B — degenerate
+    expect(measurementsModelT.measurements.length).toBe(0);
+    expect(ctx.commitCount).toBe(0);
+    const pA = getPendingA();
+    if (pA === null) throw new Error("pendingA should still be set after degenerate tap");
+  });
+
+  it("cancel() clears pendingA and creates nothing", () => {
+    const ctx = resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measureToolOnClick(0, 0);  // set A
+    measureToolCancel();
+    expect(measurementsModelT.measurements.length).toBe(0);
+    expect(ctx.commitCount).toBe(0);
+    if (getPendingA() !== null) throw new Error("pendingA should be null after cancel");
+  });
+
+  it("setActive(false) clears pendingA", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measureToolOnClick(0, 0);  // set A
+    measureToolSetActive(false);
+    if (getPendingA() !== null) throw new Error("pendingA should be cleared by setActive(false)");
+    expect(measurementsModelT.measurements.length).toBe(0);
+  });
+});
+
+// ─── Unit: selection & delete ──────────────────────────────────────────────────
+
+describe("LLD 85 — measureTool.onSelectDown: hit-test", () => {
+  it("click within tolerance of a line returns true and sets selectedId", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Add a horizontal measurement from (0,0) to (10,0) in world
+    measurementsModelT.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 10, y: 0 } });
+    // Screen: a=(0,0), b=(400,0). Click at (200, 3) — 3px from the line.
+    const hit = measureToolOnSelectDown(200, 3);
+    expect(hit).toBe(true);
+    expect(measureToolGetSelectedId()).toBe("m0");
+  });
+
+  it("click far from any line returns false, selection unchanged", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measurementsModelT.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 10, y: 0 } });
+    const hit = measureToolOnSelectDown(200, 200);  // 200px away from line
+    expect(hit).toBe(false);
+    if (measureToolGetSelectedId() !== null) {
+      throw new Error("Selection should be null after miss");
+    }
+  });
+});
+
+describe("LLD 85 — measureTool.deleteSelected", () => {
+  it("removes the selected measurement and commits once", () => {
+    const ctx = resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measurementsModelT.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 10, y: 0 } });
+    // Select it
+    measureToolOnSelectDown(200, 3);
+    expect(measureToolHasSelection()).toBe(true);
+    measureToolDeleteSelected();
+    expect(measurementsModelT.measurements.length).toBe(0);
+    expect(ctx.commitCount).toBe(1);
+    expect(measureToolHasSelection()).toBe(false);
+  });
+
+  it("deleteSelected is a no-op when nothing is selected", () => {
+    const ctx = resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measurementsModelT.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 10, y: 0 } });
+    measureToolDeleteSelected();  // nothing selected
+    expect(measurementsModelT.measurements.length).toBe(1);
+    expect(ctx.commitCount).toBe(0);
+  });
+});
+
+// ─── Unit: history includes measurements ─────────────────────────────────────
+
+describe("LLD 85 — history snapshots include measurements", () => {
+  it("undo after measurement add removes the measurement", () => {
+    // Reset all models
+    model.rooms.length = 0;
+    model.chain.length = 0;
+    symbolModel.symbols.length = 0;
+    measurementsModelT.measurements.length = 0;
+    hydrateWalls({ rooms: [], chain: [] });
+    hydrateSymbols({ symbols: [] });
+    hydrateMeasurementsT({ measurements: [] });
+    initHistory();
+
+    // Add measurement and commit
+    measurementsModelT.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 5, y: 0 } });
+    historyCommit();
+    expect(canUndo()).toBe(true);
+    expect(measurementsModelT.measurements.length).toBe(1);
+
+    // Undo should remove the measurement
+    historyUndo();
+    expect(measurementsModelT.measurements.length).toBe(0);
+  });
+
+  it("redo after undo restores the measurement with same geometry", () => {
+    model.rooms.length = 0;
+    model.chain.length = 0;
+    symbolModel.symbols.length = 0;
+    measurementsModelT.measurements.length = 0;
+    hydrateWalls({ rooms: [], chain: [] });
+    hydrateSymbols({ symbols: [] });
+    hydrateMeasurementsT({ measurements: [] });
+    initHistory();
+
+    measurementsModelT.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
+    historyCommit();
+    historyUndo();
+    expect(measurementsModelT.measurements.length).toBe(0);
+    historyRedo();
+    expect(measurementsModelT.measurements.length).toBe(1);
+    const m = measurementsModelT.measurements[0];
+    if (Math.abs(m.a.x - 1) > 1e-9 || Math.abs(m.a.y - 2) > 1e-9) {
+      throw new Error(`Wrong geometry after redo: a=(${m.a.x},${m.a.y})`);
+    }
+    if (Math.abs(m.b.x - 3) > 1e-9 || Math.abs(m.b.y - 4) > 1e-9) {
+      throw new Error(`Wrong geometry after redo: b=(${m.b.x},${m.b.y})`);
+    }
+  });
+
+  it("pure add/delete is not dirty-check-collapsed (commit increments canUndo)", () => {
+    model.rooms.length = 0;
+    model.chain.length = 0;
+    symbolModel.symbols.length = 0;
+    measurementsModelT.measurements.length = 0;
+    hydrateWalls({ rooms: [], chain: [] });
+    hydrateSymbols({ symbols: [] });
+    hydrateMeasurementsT({ measurements: [] });
+    initHistory();
+
+    // Add a measurement
+    measurementsModelT.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 2, y: 0 } });
+    historyCommit();
+    expect(canUndo()).toBe(true);
+    const d1 = historyDepth();
+
+    // Delete the measurement
+    measurementsModelT.measurements.length = 0;
+    historyCommit();
+    expect(historyDepth()).toBe(d1 + 1);
+    expect(canUndo()).toBe(true);
+  });
+});
+
+// ─── Integration: persistence round-trip from tool ────────────────────────────
+
+describe("LLD 85 — integration: measureTool creates measurement that survives serializePlan round-trip", () => {
+  it("serializePlan/validatePlan round-trip after tool placement", () => {
+    resetForMeasure();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setSnapMode("off");
+
+    // Simulate placing A then B via onClick
+    measureToolOnClick(0, 0);         // A at world (0,0)
+    measureToolOnClick(200, 0);       // B at world (5,0) — 200px/40 = 5m
+
+    expect(measurementsModelT.measurements.length).toBe(1);
+    const m0 = measurementsModelT.measurements[0];
+
+    const plan = buildPlan();
+    const serialized = serializePlan(plan);
+    const parsed = JSON.parse(serialized);
+    const validated = validatePlan(parsed);
+    if (!validated) throw new Error("validatePlan returned null");
+    if (!Array.isArray(validated.measurements)) throw new Error("measurements not array");
+    if (validated.measurements.length !== 1) throw new Error(`Expected 1 measurement, got ${validated.measurements.length}`);
+    const mr = validated.measurements[0];
+    if (Math.abs(mr.a.x - m0.a.x) > 1e-9) throw new Error("a.x mismatch after round-trip");
+    if (Math.abs(mr.b.x - m0.b.x) > 1e-9) throw new Error("b.x mismatch after round-trip");
   });
 });
 

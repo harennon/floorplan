@@ -33,6 +33,35 @@ export function setDrawHooks(h) {
   _drawHooks = h;
 }
 
+/**
+ * @type {{ isMeasureMode:()=>boolean, onHover:(sx:number,sy:number,pt:string)=>void,
+ *          onClick:(sx:number,sy:number)=>void, onLeave:()=>void } | null}
+ */
+let _measureHooks = null;
+
+/**
+ * Inject measure-mode hooks. Called once by main.js after measureTool is initialised.
+ * @param {{ isMeasureMode:()=>boolean, onHover:(sx:number,sy:number,pt:string)=>void,
+ *           onClick:(sx:number,sy:number)=>void, onLeave:()=>void }} h
+ */
+export function setMeasureHooks(h) {
+  _measureHooks = h;
+}
+
+/**
+ * Return the active tap hook bundle for the current mode, or null.
+ * Draw mode takes priority, then measure mode.
+ * @returns {{ isDrawMode?:()=>boolean, isMeasureMode?:()=>boolean,
+ *             onHover:(sx:number,sy:number,pt:string)=>void,
+ *             onClick:(sx:number,sy:number)=>void,
+ *             onLeave:()=>void } | null}
+ */
+function _activeTapHook() {
+  if (_drawHooks && _drawHooks.isDrawMode()) return _drawHooks;
+  if (_measureHooks && _measureHooks.isMeasureMode()) return _measureHooks;
+  return null;
+}
+
 // ─── Select hooks (injected by main.js; no static symbol import) ─────────────
 
 /**
@@ -150,9 +179,10 @@ function _onPointerDown(e) {
   if (_pointers.size === 2) {
     // Second finger: cancel any in-flight single-pointer gesture, seed pinch.
 
-    // Cancel in-flight draw gesture.
-    if (_drawPending && _drawHooks) {
-      _drawHooks.onLeave();
+    // Cancel in-flight draw/measure gesture.
+    if (_drawPending) {
+      const hook = _activeTapHook();
+      if (hook) hook.onLeave();
     }
     _drawPending = false;
 
@@ -174,8 +204,9 @@ function _onPointerDown(e) {
     _downPointerType = e.pointerType || "mouse";
     _gestureCancelled = false;
 
-    // Draw mode: record down position; defer pan start until drag threshold exceeded.
-    if (_drawHooks && _drawHooks.isDrawMode() && !_spaceHeld) {
+    // Draw/measure mode: record down position; defer pan start until drag threshold exceeded.
+    const _tapHook = _activeTapHook();
+    if (_tapHook && !_spaceHeld) {
       _drawPending = true;
       _drawDownX = e.clientX;
       _drawDownY = e.clientY;
@@ -183,17 +214,20 @@ function _onPointerDown(e) {
       _lastX = e.clientX;
       _lastY = e.clientY;
       // Touch: show the loupe immediately on finger-down so the user can see
-      // where the tap will land before lifting.
-      if (e.pointerType === "touch") {
+      // where the tap will land before lifting. Loupe is only supported by draw mode.
+      if (e.pointerType === "touch" && _drawHooks && _drawHooks.isDrawMode()) {
         const hp = effectiveDrawPoint(e.pointerType, e.clientX, e.clientY);
         _drawHooks.onHover(hp.x, hp.y, e.pointerType);
+      } else if (e.pointerType === "touch") {
+        const hp = effectiveDrawPoint(e.pointerType, e.clientX, e.clientY);
+        _tapHook.onHover(hp.x, hp.y, e.pointerType);
       }
       _updateCursor();
       return;
     }
 
     // Select mode: let select hooks try to consume the down first.
-    if (_selectHooks && !(_drawHooks && _drawHooks.isDrawMode()) && !_spaceHeld) {
+    if (_selectHooks && !_activeTapHook() && !_spaceHeld) {
       const consumed = _selectHooks.onDown(e.clientX, e.clientY);
       _selectConsumed = consumed;
       _selectDownX = e.clientX;
@@ -235,15 +269,16 @@ function _onPointerMove(e) {
     return;
   }
 
-  // Draw-mode: plain hover (no button) → update snap preview.
-  if (_drawHooks && _drawHooks.isDrawMode() && e.buttons === 0) {
+  // Draw/measure mode: plain hover (no button) → update snap preview.
+  const _tapHookMove = _activeTapHook();
+  if (_tapHookMove && e.buttons === 0) {
     const hp = effectiveDrawPoint(e.pointerType, e.clientX, e.clientY);
-    _drawHooks.onHover(hp.x, hp.y, e.pointerType);
+    _tapHookMove.onHover(hp.x, hp.y, e.pointerType);
     return;
   }
 
-  // Draw-mode with button down: check for drag threshold.
-  if (_drawPending && _drawHooks && _drawHooks.isDrawMode()) {
+  // Draw/measure mode with button down: check for drag threshold.
+  if (_drawPending && _tapHookMove) {
     const dx = e.clientX - _drawDownX;
     const dy = e.clientY - _drawDownY;
     const threshold = dragThreshold(_downPointerType);
@@ -254,11 +289,11 @@ function _onPointerMove(e) {
       _lastX = e.clientX;
       _lastY = e.clientY;
       // Hide loupe by calling onLeave (which hides loupe + snap tag)
-      if (_drawHooks) _drawHooks.onLeave();
+      _tapHookMove.onLeave();
     } else {
       // Still within threshold; update snap preview (touch feedback).
       const hp = effectiveDrawPoint(e.pointerType, e.clientX, e.clientY);
-      _drawHooks.onHover(hp.x, hp.y, e.pointerType);
+      _tapHookMove.onHover(hp.x, hp.y, e.pointerType);
     }
     _updateCursor();
   }
@@ -281,7 +316,9 @@ function _onPointerMove(e) {
 }
 
 function _onPointerLeave() {
-  if (_drawHooks) _drawHooks.onLeave();
+  const hook = _activeTapHook();
+  if (hook) hook.onLeave();
+  else if (_drawHooks) _drawHooks.onLeave(); // fallback: always call draw hook leave for loupe
   _drawPending = false;
 }
 
@@ -308,17 +345,18 @@ function _onPointerEnd(e) {
       return;
     }
 
-    // Draw mode tap: pending click → commit vertex at loupe-offset point.
-    if (_drawPending && _drawHooks && _drawHooks.isDrawMode()) {
+    // Draw/measure mode tap: pending click → commit at loupe-offset point.
+    const _tapHookEnd = _activeTapHook();
+    if (_drawPending && _tapHookEnd) {
       const hp = effectiveDrawPoint(_downPointerType, e.clientX, e.clientY);
-      _drawHooks.onClick(hp.x, hp.y);
+      _tapHookEnd.onClick(hp.x, hp.y);
     }
 
     // Select hooks: finalize
     if (_selectConsumed && _selectHooks) {
       _selectHooks.onUp(e.clientX, e.clientY);
       _selectConsumed = false;
-    } else if (!_drawPending && !(_drawHooks && _drawHooks.isDrawMode()) && _selectHooks) {
+    } else if (!_drawPending && !_activeTapHook() && _selectHooks) {
       // Was panning (not consumed by select hooks): if pointer didn't exceed threshold,
       // it's a tap on empty canvas
       const dx = e.clientX - _selectDownX;
@@ -336,7 +374,9 @@ function _onPointerEnd(e) {
 
     // If it was a cancel / leave, clear snap preview.
     if (e.type === "pointercancel" || e.type === "pointerleave") {
-      if (_drawHooks) _drawHooks.onLeave();
+      const hookCancel = _activeTapHook();
+      if (hookCancel) hookCancel.onLeave();
+      else if (_drawHooks) _drawHooks.onLeave();
     }
   }
 

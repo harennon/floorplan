@@ -181,9 +181,10 @@
       }
 
       /* draw-mode first so panning/space-ready can override it via cascade order */
-      .stage.draw-mode   { cursor: crosshair; }
-      .stage.space-ready { cursor: grab; }
-      .stage.panning     { cursor: grabbing; }
+      .stage.draw-mode    { cursor: crosshair; }
+      .stage.measure-mode { cursor: crosshair; }
+      .stage.space-ready  { cursor: grab; }
+      .stage.panning      { cursor: grabbing; }
 
       /* SVG fills the stage */
       #drawing {
@@ -498,6 +499,33 @@
         background: var(--panel);
         color: var(--muted);
         border: 1px solid var(--hairline);
+      }
+
+      /* ── Measurement annotation color ───────────────────────────────────── */
+      :root {
+        --measure-line: #6fb3d9;  /* cool cyan-blue — distance annotation */
+      }
+      html[data-theme="light"] {
+        --measure-line: #3a86b0;  /* slightly darker for contrast on pale paper */
+      }
+
+      /* ── Measure distance chip ────────────────────────────────────────────── */
+      .measure-chip {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        padding: 0.1rem 0.35rem;
+        border-radius: 3px;
+        white-space: nowrap;
+        pointer-events: none;   /* non-interactive this phase */
+        background: var(--panel);
+        border: 1px solid var(--measure-line);
+        color: var(--ink);
+        line-height: 1.4;
+      }
+      @media (max-width: 640px) {
+        .measure-chip { font-size: 0.6rem; padding: 0.08rem 0.28rem; }
       }
 
       /* ── Snap tag (cursor-side type label) ───────────────────────────────── */
@@ -1893,6 +1921,8 @@
           <g id="symbols"></g>
           <!-- Clearance leaders, ticks, and bands (above symbols, below selection overlay) -->
           <g id="clearance"></g>
+          <!-- Measurement annotations (above furniture bodies, below symbol selection overlay) -->
+          <g id="measure"></g>
           <!-- Symbol selection overlay, handles, ghost -->
           <g id="symbol-overlay"></g>
         </svg>
@@ -1921,6 +1951,15 @@
             <polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
           </svg>
           <span class="tool-key-hint">W</span>
+        </button>
+        <button id="tool-measure" aria-label="Measure tool (M)" aria-pressed="false">
+          <!-- Dimension line with end ticks icon -->
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <line x1="3" y1="8" x2="13" y2="8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <line x1="3" y1="5" x2="3" y2="11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <line x1="13" y1="5" x2="13" y2="11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          <span class="tool-key-hint">M</span>
         </button>
         <div class="tool-rail-sep" aria-hidden="true"></div>
         <button id="tool-undo" aria-label="Undo last point (Backspace)" disabled>

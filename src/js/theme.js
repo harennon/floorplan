@@ -25,7 +25,8 @@ import { getTheme as prefsGetTheme, setTheme as prefsSetTheme, toggleTheme as pr
  *   alignEdge: string, alignCenter: string, roomCenter: string,
  *   dim: string,
  *   accentRgb: string,
- *   symInkRgb: string
+ *   symInkRgb: string,
+ *   measureLine: string
  * }} Palette
  */
 
@@ -67,6 +68,7 @@ function _buildFallback() {
     dim:         "#8f8a78",
     accentRgb:   "201,168,76",
     symInkRgb:   "201,168,76",
+    measureLine: "#6fb3d9",
   };
 }
 
@@ -94,12 +96,13 @@ const _TOKEN_MAP = [
   ["--ghost-fill",   "ghostFill"],
   ["--ghost-stroke", "ghostStroke"],
   ["--snap-teal",    "snapTeal"],
-  ["--align-edge",   "alignEdge"],
-  ["--align-center", "alignCenter"],
-  ["--room-center",  "roomCenter"],
-  ["--dim",          "dim"],
-  ["--accent-rgb",   "accentRgb"],
-  ["--sym-ink-rgb",  "symInkRgb"],
+  ["--align-edge",    "alignEdge"],
+  ["--align-center",  "alignCenter"],
+  ["--room-center",   "roomCenter"],
+  ["--dim",           "dim"],
+  ["--accent-rgb",    "accentRgb"],
+  ["--sym-ink-rgb",   "symInkRgb"],
+  ["--measure-line",  "measureLine"],
 ];
 
 // ── Cache refresh ──────────────────────────────────────────────────────────────

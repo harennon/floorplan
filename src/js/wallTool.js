@@ -28,9 +28,22 @@ export function setHistoryCommit(fn) {
   _historyCommit = fn;
 }
 
+// Tool-change notifier (optional; injected by main.js to avoid import cycle).
+// fn(newTool: string) is called at the end of setTool.
+let _onToolChange = null;
+
+/**
+ * Inject a tool-change callback. Fired with the new tool name at the end of
+ * setTool(). Used by main.js to notify measureTool when measure mode exits.
+ * @param {(t:string)=>void} fn
+ */
+export function setToolChangeHook(fn) {
+  _onToolChange = fn;
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
-/** @type {"wall"|"select"} */
+/** @type {"wall"|"select"|"measure"} */
 let _tool = "wall";
 
 let _altHeld = false;
@@ -44,6 +57,7 @@ let _hudSnapEl     = null;   // <span id="hud-snap-val">
 let _snapTagEl     = null;   // .snap-tag
 let _btnSelect     = null;
 let _btnWall       = null;
+let _btnMeasure    = null;
 let _btnUndo       = null;
 let _btnFinish     = null;
 let _stage         = null;
@@ -56,7 +70,7 @@ let _railCollapseEl  = null;
 /**
  * Bind DOM references and wire keyboard + rail.
  * @param {{ hudSnap:Element, snapTag:Element, btnSelect:Element, btnWall:Element,
- *            btnUndo:Element, btnFinish:Element, stage:Element,
+ *            btnMeasure?:Element, btnUndo:Element, btnFinish:Element, stage:Element,
  *            rail:Element, railToggle:Element, railCollapse:Element }} refs
  */
 export function init(refs) {
@@ -64,6 +78,7 @@ export function init(refs) {
   _snapTagEl      = refs.snapTag;
   _btnSelect      = refs.btnSelect;
   _btnWall        = refs.btnWall;
+  _btnMeasure     = refs.btnMeasure || null;
   _btnUndo        = refs.btnUndo;
   _btnFinish      = refs.btnFinish;
   _stage          = refs.stage;
@@ -74,6 +89,7 @@ export function init(refs) {
   // Rail buttons
   _btnSelect.addEventListener("click", () => setTool("select"));
   _btnWall.addEventListener("click",   () => setTool("wall"));
+  if (_btnMeasure) _btnMeasure.addEventListener("click", () => setTool("measure"));
   _btnUndo.addEventListener("click",   () => { undoPoint(); _updateRail(); scheduleRender(); });
   _btnFinish.addEventListener("click", () => {
     finishChain();
@@ -113,6 +129,11 @@ export function isDrawMode() {
   return _tool === "wall";
 }
 
+/** Whether measure-tool mode is active. */
+export function isMeasureMode() {
+  return _tool === "measure";
+}
+
 /** Current resolved snap, or null when cursor is absent. */
 export function getSnap() {
   return _snap;
@@ -132,6 +153,8 @@ export function setTool(t) {
   _updateRail();
   _updateCursor();
   scheduleRender();
+  // Notify tool-change listeners (e.g. measureTool.setActive)
+  if (_onToolChange) _onToolChange(t);
 }
 
 // ── Pointer hooks (called by interactions.js) ─────────────────────────────────
@@ -225,6 +248,10 @@ function _onKeyDown(e) {
     case "W":
       setTool("wall");
       break;
+    case "m":
+    case "M":
+      setTool("measure");
+      break;
     case "Escape":
       // Belt-and-suspenders guard: if help overlay is open, let help.js
       // capture-phase listener handle it (Edge Case 15 / GAP-3).
@@ -284,8 +311,9 @@ function _updateRail() {
   const drawing = _tool === "wall";
   const hasChain = model.chain.length > 0;
 
-  _btnSelect.setAttribute("aria-pressed", _tool === "select" ? "true" : "false");
-  _btnWall.setAttribute("aria-pressed",   drawing             ? "true" : "false");
+  _btnSelect.setAttribute("aria-pressed",  _tool === "select"  ? "true" : "false");
+  _btnWall.setAttribute("aria-pressed",    drawing              ? "true" : "false");
+  if (_btnMeasure) _btnMeasure.setAttribute("aria-pressed", _tool === "measure" ? "true" : "false");
   _btnUndo.disabled   = !hasChain;
   _btnFinish.disabled = !hasChain;
 
@@ -299,7 +327,13 @@ function _updateRail() {
  */
 function _updateToggleIcon() {
   if (!_railToggleEl) return;
-  const activeBtn = _tool === "wall" ? _btnWall : _btnSelect;
+  const _btnMap = { wall: _btnWall, select: _btnSelect, measure: _btnMeasure };
+  const _labelMap = {
+    wall:    "Draw wall tool — tap to expand tool rail",
+    select:  "Select tool — tap to expand tool rail",
+    measure: "Measure tool — tap to expand tool rail",
+  };
+  const activeBtn = _btnMap[_tool] || _btnSelect;
   if (!activeBtn) return;
   const srcSvg = activeBtn.querySelector("svg");
   if (!srcSvg) return;
@@ -307,17 +341,15 @@ function _updateToggleIcon() {
   _railToggleEl.innerHTML = "";
   _railToggleEl.appendChild(srcSvg.cloneNode(true));
   // Keep aria-label in sync
-  _railToggleEl.setAttribute(
-    "aria-label",
-    (_tool === "wall" ? "Draw wall tool — tap to expand tool rail" : "Select tool — tap to expand tool rail")
-  );
+  _railToggleEl.setAttribute("aria-label", _labelMap[_tool] || "Select tool — tap to expand tool rail");
 }
 
 function _updateCursor() {
   if (!_stage) return;
   // Use class-based cursor so interactions.js's .panning / .space-ready classes
   // can override it via CSS cascade order (they are declared after .draw-mode).
-  _stage.classList.toggle("draw-mode", _tool === "wall");
+  _stage.classList.toggle("draw-mode",    _tool === "wall");
+  _stage.classList.toggle("measure-mode", _tool === "measure");
 }
 
 const SNAP_LABELS = {
