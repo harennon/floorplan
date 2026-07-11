@@ -221,6 +221,13 @@ types + the verbs, per skill-creator guidance on under-triggering. ~90 words.)
    *The `outdoor` category decision*. `table` deliberately carries both coffee- and
    dining-table roles.)
 
+   **Role names are NOT placeable types.** The SKILL.md role-map section must state this
+   explicitly: `seating`, `dining-table`, `coffee-table`, `work-center`, etc. are *roles*,
+   not `place_symbol` `type` values. There is no bare `dining-table` catalog type — a dining
+   surface is placed as `table` (rectangular) or `dining-table-round`/`patio-table`. Calling
+   `place_symbol {type:"dining-table"}` (or `{type:"seating"}`, etc.) is rejected as an
+   unknown type. The role map is for *reasoning* about a placed piece, not for placement.
+
 5. **`## Workflow`** (common core — the room-type-agnostic skeleton). Numbered:
    1. Establish requirements: `set_brief` (room dims, required furniture, walkway).
    2. Build the room to exact dims: `add_room {rect}` FIRST, before any furniture
@@ -335,9 +342,12 @@ appliances placed for a short, unobstructed cook path, not spread for looks.
   with landing space.
 - **Work aisle `[GEO]`/prose:** clear floor between opposing runs (or a run and an island)
   **≥ 1.07 m** for one cook, **≥ 1.22 m** for two. **Note (state explicitly):** 1.22 m is
-  *above* the MCP walkway clamp ceiling of 1.20 m, so a `set_brief` `minWalkwayM` cannot
+  *above* the MCP walkway range ceiling of 1.20 m, so a `set_brief` `minWalkwayM` cannot
   encode the two-cook aisle — advise it as **prose only**, and use `minWalkwayM: 1.07`
-  (in-band) as the checkable floor. Do not tell the agent to set 1.22 (it would be clamped).
+  (in-band) as the checkable floor. Do NOT tell the agent to pass `minWalkwayM: 1.22`:
+  `set_brief`/`check_clearance` **reject** an out-of-range walkway with `{ok:false}`
+  (`brief.js:98`, `tools.js:502`) — the call fails and the brief is left unset/stale, it is
+  *not* silently clamped to 1.20.
 - **Landing zones `[SOFT]`/prose:** counter beside each appliance — fridge **≥ 0.38 m** on
   the handle side, stove **0.30-0.38 m** each side, sink **0.46-0.61 m** each side.
   **The catalog has no `counter`/`island` type**, so landing zones are **prose guidance
@@ -454,9 +464,10 @@ the surrounding object are untouched):
 ## The `outdoor` category decision
 
 **Context (verified):** the `outdoor` category and its four types — `patio-table`,
-`patio-chair`, `parasol`, `planter` — are in `origin/main` (PR #88, LLD 76). They are **not
-yet in this branch's checkout** (this branch predates that merge), but the skill will be
-merged into a `main` that has them, so the skill must account for them.
+`patio-chair`, `parasol`, `planter` — are in `origin/main` (PR #88, LLD 76) **and already
+present in this branch's checkout** (`src/js/symbols.js:235-256`; PR #88 is an ancestor of
+this branch, which was cut from current `main`). No rebase is needed — the skill must
+account for them.
 
 **Recommendation: fold outdoor into the existing role map (no new reference file).** Do NOT
 create `references/patio.md` in Phase 1 and do NOT defer them into invisibility. Rationale:
@@ -552,9 +563,11 @@ ones this expansion introduces.
 10. **`[SOFT]` leaks into a hard check.** Only `check_brief.satisfied` + hard feasibility
     gate. `[SOFT]` rules (focal choice, symmetry visual-weight, gaming ambience) are advice
     only.
-11. **(New) Kitchen two-cook aisle vs walkway clamp.** The 1.22 m two-cook aisle exceeds the
-    1.20 m `minWalkwayM` clamp — skill must advise it as prose and use ≤ 1.07 m for the
-    checkable `set_brief` floor, never instruct `minWalkwayM: 1.22` (silently clamped).
+11. **(New) Kitchen two-cook aisle vs walkway range.** The 1.22 m two-cook aisle exceeds the
+    1.20 m `minWalkwayM` ceiling — skill must advise it as prose and use ≤ 1.07 m for the
+    checkable `set_brief` floor. Never instruct `minWalkwayM: 1.22`: it is **rejected**
+    (`{ok:false}`, `brief.js:98` / `tools.js:502`), leaving the brief unset/stale — not
+    clamped to 1.20.
 12. **(New) Mixed-type brief** (studio: bed + sofa + desk). Skill: read the dominant room
     type's reference, borrow the other's placement rules for its pieces (e.g. bedroom D-rules
     for the bed + living B-rules for the sofa in one room).
@@ -576,9 +589,9 @@ ones this expansion introduces.
 - **The catalog with per-axis bounds + presets** (PR #98, `src/js/symbols.js:58-231`) — the
   skill cites real sizes (bed presets, TV stand widths, appliance widths) from it via the
   `floorplan://catalog` resource.
-- **The outdoor category** (PR #88, in `main`) — the role map folds its four types in; the
-  implementer should confirm they are present in the checkout the skill merges into (they
-  are in `origin/main`; this feature branch predates the merge but will rebase onto it).
+- **The outdoor category** (PR #88, in `main`) — the role map folds its four types in; they
+  are already present in this branch (`src/js/symbols.js:235-256`, PR #88 is an ancestor),
+  so no rebase is needed.
 - **The walkway constants** (`mcp/src/brief.js:23-25`): `MCP_WALKWAY_MIN=0.76`,
   `MCP_WALKWAY_MAX=1.20`, `MCP_WALKWAY_DEFAULT=0.915` — the numbers the walkway-vs-closeness
   and kitchen-aisle prose must match exactly.
