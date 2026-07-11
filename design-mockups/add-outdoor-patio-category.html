@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Outdoor / patio category — mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:         #14140f;
+    --bg-deep:    #100f0b;
+    --ink:        #ece7d6;
+    --muted:      #8f8a78;
+    --gold:       #c9a84c;
+    --gold-soft:  rgba(201, 168, 76, 0.55);
+    --panel:      rgba(20, 20, 15, 0.72);
+    --hairline:   rgba(201, 168, 76, 0.18);
+    --snap-teal:  #7fd0c8;
+    --grid-line:  rgba(201, 168, 76, 0.09);
+    --grid-major: rgba(201, 168, 76, 0.16);
+    --font-ui:    "DM Sans", system-ui, sans-serif;
+    --font-mono:  "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--font-ui);
+    color: var(--ink);
+    background:
+      linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 24px 24px,
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 24px 24px,
+      linear-gradient(var(--grid-major) 1px, transparent 1px) 0 0 / 120px 120px,
+      linear-gradient(90deg, var(--grid-major) 1px, transparent 1px) 0 0 / 120px 120px,
+      radial-gradient(circle at 50% 30%, #191812, var(--bg-deep));
+    min-height: 100%;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 2.4rem 1.5rem 6rem; }
+  header h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 1.5rem;
+    margin: 0 0 0.3rem;
+    letter-spacing: 0.01em;
+  }
+  header p { color: var(--muted); margin: 0 0 0.4rem; max-width: 62ch; line-height: 1.5; font-size: 0.92rem; }
+  .kicker {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 0.6rem;
+    color: var(--gold);
+    margin-bottom: 0.6rem;
+  }
+  section { margin-top: 2.6rem; }
+  h2 {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.7rem;
+    color: var(--gold);
+    border-bottom: 1px solid var(--hairline);
+    padding-bottom: 0.4rem;
+  }
+  .note { color: var(--muted); font-size: 0.85rem; line-height: 1.55; max-width: 70ch; }
+  .note code { font-family: var(--font-mono); color: var(--ink); background: rgba(201,168,76,0.08); padding: 0.05em 0.35em; border-radius: 4px; font-size: 0.85em; }
+
+  /* ── Symbol dock (ported from src/index.html) ─────────────────────── */
+  .dock-demo {
+    display: flex;
+    justify-content: center;
+    padding: 2.2rem 0 0.5rem;
+  }
+  .symbol-dock {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    max-width: 100%;
+    user-select: none;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+  }
+  .dock-tabs {
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--hairline);
+    flex-shrink: 0;
+  }
+  .dock-tabs::-webkit-scrollbar { display: none; }
+  .dock-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.52rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.6rem 0.7rem;
+    min-height: 2.75rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
+  }
+  .dock-tab:hover:not([aria-selected="true"]) { color: var(--ink); }
+  .dock-tab[aria-selected="true"] {
+    color: var(--gold);
+    border-bottom-color: var(--gold);
+    background: rgba(201,168,76,0.13);
+  }
+  /* Highlight the new tab in the mockup so reviewers spot the seam */
+  .dock-tab.is-new::after {
+    content: "NEW";
+    display: inline-block;
+    margin-left: 0.4em;
+    font-size: 0.72em;
+    color: var(--snap-teal);
+    letter-spacing: 0.05em;
+  }
+  .dock-row {
+    display: flex;
+    gap: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 0.45rem 0.5rem;
+  }
+  .dock-row::-webkit-scrollbar { display: none; }
+  .dock-row[hidden] { display: none; }
+  .dock-item {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    letter-spacing: 0.04em;
+    width: 2.9rem;
+    height: 2.9rem;
+    border-radius: 7px;
+    cursor: grab;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.2rem 0;
+    flex-shrink: 0;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
+  }
+  .dock-item svg { pointer-events: none; }
+  .dock-item:hover {
+    color: var(--gold);
+    border-color: var(--gold-soft);
+    background: rgba(201,168,76,0.07);
+  }
+  .dock-item:active {
+    color: var(--gold);
+    border-color: var(--gold-soft);
+    background: rgba(201,168,76,0.13);
+    cursor: grabbing;
+  }
+
+  /* ── Canvas-glyph preview cards ───────────────────────────────────── */
+  .glyph-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-top: 1.2rem;
+  }
+  .glyph-card {
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    background: rgba(20,20,15,0.5);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .glyph-card svg { display: block; }
+  .glyph-card .name {
+    font-family: var(--font-display);
+    font-size: 1rem;
+  }
+  .glyph-card .dims {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+  .glyph-card .prim {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--snap-teal);
+    letter-spacing: 0.03em;
+    text-align: center;
+    line-height: 1.4;
+  }
+  /* Symbol body fill/stroke echoing symbolRender palette */
+  .sym-body { fill: rgba(201,168,76,0.06); stroke: var(--gold-soft); stroke-width: 1.5; }
+  .sym-ink  { stroke: rgba(236,231,214,0.55); fill: none; stroke-width: 1; }
+  .sym-fill { fill: rgba(236,231,214,0.12); stroke: rgba(236,231,214,0.55); stroke-width: 1; }
+
+  .legend {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.2rem;
+    margin-top: 0.8rem;
+  }
+  .toggle-hint {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--snap-teal);
+    letter-spacing: 0.06em;
+    text-align: center;
+    margin-top: 0.9rem;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="kicker">Issue #75 · Phase 2 furniture set</div>
+    <h1>Outdoor / patio category</h1>
+    <p>A new <code>outdoor</code> tab in the symbol dock plus four curated to-scale pieces:
+       patio table, patio chair, parasol, and planter. Same tab/row markup, same dock-item
+       pattern, same clearance + export paths — one new category seam, no new primitives.</p>
+  </header>
+
+  <section>
+    <h2>1 · The dock with the new tab</h2>
+    <p class="note">The <span style="color:var(--snap-teal)">Outdoor</span> tab is appended after Bath.
+       Click any tab to switch rows — this is the real <code>dockTabs.js</code> behaviour
+       (roving tabindex, arrow-key nav, <code>aria-selected</code> + <code>hidden</code>).
+       Nothing in <code>dockTabs.js</code> changes; it enumerates tabs/rows generically.</p>
+    <div class="dock-demo">
+      <nav class="symbol-dock" id="symbol-dock" aria-label="Symbol palette">
+        <div class="dock-tabs" role="tablist" aria-label="Symbol categories">
+          <button class="dock-tab" role="tab" data-category="openings" id="tab-openings" aria-controls="row-openings" aria-selected="false" tabindex="-1">Openings</button>
+          <button class="dock-tab" role="tab" data-category="living" id="tab-living" aria-controls="row-living" aria-selected="false" tabindex="-1">Living</button>
+          <button class="dock-tab" role="tab" data-category="kitchen" id="tab-kitchen" aria-controls="row-kitchen" aria-selected="false" tabindex="-1">Kitchen</button>
+          <button class="dock-tab" role="tab" data-category="bedroom" id="tab-bedroom" aria-controls="row-bedroom" aria-selected="false" tabindex="-1">Bedroom</button>
+          <button class="dock-tab" role="tab" data-category="bath" id="tab-bath" aria-controls="row-bath" aria-selected="false" tabindex="-1">Bath</button>
+          <button class="dock-tab is-new" role="tab" data-category="outdoor" id="tab-outdoor" aria-controls="row-outdoor" aria-selected="true">Outdoor</button>
+        </div>
+        <!-- Placeholder rows for existing categories (icons omitted for brevity) -->
+        <div class="dock-row" role="tabpanel" data-category="openings" id="row-openings" aria-labelledby="tab-openings" hidden>
+          <button class="dock-item"><span>Door</span></button>
+          <button class="dock-item"><span>Window</span></button>
+        </div>
+        <div class="dock-row" role="tabpanel" data-category="living" id="row-living" aria-labelledby="tab-living" hidden>
+          <button class="dock-item"><span>Sofa</span></button>
+          <button class="dock-item"><span>Table</span></button>
+          <button class="dock-item"><span>Chair</span></button>
+          <button class="dock-item"><span>Desk</span></button>
+        </div>
+        <div class="dock-row" role="tabpanel" data-category="kitchen" id="row-kitchen" aria-labelledby="tab-kitchen" hidden>
+          <button class="dock-item"><span>Fridge</span></button>
+          <button class="dock-item"><span>Stove</span></button>
+        </div>
+        <div class="dock-row" role="tabpanel" data-category="bedroom" id="row-bedroom" aria-labelledby="tab-bedroom" hidden>
+          <button class="dock-item"><span>Bed</span></button>
+          <button class="dock-item"><span>Wardrobe</span></button>
+        </div>
+        <div class="dock-row" role="tabpanel" data-category="bath" id="row-bath" aria-labelledby="tab-bath" hidden>
+          <button class="dock-item"><span>Toilet</span></button>
+          <button class="dock-item"><span>Bathtub</span></button>
+        </div>
+        <!-- NEW: outdoor row -->
+        <div class="dock-row" role="tabpanel" data-category="outdoor" id="row-outdoor" aria-labelledby="tab-outdoor">
+          <button class="dock-item" data-type="patio_table" aria-label="Add patio table">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <circle cx="9" cy="9" r="6.2" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="9" cy="9" r="1.1" fill="currentColor"/>
+              <line x1="9" y1="2.8" x2="9" y2="15.2" stroke="currentColor" stroke-width="0.7" opacity="0.4"/>
+              <line x1="2.8" y1="9" x2="15.2" y2="9" stroke="currentColor" stroke-width="0.7" opacity="0.4"/>
+            </svg>
+            <span>Table</span>
+          </button>
+          <button class="dock-item" data-type="patio_chair" aria-label="Add patio chair">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="4" y="4" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/>
+              <rect x="4" y="4" width="10" height="3" rx="1.4" stroke="currentColor" stroke-width="0.9" fill="currentColor" fill-opacity="0.15"/>
+              <rect x="6" y="8.5" width="6" height="4" rx="1" stroke="currentColor" stroke-width="0.8" opacity="0.6"/>
+            </svg>
+            <span>Chair</span>
+          </button>
+          <button class="dock-item" data-type="parasol" aria-label="Add parasol">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <circle cx="9" cy="9" r="6.4" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="9" cy="9" r="1.2" fill="currentColor"/>
+              <path d="M9 2.6 L9 15.4 M2.6 9 L15.4 9 M4.5 4.5 L13.5 13.5 M13.5 4.5 L4.5 13.5" stroke="currentColor" stroke-width="0.7" opacity="0.45"/>
+            </svg>
+            <span>Parasol</span>
+          </button>
+          <button class="dock-item" data-type="planter" aria-label="Add planter">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <rect x="4" y="4" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="0.9" opacity="0.7"/>
+              <circle cx="9" cy="9" r="0.9" fill="currentColor" opacity="0.7"/>
+            </svg>
+            <span>Planter</span>
+          </button>
+        </div>
+      </nav>
+    </div>
+    <p class="toggle-hint">Click the tabs above — the row swap is live.</p>
+  </section>
+
+  <section>
+    <h2>2 · On-canvas glyphs (<code>_renderInterior</code>)</h2>
+    <p class="note">Each glyph is composed only from primitives already used in
+       <code>symbolRender.js</code> — <code>polygon</code> body, <code>circle</code>,
+       <code>ellipse</code>, and <code>line</code>. No new primitive is introduced.
+       Rendered here at plan scale (~40 px/m) with the gold body + ink-line palette.</p>
+    <div class="glyph-grid">
+      <div class="glyph-card">
+        <svg width="120" height="120" viewBox="0 0 120 120" aria-label="Patio table glyph">
+          <rect class="sym-body" x="24" y="24" width="72" height="72" rx="3"/>
+          <circle class="sym-ink" cx="60" cy="60" r="30" style="stroke-opacity:0.6"/>
+          <circle cx="60" cy="60" r="4" style="fill:rgba(236,231,214,0.55)"/>
+          <line class="sym-ink" x1="60" y1="30" x2="60" y2="90" style="stroke-opacity:0.4"/>
+          <line class="sym-ink" x1="30" y1="60" x2="90" y2="60" style="stroke-opacity:0.4"/>
+        </svg>
+        <div class="name">Patio table</div>
+        <div class="dims">0.90 × 0.90 m</div>
+        <div class="prim">polygon body + circle + 2 lines</div>
+      </div>
+
+      <div class="glyph-card">
+        <svg width="120" height="120" viewBox="0 0 120 120" aria-label="Patio chair glyph">
+          <rect class="sym-body" x="34" y="30" width="52" height="60" rx="3"/>
+          <polygon class="sym-fill" points="34,30 86,30 86,46 34,46"/>
+          <rect class="sym-ink" x="44" y="54" width="32" height="28" rx="2" style="stroke-opacity:0.6"/>
+        </svg>
+        <div class="name">Patio chair</div>
+        <div class="dims">0.65 × 0.70 m</div>
+        <div class="prim">polygon body + backrest strip + seat rect</div>
+      </div>
+
+      <div class="glyph-card">
+        <svg width="120" height="120" viewBox="0 0 120 120" aria-label="Parasol glyph">
+          <rect class="sym-body" x="12" y="12" width="96" height="96" rx="3" style="fill-opacity:0.03"/>
+          <circle class="sym-ink" cx="60" cy="60" r="44" style="stroke-opacity:0.7"/>
+          <circle cx="60" cy="60" r="4.5" style="fill:rgba(236,231,214,0.55)"/>
+          <line class="sym-ink" x1="60" y1="16" x2="60" y2="104" style="stroke-opacity:0.4"/>
+          <line class="sym-ink" x1="16" y1="60" x2="104" y2="60" style="stroke-opacity:0.4"/>
+          <line class="sym-ink" x1="29" y1="29" x2="91" y2="91" style="stroke-opacity:0.35"/>
+          <line class="sym-ink" x1="91" y1="29" x2="29" y2="91" style="stroke-opacity:0.35"/>
+        </svg>
+        <div class="name">Parasol</div>
+        <div class="dims">2.00 × 2.00 m</div>
+        <div class="prim">circle canopy + center dot + rib lines</div>
+      </div>
+
+      <div class="glyph-card">
+        <svg width="120" height="120" viewBox="0 0 120 120" aria-label="Planter glyph">
+          <rect class="sym-body" x="34" y="34" width="52" height="52" rx="3"/>
+          <circle class="sym-ink" cx="60" cy="60" r="16" style="stroke-opacity:0.7"/>
+          <circle cx="60" cy="60" r="3.5" style="fill:rgba(236,231,214,0.5)"/>
+        </svg>
+        <div class="name">Planter</div>
+        <div class="dims">0.50 × 0.50 m</div>
+        <div class="prim">polygon body + foliage circle + stem dot</div>
+      </div>
+    </div>
+    <div class="legend">
+      <span>■ gold body fill / soft-gold stroke — matches <code>symFill</code></span>
+      <span>— ink lines at reduced opacity — matches <code>symInkRgb</code></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>3 · Why these glyphs read at a glance</h2>
+    <p class="note">
+      <strong>Table vs. parasol</strong> are the design risk: both are round. They are
+      distinguished by (a) footprint — table is 0.90 m and square-bounded, parasol is 2.00 m
+      and dominates its box; and (b) the parasol adds diagonal rib lines (an open canopy),
+      while the table keeps only orthogonal cross-lines (a solid top). If reviewers find them
+      too similar at small sizes, an alternative is to draw the parasol canopy as a
+      <em>dashed</em> circle (open/shade) vs. the table's solid circle — still primitive-only.
+      Flag your preference and the LLD will lock it.
+    </p>
+    <p class="note">
+      <strong>Chair</strong> reuses the sofa idiom (backrest strip across the top ~25% + inset
+      seat) so the outdoor set feels of-a-piece with the living set. <strong>Planter</strong>
+      is a small square box with a foliage circle — deliberately distinct from the round
+      <em>chair</em> glyph in the living row.
+    </p>
+  </section>
+
+  <section>
+    <h2>4 · Type names &amp; data (for the LLD)</h2>
+    <p class="note">
+      Proposed <code>SymbolType</code> values: <code>patio_table</code>, <code>patio_chair</code>,
+      <code>parasol</code>, <code>planter</code>. Each gets a <code>CATALOG</code> entry with
+      <code>category: "outdoor"</code>. These flow unchanged through create → place → resize →
+      rotate → clearance → export (PNG/SVG/JSON) → URL-hash, and MCP <code>place_symbol</code>
+      picks them up from <code>CATALOG</code> with no allowlist edit. Suggested defaults
+      (min/max for the implementer to finalize, kept to-scale):
+    </p>
+    <div class="legend" style="flex-direction:column; gap:0.3rem;">
+      <span>patio_table — 0.90 × 0.90 m &nbsp;·&nbsp; min 0.40 &nbsp; max 2.00</span>
+      <span>patio_chair — 0.65 × 0.70 m &nbsp;·&nbsp; min 0.30 &nbsp; max 1.20</span>
+      <span>parasol&nbsp;&nbsp;&nbsp;&nbsp; — 2.00 × 2.00 m &nbsp;·&nbsp; min 1.00 &nbsp; max 4.00</span>
+      <span>planter&nbsp;&nbsp;&nbsp;&nbsp; — 0.50 × 0.50 m &nbsp;·&nbsp; min 0.20 &nbsp; max 1.50</span>
+    </div>
+  </section>
+</div>
+
+<script>
+  // Minimal port of dockTabs.js so the tabs are live in the mockup.
+  (function () {
+    const dock = document.getElementById("symbol-dock");
+    const tablist = dock.querySelector("[role='tablist']");
+    function setActive(category) {
+      dock.querySelectorAll("[role='tab'][data-category]").forEach((t) => {
+        const on = t.dataset.category === category;
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        t.tabIndex = on ? 0 : -1;
+      });
+      dock.querySelectorAll("[role='tabpanel'][data-category]").forEach((r) => {
+        if (r.dataset.category === category) r.removeAttribute("hidden");
+        else r.setAttribute("hidden", "");
+      });
+    }
+    tablist.addEventListener("click", (e) => {
+      const tab = e.target.closest("[role='tab']");
+      if (tab) setActive(tab.dataset.category);
+    });
+    tablist.addEventListener("keydown", (e) => {
+      const tabs = Array.from(tablist.querySelectorAll("[role='tab']"));
+      const idx = tabs.indexOf(document.activeElement);
+      if (idx === -1) return;
+      if (e.key === "ArrowRight") { e.preventDefault(); const n = tabs[(idx + 1) % tabs.length]; n.focus(); setActive(n.dataset.category); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); const p = tabs[(idx - 1 + tabs.length) % tabs.length]; p.focus(); setActive(p.dataset.category); }
+    });
+  })();
+</script>
+</body>
+</html>
