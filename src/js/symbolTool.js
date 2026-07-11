@@ -21,7 +21,7 @@ import {
   createSymbol, addSymbol, removeSymbol, duplicateSymbol,
   getSymbol, pickSymbol, moveSymbol, rotateSymbol, resizeSymbol, corners,
   WALL_FLUSH_PX, PARALLEL_TOL_DEG, nearestWallFlush,
-  ALIGN_PX, aabb as symAabb, nearestObjectAlignment,
+  ALIGN_PX, ALIGN_CONTACT_PX, aabb as symAabb, nearestObjectAlignment,
   ROOM_CENTER_PX, nearestRoomCenter,
 } from "./symbols.js";
 import { gridSnap as prefsGridSnap } from "./prefs.js";
@@ -580,8 +580,10 @@ function _resolvePlacement(sx, sy, altHeld, boxLike) {
     // Object alignment
     let objectAlignResult = { x: null, y: null };
     if (_candidateAABBs.length > 0) {
-      const alignThreshM = ALIGN_PX / pxPerM();
-      objectAlignResult = nearestObjectAlignment(dragAABBVal, _candidateAABBs, alignThreshM);
+      const ppm = pxPerM();
+      const alignThreshM = ALIGN_PX / ppm;
+      const contactThreshM = ALIGN_CONTACT_PX / ppm;
+      objectAlignResult = nearestObjectAlignment(dragAABBVal, _candidateAABBs, alignThreshM, contactThreshM);
     }
 
     // Room-center alignment

@@ -4750,6 +4750,124 @@ describe("clearance.js — flush-to-wall consistency (LLD 59)", () => {
   });
 });
 
+// ─── Tests: clearance.js — flush symbol-to-symbol contact reads a fit (LLD 60 Defect 3) ──
+
+describe("clearance.js — flush symbol-to-symbol contact reads a fit (LLD 60 Defect 3)", () => {
+  it("flush contact (right edge === left edge, full y-overlap) → tight, gap 0, not bad", () => {
+    resetClearance();
+    resetSymbolModel();
+    // A: center (1, 5), w=2, h=1 → AABB l=0, r=2, t=4.5, b=5.5
+    // B: center (3, 5), w=2, h=1 → AABB l=2, r=4, t=4.5, b=5.5
+    // dx = max(2-2, 0-4) = 0 (touching on x); dy = max(4.5-5.5, 4.5-5.5) = -1 (y overlap)
+    const symA = mkSym("s0", "sofa",  1, 5, 2, 1, 0);
+    const symB = mkSym("s1", "table", 3, 5, 2, 1, 0);
+    const result = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    expect(result.length).toBe(1);
+    const c = result[0];
+    expect(c.kind).toBe("symbol");
+    expect(c.status).toBe("tight");
+    expect(c.gap).toBe(0);
+    if (worstStatus(result) === "bad") throw new Error("worstStatus must not be bad for a flush symbol contact");
+    // Leader is drawn along the touching x-facing faces (x = 2), not center-to-center.
+    expect(c.a.x).toBeCloseTo(2, 6);
+    expect(c.b.x).toBeCloseTo(2, 6);
+  });
+
+  it("continuity: touching (dx=0) is tight, and a 0.5cm gap is also tight (no worse-when-touching)", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Touching: A r=2, B l=2 → dx=0 → contact → tight
+    const symA = mkSym("s0", "sofa",  1, 5, 2, 1, 0);
+    const symB = mkSym("s1", "table", 3, 5, 2, 1, 0);
+    const touch = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    expect(touch[0].status).toBe("tight");
+    expect(touch[0].gap).toBe(0);
+    // Nudge B right by 0.5cm → B l=2.005 → dx=0.005 > 0 → positive-gap branch, classify(0.005)="tight"
+    const symB2 = mkSym("s1", "table", 3.005, 5, 2, 1, 0);
+    const gapd = computeClearances(symA, { rooms: [], symbols: [symA, symB2] });
+    expect(gapd[0].status).toBe("tight");
+    expect(gapd[0].gap).toBeCloseTo(0.005, 6);
+    // The discontinuity is gone: touching is NOT worse (bad) than a small gap (tight).
+  });
+
+  it("vertical flush contact (bottom edge === top edge, full x-overlap) → tight, leader on shared face", () => {
+    resetClearance();
+    resetSymbolModel();
+    // A: center (5, 1), w=2, h=1 → AABB l=4, r=6, t=0.5, b=1.5
+    // B: center (5, 3), w=2, h=1 → AABB l=4, r=6, t=2.5, b=3.5 ... that's a 1m gap.
+    // Seat flush: B center (5, 2.5) → AABB t=2.0, b=3.0. Still a gap. We need B.t === A.b = 1.5.
+    // B center (5, 2), w=2, h=1 → AABB t=1.5, b=2.5. Now A.b(1.5) === B.t(1.5) → dy=0, dx=-2 (x overlap).
+    const symA = mkSym("s0", "bed",   5, 1, 2, 1, 0);
+    const symB = mkSym("s1", "table", 5, 2, 2, 1, 0);
+    const result = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    expect(result.length).toBe(1);
+    const c = result[0];
+    expect(c.status).toBe("tight");
+    expect(c.gap).toBe(0);
+    // Vertical face pair (dy>=dx path): leader on shared face y = 1.5, same x.
+    expect(c.a.y).toBeCloseTo(1.5, 6);
+    expect(c.b.y).toBeCloseTo(1.5, 6);
+    expect(c.a.x).toBeCloseTo(c.b.x, 6);
+  });
+
+  it("genuine 2-D overlap (~3cm into each other on both axes) → still bad, gap 0", () => {
+    resetClearance();
+    resetSymbolModel();
+    // A: center (1, 5), w=2, h=1 → AABB l=0, r=2, t=4.5, b=5.5
+    // B: center (2.97, 4.97), w=2, h=1 → AABB l=1.97, r=3.97, t=4.47, b=5.47
+    // dx = max(1.97-2, 0-3.97) = -0.03; dy = max(4.47-5.5, 4.5-5.47) = max(-1.03,-0.97) = -0.97
+    // sep = max(dx,dy) = -0.03 < -1e-4 → genuine 2-D interpenetration → bad
+    const symA = mkSym("s0", "sofa",  1, 5, 2, 1, 0);
+    const symB = mkSym("s1", "table", 2.97, 4.97, 2, 1, 0);
+    const result = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    expect(result.length).toBe(1);
+    const c = result[0];
+    expect(c.status).toBe("bad");
+    expect(c.gap).toBe(0);
+    // Genuine overlap keeps the center-to-center leader.
+    expect(c.a.x).toBeCloseTo(1, 6);
+    expect(c.b.x).toBeCloseTo(2.97, 6);
+  });
+
+  it("boundary: sub-mm contact inside SYM_CONTACT_EPS is tight; a nudge beyond it is bad", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Inside tolerance: dx = -5e-5 (half of SYM_CONTACT_EPS=1e-4), dy overlapping →
+    //   sep = -5e-5 >= -1e-4 → tight. (Comfortably inside, immune to ~1e-16 FP noise.)
+    // A: l=0, r=2 (center 1); B.l = r - 5e-5 = 1.99995 → B center = 1.99995+1 = 2.99995
+    const symA = mkSym("s0", "sofa",  1, 5, 2, 1, 0);
+    const symBin = mkSym("s1", "table", 2.99995, 5, 2, 1, 0);
+    const inEps = computeClearances(symA, { rooms: [], symbols: [symA, symBin] });
+    expect(inEps[0].status).toBe("tight");
+    expect(inEps[0].gap).toBe(0);
+    // Beyond tolerance on the nearest axis (dx = -2e-4), other axis still overlapping → bad.
+    // B.l = 2 - 2e-4 = 1.9998 → B center = 2.9998; sep = -2e-4 < -1e-4 → bad.
+    const symBbeyond = mkSym("s1", "table", 2.9998, 5, 2, 1, 0);
+    const beyond = computeClearances(symA, { rooms: [], symbols: [symA, symBbeyond] });
+    expect(beyond[0].status).toBe("bad");
+    expect(beyond[0].gap).toBe(0);
+  });
+
+  it("opening neighbour (door) produces no symbol contact row even when flush", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Sofa flush against a door: the door is an opening → skipped as a neighbour.
+    const sofa = mkSym("s0", "sofa", 1, 5, 2, 1, 0);       // AABB r=2
+    const door = mkSym("s1", "door", 3, 5, 2, 0.12, 0);    // AABB l=2 (flush) but opening
+    const result = computeClearances(sofa, { rooms: [], symbols: [sofa, door] });
+    const symbolRows = result.filter(c => c.kind === "symbol");
+    expect(symbolRows.length).toBe(0);
+  });
+
+  it("classify() untouched: classify(0) still bad, negative still bad (epsilon lives in the symbol branch)", () => {
+    setThreshold(0.60);
+    expect(classify(0)).toBe("bad");
+    expect(classify(-0.00005)).toBe("bad");  // within SYM_CONTACT_EPS but classify has no epsilon
+    expect(classify(-1)).toBe("bad");
+    resetClearance();
+  });
+});
+
 // ─── Tests: clearance.js — render: flush tight gap formats as 0.xx not "overlap" ──
 
 describe("clearance.js — render: flush tight 0-gap formats as length, not 'overlap' (LLD 59)", () => {
@@ -5975,6 +6093,165 @@ describe("nearestObjectAlignment — empty candidates", () => {
   });
 });
 
+// ─── Tests: LLD-60 Defect 1 — coherent corners (primary candidate) ────────────
+
+describe("nearestObjectAlignment — phantom corner: X and Y cannot come from different neighbours", () => {
+  it("P in range on X only, Q in range on Y only → exactly one axis applies, from the closer candidate", () => {
+    // Drag AABB: x:[0,2] (maxX=2), y:[0,2] (maxY=2), cx=1, cy=1
+    // Candidate P: aligns on X only — P.minX=2.05 (facing drag.maxX=2, gap 0.05); P.Y far.
+    // Candidate Q: aligns on Y only — Q.minY=2.10 (facing drag.maxY=2, gap 0.10); Q.X far.
+    const drag = mkAABB(0, 2, 0, 2);
+    const P = mkAABB(2.05, 4, 40, 42);   // X match gap 0.05; Y ~40 away
+    const Q = mkAABB(40, 42, 2.10, 4);   // Y match gap 0.10; X ~40 away
+    const result = nearestObjectAlignment(drag, [P, Q], 0.2);
+    // Phantom guard: NOT both axes applied simultaneously.
+    const bothApplied = result.x !== null && result.y !== null;
+    if (bothApplied) throw new Error("Phantom corner: X and Y both applied from different neighbours");
+    // Exactly one axis is non-null.
+    const nonNullCount = (result.x !== null ? 1 : 0) + (result.y !== null ? 1 : 0);
+    expect(nonNullCount).toBe(1);
+    // The applied axis is P's X (smaller bestAxisGap 0.05 < 0.10), tracing to P.minX=2.05.
+    if (result.x === null) throw new Error("Expected the closer candidate P's X axis to win");
+    expect(result.x.line).toBeCloseTo(2.05, 9);
+    expect(result.y).toBe(null);
+  });
+
+  it("phantom guard is comparator-driven: primary emits its OWN axis even when a NON-primary has a strictly-tighter single-axis gap on that same axis", () => {
+    // This is the inverse of "strictly-tighter single wins": here the tighter single-axis
+    // gap belongs to a NON-primary candidate, and the primary must still emit its own X
+    // (never borrow the other candidate's tighter X) — locking out the phantom.
+    // Drag: x:[0,2] maxX=2, y:[0,2] maxY=2.
+    // Candidate R (the primary): matches BOTH axes → bestAxisGap = min(0.06, 0.06) = 0.06.
+    //   R.minX=2.06 (X facing gap 0.06), R.minY=2.06 (Y facing gap 0.06).
+    // Candidate S: matches X ONLY, strictly tighter on X (gap 0.02) → S.minX=2.02; S.Y far.
+    //   S's bestAxisGap = 0.02 < R's 0.06 → S is the PRIMARY by rule 1.
+    // So the winner is S (single X axis), NOT a corner mixing S.x + R.y.
+    const drag = mkAABB(0, 2, 0, 2);
+    const R = mkAABB(2.06, 4, 2.06, 4);
+    const S = mkAABB(2.02, 4, 40, 42);
+    const result = nearestObjectAlignment(drag, [R, S], 0.2);
+    // S wins outright (tighter bestAxisGap). Single X axis, tracing to S.minX=2.02.
+    if (result.x === null) throw new Error("Expected S's X to win as primary");
+    expect(result.x.line).toBeCloseTo(2.02, 9);
+    // Crucially Y must be null — R's Y must NOT be borrowed onto S's X (no phantom).
+    expect(result.y).toBe(null);
+  });
+});
+
+describe("nearestObjectAlignment — same-object corner preferred", () => {
+  it("one candidate in range on both axes → both x and y non-null, both lines from that candidate", () => {
+    // Drag: x:[0,2] maxX=2, y:[0,2] maxY=2. Single candidate C facing on both axes.
+    const drag = mkAABB(0, 2, 0, 2);
+    const C = mkAABB(2.05, 4, 2.07, 4); // X gap 0.05, Y gap 0.07
+    const result = nearestObjectAlignment(drag, [C], 0.2);
+    if (result.x === null) throw new Error("Expected x match");
+    if (result.y === null) throw new Error("Expected y match");
+    expect(result.x.line).toBeCloseTo(2.05, 9); // C.minX
+    expect(result.y.line).toBeCloseTo(2.07, 9); // C.minY
+  });
+});
+
+describe("nearestObjectAlignment — both-axes tie-break (corner-affinity)", () => {
+  it("A in range on X only at gap g; B in range on both axes with best-axis gap g → B wins (both axes)", () => {
+    // Drag: x:[0,2] maxX=2, y:[0,2] maxY=2.
+    // A: X only, facing gap g=0.05 at line 2.05 (A.minX=2.05); A.Y far.
+    // B: both axes — X via LEFT-edge align at a DISTINCT line 0.05 (B.minX=0.05 gap 0.05),
+    //    Y facing gap 0.09 (B.minY=2.09). B's bestAxisGap = min(0.05, 0.09) = 0.05, tying A
+    //    within TIE_EPS → corner-affinity picks B.
+    // A's and B's X gaps tie at 0.05 but land on DIFFERENT lines (2.05 vs 0.05), so the emitted
+    // x.line uniquely identifies the winner — this ALSO fails pre-fix (which, resolving X
+    // independently, would keep A's line 2.05 as first-seen on the tie → a phantom X-from-A +
+    // Y-from-B corner).
+    const drag = mkAABB(0, 2, 0, 2);
+    const A = mkAABB(2.05, 4, 40, 42);
+    const B = mkAABB(0.05, 1.5, 2.09, 3);
+    const result = nearestObjectAlignment(drag, [A, B], 0.2);
+    // B wins → BOTH axes emitted, both tracing to B.
+    if (result.x === null) throw new Error("Expected x match from B");
+    if (result.y === null) throw new Error("Expected y match from B (corner-affinity)");
+    expect(result.x.line).toBeCloseTo(0.05, 9); // B's X line, NOT A's 2.05 (proves single-source)
+    expect(result.y.line).toBeCloseTo(2.09, 9);
+  });
+});
+
+describe("nearestObjectAlignment — strictly-tighter single wins over both-axes", () => {
+  it("A single-axis gap strictly < B best-axis gap → A wins its single axis, no corner override", () => {
+    // Drag: x:[0,2] maxX=2, y:[0,2] maxY=2.
+    // A: X only, gap 0.02 (A.minX=2.02); A.Y far.
+    // B: both axes, best-axis gap 0.06 (B.minX=2.06, B.minY=2.06).
+    //    A's 0.02 is strictly < B's 0.06 → A wins by rule 1, not overridden by corner-affinity.
+    const drag = mkAABB(0, 2, 0, 2);
+    const A = mkAABB(2.02, 4, 40, 42);
+    const B = mkAABB(2.06, 4, 2.06, 4);
+    const result = nearestObjectAlignment(drag, [A, B], 0.2);
+    if (result.x === null) throw new Error("Expected A's X to win");
+    expect(result.x.line).toBeCloseTo(2.02, 9);
+    expect(result.y).toBe(null); // A matches X only; B's corner must not override
+  });
+});
+
+// ─── Tests: LLD-60 Defect 2 — two-tier threshold (contact wider than edge) ────
+
+describe("nearestObjectAlignment — facing edge in the widened contact band", () => {
+  it("facing pair (drag.maxX ↔ cand.minX) at gap 0.25: matches with contact=0.275, no match with single 0.20", () => {
+    // Drag: x:[0,2] maxX=2; Y far from cand so no Y match.
+    // Cand.minX = 2.25 → facing gap 0.25.
+    const drag = mkAABB(0, 2, 0, 1);
+    const cand = mkAABB(2.25, 4, 40, 42);
+    // Two-tier: edge=0.20, contact=0.275 → facing gap 0.25 <= 0.275 → X match, facing:true.
+    const widened = nearestObjectAlignment(drag, [cand], 0.20, 0.275);
+    if (widened.x === null) throw new Error("Expected X match within the widened contact band");
+    expect(widened.x.facing).toBe(true);
+    expect(widened.x.line).toBeCloseTo(2.25, 9);
+    // Single 0.20 threshold (default contact = edge) → facing gap 0.25 > 0.20 → NO match.
+    const narrow = nearestObjectAlignment(drag, [cand], 0.20);
+    expect(narrow.x).toBe(null);
+  });
+});
+
+describe("nearestObjectAlignment — same-side edge NOT widened", () => {
+  it("same-side pair (drag.minX ↔ cand.minX) at gap 0.25 with edge=0.20, contact=0.275 → no X match", () => {
+    // Drag: x:[0,2] minX=0. Same-side (minX↔minX) uses the tighter edge threshold.
+    // Cand.minX = 0.25 → same-side gap 0.25 > edge 0.20 → no match, even though contact=0.275.
+    // Guard the other pairs out of range: cand.maxX and cand.cx far; Y far.
+    const drag = mkAABB(0, 2, 0, 1);
+    const cand = mkAABB(0.25, 40, 40, 42); // minX=0.25, maxX=40, cx≈20.125
+    const result = nearestObjectAlignment(drag, [cand], 0.20, 0.275);
+    // drag.minX(0)↔cand.minX(0.25): same-side gap 0.25 > 0.20 (edge) → filtered.
+    // drag.maxX(2)↔cand.minX(0.25): facing gap -1.75 → out of contact band too.
+    // No X match.
+    expect(result.x).toBe(null);
+  });
+});
+
+describe("nearestObjectAlignment — within old window: two-tier call unchanged", () => {
+  it("facing pair at gap 0.1 matches identically under single-threshold and two-threshold calls", () => {
+    const drag = mkAABB(0, 2, 0, 1);
+    const cand = mkAABB(2.1, 4, 40, 42); // facing gap 0.1
+    const single = nearestObjectAlignment(drag, [cand], 0.2);
+    const twoTier = nearestObjectAlignment(drag, [cand], 0.2, 0.275);
+    if (single.x === null || twoTier.x === null) throw new Error("Expected X match in both calls");
+    expect(single.x.delta).toBeCloseTo(twoTier.x.delta, 12); // identical delta, no drift
+    expect(single.x.delta).toBeCloseTo(0.1, 9);
+  });
+});
+
+describe("nearestObjectAlignment — back-compat default at edge-threshold boundary", () => {
+  it("three-arg call reproduces pre-fix result on a facing pair at the edge-threshold boundary", () => {
+    // Facing pair exactly at the threshold: gap == threshold is inclusive (<=).
+    // Use exactly-representable values (2.5 - 2 == 0.5) to avoid FP boundary noise.
+    const drag = mkAABB(0, 2, 0, 1);
+    const cand = mkAABB(2.5, 4, 40, 42); // facing gap 0.5 == threshold
+    const result = nearestObjectAlignment(drag, [cand], 0.5); // no contactThresholdM
+    if (result.x === null) throw new Error("Expected X match at the inclusive boundary (default contact = edge)");
+    expect(result.x.delta).toBeCloseTo(0.5, 9);
+    // And just beyond the boundary → no match (default single-window behaviour).
+    const candBeyond = mkAABB(2.6, 4, 40, 42); // facing gap 0.6 > threshold
+    const beyond = nearestObjectAlignment(drag, [candBeyond], 0.5);
+    expect(beyond.x).toBe(null);
+  });
+});
+
 // ─── Tests: LLD-34 regression — plan JSON unaffected ─────────────────────────
 
 describe("LLD-34 — alignment adds NO new keys to plan JSON", () => {
@@ -5986,6 +6263,8 @@ describe("LLD-34 — alignment adds NO new keys to plan JSON", () => {
     if (json.includes("alignY"))     throw new Error("'alignY' leaked into plan JSON");
     if (json.includes("activeGuide"))throw new Error("'activeGuide' leaked into plan JSON");
     if (json.includes("ALIGN_PX"))   throw new Error("'ALIGN_PX' leaked into plan JSON");
+    if (json.includes("ALIGN_CONTACT_PX")) throw new Error("'ALIGN_CONTACT_PX' leaked into plan JSON");
+    if (json.includes("facing"))     throw new Error("'facing' leaked into plan JSON");
   });
 });
 
@@ -6448,6 +6727,83 @@ describe("LLD-34 integration — drag beside another symbol, edges coincident on
     expect(r._alignX.kind).toBe("center");
     // After apply: drag.cx + delta = cand.cx
     expect(r.x).toBeCloseTo(5.05, 5);
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+});
+
+// ─── Tests: LLD-60 integration — place-beside reliability + corner coherence ──
+
+describe("LLD-60 integration — place-beside reliability at the contact threshold", () => {
+  it("facing edges ~10px apart (0.25m @ zoom 1, outside the 8px edge window) still snap to contact", () => {
+    // At zoom 1, pxPerM=40 → ALIGN_PX=8 is 0.20m, ALIGN_CONTACT_PX=11 is 0.275m.
+    // A facing gap of 0.25m (10px) is OUTSIDE the old 8px window but inside the contact band.
+    resetAll();
+    setGridSnap(true);
+    setSnapMode("off"); // isolate alignment (no grid, no wall)
+    const box = makeBox(5, 5);       // 1×1 → AABB maxX=5.5
+    const cand = mkAABB(5.75, 7, 0, 10); // facing: cand.minX=5.75, gap=0.25 (10px)
+    const r = resolvePlacementForTest(200, 200, false, box, [cand]);
+    expect(r.snapType).toBe("align");
+    if (r._alignX === null) throw new Error("Expected a facing X match in the widened contact band");
+    expect(r._alignX.facing).toBe(true);
+    // Edges become coincident on drop: drag.maxX (r.x + 0.5) == cand.minX.
+    expect(r.x + 0.5).toBeCloseTo(cand.minX, 6);
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+});
+
+describe("LLD-60 integration — corner coherence: drag into an L never mixes two neighbours", () => {
+  it("P near on X only, Q near on Y only → resolved corner comes from a single object, not a mix", () => {
+    // Two neighbours forming an L around the drag's bottom-right:
+    //   P offers an X alignment only (its Y is far); Q offers a Y alignment only (its X is far).
+    // Drag box 1×1 at (5,5): AABB x:[4.5,5.5], y:[4.5,5.5].
+    resetAll();
+    setGridSnap(true);
+    setSnapMode("off");
+    const box = makeBox(5, 5);
+    const P = mkAABB(5.55, 7, 40, 42);  // facing X gap 0.05; Y ~40 away
+    const Q = mkAABB(40, 42, 5.60, 8);  // facing Y gap 0.10; X ~40 away
+    const r = resolvePlacementForTest(200, 200, false, box, [P, Q]);
+    // Coherent-corner guarantee: object alignment supplies at most ONE axis here
+    // (both cannot come from different neighbours). No rooms → no room-center fill.
+    const bothObjAxes = r._alignX !== null && r._alignY !== null;
+    if (bothObjAxes) throw new Error("Phantom corner at resolver level: X and Y from different neighbours");
+    // The tighter neighbour P wins its X axis; Y stays unsnapped (raw).
+    if (r._alignX === null) throw new Error("Expected P's X alignment to win");
+    expect(r._alignX.line).toBeCloseTo(5.55, 9);
+    expect(r._alignY).toBe(null);
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+});
+
+describe("LLD-60 integration — place-beside → clearance reads a fit (Defect 2 + 3)", () => {
+  it("a place-beside snap produces a 0-gap contact that the clearance model reads as tight, not overlap", () => {
+    resetAll();
+    resetClearance();
+    resetSymbolModel();
+    setGridSnap(true);
+    setSnapMode("off");
+    // Neighbour symB (a real Sym): center (6.25,5), 1×1 → AABB l=5.75, r=6.75, t=4.5, b=5.5.
+    const symB = mkSym("s1", "table", 6.25, 5, 1, 1, 0);
+    const candB = mkAABB(5.75, 6.75, 4.5, 5.5);
+    // Drag a 1×1 sofa at (5,5) — facing gap to symB.l is 0.25m (10px), a contact-band snap.
+    const box = makeBox(5, 5);
+    const r = resolvePlacementForTest(200, 200, false, box, [candB]);
+    expect(r.snapType).toBe("align");
+    if (r._alignX === null) throw new Error("Expected the place-beside facing snap");
+    expect(r._alignX.facing).toBe(true);
+    // Land the dragged symbol at the resolved position and read clearance to symB.
+    const symA = mkSym("s0", "sofa", r.x, r.y, 1, 1, 0); // r.x ≈ 5.25 → AABB r = 5.75 == symB.l
+    const clr = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    const row = clr.find(c => c.kind === "symbol" && c.neighbourId === "s1");
+    if (!row) throw new Error("Expected a symbol clearance row to the neighbour");
+    expect(row.status).toBe("tight"); // a fit — NOT "bad"/overlap
+    expect(row.gap).toBe(0);
+    if (worstStatus(clr) === "bad") throw new Error("Place-beside contact must not read as overlap");
+    resetClearance();
     setGridSnap(true);
     setSnapMode("auto");
   });
