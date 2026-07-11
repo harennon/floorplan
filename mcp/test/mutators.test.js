@@ -586,3 +586,28 @@ test("check_brief: no-room-drawn message references add_room (not resize_room)",
   // Must not suggest resize_room when there is nothing to resize.
   assert.doesNotMatch(msg, /resize_room/);
 });
+
+// ── LLD 88: dining-table-round circularity enforcement (MCP integration) ─────
+
+test("LLD 88: resize_symbol dim:'h' on dining-table-round returns w===h and changed:true", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const placed = tools.tool_place_symbol({ type: "dining-table-round", x: 6, y: 6 });
+  assert.equal(placed.ok, true);
+  // Default is w=h=1.20; resize h to a different value — both axes must mirror.
+  const rz = tools.tool_resize_symbol({ id: placed.id, dim: "h", metres: 1.50 });
+  assert.equal(rz.ok, true);
+  assert.equal(rz.changed, true);
+  assert.ok(Math.abs(rz.w - 1.50) < 1e-9, `w expected 1.50, got ${rz.w}`);
+  assert.ok(Math.abs(rz.h - 1.50) < 1e-9, `h expected 1.50, got ${rz.h}`);
+  assert.equal(rz.w, rz.h);
+});
+
+test("LLD 88: place_symbol dining-table-round with differing w/h ends with w===h (last axis wins, Edge Case 5)", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  // Provide both w and h — the last-applied axis (h) wins due to sequential resizeSymbol calls.
+  const placed = tools.tool_place_symbol({ type: "dining-table-round", x: 6, y: 6, w: 1.00, h: 1.50 });
+  assert.equal(placed.ok, true);
+  assert.equal(placed.w, placed.h, `w (${placed.w}) and h (${placed.h}) must be equal`);
+});

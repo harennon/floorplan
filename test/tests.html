@@ -13799,6 +13799,88 @@ describe("LLD 81 — safety: no NaN/Infinity from validated measurements", () =>
   });
 });
 
+// ─── Tests: LLD 88 — dining-table-round circularity enforcement ───────────────
+
+describe("LLD 88 — dining-table-round: circular flag in catalog", () => {
+  it("CATALOG['dining-table-round'] has circular:true", () => {
+    if (!CATALOG["dining-table-round"].circular) throw new Error("circular flag missing or falsy");
+  });
+
+  it("sofa does NOT have circular flag (regression: flag must not leak)", () => {
+    if (CATALOG["sofa"].circular) throw new Error("sofa should not have circular:true");
+  });
+
+  it("table does NOT have circular flag (regression)", () => {
+    if (CATALOG["table"].circular) throw new Error("table should not have circular:true");
+  });
+});
+
+describe("LLD 88 — resizeSymbol: circular type mirrors both axes", () => {
+  it("dim:'w' sets both w and h to the clamped value", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0); // w=h=1.20
+    resizeSymbol(s, "w", 1.50);
+    expect(s.w).toBeCloseTo(1.50, 9);
+    expect(s.h).toBeCloseTo(1.50, 9);
+  });
+
+  it("dim:'h' sets both w and h to the clamped value", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0);
+    resizeSymbol(s, "h", 1.00);
+    expect(s.w).toBeCloseTo(1.00, 9);
+    expect(s.h).toBeCloseTo(1.00, 9);
+  });
+
+  it("out-of-range value clamps both axes to the same bound (above max)", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0);
+    resizeSymbol(s, "w", 99);
+    expect(s.w).toBeCloseTo(CATALOG["dining-table-round"].max_w, 9);
+    expect(s.h).toBeCloseTo(CATALOG["dining-table-round"].max_w, 9);
+  });
+
+  it("out-of-range value clamps both axes to the same bound (below min)", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0);
+    resizeSymbol(s, "h", 0.001);
+    expect(s.w).toBeCloseTo(CATALOG["dining-table-round"].min_h, 9);
+    expect(s.h).toBeCloseTo(CATALOG["dining-table-round"].min_h, 9);
+  });
+
+  it("lockAspect:true on circular type yields same mirrored result (no double-scale)", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0);
+    resizeSymbol(s, "w", 1.25, true);
+    expect(s.w).toBeCloseTo(1.25, 9);
+    expect(s.h).toBeCloseTo(1.25, 9);
+  });
+
+  it("returns changed:true when value actually changes", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0); // w=h=1.20
+    const changed = resizeSymbol(s, "w", 1.40);
+    expect(changed).toBe(true);
+  });
+
+  it("returns changed:false when both axes already equal the clamped value", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0); // w=h=1.20
+    const changed = resizeSymbol(s, "w", 1.20); // same value
+    expect(changed).toBe(false);
+  });
+
+  it("non-circular type (sofa) still resizes only the requested axis (regression)", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 0, 0); // w=2.00, h=0.90
+    const origH = s.h;
+    resizeSymbol(s, "w", 1.80);
+    expect(s.w).toBeCloseTo(1.80, 9);
+    // h must be unchanged — circular branch must not leak to sofa
+    expect(s.h).toBeCloseTo(origH, 9);
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 
