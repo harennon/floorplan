@@ -30,34 +30,204 @@ export const model = { symbols: /** @type {Sym[]} */ ([]) };
 // ── Catalog ────────────────────────────────────────────────────────────────────
 
 /**
- * Per-type catalog. openings:true → single editable dimension (width);
- * depth is a fixed thin marker and its chip is hidden. Furniture edits both w and h.
+ * @typedef {{ name:string, w:number, h:number }} SymPreset
+ */
+
+/**
+ * Per-type catalog. `w`/`h` are the default (typical) footprint in metres; the
+ * bounds are PER-AXIS (`min_w`/`max_w` gate width, `min_h`/`max_h` gate depth),
+ * so a piece that is realistically wide-but-shallow (a sofa) or tall-but-narrow
+ * (a bookshelf) can no longer be resized into a shape no real product has.
+ *
+ * openings:true → single editable dimension (width); depth is a fixed thin
+ * marker (min_h===max_h===h) and its chip is hidden. Furniture edits both axes.
+ *
+ * `presets` (optional) are named, real, buyable sizes — the discrete choices a
+ * user should pick from where the real world is standardized (mattress sizes,
+ * 24/30/36-in appliance widths, standard door/window leaves, round-table seat
+ * counts). Every preset lies within the type's per-axis bounds. Bounds and
+ * presets are grounded in mainstream retailer/appliance/mattress/fixture specs
+ * (IKEA, West Elm, Article, CB2; GE/Samsung/LG/Whirlpool; ISPA mattress sizes;
+ * DIN/US door leaves) so the catalog only offers furniture that actually exists.
+ *
  * @type {Record<SymbolType, {label:string, category:SymCategory,
- *   openings?:boolean, w:number, h:number, min:number, max:number}>}
+ *   openings?:boolean, w:number, h:number,
+ *   min_w:number, max_w:number, min_h:number, max_h:number,
+ *   presets?:SymPreset[]}>}
  */
 export const CATALOG = {
-  door:      { label: "Door",      category: "openings", openings: true, w: 0.90, h: 0.12, min: 0.60, max: 2.00 },
-  window:    { label: "Window",    category: "openings", openings: true, w: 1.00, h: 0.12, min: 0.30, max: 3.00 },
-  sofa:      { label: "Sofa",      category: "living",   w: 2.00, h: 0.90, min: 0.30, max: 3.50 },
-  table:     { label: "Table",     category: "living",   w: 1.20, h: 0.80, min: 0.30, max: 3.00 },
-  chair:     { label: "Chair",     category: "living",   w: 0.50, h: 0.50, min: 0.30, max: 1.00 },
-  desk:      { label: "Desk",      category: "living",   w: 1.40, h: 0.70, min: 0.30, max: 2.50 },
-  tv:        { label: "TV",        category: "living",   w: 1.20, h: 0.40, min: 0.30, max: 2.50 },
-  bookshelf: { label: "Bookshelf", category: "living",   w: 0.80, h: 0.30, min: 0.30, max: 3.00 },
-  armchair:            { label: "Armchair",           category: "living", w: 0.80, h: 0.80, min: 0.40, max: 1.20 },
-  "coffee-table":      { label: "Coffee Table",       category: "living", w: 1.10, h: 0.55, min: 0.30, max: 2.00 },
-  "dining-table-round":{ label: "Round Dining Table", category: "living", w: 1.20, h: 1.20, min: 0.60, max: 2.50 },
-  fridge:    { label: "Fridge",    category: "kitchen",  w: 0.70, h: 0.70, min: 0.30, max: 1.20 },
-  stove:     { label: "Stove",     category: "kitchen",  w: 0.60, h: 0.60, min: 0.30, max: 1.20 },
-  sink:      { label: "Sink",      category: "kitchen",  w: 0.60, h: 0.45, min: 0.30, max: 1.50 },
-  washer:    { label: "Washer",    category: "kitchen",  w: 0.60, h: 0.60, min: 0.30, max: 1.00 },
-  bed:       { label: "Bed",       category: "bedroom",  w: 1.50, h: 2.00, min: 0.30, max: 2.50 },
-  wardrobe:  { label: "Wardrobe",  category: "bedroom",  w: 1.00, h: 0.60, min: 0.30, max: 3.00 },
-  nightstand: { label: "Nightstand", category: "bedroom", w: 0.45, h: 0.40, min: 0.30, max: 1.00 },
-  dresser:    { label: "Dresser",    category: "bedroom", w: 1.00, h: 0.50, min: 0.30, max: 2.50 },
-  cabinet:    { label: "Cabinet",    category: "bedroom", w: 0.90, h: 0.40, min: 0.30, max: 2.50 },
-  toilet:    { label: "Toilet",    category: "bath",     w: 0.40, h: 0.70, min: 0.30, max: 1.00 },
-  bathtub:   { label: "Bathtub",   category: "bath",     w: 1.70, h: 0.75, min: 0.30, max: 2.20 },
+  // Openings — width-only; depth pinned to the thin wall marker (min_h===max_h===h).
+  door: {
+    label: "Door", category: "openings", openings: true, w: 0.81, h: 0.12,
+    min_w: 0.61, max_w: 0.91, min_h: 0.12, max_h: 0.12,
+    presets: [
+      { name: "Closet 24\"",   w: 0.61, h: 0.12 },
+      { name: "Bath 28\"",     w: 0.71, h: 0.12 },
+      { name: "Bedroom 30\"",  w: 0.76, h: 0.12 },
+      { name: "Standard 32\"", w: 0.81, h: 0.12 },
+      { name: "Wide 34\"",     w: 0.86, h: 0.12 },
+      { name: "Entry 36\"",    w: 0.91, h: 0.12 },
+    ],
+  },
+  window: {
+    label: "Window", category: "openings", openings: true, w: 0.91, h: 0.12,
+    min_w: 0.61, max_w: 2.44, min_h: 0.12, max_h: 0.12,
+    presets: [
+      { name: "24\"", w: 0.61, h: 0.12 },
+      { name: "32\"", w: 0.81, h: 0.12 },
+      { name: "36\"", w: 0.91, h: 0.12 },
+      { name: "48\"", w: 1.22, h: 0.12 },
+      { name: "60\"", w: 1.52, h: 0.12 },
+      { name: "72\"", w: 1.83, h: 0.12 },
+      { name: "96\"", w: 2.44, h: 0.12 },
+    ],
+  },
+
+  // Living
+  sofa: {
+    label: "Sofa", category: "living", w: 2.00, h: 0.90,
+    min_w: 1.50, max_w: 3.50, min_h: 0.85, max_h: 1.65,
+    presets: [
+      { name: "Loveseat", w: 1.65, h: 0.90 },
+      { name: "3-seat",   w: 2.10, h: 0.95 },
+      { name: "Sectional", w: 2.60, h: 1.60 },
+    ],
+  },
+  table: {
+    label: "Table", category: "living", w: 1.20, h: 0.80,
+    min_w: 0.40, max_w: 2.40, min_h: 0.40, max_h: 1.10,
+    presets: [
+      { name: "Side",      w: 0.50, h: 0.50 },
+      { name: "Utility",   w: 0.75, h: 0.75 },
+      { name: "Dining 4",  w: 1.22, h: 0.90 },
+      { name: "Dining 6",  w: 1.52, h: 0.90 },
+      { name: "Dining 8",  w: 1.98, h: 1.00 },
+    ],
+  },
+  chair:     { label: "Chair",     category: "living", w: 0.50, h: 0.50, min_w: 0.43, max_w: 0.55, min_h: 0.45, max_h: 0.62 },
+  desk:      { label: "Desk",      category: "living", w: 1.40, h: 0.70, min_w: 1.00, max_w: 1.80, min_h: 0.60, max_h: 0.80 },
+  tv: {
+    label: "TV", category: "living", w: 1.20, h: 0.40,
+    min_w: 0.90, max_w: 2.00, min_h: 0.35, max_h: 0.50,
+    presets: [
+      { name: "43\" stand", w: 1.20, h: 0.40 },
+      { name: "55\" stand", w: 1.40, h: 0.40 },
+      { name: "65\" stand", w: 1.60, h: 0.45 },
+      { name: "75\" stand", w: 1.80, h: 0.45 },
+      { name: "85\" stand", w: 2.00, h: 0.45 },
+    ],
+  },
+  bookshelf: {
+    label: "Bookshelf", category: "living", w: 0.80, h: 0.30,
+    min_w: 0.40, max_w: 1.60, min_h: 0.28, max_h: 0.40,
+    presets: [
+      { name: "Narrow", w: 0.40, h: 0.28 },
+      { name: "Wide",   w: 0.80, h: 0.28 },
+    ],
+  },
+  armchair:     { label: "Armchair",     category: "living", w: 0.80, h: 0.80, min_w: 0.65, max_w: 1.10, min_h: 0.68, max_h: 1.00 },
+  "coffee-table": { label: "Coffee Table", category: "living", w: 1.10, h: 0.55, min_w: 0.90, max_w: 1.50, min_h: 0.40, max_h: 0.78 },
+  "dining-table-round": {
+    label: "Round Dining Table", category: "living", w: 1.20, h: 1.20,
+    min_w: 0.60, max_w: 1.83, min_h: 0.60, max_h: 1.83,
+    presets: [
+      { name: "Seats 2", w: 0.70, h: 0.70 },
+      { name: "Seats 4", w: 1.00, h: 1.00 },
+      { name: "Seats 6", w: 1.25, h: 1.25 },
+      { name: "Seats 8", w: 1.65, h: 1.65 },
+    ],
+  },
+
+  // Kitchen — appliance widths snap to imperial rungs (24/30/33/36 in).
+  fridge: {
+    label: "Fridge", category: "kitchen", w: 0.76, h: 0.81,
+    min_w: 0.55, max_w: 0.91, min_h: 0.58, max_h: 0.91,
+    presets: [
+      { name: "24\" compact", w: 0.61, h: 0.81 },
+      { name: "30\"",         w: 0.76, h: 0.81 },
+      { name: "33\"",         w: 0.84, h: 0.81 },
+      { name: "36\"",         w: 0.91, h: 0.81 },
+    ],
+  },
+  stove: {
+    label: "Stove", category: "kitchen", w: 0.76, h: 0.71,
+    min_w: 0.61, max_w: 0.91, min_h: 0.66, max_h: 0.74,
+    presets: [
+      { name: "24\"", w: 0.61, h: 0.71 },
+      { name: "30\"", w: 0.76, h: 0.71 },
+      { name: "36\"", w: 0.91, h: 0.72 },
+    ],
+  },
+  sink: {
+    label: "Sink", category: "kitchen", w: 0.76, h: 0.51,
+    min_w: 0.61, max_w: 0.91, min_h: 0.46, max_h: 0.56,
+    presets: [
+      { name: "24\"",        w: 0.61, h: 0.51 },
+      { name: "30\"",        w: 0.76, h: 0.51 },
+      { name: "33\" double", w: 0.84, h: 0.53 },
+    ],
+  },
+  washer: {
+    label: "Washer", category: "kitchen", w: 0.69, h: 0.76,
+    min_w: 0.60, max_w: 0.70, min_h: 0.65, max_h: 0.86,
+    presets: [
+      { name: "24\" compact",  w: 0.61, h: 0.65 },
+      { name: "27\" standard", w: 0.69, h: 0.76 },
+    ],
+  },
+
+  // Bedroom
+  bed: {
+    label: "Bed", category: "bedroom", w: 1.52, h: 2.03,
+    min_w: 0.97, max_w: 1.93, min_h: 1.91, max_h: 2.13,
+    presets: [
+      { name: "Twin",     w: 0.97, h: 1.91 },
+      { name: "Twin XL",  w: 0.97, h: 2.03 },
+      { name: "Full",     w: 1.37, h: 1.91 },
+      { name: "Queen",    w: 1.52, h: 2.03 },
+      { name: "King",     w: 1.93, h: 2.03 },
+      { name: "Cal King", w: 1.83, h: 2.13 },
+    ],
+  },
+  wardrobe: {
+    label: "Wardrobe", category: "bedroom", w: 1.00, h: 0.58,
+    min_w: 0.50, max_w: 1.50, min_h: 0.50, max_h: 0.60,
+    presets: [
+      { name: "1-door",  w: 0.50, h: 0.58 },
+      { name: "2-door",  w: 1.00, h: 0.58 },
+      { name: "3-door",  w: 1.50, h: 0.58 },
+    ],
+  },
+  nightstand: { label: "Nightstand", category: "bedroom", w: 0.45, h: 0.40, min_w: 0.40, max_w: 0.60, min_h: 0.34, max_h: 0.45 },
+  dresser: {
+    label: "Dresser", category: "bedroom", w: 1.00, h: 0.48,
+    min_w: 0.78, max_w: 1.60, min_h: 0.46, max_h: 0.50,
+    presets: [
+      { name: "3-drawer", w: 0.80, h: 0.48 },
+      { name: "6-drawer", w: 1.60, h: 0.48 },
+    ],
+  },
+  cabinet: { label: "Cabinet", category: "bedroom", w: 0.90, h: 0.45, min_w: 0.80, max_w: 1.80, min_h: 0.40, max_h: 0.52 },
+
+  // Bath
+  toilet: {
+    label: "Toilet", category: "bath", w: 0.47, h: 0.72,
+    min_w: 0.35, max_w: 0.53, min_h: 0.69, max_h: 0.79,
+    presets: [
+      { name: "Round-front", w: 0.46, h: 0.70 },
+      { name: "Elongated",   w: 0.47, h: 0.73 },
+    ],
+  },
+  bathtub: {
+    label: "Bathtub", category: "bath", w: 1.70, h: 0.76,
+    min_w: 1.37, max_w: 1.83, min_h: 0.76, max_h: 0.81,
+    presets: [
+      { name: "54\"", w: 1.37, h: 0.76 },
+      { name: "60\"", w: 1.52, h: 0.76 },
+      { name: "66\"", w: 1.68, h: 0.76 },
+      { name: "72\"", w: 1.83, h: 0.76 },
+    ],
+  },
 };
 
 // ── CRUD ───────────────────────────────────────────────────────────────────────
@@ -187,15 +357,19 @@ export function pickSymbol(wx, wy, tolWorld = 0) {
 }
 
 /**
- * Clamp a dimension value to the type's [min, max].
+ * Clamp a dimension value to the type's per-axis bounds.
+ * `dim` selects the axis: "w" clamps to [min_w, max_w], "h" to [min_h, max_h].
  * @param {SymbolType} type
+ * @param {"w"|"h"} dim
  * @param {number} metres
  * @returns {number}
  */
-export function clampDim(type, metres) {
+export function clampDim(type, dim, metres) {
   const cat = CATALOG[type];
   if (!cat) return metres;
-  return Math.min(cat.max, Math.max(cat.min, metres));
+  const lo = dim === "w" ? cat.min_w : cat.min_h;
+  const hi = dim === "w" ? cat.max_w : cat.max_h;
+  return Math.min(hi, Math.max(lo, metres));
 }
 
 /**
@@ -213,17 +387,17 @@ export function resizeSymbol(sym, dim, metres, lockAspect = false) {
   // Openings ignore "h"
   if (CATALOG[sym.type]?.openings && dim === "h") return false;
 
-  const clamped = clampDim(sym.type, metres);
+  const clamped = clampDim(sym.type, dim, metres);
 
   if (lockAspect) {
     if (dim === "w") {
       const ratio = sym.w > 0 ? sym.h / sym.w : 1;
       sym.w = clamped;
-      sym.h = clampDim(sym.type, clamped * ratio);
+      sym.h = clampDim(sym.type, "h", clamped * ratio);
     } else {
       const ratio = sym.h > 0 ? sym.w / sym.h : 1;
       sym.h = clamped;
-      sym.w = clampDim(sym.type, clamped * ratio);
+      sym.w = clampDim(sym.type, "w", clamped * ratio);
     }
     return true;
   }

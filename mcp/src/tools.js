@@ -276,7 +276,7 @@ export function tool_place_symbol(args) {
 
   if (w !== undefined) {
     if (!isFiniteNum(w)) return { ok: false, reason: "w must be finite" };
-    if (clampDim(type, w) !== w) clamped = true;
+    if (clampDim(type, "w", w) !== w) clamped = true;
     resizeSymbol(sym, "w", w);
   }
   if (h !== undefined) {
@@ -284,7 +284,7 @@ export function tool_place_symbol(args) {
     if (isOpening) {
       hIgnored = true; // openings ignore depth (resizeSymbol returns false)
     } else {
-      if (clampDim(type, h) !== h) clamped = true;
+      if (clampDim(type, "h", h) !== h) clamped = true;
       resizeSymbol(sym, "h", h);
     }
   }
@@ -362,7 +362,7 @@ export function tool_resize_symbol(args) {
   if (isOpening && dim === "h") {
     return { ok: true, changed: false, hIgnored: true, w: sym.w, h: sym.h, clearance: singleClearance(id) };
   }
-  const clamped = clampDim(sym.type, metres) !== metres;
+  const clamped = clampDim(sym.type, dim, metres) !== metres;
   const changed = resizeSymbol(sym, dim, metres, !!lockAspect);
   return { ok: true, changed, clamped, w: sym.w, h: sym.h, clearance: singleClearance(id) };
 }
