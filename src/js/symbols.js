@@ -43,6 +43,10 @@ export const model = { symbols: /** @type {Sym[]} */ ([]) };
  * openings:true → single editable dimension (width); depth is a fixed thin
  * marker (min_h===max_h===h) and its chip is hidden. Furniture edits both axes.
  *
+ * circular:true → w and h are a single diameter; any resize on either axis
+ * mirrors to both, enforcing w===h at all times. Takes precedence over
+ * lockAspect (a 1:1 mirror is already the only valid aspect).
+ *
  * `presets` (optional) are named, real, buyable sizes — the discrete choices a
  * user should pick from where the real world is standardized (mattress sizes,
  * 24/30/36-in appliance widths, standard door/window leaves, round-table seat
@@ -52,7 +56,7 @@ export const model = { symbols: /** @type {Sym[]} */ ([]) };
  * DIN/US door leaves) so the catalog only offers furniture that actually exists.
  *
  * @type {Record<SymbolType, {label:string, category:SymCategory,
- *   openings?:boolean, w:number, h:number,
+ *   openings?:boolean, circular?:boolean, w:number, h:number,
  *   min_w:number, max_w:number, min_h:number, max_h:number,
  *   presets?:SymPreset[]}>}
  */
@@ -129,7 +133,7 @@ export const CATALOG = {
   armchair:     { label: "Armchair",     category: "living", w: 0.80, h: 0.80, min_w: 0.65, max_w: 1.10, min_h: 0.68, max_h: 1.00 },
   "coffee-table": { label: "Coffee Table", category: "living", w: 1.10, h: 0.55, min_w: 0.90, max_w: 1.50, min_h: 0.40, max_h: 0.78 },
   "dining-table-round": {
-    label: "Round Dining Table", category: "living", w: 1.20, h: 1.20,
+    label: "Round Dining Table", category: "living", circular: true, w: 1.20, h: 1.20,
     min_w: 0.60, max_w: 1.83, min_h: 0.60, max_h: 1.83,
     presets: [
       { name: "Seats 2", w: 0.70, h: 0.70 },
@@ -423,6 +427,15 @@ export function resizeSymbol(sym, dim, metres, lockAspect = false) {
   if (CATALOG[sym.type]?.openings && dim === "h") return false;
 
   const clamped = clampDim(sym.type, dim, metres);
+
+  // Circular: one diameter — a resize on either axis mirrors to both.
+  // Takes precedence over lockAspect (a 1:1 mirror is the only valid aspect).
+  if (CATALOG[sym.type]?.circular) {
+    const changed = sym.w !== clamped || sym.h !== clamped;
+    sym.w = clamped;
+    sym.h = clamped;
+    return changed;
+  }
 
   if (lockAspect) {
     if (dim === "w") {
