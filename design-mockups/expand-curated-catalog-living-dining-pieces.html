@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Living / dining catalog additions — mockup</title>
+</head>
+<body>
+<div class="wrap">
+  <header class="pagehead">
+    <h1>Living / dining pieces</h1>
+    <p>Armchair &middot; Coffee table &middot; Round dining table — added to the <b>Living</b> dock tab, reusing the existing symbol pattern exactly. This mockup shows the dock icons, the to-scale on-canvas glyphs, selected state with dim chips, and rotation behaviour of the circular table over its rectangular footprint.</p>
+  </header>
+
+  <h2>1 &middot; Living dock tab — with the 3 new items</h2>
+  <p class="note">The three additions sit alongside the existing living pieces in <code>#row-living</code>. No new category tab. New items are flagged with a teal dot here for the review only.</p>
+  <div class="dock">
+    <div class="dock-tabs" role="tablist">
+      <button class="dock-tab" role="tab">Openings</button>
+      <button class="dock-tab" role="tab" aria-selected="true">Living</button>
+      <button class="dock-tab" role="tab">Kitchen</button>
+      <button class="dock-tab" role="tab">Bedroom</button>
+      <button class="dock-tab" role="tab">Bath</button>
+    </div>
+    <div class="dock-row" role="tabpanel">
+      <button class="dock-item" data-type="sofa">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="3" y="5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <rect x="3" y="5" width="12" height="3" rx="1" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity="0.15"/>
+          <rect x="3" y="8" width="2.5" height="6" rx="0.6" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
+          <rect x="12.5" y="8" width="2.5" height="6" rx="0.6" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
+        </svg><span>Sofa</span>
+      </button>
+      <button class="dock-item is-new" data-type="armchair" title="new">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="4" y="4" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+          <rect x="4" y="4" width="10" height="3" rx="1.2" stroke="currentColor" stroke-width="0.9" fill="currentColor" fill-opacity="0.15"/>
+          <rect x="4" y="6.5" width="2.4" height="7.5" rx="0.6" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
+          <rect x="11.6" y="6.5" width="2.4" height="7.5" rx="0.6" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/>
+        </svg><span>Armchair</span>
+      </button>
+      <button class="dock-item" data-type="table">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="3" y="5" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <line x1="3" y1="5" x2="15" y2="13" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
+          <line x1="15" y1="5" x2="3" y2="13" stroke="currentColor" stroke-width="0.8" opacity="0.4"/>
+        </svg><span>Table</span>
+      </button>
+      <button class="dock-item is-new" data-type="coffee-table" title="new">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="2.5" y="6.5" width="13" height="5" rx="1.2" stroke="currentColor" stroke-width="1.3"/>
+          <line x1="5" y1="6.5" x2="5" y2="11.5" stroke="currentColor" stroke-width="0.8" opacity="0.45"/>
+          <line x1="13" y1="6.5" x2="13" y2="11.5" stroke="currentColor" stroke-width="0.8" opacity="0.45"/>
+        </svg><span>Coffee</span>
+      </button>
+      <button class="dock-item is-new" data-type="dining-round" title="new">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="1.3"/>
+          <circle cx="9" cy="9" r="2.4" stroke="currentColor" stroke-width="0.8" opacity="0.5"/>
+        </svg><span>Round</span>
+      </button>
+      <button class="dock-item" data-type="chair">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.3"/>
+          <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="0.8" opacity="0.5"/>
+        </svg><span>Chair</span>
+      </button>
+      <button class="dock-item" data-type="desk">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="3" y="4" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <polyline points="3,4 3,14 15,14" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
+        </svg><span>Desk</span>
+      </button>
+      <button class="dock-item" data-type="tv">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="2" y="4" width="14" height="9" rx="1" stroke="currentColor" stroke-width="1.3" fill="currentColor" fill-opacity="0.06"/>
+          <line x1="9" y1="13" x2="9" y2="16" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        </svg><span>TV</span>
+      </button>
+    </div>
+  </div>
+
+  <h2>2 &middot; On-canvas glyphs, drawn to scale (60 px / m)</h2>
+  <p class="note">Each glyph is composed only from existing SVG primitives (<code>rect</code>, <code>line</code>, <code>circle</code>, <code>ellipse</code>, <code>polygon</code>) painted inside the w&times;h footprint — the same machinery as every other symbol. Existing pieces shown greyed for scale reference.</p>
+  <div class="canvas">
+    <svg id="scale-svg" viewBox="0 0 1080 320" preserveAspectRatio="xMidYMid meet"></svg>
+  </div>
+  <div class="legend">
+    <div><b>Armchair</b>0.80 &times; 0.80 m · min 0.50 · max 1.20</div>
+    <div><b>Coffee table</b>1.10 &times; 0.55 m · min 0.30 · max 2.00</div>
+    <div><b>Round dining table</b>1.20 &times; 1.20 m · min 0.60 · max 2.40</div>
+  </div>
+  <p class="note">Proposed defaults/bounds above are a starting point for the LLD to finalise; all to-scale.</p>
+
+  <h2>3 &middot; Selected state — dim chips &amp; rectangular footprint</h2>
+  <p class="note">The round dining table's <b>footprint stays a w&times;h box</b> for selection, dim chips, hit-test and clearance — only the drawn glyph is circular. Selection box (dashed), rotate handle, and both dim chips render exactly like every other symbol.</p>
+  <div class="grid2" id="cards"></div>
+</div>
+
+<script>
+const NS="http://www.w3.org/2000/svg";
+const PPM=60;                 // px per metre for the mockup
+const INK="#d9be6e", INK_RGB="201,168,76", GOLD="#c9a84c";
+function el(tag,attrs){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);return e;}
+function fill(a){return `rgba(${INK_RGB},${a})`;}
+
+// Draw the w×h body box + type glyph centred at (cx,cy), rotated `rot` deg CW.
+// Mirrors symbolRender._renderInterior composition using existing primitives.
+function drawSymbol(parent, type, cx, cy, wM, hM, rot, opts={}){
+  const g=el("g",{transform:`translate(${cx},${cy}) rotate(${rot})`});
+  const sw=wM*PPM, sh=hM*PPM;
+  const ghost=opts.ghost;
+  const bodyStroke=ghost?"rgba(143,138,120,0.5)":INK;
+  const bodyFill=ghost?"rgba(143,138,120,0.06)":"var(--sym-fill)";
+  const gStroke=ghost?"rgba(143,138,120,0.5)":INK;
+  // footprint box (always rectangular w×h)
+  g.appendChild(el("rect",{x:-sw/2,y:-sh/2,width:sw,height:sh,rx:2,
+    fill:bodyFill,stroke:bodyStroke,"stroke-width":ghost?1:1.5,"stroke-linejoin":"round"}));
+  glyph(g,type,sw,sh,gStroke);
+  parent.appendChild(g);
+  return g;
+}
+
+// Interior glyphs — local frame centred at 0,0. Only existing primitives.
+function glyph(g,type,sw,sh,stroke){
+  const line=(x1,y1,x2,y2,o=0.5,w=0.8)=>el("line",{x1,y1,x2,y2,stroke,"stroke-width":w,opacity:o});
+  if(type==="armchair"){
+    // Deep single seat: back strip across top ~28%, two chunky armrests, seat cushion outline.
+    const bh=sh*0.28;
+    g.appendChild(el("rect",{x:-sw*0.44,y:-sh/2+2,width:sw*0.88,height:bh,rx:3,
+      fill:fill(0.15),stroke,"stroke-width":0.8}));
+    for(const s of[-1,1]){
+      const ax=s*(sw/2-sw*0.11);
+      g.appendChild(el("rect",{x:ax-sw*0.06,y:-sh/2+bh+2,width:sw*0.12,height:sh-bh-4,rx:2,
+        fill:fill(0.1),stroke,"stroke-width":0.7}));
+    }
+    // seat cushion
+    g.appendChild(el("rect",{x:-sw*0.28,y:-sh/2+bh+4,width:sw*0.56,height:sh*0.42,rx:3,
+      fill:"none",stroke,"stroke-width":0.7,opacity:0.6}));
+    return;
+  }
+  if(type==="coffee-table"){
+    // Low table: thin cross lines + inset top-surface rect (reads as a low surface).
+    g.appendChild(el("rect",{x:-sw/2+4,y:-sh/2+3,width:sw-8,height:sh-6,rx:2,
+      fill:fill(0.06),stroke,"stroke-width":0.7,opacity:0.7}));
+    g.appendChild(line(-sw/2+3,-sh/2+3,sw/2-3,sh/2-3,0.4,0.7));
+    g.appendChild(line(sw/2-3,-sh/2+3,-sw/2+3,sh/2-3,0.4,0.7));
+    return;
+  }
+  if(type==="dining-round"){
+    // Circular glyph inscribed in the w×h box (radius = min(w,h)/2), + inner ring.
+    const r=Math.min(sw,sh)/2-1.5;
+    g.appendChild(el("circle",{cx:0,cy:0,r,fill:fill(0.08),stroke,"stroke-width":1}));
+    g.appendChild(el("circle",{cx:0,cy:0,r:r*0.42,fill:"none",stroke,"stroke-width":0.8,opacity:0.5}));
+    return;
+  }
+  if(type==="sofa"){
+    const bh=sh*0.22;
+    g.appendChild(el("rect",{x:-sw*0.45,y:-sh/2+2,width:sw*0.9,height:bh,rx:2,fill:fill(0.15),stroke,"stroke-width":0.8}));
+    for(const s of[-1,1]){const ax=s*(sw/2-sw*0.08);
+      g.appendChild(el("rect",{x:ax-sw*0.04,y:-sh/2+bh+2,width:sw*0.08,height:sh-bh-6,rx:1.5,fill:fill(0.1),stroke,"stroke-width":0.7}));}
+    return;
+  }
+  if(type==="table"){
+    g.appendChild(line(-sw/2+3,-sh/2+3,sw/2-3,sh/2-3,0.5,0.7));
+    g.appendChild(line(sw/2-3,-sh/2+3,-sw/2+3,sh/2-3,0.5,0.7));
+    return;
+  }
+  if(type==="chair"){
+    const r=Math.min(sw,sh)/2*0.65;
+    g.appendChild(el("circle",{cx:0,cy:0,r,fill:"none",stroke,"stroke-width":0.8}));
+    return;
+  }
+}
+
+// ── Section 2: scale row ─────────────────────────────
+const svg=document.getElementById("scale-svg");
+const label=(x,y,txt)=>{const t=el("text",{x,y,fill:"var(--muted)","font-family":"var(--font-mono)","font-size":11,"text-anchor":"middle"});t.textContent=txt;svg.appendChild(t);};
+// existing (ghosted) for scale
+drawSymbol(svg,"sofa",120,120,2.00,0.90,0,{ghost:true}); label(120,185,"sofa 2.00×0.90");
+drawSymbol(svg,"table",120,255,1.20,0.80,0,{ghost:true}); label(120,300,"table 1.20×0.80");
+// new pieces
+drawSymbol(svg,"armchair",340,150,0.80,0.80,0); label(340,215,"armchair 0.80×0.80");
+drawSymbol(svg,"coffee-table",560,150,1.10,0.55,0); label(560,205,"coffee 1.10×0.55");
+drawSymbol(svg,"dining-round",840,150,1.20,1.20,0); label(840,235,"round dining 1.20×1.20");
+
+// ── Section 3: selected-state cards ──────────────────
+const cards=document.getElementById("cards");
+function makeCard(title,dims,type,wM,hM,rot){
+  const card=document.createElement("div"); card.className="card";
+  card.innerHTML=`<h3>${title}</h3><div class="dims">${dims}</div>`;
+  const cv=document.createElement("div"); cv.className="canvas";
+  const s=el("svg",{viewBox:"0 0 260 200",preserveAspectRatio:"xMidYMid meet"});
+  const cx=130,cy=100;
+  drawSymbol(s,type,cx,cy,wM,hM,rot);
+  // selection box = rotated w×h footprint (identical to every symbol)
+  const sw=wM*PPM,sh=hM*PPM;
+  s.appendChild(el("polygon",{class:"sel-box",transform:`translate(${cx},${cy}) rotate(${rot})`,
+    points:`${-sw/2},${-sh/2} ${sw/2},${-sh/2} ${sw/2},${sh/2} ${-sw/2},${sh/2}`}));
+  // rotate handle off top-center of the box
+  const rad=rot*Math.PI/180, nx=Math.sin(rad), ny=-Math.cos(rad);
+  // top-edge midpoint of the rotated box, and its outward normal (nx,ny)
+  const topMid={x:cx+(-(-sh/2)*Math.sin(rad)),y:cy+((-sh/2)*Math.cos(rad))};
+  const knob={x:topMid.x+nx*22,y:topMid.y+ny*22};
+  s.appendChild(el("line",{class:"rot-stem",x1:topMid.x,y1:topMid.y,x2:knob.x,y2:knob.y}));
+  s.appendChild(el("circle",{class:"rot-knob",cx:knob.x,cy:knob.y,r:6}));
+  // dim chips: width chip above top edge, depth chip left of left edge
+  addChip(s,topMid.x+nx*13,topMid.y+ny*13,wM.toFixed(2)+" m");
+  const leftMid={x:cx+((-sw/2)*Math.cos(rad)),y:cy+((-sw/2)*Math.sin(rad))};
+  const lnx=-Math.cos(rad),lny=-Math.sin(rad);
+  addChip(s,leftMid.x+lnx*15,leftMid.y+lny*15,hM.toFixed(2)+" m");
+  cv.appendChild(s); card.appendChild(cv); cards.appendChild(card);
+}
+function addChip(s,x,y,txt){
+  const w=txt.length*6.6+12,h=17;
+  s.appendChild(el("rect",{class:"chip",x:x-w/2,y:y-h/2,width:w,height:h,rx:4}));
+  const t=el("text",{class:"chip-txt",x,y:y+4,"text-anchor":"middle"});t.textContent=txt;s.appendChild(t);
+}
+makeCard("Armchair","0.80 × 0.80 m — selected","armchair",0.80,0.80,0);
+makeCard("Coffee table","1.10 × 0.55 m — selected","coffee-table",1.10,0.55,0);
+makeCard("Round dining table","1.20 × 1.20 m — selected, box footprint","dining-round",1.20,1.20,0);
+makeCard("Round table — rotated 30°","glyph circular, footprint still w×h","dining-round",1.20,1.20,30);
+</script>
+<style>
+  :root {
+    --bg:#14140f; --bg-deep:#100f0b; --ink:#ece7d6; --muted:#8f8a78;
+    --gold:#c9a84c; --gold-soft:rgba(201,168,76,0.55);
+    --grid-fine:rgba(201,168,76,0.055); --grid-major:rgba(201,168,76,0.14);
+    --panel:rgba(20,20,15,0.72);
+    --sym-fill:rgba(201,168,76,0.12); --sym-stroke:#d9be6e; --sym-sel-fill:rgba(201,168,76,0.18);
+    --sym-ink:rgba(201,168,76,1); --snap-teal:#7fd0c8;
+    --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --font-sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:radial-gradient(1200px 800px at 30% -10%, var(--bg) 0%, var(--bg-deep) 100%);
+    color:var(--ink); font-family:var(--font-sans); line-height:1.5;
+    padding:2rem 1rem 5rem;
+  }
+  .wrap { max-width:1080px; margin:0 auto; }
+  .pagehead h1 { font-family:var(--font-mono); font-size:1.35rem; letter-spacing:0.04em; color:var(--gold); margin:0 0 .5rem; font-weight:600; }
+  .pagehead p { color:var(--muted); font-size:.9rem; max-width:70ch; margin:0; }
+  .pagehead b { color:var(--ink); font-weight:600; }
+  h2 { font-family:var(--font-mono); font-size:.72rem; letter-spacing:0.16em; text-transform:uppercase; color:var(--muted); margin:2.4rem 0 .9rem; border-bottom:1px solid rgba(201,168,76,0.14); padding-bottom:.5rem; }
+  .note { font-size:.78rem; color:var(--muted); margin:.4rem 0 0; }
+  .note code { font-family:var(--font-mono); color:var(--gold); font-size:.9em; }
+
+  /* ── Dock strip ─────────────────────────────── */
+  .dock { background:var(--panel); border:1px solid rgba(201,168,76,0.14); border-radius:12px; padding:.55rem .5rem; display:inline-block; backdrop-filter:blur(6px); }
+  .dock-tabs { display:flex; gap:.1rem; border-bottom:1px solid rgba(201,168,76,0.14); margin:0 .1rem .35rem; padding-bottom:.05rem; }
+  .dock-tab { background:transparent; border:none; border-bottom:2px solid transparent; color:var(--muted); font-family:var(--font-mono); font-size:.62rem; letter-spacing:.06em; padding:.3rem .55rem .35rem; cursor:pointer; }
+  .dock-tab[aria-selected="true"] { color:var(--gold); border-bottom-color:var(--gold); background:rgba(201,168,76,0.13); border-radius:5px 5px 0 0; }
+  .dock-row { display:flex; gap:0; padding:.35rem .2rem 0; }
+  .dock-item { background:transparent; border:1px solid transparent; color:var(--muted); font-family:var(--font-mono); font-size:.55rem; letter-spacing:.04em; width:2.6rem; height:2.6rem; border-radius:7px; cursor:grab; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.15rem; padding:.2rem 0; flex-shrink:0; transition:color .12s,border-color .12s,background .12s; }
+  .dock-item:hover { color:var(--gold); border-color:var(--gold-soft); background:rgba(201,168,76,0.07); }
+  .dock-item.is-new { position:relative; }
+  .dock-item.is-new::after { content:""; position:absolute; top:5px; right:6px; width:5px; height:5px; border-radius:50%; background:var(--snap-teal); }
+
+  /* ── Canvas / plan surface ──────────────────── */
+  .canvas { position:relative; margin-top:1rem; border:1px solid rgba(201,168,76,0.14); border-radius:12px; overflow:hidden; background:
+      linear-gradient(var(--grid-fine) 1px, transparent 1px) 0 0/24px 24px,
+      linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px) 0 0/24px 24px,
+      linear-gradient(var(--grid-major) 1px, transparent 1px) 0 0/120px 120px,
+      linear-gradient(90deg, var(--grid-major) 1px, transparent 1px) 0 0/120px 120px,
+      var(--bg-deep); }
+  .canvas svg { display:block; width:100%; height:auto; }
+  .legend { display:flex; flex-wrap:wrap; gap:1.4rem; margin-top:.7rem; }
+  .legend > div { font-family:var(--font-mono); font-size:.62rem; color:var(--muted); letter-spacing:.04em; }
+  .legend b { color:var(--ink); display:block; font-size:.68rem; margin-bottom:.15rem; }
+
+  /* selection box + chips (screenshot of selected state) */
+  .sel-box { fill:none; stroke:var(--gold); stroke-width:1.5; stroke-dasharray:5 3; }
+  .rot-stem { stroke:var(--gold-soft); stroke-width:1; }
+  .rot-knob { fill:var(--gold); }
+  .chip { fill:var(--panel); stroke:var(--gold-soft); stroke-width:1; }
+  .chip-txt { fill:var(--ink); font-family:var(--font-mono); font-size:11px; }
+
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:1.1rem; }
+  .card { background:var(--panel); border:1px solid rgba(201,168,76,0.14); border-radius:12px; padding:1rem; }
+  .card h3 { font-family:var(--font-mono); font-size:.78rem; color:var(--gold); margin:0 0 .2rem; letter-spacing:.04em; }
+  .card .dims { font-family:var(--font-mono); font-size:.66rem; color:var(--muted); margin-bottom:.7rem; }
+  .card .canvas { margin-top:0; }
+</style>
+</body>
+</html>
