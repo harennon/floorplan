@@ -76,15 +76,15 @@ test("set_edge_length hits the exact target; bad index / degenerate → {ok:fals
 test("place_symbol / resize_symbol clamp out-of-range dims and report clamped:true", () => {
   session.newPlan();
   tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
-  // bed max is 2.5; request 9 → clamped.
+  // bed width max is max_w; request 9 → clamped to the width axis.
   const p = tools.tool_place_symbol({ type: "bed", x: 6, y: 6, w: 9 });
   assert.equal(p.ok, true);
   assert.equal(p.clamped, true);
-  assert.equal(p.w, CATALOG.bed.max);
+  assert.equal(p.w, CATALOG.bed.max_w);
 
-  const rz = tools.tool_resize_symbol({ id: p.id, dim: "w", metres: 0.01 }); // below min
+  const rz = tools.tool_resize_symbol({ id: p.id, dim: "w", metres: 0.01 }); // below min_w
   assert.equal(rz.clamped, true);
-  assert.equal(rz.w, CATALOG.bed.min);
+  assert.equal(rz.w, CATALOG.bed.min_w);
 });
 
 test("place_symbol on an opening ignores h and flags hIgnored", () => {

@@ -217,7 +217,7 @@ export function buildServer() {
     }));
 
   server.registerResource("catalog", "floorplan://catalog",
-    { description: "The symbol catalog: types, default w/h, and min/max clamp bounds.", mimeType: "application/json" },
+    { description: "The symbol catalog: types, default w/h, per-axis clamp bounds (min_w/max_w/min_h/max_h), and named real-product presets (e.g. bed sizes, appliance widths, door leaves) where the type is standardized. All bounds/presets are grounded in real, buyable furniture — resize within these to keep a plan realizable.", mimeType: "application/json" },
     async (uri) => ({
       contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(CATALOG) }],
     }));

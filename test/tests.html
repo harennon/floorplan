@@ -1665,43 +1665,43 @@ describe("symbols.js — pickSymbol", () => {
 
 describe("symbols.js — clampDim", () => {
   it("passes through in-range value", () => {
-    expect(clampDim("bed", 1.5)).toBeCloseTo(1.5, 9);
+    expect(clampDim("bed", "w", 1.5)).toBeCloseTo(1.5, 9);
   });
 
-  it("clamps below min → min", () => {
-    expect(clampDim("chair", 0.1)).toBeCloseTo(CATALOG.chair.min, 9);
+  it("clamps below min → min (width axis)", () => {
+    expect(clampDim("chair", "w", 0.1)).toBeCloseTo(CATALOG.chair.min_w, 9);
   });
 
-  it("clamps above max → max", () => {
-    expect(clampDim("sofa", 99)).toBeCloseTo(CATALOG.sofa.max, 9);
+  it("clamps above max → max (width axis)", () => {
+    expect(clampDim("sofa", "w", 99)).toBeCloseTo(CATALOG.sofa.max_w, 9);
   });
 });
 
 describe("symbols.js — resizeSymbol", () => {
   it("sets width to clamped value", () => {
     resetSymbolModel();
-    const s = createSymbol("bed", 0, 0);
+    const s = createSymbol("sofa", 0, 0); // 2.0 is in-range for sofa width
     addSymbol(s);
     resizeSymbol(s, "w", 2.0);
     expect(s.w).toBeCloseTo(2.0, 9);
   });
 
-  it("clamps value to [min, max]", () => {
+  it("clamps value to [min_w, max_w]", () => {
     resetSymbolModel();
     const s = createSymbol("chair", 0, 0);
-    resizeSymbol(s, "w", 0.01); // below min=0.30
-    expect(s.w).toBeCloseTo(CATALOG.chair.min, 9);
-    resizeSymbol(s, "w", 999); // above max=1.00
-    expect(s.w).toBeCloseTo(CATALOG.chair.max, 9);
+    resizeSymbol(s, "w", 0.01); // below min_w
+    expect(s.w).toBeCloseTo(CATALOG.chair.min_w, 9);
+    resizeSymbol(s, "w", 999); // above max_w
+    expect(s.w).toBeCloseTo(CATALOG.chair.max_w, 9);
   });
 
   it("lockAspect scales both dims proportionally", () => {
     resetSymbolModel();
-    const s = createSymbol("bed", 0, 0); // w=1.5, h=2.0, ratio h/w = 4/3
+    const s = createSymbol("table", 0, 0); // w=1.20, h=0.80; ratio stays in both axes' bounds
     const origRatio = s.h / s.w;
-    resizeSymbol(s, "w", 1.2, true);
-    expect(s.w).toBeCloseTo(1.2, 5);
-    expect(s.h).toBeCloseTo(1.2 * origRatio, 5);
+    resizeSymbol(s, "w", 1.0, true);
+    expect(s.w).toBeCloseTo(1.0, 5);
+    expect(s.h).toBeCloseTo(1.0 * origRatio, 5);
   });
 
   it("openings ignore dim='h'", () => {
@@ -1841,20 +1841,20 @@ describe("LLD-45 — catalog integrity: all new types present and valid", () => 
     }
   });
 
-  it("every new type has finite w, h, min, max", () => {
+  it("every new type has finite w, h, and per-axis bounds", () => {
     for (const t of LLD45_TYPES) {
       const cat = CATALOG[t];
-      for (const key of ["w", "h", "min", "max"]) {
+      for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
         if (!isFinite(cat[key])) throw new Error(`${t}.${key} is not finite: ${cat[key]}`);
       }
     }
   });
 
-  it("min <= w <= max and min <= h <= max for every new type (single-range guard)", () => {
+  it("min_w <= w <= max_w and min_h <= h <= max_h for every new type (per-axis guard)", () => {
     for (const t of LLD45_TYPES) {
-      const { w, h, min, max } = CATALOG[t];
-      if (w < min || w > max) throw new Error(`${t}: w=${w} not in [${min},${max}]`);
-      if (h < min || h > max) throw new Error(`${t}: h=${h} not in [${min},${max}]`);
+      const { w, h, min_w, max_w, min_h, max_h } = CATALOG[t];
+      if (w < min_w || w > max_w) throw new Error(`${t}: w=${w} not in [${min_w},${max_w}]`);
+      if (h < min_h || h > max_h) throw new Error(`${t}: h=${h} not in [${min_h},${max_h}]`);
     }
   });
 
@@ -1893,48 +1893,53 @@ describe("LLD-45 — createSymbol: new types return correct Sym", () => {
   });
 });
 
-describe("LLD-45 — clampDim: new types clamp at min and max", () => {
-  it("bathtub (asymmetric): clampDim below min clamps to min", () => {
-    const { min } = CATALOG.bathtub;
-    expect(clampDim("bathtub", min - 0.1)).toBeCloseTo(min, 9);
+describe("LLD-45 — clampDim: new types clamp at per-axis min and max", () => {
+  it("bathtub: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG.bathtub;
+    expect(clampDim("bathtub", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
   });
-  it("bathtub (asymmetric): clampDim above max clamps to max", () => {
-    const { max } = CATALOG.bathtub;
-    expect(clampDim("bathtub", max + 1)).toBeCloseTo(max, 9);
+  it("bathtub: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG.bathtub;
+    expect(clampDim("bathtub", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
-  it("washer (symmetric): clampDim below min clamps to min", () => {
-    const { min } = CATALOG.washer;
-    expect(clampDim("washer", min - 0.1)).toBeCloseTo(min, 9);
+  it("bathtub: depth below min_h clamps to min_h", () => {
+    const { min_h } = CATALOG.bathtub;
+    expect(clampDim("bathtub", "h", min_h - 0.1)).toBeCloseTo(min_h, 9);
   });
-  it("washer (symmetric): clampDim above max clamps to max", () => {
-    const { max } = CATALOG.washer;
-    expect(clampDim("washer", max + 1)).toBeCloseTo(max, 9);
+  it("washer: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG.washer;
+    expect(clampDim("washer", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
+  });
+  it("washer: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG.washer;
+    expect(clampDim("washer", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
 });
 
 describe("LLD-45 — resizeSymbol: clamp on huge/tiny inputs", () => {
-  it("bathtub w huge clamps to max and returns changed=true", () => {
+  it("bathtub w huge clamps to max_w and returns changed=true", () => {
     const s = createSymbol("bathtub", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.bathtub.max, 9);
+    expect(s.w).toBeCloseTo(CATALOG.bathtub.max_w, 9);
     expect(changed).toBe(true);
   });
-  it("bathtub h tiny clamps to min and returns changed=true", () => {
+  it("bathtub h tiny clamps to min_h and returns changed=true", () => {
     const s = createSymbol("bathtub", 0, 0);
+    resizeSymbol(s, "h", CATALOG.bathtub.max_h); // move off the min_h default first
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG.bathtub.min, 9);
+    expect(s.h).toBeCloseTo(CATALOG.bathtub.min_h, 9);
     expect(changed).toBe(true);
   });
-  it("washer w huge clamps to max and returns changed=true", () => {
+  it("washer w huge clamps to max_w and returns changed=true", () => {
     const s = createSymbol("washer", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.washer.max, 9);
+    expect(s.w).toBeCloseTo(CATALOG.washer.max_w, 9);
     expect(changed).toBe(true);
   });
-  it("washer h tiny clamps to min and returns changed=true", () => {
+  it("washer h tiny clamps to min_h and returns changed=true", () => {
     const s = createSymbol("washer", 0, 0);
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG.washer.min, 9);
+    expect(s.h).toBeCloseTo(CATALOG.washer.min_h, 9);
     expect(changed).toBe(true);
   });
 });
@@ -2050,7 +2055,7 @@ describe("symbolDimEntry — commit resizes symbol", () => {
     const input = rig.stage.querySelector(".sym-dim-input");
     input.value = "99m";
     commitSymbol();
-    expect(s.w).toBeCloseTo(CATALOG.chair.max, 5);
+    expect(s.w).toBeCloseTo(CATALOG.chair.max_w, 5);
     rig.cleanup();
   });
 
@@ -2065,7 +2070,7 @@ describe("symbolDimEntry — commit resizes symbol", () => {
     const input = rig.stage.querySelector(".sym-dim-input");
     input.value = "0.01m";
     commitSymbol();
-    expect(s.w).toBeCloseTo(CATALOG.chair.min, 5);
+    expect(s.w).toBeCloseTo(CATALOG.chair.min_w, 5);
     rig.cleanup();
   });
 
@@ -2129,17 +2134,17 @@ describe("symbolDimEntry — lock-aspect is forwarded to resizeSymbol", () => {
     resetSymbolModel();
     setUnit("m");
     view.zoom = 1; view.panX = 0; view.panY = 0;
-    const s = createSymbol("bed", 5, 5); // w=1.5, h=2.0
+    const s = createSymbol("table", 5, 5); // w=1.20, h=0.80; ratio stays in both axes' bounds
     addSymbol(s);
     const origRatio = s.h / s.w;
     const rig = makeSymbolDimRig(true); // lockAspect ON
     beginSymbolEdit(s.id, "w");
     const input = rig.stage.querySelector(".sym-dim-input");
-    input.value = "1.2m";
+    input.value = "1.0m";
     commitSymbol();
-    expect(s.w).toBeCloseTo(1.2, 5);
+    expect(s.w).toBeCloseTo(1.0, 5);
     // h should scale to preserve the ratio (within clamp)
-    const expectedH = clampDim("bed", 1.2 * origRatio);
+    const expectedH = clampDim("table", "h", 1.0 * origRatio);
     expect(s.h).toBeCloseTo(expectedH, 4);
     rig.cleanup();
   });
@@ -9093,20 +9098,28 @@ describe("LLD-50 — catalog: every entry has a valid 5-value category", () => {
 });
 
 describe("LLD-50 — catalog: regression guard (dimensions + labels)", () => {
-  it("all entries have finite w, h, min, max; non-openings satisfy min <= w,h <= max", () => {
+  it("all entries have finite w, h, per-axis bounds; defaults + presets lie within bounds", () => {
     for (const [type, entry] of Object.entries(CATALOG)) {
-      for (const field of ["w", "h", "min", "max"]) {
+      for (const field of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
         if (!isFinite(entry[field])) {
           throw new Error(`${type}.${field} is not finite: ${entry[field]}`);
         }
       }
-      // openings (door/window) have a fixed thin depth (h) that is intentionally below
-      // the user-editable min — only the width (w) is user-resizable for openings.
-      if (entry.min > entry.w) throw new Error(`${type}: min(${entry.min}) > w(${entry.w})`);
-      if (entry.w > entry.max) throw new Error(`${type}: w(${entry.w}) > max(${entry.max})`);
-      if (!entry.openings) {
-        if (entry.min > entry.h) throw new Error(`${type}: min(${entry.min}) > h(${entry.h})`);
-        if (entry.h > entry.max) throw new Error(`${type}: h(${entry.h}) > max(${entry.max})`);
+      // Default footprint must sit inside the per-axis envelope.
+      if (entry.w < entry.min_w || entry.w > entry.max_w) {
+        throw new Error(`${type}: w(${entry.w}) not in [${entry.min_w},${entry.max_w}]`);
+      }
+      if (entry.h < entry.min_h || entry.h > entry.max_h) {
+        throw new Error(`${type}: h(${entry.h}) not in [${entry.min_h},${entry.max_h}]`);
+      }
+      // Every named preset must also be a real, in-bounds size.
+      for (const p of entry.presets || []) {
+        if (p.w < entry.min_w || p.w > entry.max_w) {
+          throw new Error(`${type} preset ${p.name}: w(${p.w}) not in [${entry.min_w},${entry.max_w}]`);
+        }
+        if (p.h < entry.min_h || p.h > entry.max_h) {
+          throw new Error(`${type} preset ${p.name}: h(${p.h}) not in [${entry.min_h},${entry.max_h}]`);
+        }
       }
     }
   });
@@ -9133,27 +9146,27 @@ describe("LLD-50 — createSymbol + clampDim for new-type spot-checks", () => {
     }
   });
 
-  it("clampDim: asymmetric type (bathtub) clamps min and max correctly", () => {
-    // bathtub: min=0.30, max=2.20
-    expect(clampDim("bathtub", 0.20)).toBeCloseTo(0.30, 9); // below min → min
-    expect(clampDim("bathtub", 3.00)).toBeCloseTo(2.20, 9); // above max → max
-    expect(clampDim("bathtub", 1.00)).toBeCloseTo(1.00, 9); // in range → unchanged
+  it("clampDim: bathtub clamps width axis to [min_w, max_w]", () => {
+    // bathtub width: min_w=1.37, max_w=1.83
+    expect(clampDim("bathtub", "w", 0.20)).toBeCloseTo(1.37, 9); // below min_w → min_w
+    expect(clampDim("bathtub", "w", 3.00)).toBeCloseTo(1.83, 9); // above max_w → max_w
+    expect(clampDim("bathtub", "w", 1.50)).toBeCloseTo(1.50, 9); // in range → unchanged
   });
 
-  it("clampDim: symmetric type (washer) clamps min and max correctly", () => {
-    // washer: min=0.30, max=1.00
-    expect(clampDim("washer", 0.10)).toBeCloseTo(0.30, 9); // below min → min
-    expect(clampDim("washer", 1.50)).toBeCloseTo(1.00, 9); // above max → max
-    expect(clampDim("washer", 0.60)).toBeCloseTo(0.60, 9); // in range → unchanged
+  it("clampDim: washer clamps width axis to [min_w, max_w]", () => {
+    // washer width: min_w=0.60, max_w=0.70
+    expect(clampDim("washer", "w", 0.10)).toBeCloseTo(0.60, 9); // below min_w → min_w
+    expect(clampDim("washer", "w", 1.50)).toBeCloseTo(0.70, 9); // above max_w → max_w
+    expect(clampDim("washer", "w", 0.65)).toBeCloseTo(0.65, 9); // in range → unchanged
   });
 
   it("resizeSymbol clamps and returns changed flag correctly", () => {
     resetSymbolModel();
     const s = createSymbol("bathtub", 0, 0);
-    // Resize to below min — should clamp and return true (changed)
+    // Resize width to below min_w — should clamp and return true (changed)
     const changed = resizeSymbol(s, "w", 0.10);
     expect(changed).toBe(true);
-    expect(s.w).toBeCloseTo(0.30, 9);
+    expect(s.w).toBeCloseTo(1.37, 9); // bathtub min_w
     // Resize to same clamped value — should return false (no change)
     const notChanged = resizeSymbol(s, "w", 0.10);
     expect(notChanged).toBe(false);
@@ -9409,20 +9422,20 @@ describe("LLD 70 — catalog integrity: nightstand, dresser, cabinet", () => {
     }
   });
 
-  it("all three have finite w, h, min, max", () => {
+  it("all three have finite w, h, and per-axis bounds", () => {
     for (const t of LLD70_TYPES) {
       const cat = CATALOG[t];
-      for (const key of ["w", "h", "min", "max"]) {
+      for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
         if (!isFinite(cat[key])) throw new Error(`${t}.${key} is not finite: ${cat[key]}`);
       }
     }
   });
 
-  it("min <= w <= max and min <= h <= max for all three", () => {
+  it("min_w <= w <= max_w and min_h <= h <= max_h for all three", () => {
     for (const t of LLD70_TYPES) {
-      const { w, h, min, max } = CATALOG[t];
-      if (w < min || w > max) throw new Error(`${t}: w=${w} not in [${min},${max}]`);
-      if (h < min || h > max) throw new Error(`${t}: h=${h} not in [${min},${max}]`);
+      const { w, h, min_w, max_w, min_h, max_h } = CATALOG[t];
+      if (w < min_w || w > max_w) throw new Error(`${t}: w=${w} not in [${min_w},${max_w}]`);
+      if (h < min_h || h > max_h) throw new Error(`${t}: h=${h} not in [${min_h},${max_h}]`);
     }
   });
 
@@ -9459,78 +9472,78 @@ describe("LLD 70 — createSymbol: new types return correct Sym", () => {
   });
 });
 
-describe("LLD 70 — clampDim: new types clamp at min and max", () => {
-  it("nightstand: clampDim below min clamps to min", () => {
-    const { min } = CATALOG.nightstand;
-    expect(clampDim("nightstand", min - 0.1)).toBeCloseTo(min, 9);
+describe("LLD 70 — clampDim: new types clamp at per-axis min_w and max_w", () => {
+  it("nightstand: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG.nightstand;
+    expect(clampDim("nightstand", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
   });
 
-  it("nightstand: clampDim above max clamps to max", () => {
-    const { max } = CATALOG.nightstand;
-    expect(clampDim("nightstand", max + 1)).toBeCloseTo(max, 9);
+  it("nightstand: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG.nightstand;
+    expect(clampDim("nightstand", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
 
-  it("dresser: clampDim below min clamps to min", () => {
-    const { min } = CATALOG.dresser;
-    expect(clampDim("dresser", min - 0.1)).toBeCloseTo(min, 9);
+  it("dresser: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG.dresser;
+    expect(clampDim("dresser", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
   });
 
-  it("dresser: clampDim above max clamps to max", () => {
-    const { max } = CATALOG.dresser;
-    expect(clampDim("dresser", max + 1)).toBeCloseTo(max, 9);
+  it("dresser: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG.dresser;
+    expect(clampDim("dresser", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
 
-  it("cabinet: clampDim below min clamps to min", () => {
-    const { min } = CATALOG.cabinet;
-    expect(clampDim("cabinet", min - 0.1)).toBeCloseTo(min, 9);
+  it("cabinet: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG.cabinet;
+    expect(clampDim("cabinet", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
   });
 
-  it("cabinet: clampDim above max clamps to max", () => {
-    const { max } = CATALOG.cabinet;
-    expect(clampDim("cabinet", max + 1)).toBeCloseTo(max, 9);
+  it("cabinet: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG.cabinet;
+    expect(clampDim("cabinet", "w", max_w + 1)).toBeCloseTo(max_w, 9);
   });
 });
 
 describe("LLD 70 — resizeSymbol: new types clamp on huge/tiny inputs", () => {
-  it("nightstand w huge clamps to max, returns changed=true", () => {
+  it("nightstand w huge clamps to max_w, returns changed=true", () => {
     const s = createSymbol("nightstand", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.nightstand.max, 9);
+    expect(s.w).toBeCloseTo(CATALOG.nightstand.max_w, 9);
     expect(changed).toBe(true);
   });
 
-  it("nightstand h tiny clamps to min, returns changed=true", () => {
+  it("nightstand h tiny clamps to min_h, returns changed=true", () => {
     const s = createSymbol("nightstand", 0, 0);
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG.nightstand.min, 9);
+    expect(s.h).toBeCloseTo(CATALOG.nightstand.min_h, 9);
     expect(changed).toBe(true);
   });
 
-  it("dresser w huge clamps to max, returns changed=true", () => {
+  it("dresser w huge clamps to max_w, returns changed=true", () => {
     const s = createSymbol("dresser", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.dresser.max, 9);
+    expect(s.w).toBeCloseTo(CATALOG.dresser.max_w, 9);
     expect(changed).toBe(true);
   });
 
-  it("dresser h tiny clamps to min, returns changed=true", () => {
+  it("dresser h tiny clamps to min_h, returns changed=true", () => {
     const s = createSymbol("dresser", 0, 0);
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG.dresser.min, 9);
+    expect(s.h).toBeCloseTo(CATALOG.dresser.min_h, 9);
     expect(changed).toBe(true);
   });
 
-  it("cabinet w huge clamps to max, returns changed=true", () => {
+  it("cabinet w huge clamps to max_w, returns changed=true", () => {
     const s = createSymbol("cabinet", 0, 0);
     const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.cabinet.max, 9);
+    expect(s.w).toBeCloseTo(CATALOG.cabinet.max_w, 9);
     expect(changed).toBe(true);
   });
 
-  it("cabinet h tiny clamps to min, returns changed=true", () => {
+  it("cabinet h tiny clamps to min_h, returns changed=true", () => {
     const s = createSymbol("cabinet", 0, 0);
     const changed = resizeSymbol(s, "h", 0.001);
-    expect(s.h).toBeCloseTo(CATALOG.cabinet.min, 9);
+    expect(s.h).toBeCloseTo(CATALOG.cabinet.min_h, 9);
     expect(changed).toBe(true);
   });
 
@@ -12034,21 +12047,21 @@ describe("LLD-69 — catalog integrity: three new living types", () => {
     }
   });
 
-  it("every new type has finite w, h, min, max", () => {
+  it("every new type has finite w, h, and per-axis bounds", () => {
     for (const t of LLD69_TYPES) {
       const cat = CATALOG[t];
-      for (const key of ["w", "h", "min", "max"]) {
+      for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
         if (!isFinite(cat[key])) throw new Error(t + "." + key + " is not finite: " + cat[key]);
       }
     }
   });
 
-  it("min <= w <= max and min <= h <= max for every new type", () => {
+  it("min_w <= w <= max_w and min_h <= h <= max_h for every new type", () => {
     for (const t of LLD69_TYPES) {
       const cat = CATALOG[t];
-      const w = cat.w, h = cat.h, min = cat.min, max = cat.max;
-      if (w < min || w > max) throw new Error(t + ": w=" + w + " not in [" + min + "," + max + "]");
-      if (h < min || h > max) throw new Error(t + ": h=" + h + " not in [" + min + "," + max + "]");
+      const w = cat.w, h = cat.h, min_w = cat.min_w, max_w = cat.max_w, min_h = cat.min_h, max_h = cat.max_h;
+      if (w < min_w || w > max_w) throw new Error(t + ": w=" + w + " not in [" + min_w + "," + max_w + "]");
+      if (h < min_h || h > max_h) throw new Error(t + ": h=" + h + " not in [" + min_h + "," + max_h + "]");
     }
   });
 
@@ -12058,28 +12071,34 @@ describe("LLD-69 — catalog integrity: three new living types", () => {
     }
   });
 
-  it("armchair: w=0.80, h=0.80, min=0.40, max=1.20", () => {
+  it("armchair: w=0.80, h=0.80, per-axis bounds w[0.65,1.10] h[0.68,1.00]", () => {
     const cat = CATALOG["armchair"];
     expect(cat.w).toBeCloseTo(0.80, 9);
     expect(cat.h).toBeCloseTo(0.80, 9);
-    expect(cat.min).toBeCloseTo(0.40, 9);
-    expect(cat.max).toBeCloseTo(1.20, 9);
+    expect(cat.min_w).toBeCloseTo(0.65, 9);
+    expect(cat.max_w).toBeCloseTo(1.10, 9);
+    expect(cat.min_h).toBeCloseTo(0.68, 9);
+    expect(cat.max_h).toBeCloseTo(1.00, 9);
   });
 
-  it("coffee-table: w=1.10, h=0.55, min=0.30, max=2.00", () => {
+  it("coffee-table: w=1.10, h=0.55, per-axis bounds w[0.90,1.50] h[0.40,0.78]", () => {
     const cat = CATALOG["coffee-table"];
     expect(cat.w).toBeCloseTo(1.10, 9);
     expect(cat.h).toBeCloseTo(0.55, 9);
-    expect(cat.min).toBeCloseTo(0.30, 9);
-    expect(cat.max).toBeCloseTo(2.00, 9);
+    expect(cat.min_w).toBeCloseTo(0.90, 9);
+    expect(cat.max_w).toBeCloseTo(1.50, 9);
+    expect(cat.min_h).toBeCloseTo(0.40, 9);
+    expect(cat.max_h).toBeCloseTo(0.78, 9);
   });
 
-  it("dining-table-round: w=1.20, h=1.20, min=0.60, max=2.50", () => {
+  it("dining-table-round: w=1.20, h=1.20, per-axis bounds [0.60,1.83]", () => {
     const cat = CATALOG["dining-table-round"];
     expect(cat.w).toBeCloseTo(1.20, 9);
     expect(cat.h).toBeCloseTo(1.20, 9);
-    expect(cat.min).toBeCloseTo(0.60, 9);
-    expect(cat.max).toBeCloseTo(2.50, 9);
+    expect(cat.min_w).toBeCloseTo(0.60, 9);
+    expect(cat.max_w).toBeCloseTo(1.83, 9);
+    expect(cat.min_h).toBeCloseTo(0.60, 9);
+    expect(cat.max_h).toBeCloseTo(1.83, 9);
   });
 });
 
@@ -12103,29 +12122,29 @@ describe("LLD-69 — createSymbol: new types return correct Sym", () => {
   });
 });
 
-describe("LLD-69 — clampDim: new types clamp at min and max", () => {
-  it("dining-table-round: below min (0.60) clamps to 0.60", () => {
-    expect(clampDim("dining-table-round", 0.10)).toBeCloseTo(0.60, 9);
+describe("LLD-69 — clampDim: new types clamp at per-axis min and max", () => {
+  it("dining-table-round: width below min_w (0.60) clamps to 0.60", () => {
+    expect(clampDim("dining-table-round", "w", 0.10)).toBeCloseTo(0.60, 9);
   });
 
-  it("dining-table-round: above max (2.50) clamps to 2.50", () => {
-    expect(clampDim("dining-table-round", 9.99)).toBeCloseTo(2.50, 9);
+  it("dining-table-round: width above max_w (1.83) clamps to 1.83", () => {
+    expect(clampDim("dining-table-round", "w", 9.99)).toBeCloseTo(1.83, 9);
   });
 
-  it("dining-table-round: in-range value 1.50 passes through unchanged", () => {
-    expect(clampDim("dining-table-round", 1.50)).toBeCloseTo(1.50, 9);
+  it("dining-table-round: in-range width 1.50 passes through unchanged", () => {
+    expect(clampDim("dining-table-round", "w", 1.50)).toBeCloseTo(1.50, 9);
   });
 
-  it("coffee-table: in-range value 0.80 passes through unchanged", () => {
-    expect(clampDim("coffee-table", 0.80)).toBeCloseTo(0.80, 9);
+  it("coffee-table: in-range width 1.20 passes through unchanged", () => {
+    expect(clampDim("coffee-table", "w", 1.20)).toBeCloseTo(1.20, 9);
   });
 
-  it("armchair: below min (0.40) clamps to 0.40", () => {
-    expect(clampDim("armchair", 0.10)).toBeCloseTo(0.40, 9);
+  it("armchair: width below min_w (0.65) clamps to 0.65", () => {
+    expect(clampDim("armchair", "w", 0.10)).toBeCloseTo(0.65, 9);
   });
 
-  it("armchair: above max (1.20) clamps to 1.20", () => {
-    expect(clampDim("armchair", 5.00)).toBeCloseTo(1.20, 9);
+  it("armchair: width above max_w (1.10) clamps to 1.10", () => {
+    expect(clampDim("armchair", "w", 5.00)).toBeCloseTo(1.10, 9);
   });
 });
 
@@ -12137,18 +12156,18 @@ describe("LLD-69 — resizeSymbol: clamp on huge/tiny inputs", () => {
     expect(changed).toBe(true);
   });
 
-  it("dining-table-round h huge clamps to max=2.50 and returns changed=true", () => {
+  it("dining-table-round h huge clamps to max_h=1.83 and returns changed=true", () => {
     const s = createSymbol("dining-table-round", 0, 0);
     const changed = resizeSymbol(s, "h", 99);
-    expect(s.h).toBeCloseTo(2.50, 9);
+    expect(s.h).toBeCloseTo(1.83, 9);
     expect(changed).toBe(true);
   });
 
   it("coffee-table w in-range returns correct changed flag", () => {
     const s = createSymbol("coffee-table", 0, 0);
-    // current w=1.10, set to 0.80 — should change
-    const changed = resizeSymbol(s, "w", 0.80);
-    expect(s.w).toBeCloseTo(0.80, 9);
+    // current w=1.10, set to 1.30 (in [0.90,1.50]) — should change
+    const changed = resizeSymbol(s, "w", 1.30);
+    expect(s.w).toBeCloseTo(1.30, 9);
     expect(changed).toBe(true);
   });
 });
