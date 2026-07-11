@@ -14,6 +14,142 @@ export const PLAN_SCHEMA = 1;
 const APP_TAG = "floorplan";
 const VALID_UNITS = ["ft", "m"];
 
+// ── Compact codec (LLD 77) ────────────────────────────────────────────────────
+
+/** Internal version byte for the compact payload format. */
+export const COMPACT_VERSION = 1;
+
+/**
+ * Round a coordinate to millimetre precision (3 decimal places).
+ * @param {number} v
+ * @returns {number}
+ */
+function _mmRound(v) {
+  return Math.round(v * 1000) / 1000;
+}
+
+/**
+ * Validated Plan → lean CompactPlan (drops app/schema/view/ids/defaults,
+ * tuple vertices, mm-rounded coords). Pure. Assumes `plan` is already a
+ * well-formed Plan (as produced by buildPlan/validatePlan).
+ *
+ * @typedef {Object} CompactPlan
+ * @property {number} v   compact-format version (COMPACT_VERSION = 1)
+ * @property {"ft"|"m"} u unit
+ * @property {Array<{c:0|1, p:number[][]}>} r  rooms
+ * @property {number[][]} k     chain vertices (draft), tuple [x,y] each
+ * @property {Array<Object>} s   symbols
+ *
+ * @param {import("./plan.js").Plan} plan
+ * @returns {CompactPlan}
+ */
+export function buildCompact(plan) {
+  const r = plan.walls.rooms.map((room) => ({
+    c: room.closed ? 1 : 0,
+    p: room.verts.map((v) => [_mmRound(v.x), _mmRound(v.y)]),
+  }));
+
+  const k = plan.walls.chain.map((v) => [_mmRound(v.x), _mmRound(v.y)]);
+
+  const s = plan.symbols.symbols.map((sym) => {
+    const cat = CATALOG[sym.type];
+    const compact = {
+      t: sym.type,
+      x: _mmRound(sym.x),
+      y: _mmRound(sym.y),
+    };
+    // Omit w/h only when strictly equal to catalog defaults
+    if (sym.w !== cat.w) compact.w = _mmRound(sym.w);
+    if (sym.h !== cat.h) compact.h = _mmRound(sym.h);
+    // Omit rot only when strictly 0
+    if (sym.rot !== 0) compact.d = sym.rot;
+    return compact;
+  });
+
+  return { v: COMPACT_VERSION, u: plan.unit, r, k, s };
+}
+
+/**
+ * Lean CompactPlan → full Plan-shaped object (re-adds app/schema/default view,
+ * synthesises ids, re-expands vertices and omitted catalog defaults). Returns a
+ * plain object suitable to hand to validatePlan; does NOT itself validate.
+ * Returns null if `compact` is structurally unusable (wrong version, missing
+ * arrays).
+ *
+ * @param {unknown} compact
+ * @returns {object|null}
+ */
+export function parseCompact(compact) {
+  try {
+    if (!compact || typeof compact !== "object" || Array.isArray(compact)) return null;
+    if (compact.v !== COMPACT_VERSION) return null;
+    if (!Array.isArray(compact.r)) return null;
+    if (!Array.isArray(compact.k)) return null;
+    if (!Array.isArray(compact.s)) return null;
+
+    const rooms = compact.r.map((room, i) => {
+      if (!room || typeof room !== "object") return null;
+      if (!Array.isArray(room.p)) return null;
+      const verts = room.p.map((tuple) => {
+        if (!Array.isArray(tuple) || tuple.length < 2) return null;
+        const x = tuple[0], y = tuple[1];
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return { x, y };
+      });
+      if (verts.some((v) => v === null)) return null;
+      return {
+        id: `w${i}`,
+        closed: room.c === 1,
+        verts,
+      };
+    });
+    if (rooms.some((r) => r === null)) return null;
+
+    const chain = compact.k.map((tuple) => {
+      if (!Array.isArray(tuple) || tuple.length < 2) return null;
+      const x = tuple[0], y = tuple[1];
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return { x, y };
+    });
+    if (chain.some((v) => v === null)) return null;
+
+    const symbols = compact.s.map((sym, i) => {
+      if (!sym || typeof sym !== "object") return null;
+      const t = sym.t;
+      if (typeof t !== "string") return null;
+      const cat = CATALOG[t];
+      // Unknown type: pass through so validatePlan rejects it cleanly
+      const x = sym.x, y = sym.y;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      const w = sym.w !== undefined ? sym.w : (cat ? cat.w : 0);
+      const h = sym.h !== undefined ? sym.h : (cat ? cat.h : 0);
+      const rot = sym.d !== undefined ? sym.d : 0;
+      if (!Number.isFinite(w) || !Number.isFinite(h) || !Number.isFinite(rot)) return null;
+      return {
+        id: `s${i}`,
+        type: t,
+        x,
+        y,
+        w,
+        h,
+        rot,
+      };
+    });
+    if (symbols.some((s) => s === null)) return null;
+
+    return {
+      schema: PLAN_SCHEMA,
+      app: APP_TAG,
+      walls: { rooms, chain },
+      symbols: { symbols },
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: compact.u,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Snapshot current live state into a fresh, JSON-safe Plan object.
  * @returns {Plan}
