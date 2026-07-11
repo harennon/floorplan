@@ -13,7 +13,7 @@ import { init as initHud } from "./hud.js";
 import { init as initInteractions, setDrawHooks, setSelectHooks, zoomInStep, zoomOutStep, zoomReset } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
 import { init as initWallTool, isDrawMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit } from "./wallTool.js";
-import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from "./measure.js";
+import { init as initMeasure, update as measureUpdate, getHighlightRoomId, setSelectedRoomAccessor as measureSetSelectedRoomAccessor, setHistoryCommit as measureSetHistoryCommit } from "./measure.js";
 import { init as initDimEntry, reposition as dimReposition, getEditingEdge, setHistoryCommit as dimSetHistoryCommit } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim, setHistoryCommit as symDimSetHistoryCommit } from "./symbolDimEntry.js";
@@ -101,6 +101,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const measureTotal  = document.querySelector(".measure-total-val");
   const measureToggle = document.querySelector(".measure-toggle");
 
+  // W×H block (LLD 82)
+  const measureWxhBox   = document.querySelector(".measure-wxh");
+  const measureWxhW     = document.querySelector(".measure-wxh-w");
+  const measureWxhH     = document.querySelector(".measure-wxh-h");
+  const measureWxhUnit  = document.querySelector(".measure-wxh-unit");
+  const measureWxhApply = document.querySelector(".measure-wxh-apply");
+
   // Clearance inspector
   const clearancePanel  = document.querySelector(".clearance");
   const clearanceBody   = document.getElementById("clr-body");
@@ -151,6 +158,15 @@ document.addEventListener("DOMContentLoaded", () => {
     railCollapse: railCollapseEl,
   });
 
+  // Wire W×H accessor + history.commit into measure (LLD 82).
+  // Must run after roomTool is available (roomGetSelectedRoomId) and after
+  // history is available (historyCommit). These are module-level imports so
+  // they are available immediately; wiring is deferred to after initMeasure()
+  // but the actual injection can be placed anywhere before first render.
+  // We do it here (early boot) to keep injections grouped near their consumers.
+  measureSetSelectedRoomAccessor(roomGetSelectedRoomId);
+  // historyCommit injection happens below alongside other history wiring.
+
   // Wire wall render into surface loop
   initWallLayer(gDraft, gSnap, labelsEl, wallRender);
 
@@ -164,7 +180,17 @@ document.addEventListener("DOMContentLoaded", () => {
   loupeSetViewModule({ view, pxPerM, worldToScreen });
 
   // Measure inspector
-  initMeasure({ panel: measurePanel, list: measureList, total: measureTotal, toggle: measureToggle });
+  initMeasure({
+    panel:    measurePanel,
+    list:     measureList,
+    total:    measureTotal,
+    toggle:   measureToggle,
+    wxhBox:   measureWxhBox,
+    wxhW:     measureWxhW,
+    wxhH:     measureWxhH,
+    wxhUnit:  measureWxhUnit,
+    wxhApply: measureWxhApply,
+  });
 
   // Clearance render — reads selected id + symbol, paints into #clearance + .dim-labels
   initClearanceRender(gClearance, dimLabelsEl, getSelectedId, getSymbol);
@@ -331,7 +357,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // Wire history.commit into tool modules (injection to avoid circular imports)
   wallSetHistoryCommit(historyCommit);
   symDimSetHistoryCommit(historyCommit);
-  dimSetHistoryCommit(historyCommit); // wall-edge resize (dimEntry.js)
+  dimSetHistoryCommit(historyCommit);        // wall-edge resize (dimEntry.js)
+  measureSetHistoryCommit(historyCommit);    // W×H apply (LLD 82)
 
   // Wire history + showToast into symbolTool
   setHistoryAndToast(
