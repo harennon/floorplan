@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Round dining table — enforce circularity (lock w == h)</title>
+  <style>
+    :root {
+      --bg-deep:   #100f0b;
+      --ink:       #ece7d6;
+      --muted:     #8f8a78;
+      --gold:      #c9a84c;
+      --gold-soft: rgba(201, 168, 76, 0.55);
+      --panel:     rgba(20, 20, 15, 0.72);
+      --hairline:  rgba(201, 168, 76, 0.18);
+      --font-mono: "DM Mono", "Courier New", monospace;
+      --snap-teal: #7fd0c8;
+      --sym-fill:  rgba(201, 168, 76, 0.06);
+      --sym-stroke: rgba(201, 168, 76, 0.55);
+      --sym-sel-fill: rgba(201, 168, 76, 0.12);
+      --grid-line: rgba(201, 168, 76, 0.09);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background:
+        radial-gradient(circle at 30% 20%, rgba(201,168,76,0.05), transparent 60%),
+        var(--bg-deep);
+      color: var(--ink);
+      font-family: var(--font-mono);
+      -webkit-font-smoothing: antialiased;
+      padding: 2.2rem clamp(1rem, 4vw, 3rem) 4rem;
+    }
+    h1 {
+      font-size: 1.15rem;
+      font-weight: 500;
+      color: var(--gold);
+      letter-spacing: 0.02em;
+      margin: 0 0 0.3rem;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 0.82rem;
+      max-width: 62ch;
+      line-height: 1.5;
+      margin: 0 0 2rem;
+    }
+    .lede-tag {
+      display: inline-block;
+      font-size: 0.66rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border: 1px solid var(--hairline);
+      border-radius: 999px;
+      padding: 0.18rem 0.6rem;
+      margin-bottom: 1.1rem;
+    }
+
+    /* Layout: two option columns, stack on narrow */
+    .options {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 1.6rem;
+      align-items: start;
+    }
+    .option-card {
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      background: var(--panel);
+      backdrop-filter: blur(10px);
+      padding: 1.2rem 1.2rem 1.4rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .option-card.recommended {
+      border-color: var(--gold-soft);
+      box-shadow: 0 0 0 1px rgba(201,168,76,0.12), 0 10px 40px rgba(0,0,0,0.35);
+    }
+    .opt-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+    .opt-head h2 { font-size: 0.95rem; font-weight: 500; margin: 0; color: var(--ink); }
+    .badge {
+      font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--bg-deep); background: var(--gold);
+      border-radius: 4px; padding: 0.12rem 0.42rem;
+    }
+    .badge.alt { color: var(--muted); background: transparent; border: 1px solid var(--hairline); }
+    .opt-desc { font-size: 0.76rem; color: var(--muted); line-height: 1.5; margin: 0; }
+
+    /* Stage: graph-paper canvas holding one selected round table */
+    .stage {
+      position: relative;
+      height: 300px;
+      border-radius: 10px;
+      overflow: hidden;
+      background:
+        linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 28px 28px,
+        linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 28px 28px,
+        var(--bg-deep);
+      border: 1px solid var(--hairline);
+    }
+    .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+
+    /* Dimension chip — matches .dim-chip .sym-dim-chip in app */
+    .dim-chip {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      color: var(--gold);
+      background: var(--panel);
+      border: 1px solid var(--gold-soft);
+      border-radius: 5px;
+      padding: 0.12rem 0.4rem;
+      white-space: nowrap;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      transition: color 0.12s, border-color 0.12s, background 0.12s;
+      z-index: 5;
+    }
+    .dim-chip:hover { color: var(--ink); border-color: var(--gold); }
+    /* The diameter chip carries a ⌀ prefix + subtle emphasis */
+    .dim-chip.diameter {
+      color: var(--snap-teal);
+      border-color: rgba(127, 208, 200, 0.5);
+    }
+    .dim-chip.diameter::before { content: "\2300\00a0"; opacity: 0.85; }
+    .dim-chip.diameter:hover { color: #bff0ea; border-color: var(--snap-teal); }
+    /* A struck-through / ghosted depth chip to show the "before" state */
+    .dim-chip.legacy-depth { color: var(--muted); border-color: var(--hairline); }
+
+    /* Floating symbol inspector toolbar — matches .symbol-inspector */
+    .symbol-inspector {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      gap: 0.2rem;
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 0.3rem 0.4rem;
+      backdrop-filter: blur(10px);
+      z-index: 8;
+    }
+    .insp-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--muted);
+      width: 2rem; height: 2rem;
+      border-radius: 5px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: color 0.12s, border-color 0.12s, background 0.12s;
+    }
+    .insp-btn:hover { color: var(--gold); border-color: var(--gold-soft); }
+    .insp-btn[aria-pressed="true"] { color: var(--gold); background: rgba(201,168,76,0.12); border-color: var(--gold-soft); }
+    /* Disabled lock button (Option A: lock has no meaning on a circle) */
+    .insp-btn[disabled] { opacity: 0.3; cursor: not-allowed; }
+    .insp-sep { width: 1px; height: 1.4rem; background: var(--hairline); }
+
+    /* Callout beneath each stage explaining the state */
+    .note {
+      font-size: 0.72rem; color: var(--muted); line-height: 1.5;
+      border-left: 2px solid var(--gold-soft); padding-left: 0.7rem; margin: 0;
+    }
+    .note b { color: var(--ink); font-weight: 500; }
+    .note code {
+      color: var(--snap-teal); background: rgba(127,208,200,0.08);
+      padding: 0 0.25rem; border-radius: 3px; font-size: 0.9em;
+    }
+
+    /* Inline resize demo controls */
+    .demo-controls { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+    .demo-controls label { font-size: 0.72rem; color: var(--muted); }
+    .demo-controls input[type=range] { accent-color: var(--gold); flex: 1; min-width: 120px; }
+    .demo-controls output { font-size: 0.72rem; color: var(--snap-teal); min-width: 5.5ch; }
+
+    footer.legend {
+      margin-top: 2.4rem; padding-top: 1.2rem;
+      border-top: 1px solid var(--hairline);
+      font-size: 0.72rem; color: var(--muted); line-height: 1.6;
+      max-width: 70ch;
+    }
+    footer.legend b { color: var(--gold); font-weight: 500; }
+  </style>
+</head>
+<body>
+  <span class="lede-tag">LLD 84 · Round dining table</span>
+  <h1>Enforce circularity — lock width == depth</h1>
+  <p class="subtitle">
+    A round dining table is a w×h box where diameter = w = h. Today both axes edit
+    independently, so a "round" table can be dragged into an oval. These options collapse
+    the two dimension chips into a single <b style="color:var(--snap-teal)">diameter</b> control.
+    Toggle the resize demo on each card to watch <code>w</code> and <code>h</code> move together.
+  </p>
+
+  <div class="options">
+    <!-- Option A -->
+    <section class="option-card recommended">
+      <div class="opt-head">
+        <h2>Option A — Single diameter chip</h2>
+        <span class="badge">Recommended</span>
+      </div>
+      <p class="opt-desc">
+        The two dim chips collapse into <b style="color:var(--snap-teal)">one</b> chip on the
+        top edge, prefixed <b style="color:var(--snap-teal)">⌀</b>. The depth chip is
+        suppressed (same mechanism openings use to hide their depth). Editing it sets both
+        axes at once. The lock-aspect button is disabled — a circle has no aspect to lock.
+      </p>
+      <div class="stage" id="stageA">
+        <svg id="svgA" viewBox="0 0 380 300" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="symbol-inspector" id="inspA" style="left:118px; top:20px;">
+          <button class="insp-btn" title="Rotate 90°" aria-label="Rotate 90 degrees">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8 A5 5 0 1 1 8 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/><polyline points="3,5 3,8 6,8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+          </button>
+          <button class="insp-btn" title="Duplicate" aria-label="Duplicate symbol">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="2" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/><rect x="2" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="var(--bg-deep)"/></svg>
+          </button>
+          <button class="insp-btn" title="Delete" aria-label="Delete symbol">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><polyline points="2,4 14,4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5 4 V13 H11 V4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/><polyline points="6,4 6,2 10,2 10,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+          </button>
+          <div class="insp-sep"></div>
+          <button class="insp-btn" disabled aria-disabled="true" title="Lock aspect — N/A for a circle" aria-label="Lock aspect ratio (disabled for round table)">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="4" y="7" width="8" height="7" rx="1.2" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 7 V5 A2.5 2.5 0 0 1 10.5 5 V7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>
+          </button>
+        </div>
+        <button class="dim-chip diameter" id="chipA" style="left:190px; top:60px;">1.20 m</button>
+      </div>
+      <div class="demo-controls">
+        <label for="rngA">Resize ⌀</label>
+        <input type="range" id="rngA" min="0.60" max="1.83" step="0.01" value="1.20" />
+        <output id="outA">1.20 m</output>
+      </div>
+      <p class="note">
+        One handle, one truth. Any resize keeps <code>w === h</code> by construction — no way
+        to author an oval. Presets (Seats 2/4/6/8) already ship square, so they map 1:1.
+      </p>
+    </section>
+
+    <!-- Option B -->
+    <section class="option-card">
+      <div class="opt-head">
+        <h2>Option B — Mirrored dual chips</h2>
+        <span class="badge alt">Alternative</span>
+      </div>
+      <p class="opt-desc">
+        Keep the familiar top (width) and left (depth) chips, but <b>link</b> them: editing
+        either mirrors to the other so the shape stays circular. Both chips always read the
+        same value. Preserves muscle memory from rectangular furniture at the cost of a
+        redundant second handle.
+      </p>
+      <div class="stage" id="stageB">
+        <svg id="svgB" viewBox="0 0 380 300" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="symbol-inspector" id="inspB" style="left:118px; top:20px;">
+          <button class="insp-btn" title="Rotate 90°" aria-label="Rotate 90 degrees">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8 A5 5 0 1 1 8 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/><polyline points="3,5 3,8 6,8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+          </button>
+          <button class="insp-btn" title="Duplicate" aria-label="Duplicate symbol">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="2" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/><rect x="2" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="var(--bg-deep)"/></svg>
+          </button>
+          <button class="insp-btn" title="Delete" aria-label="Delete symbol">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><polyline points="2,4 14,4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5 4 V13 H11 V4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/><polyline points="6,4 6,2 10,2 10,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+          </button>
+        </div>
+        <button class="dim-chip diameter" id="chipBw" style="left:190px; top:60px;">1.20 m</button>
+        <button class="dim-chip diameter" id="chipBh" style="left:96px; top:150px;">1.20 m</button>
+      </div>
+      <div class="demo-controls">
+        <label for="rngB">Resize either</label>
+        <input type="range" id="rngB" min="0.60" max="1.83" step="0.01" value="1.20" />
+        <output id="outB">1.20 m</output>
+      </div>
+      <p class="note">
+        <code>resize_symbol</code> on <b>w</b> mirrors to <b>h</b> and vice-versa. Circularity is
+        still enforced, but two chips for one number can read as "why did the other change?"
+      </p>
+    </section>
+  </div>
+
+  <footer class="legend">
+    <b>Model:</b> both options preserve the existing w×h box + circle render — only the chip
+    layer and resize path change. A catalog flag <b>circular: true</b> (generalizes to
+    <b>lockSquare</b>) drives the behavior: the render draws the inscribed circle unchanged,
+    hit-testing stays box-based, and <b>resizeSymbol</b> mirrors the edited axis to the other,
+    each independently clamped to the shared [0.60, 1.83] bounds. Parasol / patio-table are
+    natural future candidates for the same flag.
+    <br /><br />
+    <b>Recommendation:</b> Option A. One chip = one degree of freedom, which is the honest
+    model for a circle, and the disabled lock button removes a control that never did anything
+    meaningful here.
+  </footer>
+  <script>
+    const NS = "http://www.w3.org/2000/svg";
+    const PPM = 90;               // px per metre in the mock stage
+    const CX = 190, CY = 150;     // stage center (viewBox 380x300)
+    const SYM_FILL = "rgba(201,168,76,0.06)";
+    const SYM_STROKE = "rgba(201,168,76,0.55)";
+    const SYM_SEL_FILL = "rgba(201,168,76,0.12)";
+    const GOLD = "#c9a84c";
+
+    function el(name, attrs) {
+      const e = document.createElementNS(NS, name);
+      for (const k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    }
+
+    // Draw one selected round dining table (box + inscribed circle + dashed selection box).
+    function drawTable(svg, diaM) {
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      const side = diaM * PPM;
+      const half = side / 2;
+      const x = CX - half, y = CY - half;
+
+      // Body box (the w×h model box — kept, hit-test uses it)
+      svg.appendChild(el("rect", {
+        x, y, width: side, height: side,
+        fill: SYM_SEL_FILL, stroke: GOLD, "stroke-width": 2, "stroke-linejoin": "round", rx: 1,
+      }));
+      // Inscribed circle (tabletop) — unchanged render
+      const r = half * 0.94;
+      svg.appendChild(el("circle", { cx: CX, cy: CY, r, fill: "none", stroke: SYM_STROKE, "stroke-width": 1 }));
+      svg.appendChild(el("circle", { cx: CX, cy: CY, r: r * 0.6, fill: "none", stroke: SYM_STROKE, "stroke-width": 0.7, opacity: 0.4 }));
+      // Dashed selection box on top of the body (gold, matches _renderSelectionBox)
+      svg.appendChild(el("rect", {
+        x, y, width: side, height: side, fill: "none",
+        stroke: GOLD, "stroke-width": 1.5, "stroke-dasharray": "5 3", "stroke-linejoin": "round",
+      }));
+      return { x, y, side };
+    }
+
+    function fmt(m) { return m.toFixed(2) + " m"; }
+
+    // ── Option A: single top-edge diameter chip ────────────────────────────
+    (function () {
+      const svg = document.getElementById("svgA");
+      const chip = document.getElementById("chipA");
+      const rng = document.getElementById("rngA");
+      const out = document.getElementById("outA");
+      const stage = document.getElementById("stageA");
+
+      function svgToStagePx(vbx, vby) {
+        // viewBox is 380x300, stage is 100% width; map proportionally
+        const rect = stage.getBoundingClientRect();
+        return { x: (vbx / 380) * rect.width, y: (vby / 300) * rect.height };
+      }
+
+      function paint(diaM) {
+        const g = drawTable(svg, diaM);
+        // top edge midpoint, offset upward
+        const p = svgToStagePx(CX, g.y - 12);
+        chip.style.left = p.x + "px";
+        chip.style.top = p.y + "px";
+        chip.textContent = fmt(diaM);
+        out.textContent = fmt(diaM);
+      }
+      rng.addEventListener("input", () => paint(parseFloat(rng.value)));
+      chip.addEventListener("click", () => {
+        // simulate "commit smallest step" flash to show it's the live handle
+        chip.animate([{ background: "rgba(127,208,200,0.35)" }, { background: "rgba(20,20,15,0.72)" }], { duration: 400 });
+      });
+      window.addEventListener("resize", () => paint(parseFloat(rng.value)));
+      paint(1.20);
+    })();
+
+    // ── Option B: mirrored width + depth chips ─────────────────────────────
+    (function () {
+      const svg = document.getElementById("svgB");
+      const chipW = document.getElementById("chipBw");
+      const chipH = document.getElementById("chipBh");
+      const rng = document.getElementById("rngB");
+      const out = document.getElementById("outB");
+      const stage = document.getElementById("stageB");
+
+      function svgToStagePx(vbx, vby) {
+        const rect = stage.getBoundingClientRect();
+        return { x: (vbx / 380) * rect.width, y: (vby / 300) * rect.height };
+      }
+
+      function paint(diaM) {
+        const g = drawTable(svg, diaM);
+        const pw = svgToStagePx(CX, g.y - 12);       // top edge (width)
+        const ph = svgToStagePx(g.x - 12, CY);       // left edge (depth)
+        chipW.style.left = pw.x + "px"; chipW.style.top = pw.y + "px";
+        chipH.style.left = ph.x + "px"; chipH.style.top = ph.y + "px";
+        chipW.textContent = fmt(diaM);
+        chipH.textContent = fmt(diaM);
+        out.textContent = fmt(diaM);
+      }
+      // Editing either chip mirrors — flash BOTH to show the linkage
+      function flashBoth() {
+        for (const c of [chipW, chipH]) {
+          c.animate([{ background: "rgba(127,208,200,0.35)" }, { background: "rgba(20,20,15,0.72)" }], { duration: 400 });
+        }
+      }
+      rng.addEventListener("input", () => { paint(parseFloat(rng.value)); });
+      chipW.addEventListener("click", flashBoth);
+      chipH.addEventListener("click", flashBoth);
+      window.addEventListener("resize", () => paint(parseFloat(rng.value)));
+      paint(1.20);
+    })();
+  </script>
+</body>
+</html>
