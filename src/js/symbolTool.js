@@ -54,6 +54,15 @@ export function setHistoryAndToast(history, showToast) {
   _showToastFn   = showToast;
 }
 
+// Injected from main.js so selecting a symbol can drop any live room selection
+// (the selection mutex) WITHOUT importing roomTool — mirrors the toast/history
+// injection pattern, and covers selection paths that bypass the main.js
+// dispatcher (dock drag-drop placement calls selectSymbol directly).
+let _clearRoomSelection = null;
+export function setClearRoomSelection(fn) {
+  _clearRoomSelection = fn;
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 /**
@@ -337,6 +346,11 @@ export function onDrawModeEnter() {
  * Select a symbol by id (e.g. after placement).
  */
 export function selectSymbol(id) {
+  // Selection mutex: a symbol selection clears any room selection. This lives in
+  // selectSymbol (not just the dispatcher) so dock drag-drop placement — which
+  // calls selectSymbol directly, bypassing the dispatcher — also upholds the
+  // "≤1 of {room, symbol} selected" invariant.
+  if (_clearRoomSelection) _clearRoomSelection();
   _selectedId = id;
   const sym = getSymbol(id);
   if (sym) _showInspector(sym);
@@ -876,6 +890,17 @@ function _clearSelection() {
   _dragMode = null;
   if (isDimEditing()) cancelDimEdit();
   _hideInspector();
+}
+
+/**
+ * Public alias of _clearSelection: nulls the symbol selection, cancels any open
+ * dim edit, and hides the inspector — WITHOUT touching room selection. Used by
+ * the main.js select dispatcher / roomTool to enforce the room↔symbol selection
+ * mutex (LLD 63). Idempotent; safe to call when nothing is selected. Does not
+ * schedule a render (the caller owns render scheduling).
+ */
+export function clearSelection() {
+  _clearSelection();
 }
 
 // ── Keyboard ───────────────────────────────────────────────────────────────────

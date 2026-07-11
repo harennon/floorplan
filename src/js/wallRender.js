@@ -28,9 +28,10 @@ let _labelsEl = null;
 let _dimLabelsEl = null;
 
 // Injected getters (set via init)
-let _getSnap         = () => null;
-let _getHighlight    = () => null;
-let _getEditingEdge  = () => null;
+let _getSnap           = () => null;
+let _getHighlight      = () => null;
+let _getEditingEdge    = () => null;
+let _getSelectedRoomId = () => null;
 
 /**
  * Bind mount points. Called once from main.js.
@@ -42,8 +43,9 @@ let _getEditingEdge  = () => null;
  * @param {()=>import("./walls.js").Snap|null} getSnap
  * @param {()=>string|null} getHighlight    measure.getHighlightRoomId
  * @param {()=>{roomId:string,edgeIndex:number}|null} getEditingEdge  dimEntry.getEditingEdge
+ * @param {()=>string|null} [getSelectedRoomId]  roomTool.getSelectedRoomId (LLD 63)
  */
-export function init(gWorld, gDraft, gSnap, labelsEl, dimLabelsEl, getSnap, getHighlight, getEditingEdge) {
+export function init(gWorld, gDraft, gSnap, labelsEl, dimLabelsEl, getSnap, getHighlight, getEditingEdge, getSelectedRoomId) {
   _gWorld       = gWorld;
   _gDraft       = gDraft;
   _gSnap        = gSnap;
@@ -52,6 +54,7 @@ export function init(gWorld, gDraft, gSnap, labelsEl, dimLabelsEl, getSnap, getH
   _getSnap      = getSnap;
   _getHighlight = getHighlight  || (() => null);
   _getEditingEdge = getEditingEdge || (() => null);
+  _getSelectedRoomId = getSelectedRoomId || (() => null);
 }
 
 /**
@@ -72,10 +75,11 @@ export function render() {
   const ppm = pxPerM();
   const highlightId = _getHighlight();
   const editingEdge = _getEditingEdge();
+  const selectedRoomId = _getSelectedRoomId();
 
   // ── Committed rooms ────────────────────────────────────────────────────────
   for (const room of model.rooms) {
-    _renderRoom(room, p, ppm, highlightId === room.id);
+    _renderRoom(room, p, ppm, highlightId === room.id, selectedRoomId === room.id);
   }
 
   // ── Interactive dimension chips for committed rooms ─────────────────────────
@@ -136,7 +140,7 @@ export function render() {
 
 // ── Private: committed room rendering ────────────────────────────────────────
 
-function _renderRoom(room, p, ppm, highlighted) {
+function _renderRoom(room, p, ppm, highlighted, selected) {
   const pts = room.verts;
   if (pts.length === 0) return;
 
@@ -176,6 +180,21 @@ function _renderRoom(room, p, ppm, highlighted) {
 
   // Vertex dots
   _renderVertexDots(_gWorld, pts, lineColor);
+
+  // Selection outline (LLD 63): a distinct 1.5px dashed gold outline drawn on top
+  // of the normal room render, kept SEPARATE from the measure-hover `highlighted`
+  // treatment so "selected" reads differently from "hovered". Not OR-ed into the
+  // solid roomFillHi hover.
+  if (selected && pts.length >= 2) {
+    const outline = room.closed ? _buildPolygon(pts) : _buildPolyline(pts);
+    outline.setAttribute("fill", "none");
+    outline.setAttribute("stroke", p.snapPoint);
+    outline.setAttribute("stroke-width", "1.5");
+    outline.setAttribute("stroke-dasharray", "6 4");
+    outline.setAttribute("stroke-linejoin", "round");
+    outline.setAttribute("stroke-linecap", "round");
+    _gWorld.appendChild(outline);
+  }
 }
 
 // ── Private: interactive committed dimension chips ────────────────────────────
