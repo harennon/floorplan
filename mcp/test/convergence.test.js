@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 
 import * as session from "../src/session.js";
 import * as tools from "../src/tools.js";
-import { validatePlan, encodePlanToHash, decodeHashToPlan } from "../src/core.js";
+import { validatePlan, encodePlanToHash, decodeHashToPlan, symbolsModel } from "../src/core.js";
 
 beforeEach(() => session.resetAll());
 
@@ -152,4 +152,48 @@ test("regression: round-trip through encode/decode + validatePlan accepts the ou
   const back = await decodeHashToPlan(await encodePlanToHash(doc));
   assert.deepEqual(back, doc);
   assert.notEqual(validatePlan(doc), null);
+});
+
+// ── LLD 78: repair-by-resize loop (closes LLD 32 M2 gap) ────────────────────
+
+test("repair-by-resize: agent fixes mis-sized room with resize_room, no rebuild needed", () => {
+  // Set a brief with a 5×7 room requirement.
+  const briefRes = tools.tool_set_brief({
+    room: { w: 5, h: 7 },
+    furniture: [{ type: "sofa" }],
+    minWalkwayM: 0.915,
+  });
+  assert.equal(briefRes.ok, true);
+
+  // Add the room at the WRONG size (4×4).
+  const room = tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  assert.equal(room.ok, true);
+  const roomId = room.roomId;
+
+  // Place a sofa (to prove it survives the resize — no rebuild).
+  const sofa = tools.tool_place_symbol({ type: "sofa", x: 2, y: 2 });
+  assert.equal(sofa.ok, true);
+  const sofaId = sofa.id;
+
+  // Brief must be unsatisfied at this point (wrong room size).
+  const before = tools.tool_check_brief();
+  assert.equal(before.satisfied, false);
+  // The unmet message must steer to resize_room.
+  const resizeMsg = before.unmet.find((u) => /resize_room/.test(u));
+  assert.ok(resizeMsg, `check_brief must suggest resize_room; unmet: ${JSON.stringify(before.unmet)}`);
+
+  // Scripted agent applies resize_room (no new_plan, no re-add_room).
+  const fix = tools.tool_resize_room({ roomId, w: 5, h: 7 });
+  assert.equal(fix.ok, true);
+  assert.ok(Math.abs(fix.newMetrics.area - 35) < 1e-6, "resized room area should be 35 m²");
+
+  // Verify the sofa still exists (no rebuild happened).
+  const stillHere = sofa && symbolsModel.symbols.find((s) => s.id === sofaId);
+  assert.ok(stillHere, "sofa must survive resize (no rebuild)");
+
+  // The room-size requirement must now be satisfied.
+  // (Clearance may still fail — we only care that the room-size unmet is gone.)
+  const after = tools.tool_check_brief();
+  const stillWrongSize = after.unmet.find((u) => /resize_room|new_plan|m; brief asked/.test(u));
+  assert.ok(!stillWrongSize, `room-size requirement must be cleared; remaining unmet: ${JSON.stringify(after.unmet)}`);
 });

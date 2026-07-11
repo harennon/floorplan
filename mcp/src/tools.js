@@ -18,6 +18,10 @@ import {
   rescaleEdge,
   roomMetrics,
   wallSegments,
+  moveRoom,
+  rescaleRectEdge,
+  isRectangle,
+  pointNearRoomWall,
   createSymbol,
   addSymbol,
   moveSymbol,
@@ -28,9 +32,11 @@ import {
   duplicateSymbol,
   getSymbol,
   aabb,
+  pointInRoom,
   CATALOG,
   corners,
   WALL_M,
+  MIN_SEG_M,
   PARALLEL_TOL_DEG,
   encodePlanToHash,
   serializePlan,
@@ -184,7 +190,7 @@ export function tool_add_room(args) {
         ok: false,
         reason:
           `single-room brief already has a room (${existingClosed.id}); ` +
-          `call new_plan to start over, or set_edge_length to resize the existing room instead of adding another`,
+          `call new_plan to start over, or resize_room to resize the existing room instead of adding another`,
       };
     }
   }
@@ -254,6 +260,77 @@ export function tool_set_edge_length(args) {
     return { ok: false, reason: "edge index out of range or degenerate edge" };
   }
   return { ok: true, newMetrics: roomMetrics(room) };
+}
+
+/**
+ * move_room: { roomId, dx, dy }. Rigid translate; carries contained furniture
+ * (center ∈ room) and the room's own wall-mounted openings (within WALL_M of a
+ * wall). Returns { ok, roomId, metrics, carried:[id…] } or { ok:false, reason }.
+ */
+export function tool_move_room(args) {
+  const { roomId, dx, dy } = args || {};
+  const room = wallsModel.rooms.find((r) => r.id === roomId);
+  if (!room) return { ok: false, reason: "no such room" };
+  if (!isFiniteNum(dx) || !isFiniteNum(dy)) {
+    return { ok: false, reason: "dx,dy must be finite" };
+  }
+
+  // Snapshot carry membership BEFORE mutating (keeps the mutator synchronous
+  // and the carry set stable — mirrors LLD 63 editor decision A1).
+  const carried = [];
+  for (const sym of symbolsModel.symbols) {
+    const isOpening = !!CATALOG[sym.type].openings;
+    if (isOpening) {
+      // Openings: carried if within WALL_M of a room wall segment (opening
+      // center sits ~0.06 m off the wall centerline; pointInRoom unreliable).
+      if (pointNearRoomWall(room, sym.x, sym.y, WALL_M)) {
+        carried.push(sym.id);
+      }
+    } else {
+      // Furniture: carried if center strictly inside the room polygon.
+      if (pointInRoom(room, sym.x, sym.y)) {
+        carried.push(sym.id);
+      }
+    }
+  }
+
+  // Apply: translate room verts, then translate each carried symbol.
+  moveRoom(room, dx, dy);
+  for (const id of carried) {
+    const sym = symbolsModel.symbols.find((s) => s.id === id);
+    if (sym) moveSymbol(sym, sym.x + dx, sym.y + dy);
+  }
+
+  return { ok: true, roomId, metrics: roomMetrics(room), carried };
+}
+
+/**
+ * resize_room: { roomId, w, h }. Non-destructive rectangle resize (LLD 32 M2 gap).
+ * Sets edge 0 → w and edge 1 → h via rescaleRectEdge, anchored at the origin corner.
+ * Returns { ok, roomId, newMetrics } or { ok:false, reason } (no such room /
+ * not a rectangle / w or h below MIN_SEG_M).
+ */
+export function tool_resize_room(args) {
+  const { roomId, w, h } = args || {};
+  const room = wallsModel.rooms.find((r) => r.id === roomId);
+  if (!room) return { ok: false, reason: "no such room" };
+  if (!isFiniteNum(w) || !isFiniteNum(h) || w <= 0 || h <= 0) {
+    return { ok: false, reason: "w and h must be finite positive" };
+  }
+  if (!isRectangle(room)) {
+    return {
+      ok: false,
+      reason:
+        "resize_room only works on rectangular rooms; this room is not a rectangle — rebuild it via new_plan + add_room",
+    };
+  }
+  if (w < MIN_SEG_M || h < MIN_SEG_M) {
+    return { ok: false, reason: `w and h must be ≥ ${MIN_SEG_M} m` };
+  }
+  // Both guards passed; rescaleRectEdge is guaranteed to return true here.
+  rescaleRectEdge(room, 0, w);
+  rescaleRectEdge(room, 1, h);
+  return { ok: true, roomId, newMetrics: roomMetrics(room) };
 }
 
 /**
@@ -472,7 +549,7 @@ export function tool_check_brief() {
     if (closed.length === 0) {
       unmet.push(
         `brief needs a ${brief.room.w}×${brief.room.h} m room; none drawn — ` +
-        `rebuild the room to ${brief.room.w}×${brief.room.h} m via new_plan + add_room BEFORE placing furniture`
+        `add_room {rect:{x:0,y:0,w:${brief.room.w},h:${brief.room.h}}} BEFORE placing furniture`
       );
     } else {
       const room = closed[0];
@@ -484,10 +561,14 @@ export function tool_check_brief() {
       const want = [brief.room.w, brief.room.h].sort((a, b) => a - b);
       const TOL = 0.025;
       if (Math.abs(got[0] - want[0]) > TOL || Math.abs(got[1] - want[1]) > TOL) {
+        const rectOk = isRectangle(room);
+        const fix = rectOk
+          ? `call resize_room {roomId:"${room.id}", w:${brief.room.w}, h:${brief.room.h}} to fix it non-destructively (no rebuild needed)`
+          : `call resize_room {roomId:"${room.id}", w:${brief.room.w}, h:${brief.room.h}} to fix it non-destructively — or if that fails (non-rectangular room), rebuild via new_plan + add_room`;
         unmet.push(
           `room is ${w.toFixed(2)}×${h.toFixed(2)} m; brief asked ` +
           `${brief.room.w}×${brief.room.h} m (±0.025 m) — ` +
-          `rebuild the room via new_plan + add_room BEFORE placing furniture`
+          fix
         );
       }
     }
