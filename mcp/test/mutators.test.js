@@ -1,12 +1,12 @@
 /**
- * Unit — mutators & session (tools.js, session.js). LLD 32 Test reqs.
+ * Unit — mutators & session (tools.js, session.js). LLD 32 + LLD 78 Test reqs.
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import * as session from "../src/session.js";
 import * as tools from "../src/tools.js";
-import { wallsModel, symbolsModel, CATALOG } from "../src/core.js";
+import { wallsModel, symbolsModel, CATALOG, isRectangle, MIN_SEG_M } from "../src/core.js";
 
 beforeEach(() => session.resetAll());
 
@@ -310,4 +310,226 @@ test("Gap B: no walls → opening rejected", () => {
   assert.equal(r.ok, false);
   assert.match(r.reason, /must sit on a wall/);
   assert.equal(symbolsModel.symbols.length, 0);
+});
+
+// ── resize_room (LLD 78) ─────────────────────────────────────────────────────
+
+test("resize_room: resizes a rectangle to exact w×h non-destructively", () => {
+  session.newPlan();
+  const { roomId } = tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  const r = tools.tool_resize_room({ roomId, w: 5, h: 7 });
+  assert.equal(r.ok, true);
+  assert.equal(r.roomId, roomId);
+  assert.ok(Math.abs(r.newMetrics.area - 35) < 1e-6, "area should be 35 m²");
+  const room = wallsModel.rooms[0];
+  assert.equal(room.verts.length, 4);
+  assert.equal(room.closed, true);
+  assert.ok(isRectangle(room), "room should still be a rectangle after resize");
+  // The origin corner v0 = (0,0) should be unchanged (anchor corner).
+  assert.ok(Math.abs(room.verts[0].x - 0) < 1e-9);
+  assert.ok(Math.abs(room.verts[0].y - 0) < 1e-9);
+});
+
+test("resize_room: furniture placed after resize is unaffected (no rebuild needed)", () => {
+  session.newPlan();
+  const { roomId } = tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  // Place a symbol inside the room.
+  const sym = tools.tool_place_symbol({ type: "bed", x: 2, y: 2 });
+  assert.equal(sym.ok, true);
+  const bedId = sym.id;
+  const bedX = symbolsModel.symbols[0].x;
+  const bedY = symbolsModel.symbols[0].y;
+  // Resize the room — the symbol should be unaffected (resize does not touch symbols).
+  const r = tools.tool_resize_room({ roomId, w: 5, h: 7 });
+  assert.equal(r.ok, true);
+  // Symbol still exists at its original coordinates (no rebuild).
+  const bed = symbolsModel.symbols.find((s) => s.id === bedId);
+  assert.ok(bed, "bed symbol must still exist after resize");
+  assert.equal(bed.x, bedX);
+  assert.equal(bed.y, bedY);
+});
+
+test("resize_room: non-rectangle rejected with clear reason, no mutation", () => {
+  session.newPlan();
+  // Triangle — not a rectangle.
+  const { roomId } = tools.tool_add_room({ verts: [
+    { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 4 },
+  ] });
+  const vertsBefore = wallsModel.rooms[0].verts.map((v) => ({ x: v.x, y: v.y }));
+  const r = tools.tool_resize_room({ roomId, w: 5, h: 7 });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /rectangular/);
+  // Verts unchanged.
+  const vertsAfter = wallsModel.rooms[0].verts.map((v) => ({ x: v.x, y: v.y }));
+  assert.deepEqual(vertsAfter, vertsBefore);
+});
+
+test("resize_room: w or h below MIN_SEG_M rejected, no partial resize", () => {
+  session.newPlan();
+  const { roomId } = tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  const v0Before = { x: wallsModel.rooms[0].verts[0].x, y: wallsModel.rooms[0].verts[0].y };
+  const v1Before = { x: wallsModel.rooms[0].verts[1].x, y: wallsModel.rooms[0].verts[1].y };
+  // h is way below MIN_SEG_M — should be rejected without even applying w.
+  const r = tools.tool_resize_room({ roomId, w: 5, h: MIN_SEG_M / 2 });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /≥/);
+  // Edge 0 must NOT have been applied (room is unchanged).
+  assert.ok(Math.abs(wallsModel.rooms[0].verts[0].x - v0Before.x) < 1e-9);
+  assert.ok(Math.abs(wallsModel.rooms[0].verts[1].x - v1Before.x) < 1e-9);
+});
+
+test("resize_room: NaN / zero / negative w or h rejected without throwing", () => {
+  session.newPlan();
+  const { roomId } = tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  assert.equal(tools.tool_resize_room({ roomId, w: NaN, h: 5 }).ok, false);
+  assert.equal(tools.tool_resize_room({ roomId, w: 5, h: NaN }).ok, false);
+  assert.equal(tools.tool_resize_room({ roomId, w: 0, h: 5 }).ok, false);
+  assert.equal(tools.tool_resize_room({ roomId, w: -1, h: 5 }).ok, false);
+  // Room still intact.
+  assert.equal(wallsModel.rooms.length, 1);
+});
+
+test("resize_room: unknown roomId → {ok:false}", () => {
+  session.newPlan();
+  const r = tools.tool_resize_room({ roomId: "nope", w: 5, h: 7 });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /no such room/);
+});
+
+// ── move_room (LLD 78) ───────────────────────────────────────────────────────
+
+test("move_room: rigid translate — every vert shifted by delta, area invariant", () => {
+  session.newPlan();
+  const { roomId } = tools.tool_add_room({ rect: { x: 0, y: 0, w: 5, h: 3 } });
+  const areaBefore = tools.tool_get_metrics().rooms[0].areaM2;
+  const r = tools.tool_move_room({ roomId, dx: 2, dy: 3 });
+  assert.equal(r.ok, true);
+  assert.equal(r.roomId, roomId);
+  const room = wallsModel.rooms[0];
+  for (const v of room.verts) {
+    // Each vert must have been shifted; the original room was axis-aligned at 0.
+    // v0 was (0,0) → should be (2,3), etc.
+    assert.ok(v.x >= 2 - 1e-9 && v.x <= 7 + 1e-9, `v.x=${v.x} out of expected range`);
+    assert.ok(v.y >= 3 - 1e-9 && v.y <= 6 + 1e-9, `v.y=${v.y} out of expected range`);
+  }
+  // Verify exact v0 shift (0,0) → (2,3).
+  assert.ok(Math.abs(room.verts[0].x - 2) < 1e-9);
+  assert.ok(Math.abs(room.verts[0].y - 3) < 1e-9);
+  // Area must be invariant.
+  const areaAfter = r.metrics.area;
+  assert.ok(Math.abs(areaAfter - areaBefore) < 1e-6);
+});
+
+test("move_room: carries contained furniture", () => {
+  session.newPlan();
+  const { roomId } = tools.tool_add_room({ rect: { x: 0, y: 0, w: 5, h: 5 } });
+  // Place a bed at room center.
+  const bed = tools.tool_place_symbol({ type: "bed", x: 2.5, y: 2.5 });
+  assert.equal(bed.ok, true);
+  const bedId = bed.id;
+  const r = tools.tool_move_room({ roomId, dx: 1, dy: 2 });
+  assert.equal(r.ok, true);
+  assert.ok(r.carried.includes(bedId), "bed should be in carried list");
+  const bedSym = symbolsModel.symbols.find((s) => s.id === bedId);
+  assert.ok(Math.abs(bedSym.x - 3.5) < 1e-9, `bed.x expected 3.5, got ${bedSym.x}`);
+  assert.ok(Math.abs(bedSym.y - 4.5) < 1e-9, `bed.y expected 4.5, got ${bedSym.y}`);
+});
+
+test("move_room: does NOT carry furniture outside the room", () => {
+  session.newPlan();
+  const { roomId } = tools.tool_add_room({ rect: { x: 0, y: 0, w: 5, h: 5 } });
+  // Place a second room so we have somewhere to put the outside furniture.
+  tools.tool_add_room({ rect: { x: 10, y: 0, w: 5, h: 5 } });
+  // Place furniture well outside the first room.
+  const bed = tools.tool_place_symbol({ type: "bed", x: 12, y: 2 });
+  assert.equal(bed.ok, true);
+  const bedId = bed.id;
+  const r = tools.tool_move_room({ roomId, dx: 1, dy: 1 });
+  assert.equal(r.ok, true);
+  assert.ok(!r.carried.includes(bedId), "outside furniture must not be carried");
+  // Verify position unchanged.
+  const bedSym = symbolsModel.symbols.find((s) => s.id === bedId);
+  assert.equal(bedSym.x, 12);
+  assert.equal(bedSym.y, 2);
+});
+
+test("move_room: carries the room's own door/window (opening on room wall)", () => {
+  session.newPlan();
+  const { roomId } = tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  // Place door on the top wall centerline (y=0).
+  const door = tools.tool_place_symbol({ type: "door", x: 2, y: 0 });
+  assert.equal(door.ok, true);
+  const doorId = door.id;
+  const doorSym = symbolsModel.symbols.find((s) => s.id === doorId);
+  const origX = doorSym.x, origY = doorSym.y;
+  const r = tools.tool_move_room({ roomId, dx: 3, dy: 2 });
+  assert.equal(r.ok, true);
+  assert.ok(r.carried.includes(doorId), "door should be in carried list");
+  // Door must have moved with the room.
+  assert.ok(Math.abs(doorSym.x - (origX + 3)) < 1e-9);
+  assert.ok(Math.abs(doorSym.y - (origY + 2)) < 1e-9);
+});
+
+test("move_room: dx===0, dy===0 is no-op safe, carried still returned", () => {
+  session.newPlan();
+  const { roomId } = tools.tool_add_room({ rect: { x: 0, y: 0, w: 5, h: 5 } });
+  const bed = tools.tool_place_symbol({ type: "bed", x: 2.5, y: 2.5 });
+  const vertsBefore = wallsModel.rooms[0].verts.map((v) => ({ x: v.x, y: v.y }));
+  const r = tools.tool_move_room({ roomId, dx: 0, dy: 0 });
+  assert.equal(r.ok, true);
+  // Verts unchanged.
+  const vertsAfter = wallsModel.rooms[0].verts.map((v) => ({ x: v.x, y: v.y }));
+  assert.deepEqual(vertsAfter, vertsBefore);
+  // Bed position unchanged.
+  const bedSym = symbolsModel.symbols.find((s) => s.id === bed.id);
+  assert.equal(bedSym.x, 2.5);
+  assert.equal(bedSym.y, 2.5);
+  // Carry set still populated.
+  assert.ok(Array.isArray(r.carried));
+});
+
+test("move_room: unknown roomId → {ok:false}, no mutation", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  const vertsBefore = wallsModel.rooms[0].verts.map((v) => ({ x: v.x, y: v.y }));
+  const r = tools.tool_move_room({ roomId: "nope", dx: 1, dy: 1 });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /no such room/);
+  const vertsAfter = wallsModel.rooms[0].verts.map((v) => ({ x: v.x, y: v.y }));
+  assert.deepEqual(vertsAfter, vertsBefore);
+});
+
+test("move_room: non-finite dx/dy → {ok:false}, no mutation", () => {
+  session.newPlan();
+  const { roomId } = tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  const r1 = tools.tool_move_room({ roomId, dx: NaN, dy: 1 });
+  assert.equal(r1.ok, false);
+  const r2 = tools.tool_move_room({ roomId, dx: 1, dy: Infinity });
+  assert.equal(r2.ok, false);
+  // Room verts unchanged.
+  assert.ok(Math.abs(wallsModel.rooms[0].verts[0].x) < 1e-9);
+});
+
+// ── check_brief guidance (LLD 78) ────────────────────────────────────────────
+
+test("check_brief: wrong-size room unmet message now references resize_room", () => {
+  tools.tool_set_brief({ room: { w: 5, h: 7 } });
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } }); // wrong size
+  const r = tools.tool_check_brief();
+  assert.equal(r.satisfied, false);
+  const msg = r.unmet.find((u) => /resize_room/.test(u));
+  assert.ok(msg, `unmet message must mention resize_room; got: ${JSON.stringify(r.unmet)}`);
+});
+
+test("check_brief: no-room-drawn message references add_room (not resize_room)", () => {
+  tools.tool_set_brief({ room: { w: 5, h: 7 } });
+  session.newPlan();
+  // No room drawn.
+  const r = tools.tool_check_brief();
+  assert.equal(r.satisfied, false);
+  const msg = r.unmet[0];
+  assert.match(msg, /add_room/);
+  // Must not suggest resize_room when there is nothing to resize.
+  assert.doesNotMatch(msg, /resize_room/);
 });

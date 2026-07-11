@@ -33,6 +33,10 @@ export {
   perimeter,
   roomMetrics,
   wallSegments,
+  moveRoom,
+  rescaleRectEdge,
+  isRectangle,
+  pointNearRoomWall,
   WALL_M,
   MIN_SEG_M,
 } from "../../src/js/walls.js";

@@ -140,6 +140,19 @@ export function buildServer() {
     inputSchema: { roomId: z.string(), edgeIndex: z.number().int(), lengthM: z.number() },
   }, (args) => asResult(tools.tool_set_edge_length(args)));
 
+  server.registerTool("move_room", {
+    description: "Move a whole room by (dx,dy), carrying its furniture and its own doors/windows. " +
+      "Non-destructive; returns the carried symbol ids." + FRAME,
+    inputSchema: { roomId: z.string(), dx: z.number(), dy: z.number() },
+  }, (args) => asResult(tools.tool_move_room(args)));
+
+  server.registerTool("resize_room", {
+    description: "Resize a RECTANGULAR room to exact target w×h metres (anchored at its origin " +
+      "corner), non-destructively — use this instead of rebuilding a mis-sized room. " +
+      "Fails on non-rectangular rooms.",
+    inputSchema: { roomId: z.string(), w: z.number(), h: z.number() },
+  }, (args) => asResult(tools.tool_resize_room(args)));
+
   server.registerTool("place_symbol", {
     description: "Place a furniture/opening symbol at center (x,y). Optional w,h,rot; dims are clamped to the catalog range." + FRAME,
     inputSchema: {
