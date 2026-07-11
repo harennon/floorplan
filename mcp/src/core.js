@@ -32,6 +32,7 @@ export {
   polygonArea,
   perimeter,
   roomMetrics,
+  wallSegments,
   WALL_M,
   MIN_SEG_M,
 } from "../../src/js/walls.js";
@@ -50,6 +51,7 @@ export {
   duplicateSymbol,
   getSymbol,
   corners,
+  PARALLEL_TOL_DEG,
 } from "../../src/js/symbols.js";
 
 export {
