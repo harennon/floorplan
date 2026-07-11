@@ -5,12 +5,12 @@
  * document state. prefs.js owns editor-session preferences that should survive
  * reload but must NOT appear in exported JSON or share links.
  *
- * Preferences: gridSnap (boolean), theme ("light"|"dark").
+ * Preferences: gridSnap (boolean), theme ("light"|"dark"), onboardingSeen (boolean).
  */
 
 export const PREFS_KEY = "floorplan:prefs:v1";
 
-/** @typedef {{ gridSnap: boolean, theme: "light"|"dark" }} Prefs */
+/** @typedef {{ gridSnap: boolean, theme: "light"|"dark", onboardingSeen: boolean }} Prefs */
 
 /**
  * Resolve the default theme from prefers-color-scheme.
@@ -32,6 +32,7 @@ const _defaults = {
   gridSnap: true,
   // Theme default is computed at module load from prefers-color-scheme (light fallback).
   theme: _resolveDefaultTheme(),
+  onboardingSeen: false,
 };
 
 /** In-memory copy, kept in sync with localStorage. */
@@ -53,6 +54,9 @@ const _listeners = [];
     }
     if (parsed.theme === "light" || parsed.theme === "dark") {
       _prefs.theme = parsed.theme;
+    }
+    if (typeof parsed.onboardingSeen === "boolean") {
+      _prefs.onboardingSeen = parsed.onboardingSeen;
     }
     // Unrecognised keys are silently ignored; missing keys fall back to defaults.
   } catch {
@@ -115,6 +119,25 @@ export function setTheme(theme) {
 export function toggleTheme() {
   setTheme(_prefs.theme === "light" ? "dark" : "light");
   return _prefs.theme;
+}
+
+/**
+ * True once the user has dismissed (or auto-dismissed) the first-run coach-marks.
+ * Defaults to false (unseen). Missing/corrupt key falls back to false.
+ * @returns {boolean}
+ */
+export function onboardingSeen() {
+  return _prefs.onboardingSeen;
+}
+
+/**
+ * Persist that onboarding has been seen; fires onPrefsChange listeners.
+ * @param {boolean} seen
+ */
+export function setOnboardingSeen(seen) {
+  _prefs.onboardingSeen = !!seen;
+  _persist();
+  for (const cb of _listeners) cb();
 }
 
 /**

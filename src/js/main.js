@@ -47,6 +47,7 @@ import { init as initClearancePanel, update as clearancePanelUpdate } from "./cl
 import { onChange as onClearanceChange, setEnabled as setClearanceEnabled } from "./clearance.js";
 import { init as initLoupe, setViewModule as loupeSetViewModule, reposition as loupeReposition } from "./loupe.js";
 import { toggleGridSnap } from "./prefs.js";
+import { init as initOnboarding, maybeShow as onboardingMaybeShow, dismiss as onboardingDismiss } from "./onboarding.js";
 
 /** Detect macOS for platform-correct tooltip chords. */
 const _isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
@@ -539,8 +540,33 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Wire openTemplates into actions.js overflow handler
-  setOpenTemplates(openTemplates);
+  // ── Onboarding coach-marks (LLD-60) ───────────────────────────────────────
+  const onboardingEl  = document.getElementById("onboarding");
+  const coachWallEl   = document.getElementById("coach-wall");
+  const coachTmplEl   = document.getElementById("coach-template");
+  const coachDismiss  = document.getElementById("coach-dismiss");
+
+  if (onboardingEl && coachWallEl && coachTmplEl && coachDismiss && btnWall) {
+    initOnboarding({
+      container:   onboardingEl,
+      wallTip:     coachWallEl,
+      templateTip: coachTmplEl,
+      dismissBtn:  coachDismiss,
+      stage,
+      wallBtn:     btnWall,
+      emptyCta:    emptyCtaEl || undefined,
+      isEmpty:     isEmptyPlan,
+    });
+  }
+
+  // Wire openTemplates into actions.js overflow handler.
+  // Wrap with onboardingDismiss so the overflow "Start from a template" path
+  // (LLD-60 Edge Case 8 / Frontend Design §Entry/dismissal wiring) also
+  // dismisses coach-marks — the same dismissal set as #empty-cta click.
+  setOpenTemplates(() => {
+    onboardingDismiss();
+    openTemplates();
+  });
 
   // Register onRender hook to keep #empty-cta visibility in sync
   if (emptyCtaEl) {
@@ -642,6 +668,10 @@ document.addEventListener("DOMContentLoaded", () => {
       // Empty start: use default frame
       resetView(vW, vH);
       render();
+      // Show first-run coach-marks only on an empty start (LLD-60)
+      if (onboardingEl && coachWallEl && coachTmplEl && coachDismiss) {
+        onboardingMaybeShow();
+      }
     }
   })();
 

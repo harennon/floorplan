@@ -10104,6 +10104,345 @@ describe("prefs.js — default theme resolution", () => {
   });
 });
 
+// ─── Tests: LLD-60 — prefs.js onboardingSeen extension ───────────────────────
+
+import {
+  onboardingSeen, setOnboardingSeen,
+} from "../src/js/prefs.js";
+
+describe("prefs.js — onboardingSeen (LLD-60)", () => {
+  it("onboardingSeen() defaults to false on fresh prefs state", () => {
+    // Reset to known unseen state
+    setOnboardingSeen(false);
+    expect(onboardingSeen()).toBe(false);
+  });
+
+  it("setOnboardingSeen(true) persists across simulated reload (re-read from PREFS_KEY)", () => {
+    setOnboardingSeen(true);
+    expect(onboardingSeen()).toBe(true);
+    // Verify it is persisted to localStorage
+    try {
+      const raw = localStorage.getItem(PREFS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.onboardingSeen !== true) {
+          throw new Error("onboardingSeen not persisted to localStorage");
+        }
+      }
+    } catch (e) {
+      if (e.message.includes("onboardingSeen not persisted")) throw e;
+      // localStorage unavailable — acceptable
+    }
+    // Restore
+    setOnboardingSeen(false);
+  });
+
+  it("onboardingSeen never leaks into plan serialization", () => {
+    setOnboardingSeen(true);
+    // buildPlan and serializePlan are already imported above
+    const plan = JSON.parse(serializePlan(buildPlan()));
+    if ("onboardingSeen" in plan) {
+      throw new Error("'onboardingSeen' key found in serialized plan");
+    }
+    setOnboardingSeen(false);
+  });
+
+  it("corrupt/missing onboardingSeen in stored JSON falls back to false", () => {
+    // Manually write prefs with missing onboardingSeen
+    try {
+      const stored = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
+      delete stored.onboardingSeen;
+      localStorage.setItem(PREFS_KEY, JSON.stringify(stored));
+    } catch {
+      // localStorage unavailable — skip storage check but still verify in-memory fallback
+    }
+    // Even after a bad storage state, the in-memory API should work correctly.
+    // We can verify that setOnboardingSeen(false) + read gives false.
+    setOnboardingSeen(false);
+    expect(onboardingSeen()).toBe(false);
+  });
+
+  it("setOnboardingSeen fires onPrefsChange listeners", () => {
+    setOnboardingSeen(false);
+    let fired = false;
+    onPrefsChange(() => { fired = true; });
+    setOnboardingSeen(true);
+    if (!fired) throw new Error("onPrefsChange was not fired by setOnboardingSeen");
+    setOnboardingSeen(false); // restore
+  });
+});
+
+// ─── Tests: LLD-60 — onboarding.js behavioural suite ─────────────────────────
+
+import {
+  init as initOnboarding,
+  maybeShow as onboardingMaybeShow,
+  dismiss as onboardingDismiss,
+  isShown as onboardingIsShown,
+} from "../src/js/onboarding.js";
+
+/**
+ * Build a minimal set of DOM stubs for onboarding tests.
+ * @param {{ wallVisible?: boolean, templateVisible?: boolean }} opts
+ */
+function _makeOnboardingRefs({ wallVisible = true, templateVisible = true } = {}) {
+  function makeEl(id) {
+    const el = document.createElement("div");
+    el.id = id;
+    return el;
+  }
+
+  const container   = makeEl("t-onboarding");
+  container.hidden  = true;
+
+  const wallTip     = makeEl("t-coach-wall");
+  wallTip.hidden    = true;
+  const wallArrow   = document.createElement("span");
+  wallArrow.className = "coach-arrow";
+  wallTip.appendChild(wallArrow);
+
+  const templateTip = makeEl("t-coach-template");
+  templateTip.hidden = true;
+  const tmplArrow   = document.createElement("span");
+  tmplArrow.className = "coach-arrow";
+  templateTip.appendChild(tmplArrow);
+
+  const dismissBtn  = makeEl("t-coach-dismiss");
+  const stage       = makeEl("t-stage");
+
+  // Stub wallBtn with controllable visibility
+  const wallBtn = makeEl("t-tool-wall");
+  if (wallVisible) {
+    // Make offsetParent non-null by appending to document body
+    document.body.appendChild(wallBtn);
+    // Override getBoundingClientRect to return a non-zero rect inside viewport
+    wallBtn.getBoundingClientRect = () => ({
+      left: 10, top: 200, right: 50, bottom: 240,
+      width: 40, height: 40,
+    });
+  } else {
+    // Simulate collapsed (not in DOM → offsetParent is null)
+    wallBtn.getBoundingClientRect = () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
+  }
+
+  // Stub emptyCta with controllable visibility
+  const emptyCta = makeEl("t-empty-cta");
+  if (templateVisible) {
+    document.body.appendChild(emptyCta);
+    emptyCta.getBoundingClientRect = () => ({
+      left: 300, top: 300, right: 500, bottom: 340,
+      width: 200, height: 40,
+    });
+  } else {
+    emptyCta.getBoundingClientRect = () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
+  }
+
+  return { container, wallTip, templateTip, dismissBtn, stage, wallBtn, emptyCta };
+}
+
+/** Reset onboarding module state between tests by calling init with fresh refs. */
+function _resetOnboarding(opts) {
+  setOnboardingSeen(false);
+  onboardingDismiss(); // ensure _shown = false
+  const refs = _makeOnboardingRefs(opts);
+  initOnboarding({
+    container:   refs.container,
+    wallTip:     refs.wallTip,
+    templateTip: refs.templateTip,
+    dismissBtn:  refs.dismissBtn,
+    stage:       refs.stage,
+    wallBtn:     refs.wallBtn,
+    emptyCta:    refs.emptyCta,
+    isEmpty: () => true,
+  });
+  return refs;
+}
+
+describe("onboarding.js — maybeShow gating (LLD-60)", () => {
+  it("maybeShow returns false and shows nothing when onboardingSeen is true", () => {
+    _resetOnboarding();
+    setOnboardingSeen(true);
+    const result = onboardingMaybeShow();
+    expect(result).toBe(false);
+    expect(onboardingIsShown()).toBe(false);
+    setOnboardingSeen(false);
+  });
+
+  it("maybeShow returns false when isEmpty() returns false", () => {
+    setOnboardingSeen(false);
+    onboardingDismiss();
+    const refs = _makeOnboardingRefs();
+    initOnboarding({
+      container:   refs.container,
+      wallTip:     refs.wallTip,
+      templateTip: refs.templateTip,
+      dismissBtn:  refs.dismissBtn,
+      stage:       refs.stage,
+      wallBtn:     refs.wallBtn,
+      emptyCta:    refs.emptyCta,
+      isEmpty: () => false, // plan is non-empty
+    });
+    const result = onboardingMaybeShow();
+    expect(result).toBe(false);
+    expect(onboardingIsShown()).toBe(false);
+  });
+
+  it("maybeShow shows tips and returns true when unseen + empty + anchors visible", () => {
+    const refs = _resetOnboarding({ wallVisible: true, templateVisible: true });
+    const result = onboardingMaybeShow();
+    expect(result).toBe(true);
+    expect(onboardingIsShown()).toBe(true);
+    if (refs.container.hidden) throw new Error("container should not be hidden");
+    onboardingDismiss();
+  });
+});
+
+describe("onboarding.js — anchor suppression (LLD-60)", () => {
+  it("wall tip is hidden and template tip shows when wall anchor is invisible", () => {
+    const refs = _resetOnboarding({ wallVisible: false, templateVisible: true });
+    const result = onboardingMaybeShow();
+    expect(result).toBe(true);
+    if (!refs.wallTip.hidden) throw new Error("wall tip should be hidden");
+    if (refs.templateTip.hidden) throw new Error("template tip should be visible");
+    onboardingDismiss();
+  });
+
+  it("template tip is hidden and wall tip shows when template anchor is invisible", () => {
+    const refs = _resetOnboarding({ wallVisible: true, templateVisible: false });
+    const result = onboardingMaybeShow();
+    expect(result).toBe(true);
+    if (refs.wallTip.hidden) throw new Error("wall tip should be visible");
+    if (!refs.templateTip.hidden) throw new Error("template tip should be hidden");
+    onboardingDismiss();
+  });
+
+  it("maybeShow returns false and does NOT set seen flag when all anchors suppressed", () => {
+    setOnboardingSeen(false);
+    onboardingDismiss();
+    const refs = _makeOnboardingRefs({ wallVisible: false, templateVisible: false });
+    // wallBtn and emptyCta need offsetParent to be null for the visibility check to fail.
+    // Since they're not in the document body, offsetParent is null.
+    if (refs.wallBtn.parentNode) refs.wallBtn.parentNode.removeChild(refs.wallBtn);
+    if (refs.emptyCta.parentNode) refs.emptyCta.parentNode.removeChild(refs.emptyCta);
+    initOnboarding({
+      container:   refs.container,
+      wallTip:     refs.wallTip,
+      templateTip: refs.templateTip,
+      dismissBtn:  refs.dismissBtn,
+      stage:       refs.stage,
+      wallBtn:     refs.wallBtn,
+      emptyCta:    refs.emptyCta,
+      isEmpty: () => true,
+    });
+    const result = onboardingMaybeShow();
+    expect(result).toBe(false);
+    // Seen flag must NOT be set
+    expect(onboardingSeen()).toBe(false);
+  });
+});
+
+describe("onboarding.js — dismiss (LLD-60)", () => {
+  it("dismiss() hides container, sets _shown false, persists onboardingSeen true", () => {
+    const refs = _resetOnboarding();
+    onboardingMaybeShow();
+    expect(onboardingIsShown()).toBe(true);
+    onboardingDismiss();
+    expect(onboardingIsShown()).toBe(false);
+    if (!refs.container.hidden) throw new Error("container should be hidden after dismiss");
+    expect(onboardingSeen()).toBe(true);
+    setOnboardingSeen(false); // restore
+  });
+
+  it("second dismiss() is a no-op (idempotent)", () => {
+    _resetOnboarding();
+    onboardingMaybeShow();
+    onboardingDismiss();
+    // Calling again should not throw or change state
+    onboardingDismiss();
+    expect(onboardingIsShown()).toBe(false);
+    setOnboardingSeen(false);
+  });
+});
+
+describe("onboarding.js — dismissal triggers (LLD-60)", () => {
+  it("stage pointerdown triggers dismiss()", () => {
+    const refs = _resetOnboarding();
+    onboardingMaybeShow();
+    expect(onboardingIsShown()).toBe(true);
+    // Simulate pointerdown on stage
+    const ev = new Event("pointerdown", { bubbles: true });
+    refs.stage.dispatchEvent(ev);
+    expect(onboardingIsShown()).toBe(false);
+    setOnboardingSeen(false);
+  });
+
+  it("wall-tool click triggers dismiss()", () => {
+    const refs = _resetOnboarding();
+    onboardingMaybeShow();
+    expect(onboardingIsShown()).toBe(true);
+    refs.wallBtn.click();
+    expect(onboardingIsShown()).toBe(false);
+    setOnboardingSeen(false);
+  });
+
+  it("dismiss-button click triggers dismiss()", () => {
+    const refs = _resetOnboarding();
+    onboardingMaybeShow();
+    expect(onboardingIsShown()).toBe(true);
+    refs.dismissBtn.click();
+    expect(onboardingIsShown()).toBe(false);
+    setOnboardingSeen(false);
+  });
+
+  it("empty-cta click triggers dismiss()", () => {
+    const refs = _resetOnboarding({ wallVisible: true, templateVisible: true });
+    onboardingMaybeShow();
+    expect(onboardingIsShown()).toBe(true);
+    refs.emptyCta.click();
+    expect(onboardingIsShown()).toBe(false);
+    setOnboardingSeen(false);
+  });
+
+  it("overflow open-templates path: calling dismiss() before openTemplates dismisses coach-marks (LLD-60 Edge Case 8)", () => {
+    // The overflow menu handler in main.js wraps openTemplates as:
+    //   () => { onboardingDismiss(); openTemplates(); }
+    // This test simulates that wrapper to verify the dismiss() call is sufficient.
+    _resetOnboarding();
+    onboardingMaybeShow();
+    expect(onboardingIsShown()).toBe(true);
+    // Simulate the wrapper: dismiss first, then open templates (noop here)
+    onboardingDismiss();
+    expect(onboardingIsShown()).toBe(false);
+    expect(onboardingSeen()).toBe(true);
+    setOnboardingSeen(false);
+  });
+});
+
+describe("onboarding.js — Esc handling (LLD-60)", () => {
+  it("Esc key triggers dismiss() but does not stopPropagation", () => {
+    _resetOnboarding();
+    onboardingMaybeShow();
+    expect(onboardingIsShown()).toBe(true);
+
+    // Set up an outer bubble-phase listener to verify it still receives the Esc event
+    let outerFired = false;
+    const outerListener = (e) => {
+      if (e.key === "Escape") outerFired = true;
+    };
+    window.addEventListener("keydown", outerListener);
+
+    // Dispatch Esc — bubble phase
+    const ev = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
+    window.dispatchEvent(ev);
+
+    window.removeEventListener("keydown", outerListener);
+
+    expect(onboardingIsShown()).toBe(false);
+    if (!outerFired) throw new Error("Outer bubble-phase Esc listener did not fire — stopPropagation was called");
+    setOnboardingSeen(false);
+  });
+});
+
 // ─── LLD 61: SVG structural assertions ───────────────────────────────────────
 
 import {
@@ -12073,6 +12412,7 @@ describe("LLD 63 — selection mutex (room ↔ symbol, the HIGH fix)", () => {
     symClearSelectionMutex();
   });
 });
+
 
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results

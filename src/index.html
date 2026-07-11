@@ -1783,6 +1783,97 @@
       @media (prefers-reduced-motion: reduce) {
         .empty-cta { transition: none; }
       }
+
+      /* ── Onboarding coach-marks (LLD-60) ──────────────────────────────────── */
+      .onboarding {
+        position: fixed;
+        inset: 0;
+        z-index: 6;
+        pointer-events: none;
+      }
+      .coach-mark {
+        position: fixed;
+        max-width: 15rem;
+        background: var(--panel);
+        border: 1px solid var(--gold-soft);
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        padding: 0.45rem 0.7rem;
+        border-radius: 8px;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        pointer-events: none;
+        opacity: 1;
+        transition: opacity 0.2s ease;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .coach-mark { transition: none; }
+      }
+      /* Arrow: an 8px square rotated 45° with gold-soft border on two edges */
+      .coach-arrow {
+        position: absolute;
+        width: 8px;
+        height: 8px;
+        background: var(--panel);
+        border: 1px solid var(--gold-soft);
+        transform: rotate(45deg);
+        pointer-events: none;
+      }
+      /* Arrow placement based on data-side attribute set by JS */
+      .coach-arrow[data-side="left"] {
+        left: -5px;
+        top: 50%;
+        margin-top: -4px;
+        border-right: none;
+        border-top: none;
+      }
+      .coach-arrow[data-side="right"] {
+        right: -5px;
+        top: 50%;
+        margin-top: -4px;
+        border-left: none;
+        border-bottom: none;
+      }
+      .coach-arrow[data-side="bottom"] {
+        bottom: -5px;
+        left: 50%;
+        margin-left: -4px;
+        border-left: none;
+        border-top: none;
+      }
+      .coach-arrow[data-side="top"] {
+        top: -5px;
+        left: 50%;
+        margin-left: -4px;
+        border-right: none;
+        border-bottom: none;
+      }
+      .coach-dismiss {
+        position: fixed;
+        pointer-events: auto;
+        z-index: 9;
+        background: var(--panel);
+        border: 1px solid var(--gold-soft);
+        color: var(--gold);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        padding: 0.4rem 1rem;
+        border-radius: 100px;
+        cursor: pointer;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        transition: background 0.15s, border-color 0.15s;
+        letter-spacing: 0.03em;
+        white-space: nowrap;
+      }
+      .coach-dismiss:hover {
+        background: rgba(201,168,76,0.13);
+        border-color: var(--gold);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .coach-dismiss { transition: none; }
+      }
     </style>
   </head>
   <body>
@@ -2074,6 +2165,19 @@
             </tbody>
           </table>
         </div>
+      </div>
+
+      <!-- First-run onboarding coach-marks (LLD-60) -->
+      <div id="onboarding" class="onboarding" hidden aria-live="polite">
+        <div class="coach-mark" id="coach-wall" role="note" data-anchor="tool-wall" hidden>
+          <span class="coach-arrow" aria-hidden="true"></span>
+          <span class="coach-text">Draw a wall — click here, then click on the grid to start.</span>
+        </div>
+        <div class="coach-mark" id="coach-template" role="note" data-anchor="empty-cta" hidden>
+          <span class="coach-arrow" aria-hidden="true"></span>
+          <span class="coach-text">Or start from a template.</span>
+        </div>
+        <button class="coach-dismiss" id="coach-dismiss">Got it — hide tips</button>
       </div>
 
       <!-- Symbol dock (bottom-center, always visible in select mode) -->
