@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bedroom & storage pieces — glyph directions</title>
+<style>
+  :root {
+    --bg:#14140f; --bg-deep:#100f0b; --ink:#ece7d6; --muted:#8f8a78;
+    --gold:#c9a84c; --gold-soft:rgba(201,168,76,0.55);
+    --panel:rgba(20,20,15,0.72); --line:rgba(201,168,76,0.16);
+    --font-ui:"DM Sans",system-ui,sans-serif;
+    --font-mono:"DM Mono","Courier New",monospace;
+    --font-display:"Libre Baskerville",Georgia,serif;
+    --sym-fill:rgba(201,168,76,0.12); --sym-stroke:#d9be6e;
+    --sym-sel-fill:rgba(201,168,76,0.18); --sym-ink:201,168,76;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; font-family:var(--font-ui); color:var(--ink);
+    background:
+      radial-gradient(1200px 800px at 70% -10%, #1b1a12 0%, var(--bg-deep) 60%),
+      var(--bg-deep);
+    min-height:100vh; padding:2.2rem 1.2rem 4rem;
+  }
+  .wrap { max-width:1080px; margin:0 auto; }
+  .page-head h1 {
+    font-family:var(--font-display); font-weight:400; color:var(--gold);
+    font-size:1.55rem; margin:0 0 0.5rem; letter-spacing:0.01em;
+  }
+  .page-head .sub {
+    font-family:var(--font-mono); color:var(--muted); font-size:0.8rem;
+    line-height:1.55; margin:0; max-width:62ch;
+  }
+  .page-head code {
+    color:var(--gold); background:rgba(201,168,76,0.08);
+    padding:0.05em 0.35em; border-radius:4px; font-size:0.9em;
+  }
+  .style-toggle {
+    display:flex; gap:0.4rem; margin:1.5rem 0 1.8rem;
+    border-bottom:1px solid var(--line); padding-bottom:0.9rem;
+  }
+  .st-btn {
+    font-family:var(--font-mono); font-size:0.72rem; letter-spacing:0.03em;
+    color:var(--muted); background:var(--panel);
+    border:1px solid transparent; border-radius:7px;
+    padding:0.5rem 0.9rem; cursor:pointer; transition:all 0.14s;
+  }
+  .st-btn:hover { color:var(--gold); border-color:var(--gold-soft); }
+  .st-btn.is-active {
+    color:var(--gold); border-color:var(--gold-soft);
+    background:rgba(201,168,76,0.13);
+  }
+
+  /* ── Section cards ─────────────────────────────────────── */
+  .section-label {
+    font-family:var(--font-mono); font-size:0.66rem; letter-spacing:0.14em;
+    text-transform:uppercase; color:var(--muted); margin:2rem 0 0.9rem;
+  }
+  .card-grid {
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:1rem;
+  }
+  @media (max-width:720px){ .card-grid { grid-template-columns:1fr; } }
+  .piece-card {
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; padding:1.1rem 1.1rem 1.25rem;
+    display:flex; flex-direction:column; gap:0.7rem;
+  }
+  .piece-card h3 {
+    font-family:var(--font-display); font-weight:400; color:var(--ink);
+    margin:0; font-size:1.05rem;
+  }
+  .piece-card .dims {
+    font-family:var(--font-mono); font-size:0.68rem; color:var(--muted);
+    letter-spacing:0.02em;
+  }
+  .canvas-holder {
+    background:
+      linear-gradient(rgba(201,168,76,0.05) 1px, transparent 1px) 0 0 / 20px 20px,
+      linear-gradient(90deg, rgba(201,168,76,0.05) 1px, transparent 1px) 0 0 / 20px 20px,
+      var(--bg);
+    border-radius:8px; border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center;
+    aspect-ratio:1/0.8; padding:0.5rem;
+  }
+  .canvas-holder svg { width:100%; height:100%; }
+  .meta-row {
+    display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;
+    font-family:var(--font-mono); font-size:0.62rem; color:var(--muted);
+  }
+  .chip {
+    display:inline-flex; align-items:center; gap:0.3rem;
+    background:rgba(201,168,76,0.08); border:1px solid var(--gold-soft);
+    color:var(--gold); border-radius:5px; padding:0.2rem 0.45rem;
+    font-family:var(--font-mono); font-size:0.62rem;
+  }
+
+  /* ── Dock strip (matches src/index.html) ───────────────── */
+  .dock {
+    margin-top:0.7rem; background:var(--panel);
+    border:1px solid var(--line); border-radius:12px; overflow:hidden;
+    max-width:520px;
+  }
+  .dock-head {
+    font-family:var(--font-mono); font-size:0.62rem; letter-spacing:0.1em;
+    text-transform:uppercase; color:var(--muted);
+    padding:0.55rem 0.75rem 0;
+  }
+  .dock-row {
+    display:flex; gap:0; overflow-x:auto; scrollbar-width:none;
+    padding:0.35rem 0.5rem 0.55rem;
+  }
+  .dock-row::-webkit-scrollbar { display:none; }
+  .dock-item {
+    background:transparent; border:1px solid transparent; color:var(--muted);
+    font-family:var(--font-mono); font-size:0.55rem; letter-spacing:0.04em;
+    width:2.9rem; height:2.9rem; border-radius:7px; cursor:grab;
+    display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:0.15rem; padding:0.2rem 0;
+    flex-shrink:0; transition:color 0.12s, border-color 0.12s, background 0.12s;
+  }
+  .dock-item:hover {
+    color:var(--gold); border-color:var(--gold-soft);
+    background:rgba(201,168,76,0.07);
+  }
+  .dock-item.is-new { color:var(--ink); }
+  .dock-item.is-new::after {
+    content:"NEW"; position:absolute; margin:-2.2rem 0 0 1.9rem;
+    font-size:0.42rem; letter-spacing:0.08em; color:var(--gold);
+  }
+  .dock-item { position:relative; }
+  .note {
+    font-family:var(--font-mono); font-size:0.72rem; color:var(--muted);
+    line-height:1.6; margin:1.4rem 0 0; max-width:70ch;
+  }
+  .note b { color:var(--ink); font-weight:400; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page-head">
+    <h1>Bedroom &amp; storage pieces</h1>
+    <p class="sub">Nightstand · Dresser · Cabinet — two glyph directions for the dock icon and the on-canvas symbol. Both use only <code>rect / line / circle</code> primitives already in <code>_renderInterior()</code>.</p>
+  </header>
+
+  <div class="style-toggle" role="tablist" aria-label="Glyph direction">
+    <button class="st-btn is-active" data-style="line" role="tab" aria-selected="true">A · Line &amp; knob</button>
+    <button class="st-btn" data-style="panel" role="tab" aria-selected="false">B · Paneled fills</button>
+  </div>
+
+  <main id="stage"></main>
+</div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const STROKE = "#d9be6e";
+const INK = "201,168,76";
+const GOLD = "#c9a84c";
+
+// Catalog defaults proposed for the LLD (to-scale, metres).
+const PIECES = [
+  { type:"nightstand", label:"Nightstand", w:0.45, h:0.40, min:0.30, max:0.90,
+    blurb:"small bedside table" },
+  { type:"dresser",    label:"Dresser",    w:1.20, h:0.50, min:0.40, max:2.20,
+    blurb:"wide chest of drawers" },
+  { type:"cabinet",    label:"Cabinet",    w:0.80, h:0.40, min:0.30, max:2.50,
+    blurb:"general closed storage" },
+];
+
+// Pixels-per-metre for the preview canvas render.
+const PPM = 150;
+
+function el(tag, attrs){
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+}
+
+// Build one on-canvas symbol body + interior glyph (rot=0), centered in a
+// viewBox sized to the piece. Mirrors _renderSymbolBody + _renderInterior.
+function renderSymbol(piece, style){
+  const sw = piece.w * PPM, sh = piece.h * PPM;
+  const pad = 34;
+  const vbW = sw + pad*2, vbH = sh + pad*2;
+  const cx = vbW/2, cy = vbH/2;
+  const svg = el("svg", { viewBox:`0 0 ${vbW} ${vbH}` });
+  // lp: local offset from center → absolute (no rotation)
+  const lp = (lx,ly) => ({ x:cx+lx, y:cy+ly });
+
+  // Body box
+  svg.appendChild(el("rect", {
+    x:cx-sw/2, y:cy-sh/2, width:sw, height:sh, rx:2,
+    fill:"rgba("+INK+",0.12)", stroke:STROKE, "stroke-width":1.5,
+    "stroke-linejoin":"round",
+  }));
+
+  // Interior glyph
+  const g = interiorGlyph(piece.type, sw, sh, lp, style);
+  g.forEach(node => svg.appendChild(node));
+
+  // Selection-style dim chips (illustrative)
+  addDimChip(svg, cx, cy - sh/2 - 12, piece.w);
+  addDimChip(svg, cx - sw/2 - 20, cy, piece.h);
+  return svg;
+}
+
+function addDimChip(svg, x, y, m){
+  const txt = m.toFixed(2) + " m";
+  const w = txt.length*5.4 + 10;
+  svg.appendChild(el("rect", {
+    x:x-w/2, y:y-7, width:w, height:14, rx:3,
+    fill:"rgba(20,20,15,0.9)", stroke:"rgba(201,168,76,0.5)", "stroke-width":0.8,
+  }));
+  const t = el("text", {
+    x:x, y:y+3, "text-anchor":"middle",
+    "font-family":"'DM Mono',monospace", "font-size":8, fill:GOLD,
+  });
+  t.textContent = txt;
+  svg.appendChild(t);
+}
+
+const line = (a,b,extra={}) => el("line",
+  Object.assign({ x1:a.x, y1:a.y, x2:b.x, y2:b.y, stroke:STROKE, "stroke-width":0.8, opacity:0.65 }, extra));
+const dot  = (p,r=1.6,extra={}) => el("circle",
+  Object.assign({ cx:p.x, cy:p.y, r, fill:STROKE, opacity:0.7 }, extra));
+const panel = (p0,p1,extra={}) => el("rect",
+  Object.assign({ x:Math.min(p0.x,p1.x), y:Math.min(p0.y,p1.y),
+    width:Math.abs(p1.x-p0.x), height:Math.abs(p1.y-p0.y),
+    fill:"rgba("+INK+",0.14)", stroke:STROKE, "stroke-width":0.8 }, extra));
+
+// Returns array of SVG nodes for the interior glyph.
+function interiorGlyph(type, sw, sh, lp, style){
+  const out = [];
+  if (type === "nightstand") {
+    if (style === "line") {
+      // one drawer line + centered knob
+      const dy = -sh/2 + sh*0.42;
+      out.push(line(lp(-sw/2+3, dy), lp(sw/2-3, dy)));
+      out.push(dot(lp(0, dy + sh*0.22), 1.8));
+    } else {
+      // single inset drawer panel + knob
+      out.push(panel(lp(-sw/2+3, -sh/2+3), lp(sw/2-3, sh/2-3)));
+      out.push(dot(lp(0, 0), 2));
+    }
+  } else if (type === "dresser") {
+    // wide low unit: 3 columns of drawers
+    const cols = 3;
+    if (style === "line") {
+      for (let i=1;i<cols;i++){
+        const x = -sw/2 + (sw*i/cols);
+        out.push(line(lp(x, -sh/2+3), lp(x, sh/2-3)));
+      }
+      // one horizontal split + knobs
+      out.push(line(lp(-sw/2+3, 0), lp(sw/2-3, 0)));
+      for (let i=0;i<cols;i++){
+        const x = -sw/2 + sw*(i+0.5)/cols;
+        out.push(dot(lp(x, -sh*0.24), 1.6));
+        out.push(dot(lp(x,  sh*0.24), 1.6));
+      }
+    } else {
+      for (let i=0;i<cols;i++){
+        const x0 = -sw/2 + sw*i/cols + 2.5;
+        const x1 = -sw/2 + sw*(i+1)/cols - 2.5;
+        out.push(panel(lp(x0, -sh/2+3), lp(x1, -1)));
+        out.push(panel(lp(x0, 1),       lp(x1, sh/2-3)));
+        out.push(dot(lp((x0+x1)/2, -sh*0.24), 1.6));
+        out.push(dot(lp((x0+x1)/2,  sh*0.24), 1.6));
+      }
+    }
+  } else if (type === "cabinet") {
+    // closed storage: two doors, meeting handles at the center seam
+    const seamX = 0;
+    if (style === "line") {
+      out.push(line(lp(seamX, -sh/2+3), lp(seamX, sh/2-3), {opacity:0.75}));
+      // handle bars either side of the seam (short vertical lines)
+      out.push(line(lp(-sw*0.06, -sh*0.12), lp(-sw*0.06, sh*0.12),
+        {stroke:GOLD, "stroke-width":1.4, "stroke-linecap":"round", opacity:1}));
+      out.push(line(lp( sw*0.06, -sh*0.12), lp( sw*0.06, sh*0.12),
+        {stroke:GOLD, "stroke-width":1.4, "stroke-linecap":"round", opacity:1}));
+    } else {
+      out.push(panel(lp(-sw/2+3, -sh/2+3), lp(seamX-1.5, sh/2-3)));
+      out.push(panel(lp(seamX+1.5, -sh/2+3), lp(sw/2-3, sh/2-3)));
+      out.push(dot(lp(-sw*0.06, 0), 1.6, {fill:GOLD, opacity:1}));
+      out.push(dot(lp( sw*0.06, 0), 1.6, {fill:GOLD, opacity:1}));
+    }
+  }
+  return out;
+}
+
+// 18×18 dock icon (currentColor), one per piece × style.
+function dockIcon(type, style){
+  const svg = el("svg", { width:18, height:18, viewBox:"0 0 18 18", fill:"none", "aria-hidden":"true" });
+  const cc = { stroke:"currentColor" };
+  const add = (tag,a)=> svg.appendChild(el(tag, Object.assign({}, cc, a)));
+  if (type === "nightstand") {
+    add("rect", { x:4, y:4, width:10, height:10, rx:1, "stroke-width":1.3 });
+    if (style === "line") {
+      add("line", { x1:4, y1:8, x2:14, y2:8, "stroke-width":0.9, opacity:0.6 });
+      add("circle", { cx:9, cy:11, r:1, fill:"currentColor", stroke:"none", opacity:0.8 });
+    } else {
+      add("rect", { x:5.5, y:5.5, width:7, height:7, rx:0.6, "stroke-width":0.9,
+        fill:"currentColor", "fill-opacity":0.14 });
+      add("circle", { cx:9, cy:9, r:1, fill:"currentColor", stroke:"none" });
+    }
+  } else if (type === "dresser") {
+    add("rect", { x:2, y:5, width:14, height:8, rx:1, "stroke-width":1.3 });
+    add("line", { x1:6.7, y1:5, x2:6.7, y2:13, "stroke-width":0.9, opacity:0.7 });
+    add("line", { x1:11.3, y1:5, x2:11.3, y2:13, "stroke-width":0.9, opacity:0.7 });
+    if (style === "line") {
+      add("line", { x1:2, y1:9, x2:16, y2:9, "stroke-width":0.8, opacity:0.6 });
+    }
+    [4.35, 9, 13.65].forEach(x=>{
+      add("circle", { cx:x, cy:7.3, r:0.7, fill:"currentColor", stroke:"none", opacity:0.8 });
+      add("circle", { cx:x, cy:10.7, r:0.7, fill:"currentColor", stroke:"none", opacity:0.8 });
+    });
+  } else if (type === "cabinet") {
+    add("rect", { x:3, y:3, width:12, height:12, rx:1, "stroke-width":1.3 });
+    add("line", { x1:9, y1:3, x2:9, y2:15, "stroke-width":0.9, opacity:0.75 });
+    if (style === "line") {
+      add("line", { x1:7.6, y1:7.5, x2:7.6, y2:10.5, "stroke-width":1.4, "stroke-linecap":"round" });
+      add("line", { x1:10.4, y1:7.5, x2:10.4, y2:10.5, "stroke-width":1.4, "stroke-linecap":"round" });
+    } else {
+      add("rect", { x:4.3, y:4.3, width:3.7, height:9.4, rx:0.5, "stroke-width":0.8,
+        fill:"currentColor", "fill-opacity":0.12 });
+      add("rect", { x:10, y:4.3, width:3.7, height:9.4, rx:0.5, "stroke-width":0.8,
+        fill:"currentColor", "fill-opacity":0.12 });
+      add("circle", { cx:7.6, cy:9, r:0.8, fill:"currentColor", stroke:"none" });
+      add("circle", { cx:10.4, cy:9, r:0.8, fill:"currentColor", stroke:"none" });
+    }
+  }
+  return svg;
+}
+
+function build(style){
+  const stage = document.getElementById("stage");
+  stage.innerHTML = "";
+
+  // ── On-canvas symbols ─────────────────────────────────
+  const lbl1 = document.createElement("p");
+  lbl1.className = "section-label";
+  lbl1.textContent = "On-canvas symbol (to scale, on the graph grid)";
+  stage.appendChild(lbl1);
+
+  const grid = document.createElement("div");
+  grid.className = "card-grid";
+  PIECES.forEach(pc=>{
+    const card = document.createElement("div");
+    card.className = "piece-card";
+    card.innerHTML =
+      `<h3>${pc.label}</h3>`+
+      `<div class="dims">${pc.w.toFixed(2)} × ${pc.h.toFixed(2)} m · ${pc.blurb}</div>`;
+    const holder = document.createElement("div");
+    holder.className = "canvas-holder";
+    holder.appendChild(renderSymbol(pc, style));
+    card.appendChild(holder);
+    const meta = document.createElement("div");
+    meta.className = "meta-row";
+    meta.innerHTML =
+      `<span class="chip">min ${pc.min.toFixed(2)} m</span>`+
+      `<span class="chip">max ${pc.max.toFixed(2)} m</span>`+
+      `<span>category: bedroom</span>`;
+    card.appendChild(meta);
+    grid.appendChild(card);
+  });
+  stage.appendChild(grid);
+
+  // ── Dock strip ────────────────────────────────────────
+  const lbl2 = document.createElement("p");
+  lbl2.className = "section-label";
+  lbl2.textContent = "Bedroom dock tab (#row-bedroom) — existing + 3 new";
+  stage.appendChild(lbl2);
+
+  const dock = document.createElement("div");
+  dock.className = "dock";
+  dock.innerHTML = `<div class="dock-head">Bedroom</div>`;
+  const row = document.createElement("div");
+  row.className = "dock-row";
+  row.appendChild(existingDockItem("Bed", bedIcon()));
+  row.appendChild(existingDockItem("Wardrobe", wardrobeIcon()));
+  PIECES.forEach(pc=>{
+    const btn = document.createElement("button");
+    btn.className = "dock-item is-new";
+    btn.appendChild(dockIcon(pc.type, style));
+    const s = document.createElement("span");
+    s.textContent = pc.label;
+    btn.appendChild(s);
+    row.appendChild(btn);
+  });
+  dock.appendChild(row);
+  stage.appendChild(dock);
+
+  const note = document.createElement("p");
+  note.className = "note";
+  note.innerHTML = style === "line"
+    ? "<b>Direction A · Line &amp; knob.</b> Interiors are drawn with strokes + small filled knobs — the lightest visual weight, matching Bookshelf / Wardrobe / Table. Cabinet reads as two doors via gold handle bars at the center seam, distinguishing it from Wardrobe's dotted handles."
+    : "<b>Direction B · Paneled fills.</b> Interiors use inset filled rectangles (like Sofa / TV / Toilet) for a more solid, furniture-like read. Heavier ink; drawer/door panels are unmistakable but the three pieces look denser on a busy plan.";
+  stage.appendChild(note);
+}
+
+function existingDockItem(label, iconSvg){
+  const btn = document.createElement("button");
+  btn.className = "dock-item";
+  btn.appendChild(iconSvg);
+  const s = document.createElement("span"); s.textContent = label;
+  btn.appendChild(s);
+  return btn;
+}
+function bedIcon(){
+  const svg = el("svg",{width:18,height:18,viewBox:"0 0 18 18",fill:"none","aria-hidden":"true"});
+  svg.appendChild(el("rect",{x:3,y:3,width:12,height:12,rx:1,stroke:"currentColor","stroke-width":1.3}));
+  svg.appendChild(el("rect",{x:4,y:4,width:10,height:3.5,rx:0.8,stroke:"currentColor","stroke-width":1,fill:"currentColor","fill-opacity":0.15}));
+  svg.appendChild(el("line",{x1:9,y1:7.5,x2:9,y2:15,stroke:"currentColor","stroke-width":0.8,opacity:0.5}));
+  return svg;
+}
+function wardrobeIcon(){
+  const svg = el("svg",{width:18,height:18,viewBox:"0 0 18 18",fill:"none","aria-hidden":"true"});
+  svg.appendChild(el("rect",{x:2,y:3,width:14,height:12,rx:1,stroke:"currentColor","stroke-width":1.3}));
+  svg.appendChild(el("line",{x1:9,y1:3,x2:9,y2:15,stroke:"currentColor","stroke-width":0.9,opacity:0.7}));
+  svg.appendChild(el("circle",{cx:7,cy:9,r:1,fill:"currentColor",opacity:0.7}));
+  svg.appendChild(el("circle",{cx:11,cy:9,r:1,fill:"currentColor",opacity:0.7}));
+  return svg;
+}
+
+let currentStyle = "line";
+document.querySelectorAll(".st-btn").forEach(b=>{
+  b.addEventListener("click", ()=>{
+    document.querySelectorAll(".st-btn").forEach(x=>{
+      x.classList.remove("is-active"); x.setAttribute("aria-selected","false");
+    });
+    b.classList.add("is-active"); b.setAttribute("aria-selected","true");
+    currentStyle = b.dataset.style;
+    build(currentStyle);
+  });
+});
+build(currentStyle);
+</script>
+</body>
+</html>
