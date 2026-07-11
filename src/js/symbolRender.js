@@ -508,6 +508,83 @@ function _renderInterior(parent, sym, cs, p) {
     parent.appendChild(tray);
     return;
   }
+
+  if (sym.type === "nightstand") {
+    // Single horizontal drawer line across ~40% depth + center handle dot
+    const drawerY = -sh / 2 + sh * 0.40;
+    const d0 = lp(-sw / 2 + 2, drawerY);
+    const d1 = lp( sw / 2 - 2, drawerY);
+    const drawerLine = _makeLine(d0.x, d0.y, d1.x, d1.y);
+    drawerLine.setAttribute("stroke", p.symStroke);
+    drawerLine.setAttribute("stroke-width", "0.7");
+    drawerLine.setAttribute("opacity", "0.6");
+    parent.appendChild(drawerLine);
+    // Center handle dot
+    const hPt = lp(0, 0);
+    const hdot = document.createElementNS(NS, "circle");
+    hdot.setAttribute("cx", String(hPt.x));
+    hdot.setAttribute("cy", String(hPt.y));
+    hdot.setAttribute("r", "1.5");
+    hdot.setAttribute("fill", p.symStroke);
+    hdot.setAttribute("opacity", "0.7");
+    parent.appendChild(hdot);
+    return;
+  }
+
+  if (sym.type === "dresser") {
+    // Two horizontal drawer lines (evenly spaced) + short vertical center split across drawer band
+    for (let i = 1; i <= 2; i++) {
+      const lineY = -sh / 2 + sh * (i / 3);
+      const l0 = lp(-sw / 2 + 2, lineY);
+      const l1 = lp( sw / 2 - 2, lineY);
+      const shelf = _makeLine(l0.x, l0.y, l1.x, l1.y);
+      shelf.setAttribute("stroke", p.symStroke);
+      shelf.setAttribute("stroke-width", "0.7");
+      shelf.setAttribute("opacity", "0.6");
+      parent.appendChild(shelf);
+    }
+    // Short vertical center split spanning the drawer band
+    const splitTop = lp(0, -sh / 2 + 2);
+    const splitBot = lp(0,  sh / 2 - 2);
+    const split = _makeLine(splitTop.x, splitTop.y, splitBot.x, splitBot.y);
+    split.setAttribute("stroke", p.symStroke);
+    split.setAttribute("stroke-width", "0.7");
+    split.setAttribute("opacity", "0.4");
+    parent.appendChild(split);
+    return;
+  }
+
+  if (sym.type === "cabinet") {
+    // Vertical center divider (two doors) — inset, not full-height like wardrobe
+    const divTop = lp(0, -sh / 2 + 3);
+    const divBot = lp(0,  sh / 2 - 3);
+    const divL = _makeLine(divTop.x, divTop.y, divBot.x, divBot.y);
+    divL.setAttribute("stroke", p.symStroke);
+    divL.setAttribute("stroke-width", "0.8");
+    divL.setAttribute("opacity", "0.6");
+    parent.appendChild(divL);
+    // Horizontal shelf line at mid-depth to read as closed storage (distinct from wardrobe)
+    const shelfY = sh * 0.15;
+    const s0 = lp(-sw / 2 + 2, shelfY);
+    const s1 = lp( sw / 2 - 2, shelfY);
+    const shelfLine = _makeLine(s0.x, s0.y, s1.x, s1.y);
+    shelfLine.setAttribute("stroke", p.symStroke);
+    shelfLine.setAttribute("stroke-width", "0.7");
+    shelfLine.setAttribute("opacity", "0.5");
+    parent.appendChild(shelfLine);
+    // Two handle dots (one per door panel)
+    for (const side of [-1, 1]) {
+      const hPt = lp(side * sw * 0.20, -sh * 0.08);
+      const hdot = document.createElementNS(NS, "circle");
+      hdot.setAttribute("cx", String(hPt.x));
+      hdot.setAttribute("cy", String(hPt.y));
+      hdot.setAttribute("r", "1.5");
+      hdot.setAttribute("fill", p.symStroke);
+      hdot.setAttribute("opacity", "0.7");
+      parent.appendChild(hdot);
+    }
+    return;
+  }
 }
 
 // ── Private: selection box ────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ import {
   worstStatus,
   setThreshold,
   effectiveThreshold,
+  pointInRoom,
   CATALOG,
 } from "./core.js";
 
@@ -37,14 +38,108 @@ const cm = (m) => round(m * 100);
  * @param {{a:{x,y}, b:{x,y}}} c
  * @returns {{ axis:"x"|"y", openDir:"+x"|"-x"|"+y"|"-y" }}
  */
+// A wall's interior normal: the direction to move the subject to GROW the gap to
+// that wall (i.e. away from the wall, into the room). Keyed by clearance label.
+// In screen coords (y-down): top wall is at min-y so "into the room" is +y (down);
+// bottom is -y (up); left is +x (right); right is -x (left).
+const WALL_OPEN_DIR = {
+  "left wall": { axis: "x", openDir: "+x" },
+  "right wall": { axis: "x", openDir: "-x" },
+  "top wall": { axis: "y", openDir: "+y" },
+  "bottom wall": { axis: "y", openDir: "-y" },
+};
+
 function deriveDirection(c) {
-  // Horizontal leader → x-axis; vertical → y-axis. (Overlap leaders are
-  // center-to-center and may be diagonal; handled by the caller.)
+  // Wall gaps: derive from the wall's fixed interior normal, NOT the leader
+  // endpoints. For a subject INSIDE the room these agree with the endpoint math,
+  // but when the subject straddles/overlaps a wall the endpoints flip and would
+  // point OUT of the room (pushing furniture through the wall). The interior
+  // normal always points into the room, so the escape move is always inward.
+  if (c.kind === "wall") {
+    const d = WALL_OPEN_DIR[c.label];
+    if (d) return d;
+  }
+  // Symbol gaps (and any unlabelled wall): horizontal leader → x-axis; vertical
+  // → y-axis. (Overlap leaders are center-to-center and may be diagonal; handled
+  // by the caller.)
   if (c.a.y === c.b.y) {
     // sign of (a - b): a further +x than b ⇒ move subject +x to open
     return { axis: "x", openDir: c.a.x - c.b.x >= 0 ? "+x" : "-x" };
   }
   return { axis: "y", openDir: c.a.y - c.b.y >= 0 ? "+y" : "-y" };
+}
+
+/** Vertex-average centroid of a room polygon. Interior for convex rooms; may fall
+ *  OUTSIDE a concave (e.g. L-shaped) room — callers must not assume it is inside. */
+function roomCentroid(room) {
+  let sx = 0, sy = 0;
+  for (const v of room.verts) { sx += v.x; sy += v.y; }
+  const n = room.verts.length || 1;
+  return { x: sx / n, y: sy / n };
+}
+
+/**
+ * A point GUARANTEED inside `room`, nearest the given `center`.
+ * The centroid is used when it is genuinely interior (always so for the convex
+ * rooms add_room produces); for a concave room whose centroid falls outside the
+ * polygon, fall back to a deterministic grid scan of the room's bounding box and
+ * pick the interior sample closest to `center`. Returns null only for a
+ * degenerate room with no interior sample (shouldn't happen for a closed room).
+ */
+function interiorPointNear(room, center) {
+  const c = roomCentroid(room);
+  if (pointInRoom(room, c.x, c.y)) return c;
+  // Concave fallback: scan a grid over the AABB for the nearest interior point.
+  const xs = room.verts.map((v) => v.x);
+  const ys = room.verts.map((v) => v.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const N = 20; // 21×21 samples — fine enough for room-scale metres, cheap.
+  let best = null, bestD = Infinity;
+  for (let i = 0; i <= N; i++) {
+    for (let j = 0; j <= N; j++) {
+      const x = minX + ((maxX - minX) * i) / N;
+      const y = minY + ((maxY - minY) * j) / N;
+      if (!pointInRoom(room, x, y)) continue;
+      const d = (x - center.x) ** 2 + (y - center.y) ** 2;
+      if (d < bestD) { bestD = d; best = { x, y }; }
+    }
+  }
+  return best;
+}
+
+/**
+ * Target to pull an outside-the-room subject back in: a guaranteed-interior point
+ * of the closed room whose centroid is nearest the subject's current centre.
+ * Returns {toX,toY} or null. (Room SELECTION is by centroid distance — for the
+ * single-room brief this is exact; a rare multi-room case might pick a room whose
+ * centroid is nearer than its wall, but the subject is flagged bad either way.)
+ */
+function nearestRoomInteriorTarget(center, closedRooms) {
+  let bestRoom = null, bestD = Infinity;
+  for (const room of closedRooms) {
+    const c = roomCentroid(room);
+    const d = (c.x - center.x) ** 2 + (c.y - center.y) ** 2;
+    if (d < bestD) { bestD = d; bestRoom = room; }
+  }
+  if (!bestRoom) return null;
+  const pt = interiorPointNear(bestRoom, center);
+  return pt ? { toX: pt.x, toY: pt.y } : null;
+}
+
+/** NL violation for a subject whose centre is outside every room. */
+function buildOutsideRoomString(label, target, center) {
+  let msg = `${label} is outside the room — move it inside.`;
+  if (target) {
+    const dx = target.toX - center.x;
+    const dy = target.toY - center.y;
+    const deltas = [];
+    if (Math.abs(dx) >= 0.005) deltas.push(`${DIR_WORD[dx > 0 ? "+x" : "-x"]} ${cm(Math.abs(dx))} cm`);
+    if (Math.abs(dy) >= 0.005) deltas.push(`${DIR_WORD[dy > 0 ? "+y" : "-y"]} ${cm(Math.abs(dy))} cm`);
+    msg += ` Move ${label} to ~(${target.toX.toFixed(2)}, ${target.toY.toFixed(2)}) m`;
+    msg += deltas.length ? ` — ${deltas.join(" and ")}, then re-check.` : ", then re-check.";
+  }
+  return msg;
 }
 
 /**
@@ -291,12 +386,36 @@ export function buildClearanceReport(world, thresholdM, onlyId, aabbOf, getSymbo
     const subjectW = box.r - box.l;
     const subjectH = box.b - box.t;
     const center = { x: (box.l + box.r) / 2, y: (box.t + box.b) / 2 };
+    const label = CATALOG[sym.type]?.label || sym.type;
 
     const gaps = raw.map((c) => {
       const other = c.neighbourId ? getSymbolById(c.neighbourId) : null;
       const diagonal = c.kind === "symbol" && isDiagonal(box, other, aabbOf);
       return buildGap(c, effThr, diagonal);
     });
+
+    // Containment: computeClearances() evaluates wall gaps only for the room that
+    // CONTAINS the subject's centre, so a piece whose centre is outside every
+    // closed room gets no wall gaps and would otherwise read "ok" while floating
+    // outside the plan. Flag it bad and steer it toward the nearest room interior.
+    // (Only when a room exists — with no room drawn, containment is not yet meaningful.)
+    const closedRooms = world.rooms.filter((r) => r.closed);
+    if (closedRooms.length && !closedRooms.some((r) => pointInRoom(r, center.x, center.y))) {
+      anyBad = true;
+      const target = nearestRoomInteriorTarget(center, closedRooms);
+      items.push({
+        id: sym.id,
+        label,
+        worstStatus: "bad",
+        center: { x: center.x, y: center.y },
+        gaps,
+        suggestedMove: target,
+        boxedInAxes: [],
+        outsideRoom: true,
+      });
+      violations.push(buildOutsideRoomString(label, target, center));
+      continue;
+    }
 
     const itemWorst = worstStatus(raw);
     if (itemWorst === "bad") anyBad = true;
@@ -306,7 +425,6 @@ export function buildClearanceReport(world, thresholdM, onlyId, aabbOf, getSymbo
       center, subjectW, subjectH, gaps, effThr, world, getSymbolById, clearancesFor
     );
 
-    const label = CATALOG[sym.type]?.label || sym.type;
     items.push({
       id: sym.id,
       label,

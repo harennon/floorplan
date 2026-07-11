@@ -23,6 +23,30 @@ test("server.js imports without starting the stdio server", async () => {
   assert.equal(typeof m.buildServer, "function");
 });
 
+test("asResult flags genuine failures (ok:false) as isError, but NOT negative verdicts", async () => {
+  const { asResult } = await import("../src/server.js");
+  const session = await import("../src/session.js");
+  const tools = await import("../src/tools.js");
+  session.resetAll();
+
+  // Genuine execution/input failures → isError:true (all return { ok:false }).
+  assert.equal(asResult(tools.tool_move_symbol({ id: "nope", x: 1, y: 1 })).isError, true);
+  assert.equal(asResult(tools.tool_place_symbol({ type: "spaceship", x: 1, y: 1 })).isError, true);
+  assert.equal(asResult(tools.tool_check_clearance({ minWalkwayM: 0.1 })).isError, true);
+
+  // Negative VERDICTS ({ satisfied:false }, no ok field) are NOT errors — the SDK
+  // must still validate them against outputSchema, so isError must be unset.
+  const briefRes = asResult(tools.tool_check_brief());
+  assert.equal(briefRes.structuredContent.satisfied, false);
+  assert.equal(briefRes.isError, undefined);
+
+  // A success payload is never an error and always carries structuredContent.
+  session.newPlan();
+  const ok = asResult(tools.tool_add_room({ rect: { x: 0, y: 0, w: 3, h: 4 } }));
+  assert.equal(ok.isError, undefined);
+  assert.equal(ok.structuredContent.ok, true);
+});
+
 test("encodePlanToHash runs headless and round-trips through decodeHashToPlan", async () => {
   const { encodePlanToHash, decodeHashToPlan } = await import("../../src/js/share.js");
   const { emptyPlan } = await import("../src/session.js");

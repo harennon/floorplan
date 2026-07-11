@@ -17,7 +17,19 @@ import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from
 import { init as initDimEntry, reposition as dimReposition, getEditingEdge, setHistoryCommit as dimSetHistoryCommit } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim, setHistoryCommit as symDimSetHistoryCommit } from "./symbolDimEntry.js";
-import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, repositionFlushGuide, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast, nudgeSelected, rotateSelected, flushNudge } from "./symbolTool.js";
+import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, repositionFlushGuide, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast, nudgeSelected, rotateSelected, flushNudge, clearSelection as symClearSelection, setClearRoomSelection as symSetClearRoomSelection } from "./symbolTool.js";
+import {
+  init as initRoomTool,
+  onSelectDown as roomOnSelectDown,
+  onSelectMove as roomOnSelectMove,
+  onSelectUp as roomOnSelectUp,
+  onTapEmpty as roomOnTapEmpty,
+  onDrawModeEnter as roomOnDrawModeEnter,
+  clearSelection as roomClearSelection,
+  getSelectedRoomId as roomGetSelectedRoomId,
+  setHistoryAndToast as roomSetHistoryAndToast,
+  setClearSymbolSelection as roomSetClearSymbolSelection,
+} from "./roomTool.js";
 import { init as initStore, loadLocal, saveNow } from "./store.js";
 import { readBootHash } from "./share.js";
 import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
@@ -123,7 +135,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initHud(elZoom, elScale, elCursor, elUnitImp, elUnitMet, elSnapModeBtn, elGridToggleBtn);
 
   // wallRender binds mount points + injected getters
-  initWallRender(gWorld, gDraft, gSnap, labelsEl, dimLabelsEl, getSnap, getHighlightRoomId, getEditingEdge);
+  initWallRender(gWorld, gDraft, gSnap, labelsEl, dimLabelsEl, getSnap, getHighlightRoomId, getEditingEdge, roomGetSelectedRoomId);
 
   // wallTool binds rail, hud, keyboard
   initWallTool({
@@ -197,19 +209,59 @@ document.addEventListener("DOMContentLoaded", () => {
     symOverlay:  gSymOverlay,
   });
 
+  // roomTool — room selection + whole-room move-drag (LLD 63)
+  initRoomTool({ stage });
+
   // Dock category tabs (session-only UI state; no persistence)
   if (dockEl) initDockTabs(dockEl);
 
-  // Wire select hooks into interactions (no static symbol import there)
-  setSelectHooks({ onDown: onSelectDown, onMove: onSelectMove, onUp: onSelectUp, onTapEmpty });
+  // Wire select hooks into interactions (no static symbol/room import there).
+  // Dispatcher composes symbolTool + roomTool over the one Select tool: symbols
+  // win ties, else rooms; selections are mutually exclusive (LLD 63 HIGH fix).
+  let _activeSelectOwner = null; // "symbol" | "room" | null
+  setSelectHooks({
+    onDown(sx, sy) {
+      if (onSelectDown(sx, sy)) {
+        roomClearSelection();          // MUTEX: picking a symbol drops the room
+        _activeSelectOwner = "symbol";
+        return true;
+      }
+      if (roomOnSelectDown(sx, sy)) {  // roomTool clears the symbol selection itself
+        _activeSelectOwner = "room";   // via the injected clearSymbolSelection()
+        return true;
+      }
+      _activeSelectOwner = null;
+      return false;                    // miss: neither selection changes
+    },
+    onMove(sx, sy) {
+      if (_activeSelectOwner === "symbol") onSelectMove(sx, sy);
+      else if (_activeSelectOwner === "room") roomOnSelectMove(sx, sy);
+    },
+    onUp(sx, sy) {
+      if (_activeSelectOwner === "symbol") onSelectUp(sx, sy);
+      else if (_activeSelectOwner === "room") roomOnSelectUp(sx, sy);
+      _activeSelectOwner = null;
+    },
+    onTapEmpty() { onTapEmpty(); roomOnTapEmpty(); }, // clear both
+  });
 
-  // When switching to draw mode, clear symbol selection
-  document.getElementById("tool-wall")?.addEventListener("click", onDrawModeEnter);
+  // Wire the mutex injection so roomTool can drop the symbol selection without
+  // importing symbolTool (mirrors the history/toast injection pattern).
+  roomSetClearSymbolSelection(symClearSelection);
+  // And the reverse: any symbol selection (incl. dock drag-drop placement, which
+  // bypasses the dispatcher via selectSymbol) drops a live room selection.
+  symSetClearRoomSelection(roomClearSelection);
+
+  // When switching to draw mode, clear both symbol and room selection
+  document.getElementById("tool-wall")?.addEventListener("click", () => {
+    onDrawModeEnter();
+    roomOnDrawModeEnter();
+  });
   window.addEventListener("keydown", (e) => {
     if (e.ctrlKey || e.metaKey) return;
     const tag = document.activeElement?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    if (e.key === "w" || e.key === "W") onDrawModeEnter();
+    if (e.key === "w" || e.key === "W") { onDrawModeEnter(); roomOnDrawModeEnter(); }
   });
 
   // Register post-render hooks
@@ -286,6 +338,9 @@ document.addEventListener("DOMContentLoaded", () => {
     { commit: historyCommit, undo: historyUndo, depth: historyDepth },
     showToast,
   );
+
+  // Wire history + showToast into roomTool (LLD 63)
+  roomSetHistoryAndToast({ commit: historyCommit }, showToast);
 
   // Seed history baseline (must run before first render)
   initHistory();

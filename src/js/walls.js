@@ -386,6 +386,144 @@ export function rescaleEdge(room, edgeIndex, targetLenM) {
   return true;
 }
 
+// ── Room editing (LLD 63) ─────────────────────────────────────────────────────
+
+/** Right-angle tolerance: |cos(theta)| below this counts as square (~5° of 90°). */
+export const RIGHT_ANGLE_COS_TOL = 0.087; // cos(85°)
+
+/**
+ * True if world point (x, y) lies within `tolM` of ANY of this room's own wall
+ * segments (edges between consecutive verts, plus the closing edge for a closed
+ * room). Pure; no global reads. Used by room-move to carry wall-mounted openings
+ * (doors/windows), whose centers sit ON the wall line and so fail the strict
+ * pointInRoom interior test. Scoped to the given room's edges only, so an opening
+ * on a NEIGHBOUR's wall (or a shared wall) is not falsely attributed here.
+ * @param {Room} room
+ * @param {number} x  world metres
+ * @param {number} y  world metres
+ * @param {number} tolM  distance threshold, world metres
+ * @returns {boolean}
+ */
+export function pointNearRoomWall(room, x, y, tolM) {
+  const verts = room.verts;
+  const n = verts.length;
+  if (n < 2) return false;
+  const tol2 = tolM * tolM;
+  const last = room.closed ? n : n - 1; // closed: include verts[n-1]→verts[0]
+  for (let i = 0; i < last; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % n];
+    // Squared distance from (x,y) to segment ab.
+    const abx = b.x - a.x, aby = b.y - a.y;
+    const apx = x - a.x, apy = y - a.y;
+    const len2 = abx * abx + aby * aby;
+    let t = len2 > 0 ? (apx * abx + apy * aby) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = a.x + t * abx, cy = a.y + t * aby;
+    const ddx = x - cx, ddy = y - cy;
+    if (ddx * ddx + ddy * ddy <= tol2) return true;
+  }
+  return false;
+}
+
+/**
+ * Translate every vertex of a room by (dx, dy) world metres. Rigid — shape,
+ * angles, and edge lengths are all preserved. Mutates room.verts in place.
+ * No-op-safe on dx===0 && dy===0. Works for closed and open rooms.
+ * @param {Room} room
+ * @param {number} dx  world metres
+ * @param {number} dy  world metres
+ */
+export function moveRoom(room, dx, dy) {
+  for (const v of room.verts) {
+    v.x += dx;
+    v.y += dy;
+  }
+}
+
+/**
+ * True iff room is an axis-agnostic rectangle: closed, exactly 4 verts, all four
+ * corner turns within RIGHT_ANGLE_COS_TOL of 90°, no edge < MIN_SEG_M.
+ * Rotation-agnostic (a tilted rectangle qualifies). Pure.
+ * @param {Room} room
+ * @returns {boolean}
+ */
+export function isRectangle(room) {
+  if (!room || room.closed !== true) return false;
+  const verts = room.verts;
+  if (verts.length !== 4) return false;
+
+  // Edge vectors ei = v(i) → v(i+1 mod 4); reject any edge shorter than MIN_SEG_M.
+  const edges = [];
+  for (let i = 0; i < 4; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % 4];
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const len = Math.sqrt(ex * ex + ey * ey);
+    if (len < MIN_SEG_M) return false; // degenerate edge
+    edges.push({ x: ex / len, y: ey / len });
+  }
+
+  // Each corner turn is the angle between the incoming and outgoing edge unit
+  // vectors. The turn at vertex v(i+1) is between edge i and edge i+1; a right
+  // angle means their dot product is ≈ 0.
+  for (let i = 0; i < 4; i++) {
+    const e0 = edges[i];
+    const e1 = edges[(i + 1) % 4];
+    const dot = e0.x * e1.x + e0.y * e1.y;
+    if (Math.abs(dot) > RIGHT_ANGLE_COS_TOL) return false;
+  }
+  return true;
+}
+
+/**
+ * Rectangle-preserving edge resize. Sets edge K=`edgeIndex` (vK→v(K+1)) to length
+ * `targetLenM`, keeping all four angles at 90°. Mutates room.verts in place.
+ *
+ * Algorithm: anchor vK; u = unit(v(K+1) − vK); shift = u * (targetLenM − |eK|);
+ * move v(K+1) AND v(K+2) by shift (vK and v(K+3) stay fixed). This changes the
+ * edited edge's own length (its far endpoint moves), rigidly translates the far
+ * perpendicular wall, and keeps the shape a rectangle. Verts are (mod 4).
+ *
+ * Self-guards for MCP-later safety: returns false (no-op) if !isRectangle(room),
+ * targetLenM < MIN_SEG_M, or edgeIndex out of [0,3]. Returns true on success.
+ * @param {Room} room
+ * @param {number} edgeIndex  0..3
+ * @param {number} targetLenM
+ * @returns {boolean}
+ */
+export function rescaleRectEdge(room, edgeIndex, targetLenM) {
+  if (targetLenM < MIN_SEG_M) return false;
+  if (!Number.isInteger(edgeIndex) || edgeIndex < 0 || edgeIndex > 3) return false;
+  if (!isRectangle(room)) return false;
+
+  const verts = room.verts;
+  const K = edgeIndex;
+  const vK   = verts[K];
+  const vK1  = verts[(K + 1) % 4];
+  const vK2  = verts[(K + 2) % 4];
+
+  const dx = vK1.x - vK.x;
+  const dy = vK1.y - vK.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < MIN_SEG_M) return false; // guarded by isRectangle, but be safe
+
+  const ux = dx / len;
+  const uy = dy / len;
+  const delta = targetLenM - len;
+  const shiftX = ux * delta;
+  const shiftY = uy * delta;
+
+  // Move the far endpoint of the edited edge and its neighbour by the same shift.
+  // vK and v(K+3) stay fixed.
+  vK1.x += shiftX;
+  vK1.y += shiftY;
+  vK2.x += shiftX;
+  vK2.y += shiftY;
+  return true;
+}
+
 // ── Room centroids (LLD 37) ──────────────────────────────────────────────────
 
 /**

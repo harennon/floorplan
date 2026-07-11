@@ -17,6 +17,7 @@ import {
   closeRoom,
   rescaleEdge,
   roomMetrics,
+  wallSegments,
   createSymbol,
   addSymbol,
   moveSymbol,
@@ -28,20 +29,98 @@ import {
   getSymbol,
   aabb,
   CATALOG,
-  DEFAULT_THRESHOLD,
-  THRESH_MIN,
-  THRESH_MAX,
+  corners,
+  WALL_M,
+  PARALLEL_TOL_DEG,
   encodePlanToHash,
   serializePlan,
 } from "./core.js";
 import * as session from "./session.js";
-import { getBrief, setBrief } from "./brief.js";
+import {
+  getBrief,
+  setBrief,
+  MCP_WALKWAY_MIN,
+  MCP_WALKWAY_MAX,
+  MCP_WALKWAY_DEFAULT,
+  WALKWAY_RANGE_MSG,
+} from "./brief.js";
 import { buildClearanceReport } from "./feedback.js";
 import { savePlanFile } from "./io.js";
 
 const SHARE_BASE = "https://floorplan.danbing.app/#";
 
 const isFiniteNum = (v) => typeof v === "number" && Number.isFinite(v);
+
+/** Opening near-edge-to-wall-face adjacency slack (metres). */
+const WALL_ADJ_TOL_M = 0.15;
+
+/**
+ * True if an opening's footprint is parallel-and-adjacent to some wall segment.
+ * Mirrors nearestWallFlush (symbols.js) parallel+overlap+face-gap math, reduced
+ * to a boolean. Pure: all inputs injected.
+ *
+ * @param {import("../../src/js/symbols.js").Sym} sym
+ * @param {{ a:{x:number,y:number}, b:{x:number,y:number} }[]} segments
+ * @param {number} tolM  adjacency tolerance in metres
+ * @returns {boolean}
+ */
+function openingOnWall(sym, segments, tolM) {
+  const tolRad = (PARALLEL_TOL_DEG * Math.PI) / 180;
+  const cosThresh = Math.cos(tolRad);
+  const halfWall = WALL_M / 2;
+  const corners4 = corners(sym);
+
+  for (const seg of segments) {
+    const ax = seg.a.x, ay = seg.a.y;
+    const bx = seg.b.x, by = seg.b.y;
+    const segDx = bx - ax;
+    const segDy = by - ay;
+    const segLen = Math.sqrt(segDx * segDx + segDy * segDy);
+    if (segLen < 1e-9) continue; // degenerate
+
+    // Unit tangent (t) and normal (n) along the segment
+    const tx = segDx / segLen;
+    const ty = segDy / segLen;
+    const nx = ty;
+    const ny = -tx;
+
+    // Project all four corners onto t and n
+    let symTMin = Infinity, symTMax = -Infinity;
+    let symNMin = Infinity, symNMax = -Infinity;
+    for (const c of corners4) {
+      const relX = c.x - ax;
+      const relY = c.y - ay;
+      const t = relX * tx + relY * ty;
+      const n = relX * nx + relY * ny;
+      if (t < symTMin) symTMin = t;
+      if (t > symTMax) symTMax = t;
+      if (n < symNMin) symNMin = n;
+      if (n > symNMax) symNMax = n;
+    }
+
+    // 1. t-span overlap with [0, segLen]
+    if (Math.min(symTMax, segLen) <= Math.max(symTMin, 0)) continue;
+
+    // 2. Parallel check: local x- or y-axis of the symbol within PARALLEL_TOL_DEG
+    const symXX = corners4[1].x - corners4[0].x;
+    const symXY = corners4[1].y - corners4[0].y;
+    const symXLen = Math.sqrt(symXX * symXX + symXY * symXY);
+    const symYX = corners4[3].x - corners4[0].x;
+    const symYY = corners4[3].y - corners4[0].y;
+    const symYLen = Math.sqrt(symYX * symYX + symYY * symYY);
+    const cosX = symXLen > 1e-9 ? Math.abs((symXX * tx + symXY * ty) / symXLen) : 0;
+    const cosY = symYLen > 1e-9 ? Math.abs((symYX * tx + symYY * ty) / symYLen) : 0;
+    if (cosX < cosThresh && cosY < cosThresh) continue;
+
+    // 3. Adjacency: nearest symbol edge to either wall face ≤ tolM
+    for (const faceN of [halfWall, -halfWall]) {
+      const nearEdgeN = Math.abs(symNMin - faceN) <= Math.abs(symNMax - faceN)
+        ? symNMin : symNMax;
+      if (Math.abs(nearEdgeN - faceN) <= tolM) return true;
+    }
+  }
+  return false;
+}
 
 function world() {
   return { rooms: wallsModel.rooms, symbols: symbolsModel.symbols };
@@ -96,6 +175,20 @@ function planSummary() {
  * Returns { ok, roomId, metrics } or { ok:false, reason }.
  */
 export function tool_add_room(args) {
+  // Gap A: single-room brief — reject a second room before any mutation.
+  const brief = getBrief();
+  if (brief && brief.room) {
+    const existingClosed = wallsModel.rooms.find((r) => r.closed);
+    if (existingClosed) {
+      return {
+        ok: false,
+        reason:
+          `single-room brief already has a room (${existingClosed.id}); ` +
+          `call new_plan to start over, or set_edge_length to resize the existing room instead of adding another`,
+      };
+    }
+  }
+
   let verts;
   if (args && args.rect) {
     const { x, y, w, h } = args.rect;
@@ -200,6 +293,16 @@ export function tool_place_symbol(args) {
     rotateSymbol(sym, rot);
   }
 
+  // Gap B: openings must sit on a wall — check before addSymbol (never mutates on reject).
+  if (isOpening && !openingOnWall(sym, wallSegments(), WALL_ADJ_TOL_M)) {
+    return {
+      ok: false,
+      reason:
+        `a ${CATALOG[type].label.toLowerCase()} must sit on a wall; ` +
+        `place it within 0.15 m of a wall segment (center on the wall line)`,
+    };
+  }
+
   addSymbol(sym);
   return {
     ok: true,
@@ -222,6 +325,25 @@ export function tool_move_symbol(args) {
   if (!isFiniteNum(x) || !isFiniteNum(y)) {
     return { ok: false, reason: "x,y must be finite" };
   }
+
+  const isOpening = !!CATALOG[sym.type].openings;
+  if (isOpening) {
+    // Gap B: capture prior position, move, check, restore on failure.
+    const prevX = sym.x;
+    const prevY = sym.y;
+    moveSymbol(sym, x, y);
+    if (!openingOnWall(sym, wallSegments(), WALL_ADJ_TOL_M)) {
+      moveSymbol(sym, prevX, prevY); // restore
+      return {
+        ok: false,
+        reason:
+          `a ${CATALOG[sym.type].label.toLowerCase()} must sit on a wall; ` +
+          `place it within 0.15 m of a wall segment (center on the wall line)`,
+      };
+    }
+    return { ok: true, id, clearance: singleClearance(id) };
+  }
+
   moveSymbol(sym, x, y);
   return { ok: true, id, clearance: singleClearance(id) };
 }
@@ -288,8 +410,8 @@ export function tool_get_metrics() {
 
 /**
  * Effective threshold for an evaluator call: explicit override, else brief's
- * minWalkwayM, else DEFAULT_THRESHOLD. Range-checked (M1) — out of range returns
- * a reason instead of a threshold.
+ * minWalkwayM, else MCP_WALKWAY_DEFAULT. Range-checked (M1) against the grounded
+ * MCP walkway range — out of range returns a reason instead of a threshold.
  * @returns {{thresholdM:number}|{error:string}}
  */
 function resolveThreshold(minWalkwayM) {
@@ -298,10 +420,10 @@ function resolveThreshold(minWalkwayM) {
     thr = minWalkwayM;
   } else {
     const brief = getBrief();
-    thr = brief ? brief.minWalkwayM : DEFAULT_THRESHOLD;
+    thr = brief ? brief.minWalkwayM : MCP_WALKWAY_DEFAULT;
   }
-  if (!isFiniteNum(thr) || thr < THRESH_MIN || thr > THRESH_MAX) {
-    return { error: "walkway must be 0.30–1.20 m" };
+  if (!isFiniteNum(thr) || thr < MCP_WALKWAY_MIN || thr > MCP_WALKWAY_MAX) {
+    return { error: WALKWAY_RANGE_MSG };
   }
   return { thresholdM: thr };
 }
@@ -320,8 +442,8 @@ export function tool_check_clearance(args) {
 /** Compact single-symbol clearance readout used by mutators. */
 function singleClearance(id) {
   const brief = getBrief();
-  // brief.js already guarantees minWalkwayM ∈ [THRESH_MIN, THRESH_MAX] (M1).
-  const thr = brief ? brief.minWalkwayM : DEFAULT_THRESHOLD;
+  // brief.js already guarantees minWalkwayM ∈ [MCP_WALKWAY_MIN, MCP_WALKWAY_MAX] (M1).
+  const thr = brief ? brief.minWalkwayM : MCP_WALKWAY_DEFAULT;
   const report = buildClearanceReport(world(), thr, id, aabb, getSymbol);
   const item = report.items[0] || null;
   return {

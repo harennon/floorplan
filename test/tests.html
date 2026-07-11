@@ -125,7 +125,7 @@ import {
 } from "../src/js/units.js";
 
 import {
-  NICE_STEPS, MAJOR_EVERY, chooseGridStep,
+  NICE_STEPS, MAJOR_EVERY, chooseGridStep, drawGrid,
   SNAP_PRESETS, getSnapMode, setSnapMode, cycleSnapMode, snapStep, onSnapModeChange,
 } from "../src/js/grid.js";
 
@@ -135,6 +135,7 @@ import {
   gridSnap, closestEndpoint, canClose, resolveSnap,
   allVertices, placeVertex, closeRoom, finishChain, undoPoint,
   edgeLength, polygonArea, perimeter, roomMetrics, rescaleEdge,
+  moveRoom, isRectangle, rescaleRectEdge, RIGHT_ANGLE_COS_TOL, pointNearRoomWall,
 } from "../src/js/walls.js";
 
 // ─── Tests: view.js ───────────────────────────────────────────────────────────
@@ -939,6 +940,374 @@ describe("walls.js — rescaleEdge", () => {
   });
 });
 
+// ─── Tests: walls.js — LLD 63: moveRoom ──────────────────────────────────────
+
+/** Rotate a point (x,y) about the origin by `deg` degrees. */
+function _rotPt(x, y, deg) {
+  const r = (deg * Math.PI) / 180;
+  const c = Math.cos(r), s = Math.sin(r);
+  return { x: x * c - y * s, y: x * s + y * c };
+}
+
+/** Build a closed 4-vert room from an array of {x,y}. */
+function _closedRoom(id, verts) {
+  return { id, closed: true, verts: verts.map(v => ({ x: v.x, y: v.y })) };
+}
+
+/** Rotate every vertex of a room's verts array by `deg` about origin (returns new room). */
+function _rotateRoom(room, deg) {
+  return { ...room, verts: room.verts.map(v => _rotPt(v.x, v.y, deg)) };
+}
+
+/** Interior corner cosines for a closed 4-vert room (|cos| at each corner). */
+function _cornerCosines(room) {
+  const v = room.verts;
+  const n = v.length;
+  const edges = [];
+  for (let i = 0; i < n; i++) {
+    const a = v[i], b = v[(i + 1) % n];
+    const ex = b.x - a.x, ey = b.y - a.y;
+    const len = Math.sqrt(ex * ex + ey * ey);
+    edges.push({ x: ex / len, y: ey / len });
+  }
+  return edges.map((_, i) => {
+    const e0 = edges[i], e1 = edges[(i + 1) % n];
+    return Math.abs(e0.x * e1.x + e0.y * e1.y);
+  });
+}
+
+describe("walls.js — moveRoom (LLD 63)", () => {
+  it("rigid translate: all verts shift by (dx,dy); area & perimeter invariant", () => {
+    const room = mkRoom("m0", 0, 0, 4, 3);
+    const areaBefore = polygonArea(room.verts);
+    const perimBefore = perimeter(room.verts, true);
+    moveRoom(room, 2, -5);
+    expect(room.verts[0].x).toBeCloseTo(2, 12);
+    expect(room.verts[0].y).toBeCloseTo(-5, 12);
+    expect(room.verts[1].x).toBeCloseTo(6, 12);
+    expect(room.verts[2].y).toBeCloseTo(-2, 12);
+    expect(room.verts[3].x).toBeCloseTo(2, 12);
+    // Rigid: area + perimeter unchanged
+    expect(polygonArea(room.verts)).toBeCloseTo(areaBefore, 12);
+    expect(perimeter(room.verts, true)).toBeCloseTo(perimBefore, 12);
+  });
+
+  it("edge lengths preserved after translate", () => {
+    const room = mkRoom("m1", 1, 1, 5, 4);
+    const e0 = edgeLength(room.verts[0], room.verts[1]);
+    const e1 = edgeLength(room.verts[1], room.verts[2]);
+    moveRoom(room, -3, 7);
+    expect(edgeLength(room.verts[0], room.verts[1])).toBeCloseTo(e0, 12);
+    expect(edgeLength(room.verts[1], room.verts[2])).toBeCloseTo(e1, 12);
+  });
+
+  it("dx===0 && dy===0 leaves verts numerically identical (no-op-safe)", () => {
+    const room = mkRoom("m2", 0, 0, 2, 2);
+    const before = room.verts.map(v => ({ x: v.x, y: v.y }));
+    moveRoom(room, 0, 0);
+    for (let i = 0; i < before.length; i++) {
+      expect(room.verts[i].x).toBe(before[i].x);
+      expect(room.verts[i].y).toBe(before[i].y);
+    }
+  });
+
+  it("works on an open polyline room (all verts shifted)", () => {
+    const room = { id: "m3", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 2 }] };
+    moveRoom(room, 10, 20);
+    expect(room.verts[0].x).toBe(10);
+    expect(room.verts[0].y).toBe(20);
+    expect(room.verts[1].x).toBe(11);
+    expect(room.verts[2].y).toBe(22);
+  });
+
+  it("negative deltas shift correctly", () => {
+    const room = mkRoom("m4", 5, 5, 9, 8);
+    moveRoom(room, -5, -5);
+    expect(room.verts[0].x).toBe(0);
+    expect(room.verts[0].y).toBe(0);
+    expect(room.verts[2].x).toBe(4);
+    expect(room.verts[2].y).toBe(3);
+  });
+});
+
+// ─── Tests: walls.js — LLD 63: isRectangle ───────────────────────────────────
+
+describe("walls.js — isRectangle (LLD 63)", () => {
+  it("true for an axis-aligned 4-vert closed rectangle", () => {
+    expect(isRectangle(mkRoom("r0", 0, 0, 4, 3))).toBe(true);
+  });
+
+  it("true for a rectangle rotated 30° (rotation-agnostic)", () => {
+    const rect = mkRoom("r1", 0, 0, 4, 3);
+    expect(isRectangle(_rotateRoom(rect, 30))).toBe(true);
+  });
+
+  it("true for a near-rectangle within 5° tolerance (~87° corners)", () => {
+    // Rhomboid whose corner |cos| ≈ cos(87°) ≈ 0.0523 < RIGHT_ANGLE_COS_TOL(0.087).
+    const a = 0.0523 / Math.sqrt(1 - 0.0523 * 0.0523);
+    const room = _closedRoom("r2", [
+      { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1 + a, y: 1 }, { x: a, y: 1 },
+    ]);
+    expect(isRectangle(room)).toBe(true);
+  });
+
+  it("false for an open polyline", () => {
+    const room = { id: "r3", closed: false, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ] };
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("false for a triangle (3 verts)", () => {
+    const room = { id: "r4", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 3 },
+    ] };
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("false for a 5-vert polygon", () => {
+    const room = { id: "r5", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 2, y: 4 }, { x: 0, y: 3 },
+    ] };
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("false for an L-shape (6 verts → fails 4-vert check)", () => {
+    const room = { id: "r6", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 2 }, { x: 2, y: 2 }, { x: 2, y: 4 }, { x: 0, y: 4 },
+    ] };
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("false for a parallelogram (60°/120° corners)", () => {
+    // Slant so corner cos = cos(60°) = 0.5 >> tolerance.
+    const room = _closedRoom("r7", [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 3, y: Math.sqrt(3) }, { x: 1, y: Math.sqrt(3) },
+    ]);
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("false for a rectangle with one edge < MIN_SEG_M (degenerate)", () => {
+    const room = _closedRoom("r8", [
+      { x: 0, y: 0 }, { x: MIN_SEG_M * 0.5, y: 0 }, { x: MIN_SEG_M * 0.5, y: 3 }, { x: 0, y: 3 },
+    ]);
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("boundary: |cos| just below RIGHT_ANGLE_COS_TOL → true; just above → false (<= inclusive)", () => {
+    const mkRhomboid = (dot) => {
+      const a = dot / Math.sqrt(1 - dot * dot);
+      return _closedRoom("rb", [
+        { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1 + a, y: 1 }, { x: a, y: 1 },
+      ]);
+    };
+    // Just inside → rectangle
+    expect(isRectangle(mkRhomboid(RIGHT_ANGLE_COS_TOL - 1e-4))).toBe(true);
+    // Just outside → not a rectangle
+    expect(isRectangle(mkRhomboid(RIGHT_ANGLE_COS_TOL + 1e-3))).toBe(false);
+  });
+});
+
+// ─── Tests: walls.js — LLD 63: rescaleRectEdge ───────────────────────────────
+
+/**
+ * Assert a room is a rectangle with edge K == L, opposite edge parallel+equal,
+ * both perpendicular sides equal to their originals, and all corners 90°.
+ */
+function _assertRectAfterResize(room, K, L, perpBefore) {
+  const v = room.verts;
+  const vK = v[K], vK1 = v[(K + 1) % 4], vK2 = v[(K + 2) % 4], vK3 = v[(K + 3) % 4];
+  // Edited edge == L
+  expect(edgeLength(vK, vK1)).toBeCloseTo(L, 9);
+  // Opposite edge (v(K+2)→v(K+3)) parallel + equal length
+  const eK  = { x: vK1.x - vK.x,  y: vK1.y - vK.y };
+  const eOpp = { x: vK3.x - vK2.x, y: vK3.y - vK2.y }; // e(K+2)
+  expect(edgeLength(vK2, vK3)).toBeCloseTo(L, 9);
+  // Parallel: cross product ≈ 0
+  expect(eK.x * eOpp.y - eK.y * eOpp.x).toBeCloseTo(0, 8);
+  // Perpendicular sides unchanged
+  expect(edgeLength(vK1, vK2)).toBeCloseTo(perpBefore, 9);
+  expect(edgeLength(vK3, vK)).toBeCloseTo(perpBefore, 9);
+  // Still a rectangle (all angles 90°)
+  expect(isRectangle(room)).toBe(true);
+}
+
+describe("walls.js — pointNearRoomWall (LLD 63: opening carry)", () => {
+  const room = { id: "pw", closed: true, verts: [
+    { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+  ] };
+  it("point exactly on a wall segment is 'near' (tol 0.12)", () => {
+    expect(pointNearRoomWall(room, 2, 0, 0.12)).toBe(true);   // on top edge
+    expect(pointNearRoomWall(room, 0, 2, 0.12)).toBe(true);   // on left edge
+    expect(pointNearRoomWall(room, 4, 3, 0.12)).toBe(true);   // on right edge
+  });
+  it("point just inside the wall band is near; well inside the interior is not", () => {
+    expect(pointNearRoomWall(room, 2, 0.05, 0.12)).toBe(true);  // 5cm off top wall
+    expect(pointNearRoomWall(room, 2, 2, 0.12)).toBe(false);    // room center
+  });
+  it("point outside the wall band (beyond tol) is not near", () => {
+    expect(pointNearRoomWall(room, 2, 0.5, 0.12)).toBe(false);  // 50cm off top wall
+    expect(pointNearRoomWall(room, 6, 2, 0.12)).toBe(false);    // outside entirely
+  });
+  it("clamps to the segment ends (corner proximity, not infinite line)", () => {
+    // (5,0) is on the infinite line through the top edge but 1m past corner v1 → far.
+    expect(pointNearRoomWall(room, 5, 0, 0.12)).toBe(false);
+    // Near corner v1=(4,0) within tol → true.
+    expect(pointNearRoomWall(room, 4.05, 0.05, 0.12)).toBe(true);
+  });
+  it("open room: closing edge is NOT tested", () => {
+    const open = { id: "op", closed: false, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 },
+    ] };
+    // Point near the (would-be) closing edge v2→v0 is not near any real segment.
+    expect(pointNearRoomWall(open, 0, 2, 0.12)).toBe(false); // left closing edge absent
+    expect(pointNearRoomWall(open, 2, 0, 0.12)).toBe(true);  // real top edge present
+  });
+});
+
+describe("walls.js — rescaleRectEdge (LLD 63)", () => {
+  it("worked case: v0=(0,0) v1=(4,0) v2=(4,3) v3=(0,3), edit e0 to L=6", () => {
+    const room = _closedRoom("q0", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    const ok = rescaleRectEdge(room, 0, 6);
+    expect(ok).toBe(true);
+    // v0 and v3 unchanged
+    expect(room.verts[0].x).toBe(0); expect(room.verts[0].y).toBe(0);
+    expect(room.verts[3].x).toBe(0); expect(room.verts[3].y).toBe(3);
+    // v1 and v2 each moved by u·(L-|e0|) = (2,0)
+    expect(room.verts[1].x).toBeCloseTo(6, 12); expect(room.verts[1].y).toBeCloseTo(0, 12);
+    expect(room.verts[2].x).toBeCloseTo(6, 12); expect(room.verts[2].y).toBeCloseTo(3, 12);
+    _assertRectAfterResize(room, 0, 6, 3);
+  });
+
+  it("moves exactly v(K+1) and v(K+2); vK and v(K+3) stay fixed (all 4 edges)", () => {
+    for (let K = 0; K < 4; K++) {
+      const room = _closedRoom("q" + K, [
+        { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+      ]);
+      const before = room.verts.map(v => ({ x: v.x, y: v.y }));
+      const eKlen = edgeLength(room.verts[K], room.verts[(K + 1) % 4]);
+      const perp = edgeLength(room.verts[(K + 1) % 4], room.verts[(K + 2) % 4]);
+      const L = eKlen + 2; // grow by 2
+      const ok = rescaleRectEdge(room, K, L);
+      expect(ok).toBe(true);
+      // vK and v(K+3) unchanged
+      expect(room.verts[K].x).toBe(before[K].x);
+      expect(room.verts[K].y).toBe(before[K].y);
+      expect(room.verts[(K + 3) % 4].x).toBe(before[(K + 3) % 4].x);
+      expect(room.verts[(K + 3) % 4].y).toBe(before[(K + 3) % 4].y);
+      // v(K+1) and v(K+2) moved
+      const moved1 = room.verts[(K + 1) % 4].x !== before[(K + 1) % 4].x
+                  || room.verts[(K + 1) % 4].y !== before[(K + 1) % 4].y;
+      const moved2 = room.verts[(K + 2) % 4].x !== before[(K + 2) % 4].x
+                  || room.verts[(K + 2) % 4].y !== before[(K + 2) % 4].y;
+      if (!moved1) throw new Error(`edge ${K}: v(K+1) should have moved`);
+      if (!moved2) throw new Error(`edge ${K}: v(K+2) should have moved`);
+      _assertRectAfterResize(room, K, L, perp);
+    }
+  });
+
+  it("does not shear: result is still a rectangle (anti-parallelogram)", () => {
+    const room = _closedRoom("qs", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    rescaleRectEdge(room, 1, 7); // grow a vertical edge
+    // No corner drifts off 90°
+    for (const c of _cornerCosines(room)) expect(c).toBeCloseTo(0, 9);
+    expect(isRectangle(room)).toBe(true);
+  });
+
+  it("works on a rectangle rotated 30° (grows along local axis; stays rectangle)", () => {
+    const axis = _closedRoom("qr", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    const room = _rotateRoom(axis, 30);
+    const perp = edgeLength(room.verts[1], room.verts[2]);
+    const ok = rescaleRectEdge(room, 0, 6);
+    expect(ok).toBe(true);
+    _assertRectAfterResize(room, 0, 6, perp);
+  });
+
+  it("shrinking (L < |eK|, 4→2) works symmetrically; stays rectangle", () => {
+    const room = _closedRoom("qsh", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    const ok = rescaleRectEdge(room, 0, 2);
+    expect(ok).toBe(true);
+    expect(room.verts[1].x).toBeCloseTo(2, 12);
+    expect(room.verts[2].x).toBeCloseTo(2, 12);
+    _assertRectAfterResize(room, 0, 2, 3);
+  });
+
+  it("returns false (no-op) for targetLenM < MIN_SEG_M", () => {
+    const room = _closedRoom("qm", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    const before = room.verts.map(v => ({ x: v.x, y: v.y }));
+    expect(rescaleRectEdge(room, 0, MIN_SEG_M * 0.5)).toBe(false);
+    for (let i = 0; i < 4; i++) {
+      expect(room.verts[i].x).toBe(before[i].x);
+      expect(room.verts[i].y).toBe(before[i].y);
+    }
+  });
+
+  it("returns false for edgeIndex out of [0,3]", () => {
+    const room = _closedRoom("qi", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    expect(rescaleRectEdge(room, 4, 5)).toBe(false);
+    expect(rescaleRectEdge(room, -1, 5)).toBe(false);
+  });
+
+  it("returns false for a non-rectangle input (self-guard)", () => {
+    const tri = { id: "qt", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 3 },
+    ] };
+    const before = tri.verts.map(v => ({ x: v.x, y: v.y }));
+    expect(rescaleRectEdge(tri, 0, 6)).toBe(false);
+    for (let i = 0; i < tri.verts.length; i++) {
+      expect(tri.verts[i].x).toBe(before[i].x);
+      expect(tri.verts[i].y).toBe(before[i].y);
+    }
+  });
+
+  it("near-rectangle (88° corners) is NOT regularized: edge becomes L but corners stay 88° (EC13)", () => {
+    // Build a rhomboid whose corner |cos| = cos(88°) ≈ 0.0349 (within tolerance).
+    const dot = Math.cos((88 * Math.PI) / 180); // ≈ 0.0349
+    const a = dot / Math.sqrt(1 - dot * dot);
+    const room = _closedRoom("qn", [
+      { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1 + a, y: 1 }, { x: a, y: 1 },
+    ]);
+    expect(isRectangle(room)).toBe(true); // passes within tolerance
+    const K = 0;
+    const vKbefore  = { x: room.verts[K].x,           y: room.verts[K].y };
+    const vK1before = { x: room.verts[(K + 1) % 4].x, y: room.verts[(K + 1) % 4].y };
+    const L = 3;
+    const ok = rescaleRectEdge(room, K, L);
+    expect(ok).toBe(true);
+    // Edited edge equals L; vK stays put, v(K+1) slides along u=(1,0) by (L-1).
+    expect(room.verts[K].x).toBe(vKbefore.x);
+    expect(room.verts[K].y).toBe(vKbefore.y);
+    expect(room.verts[(K + 1) % 4].x).toBe(vK1before.x + L - 1);
+    expect(edgeLength(room.verts[K], room.verts[(K + 1) % 4])).toBeCloseTo(L, 9);
+    // The LOW-fix contract: assert the NEAR-side corners are unchanged — NOT
+    // "all corner angles unchanged" (that is false in general; a tilted opposite
+    // edge lets the far corners drift toward 90°). Here the shape is a parallelogram
+    // so all corners keep the same |cos|, but the assertions below deliberately
+    // check only the two near corners + that it is still not a true rectangle.
+    // _cornerCosines[i] is the corner at v[(i+1)%4]: index 3 = corner at v0(=vK),
+    // index 0 = corner at v1(=v(K+1)).
+    const cosines = _cornerCosines(room);
+    // (a) near-side corner angles (at vK and v(K+1)) are unchanged (≈88°, not squared up)
+    expect(cosines[3]).toBeCloseTo(dot, 6); // corner at vK
+    expect(cosines[0]).toBeCloseTo(dot, 6); // corner at v(K+1)
+    // (b) still NOT a true rectangle: at least one corner remains off 90°.
+    const anyOff = cosines.some(c => c > 1e-3);
+    if (!anyOff) throw new Error("near-rectangle was unexpectedly squared up to exact 90°");
+  });
+});
+
 // ─── Tests: units.js — LLD 9: M2_PER_FT2 ────────────────────────────────────
 
 describe("units.js — M2_PER_FT2", () => {
@@ -1453,7 +1822,8 @@ describe("symbols.js — units reuse: fmtLen/parseLen round-trip for w/h", () =>
 
 // ─── Tests: LLD-45 — new furniture types ─────────────────────────────────────
 
-const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer"];
+const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer",
+                     "nightstand", "dresser", "cabinet"];
 
 describe("LLD-45 — catalog integrity: all new types present and valid", () => {
   it("every new type exists in CATALOG with a valid category (updated by LLD-50)", () => {
@@ -1935,7 +2305,7 @@ describe("security — symbolDimEntry: raw input string never reaches DOM as mar
 
 // ─── Import dimEntry and measure (behavioral tests) ───────────────────────────
 
-import { init as initDimEntry, isEditing, getEditingEdge, beginEdit, commit, cancel } from "../src/js/dimEntry.js";
+import { init as initDimEntry, isEditing, getEditingEdge, beginEdit, commit, cancel, reposition } from "../src/js/dimEntry.js";
 import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from "../src/js/measure.js";
 
 // ─── Tests: dimEntry.js — behavioral ─────────────────────────────────────────
@@ -2209,6 +2579,108 @@ describe("dimEntry — dim-input aria-label is set", () => {
     if (input.getAttribute("aria-invalid") === "true") {
       throw new Error("aria-invalid should be cleared after cancel");
     }
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: dimEntry.js — LLD 63 rectangle-vs-general routing ────────────────
+
+describe("dimEntry — LLD 63: rectangle edit routes to rescaleRectEdge (stays rectangle)", () => {
+  it("committing a larger length on a rectangle keeps all four angles 90° (no shear)", () => {
+    resetModel();
+    setUnit("m");
+    // Axis-aligned 4x3 rectangle.
+    model.rooms.push({
+      id: "rr1", closed: true,
+      verts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }],
+    });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rr1", 0); // edge 0 = bottom, |e0| = 4
+    const input = rig.stage.querySelector(".dim-input");
+    input.value = "6m";
+    commit();
+    const room = model.rooms[0];
+    // Edited edge is 6; opposite edge also 6 (rectangle path — NOT single-corner shear)
+    expect(edgeLength(room.verts[0], room.verts[1])).toBeCloseTo(6, 9);
+    expect(edgeLength(room.verts[2], room.verts[3])).toBeCloseTo(6, 9);
+    // v2 moved with v1 (rectangle path); a single-corner rescaleEdge would have
+    // left v2 at x=4. Rectangle path moves it to x=6.
+    expect(room.verts[2].x).toBeCloseTo(6, 9);
+    // Still a rectangle
+    expect(isRectangle(room)).toBe(true);
+    rig.cleanup();
+  });
+});
+
+describe("dimEntry — LLD 63: non-rectangle edit routes to unchanged rescaleEdge (single-corner)", () => {
+  it("committing a length on an L-shaped room applies single-corner rescaleEdge", () => {
+    resetModel();
+    setUnit("m");
+    // L-shape (6 verts) — not a rectangle. Edge 0 = (0,0)→(4,0), |e0| = 4.
+    model.rooms.push({
+      id: "rl1", closed: true,
+      verts: [
+        { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 2 },
+        { x: 2, y: 2 }, { x: 2, y: 4 }, { x: 0, y: 4 },
+      ],
+    });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    // Cross-check against calling rescaleEdge directly on an identical clone.
+    const clone = { id: "clone", closed: true, verts: model.rooms[0].verts.map(v => ({ x: v.x, y: v.y })) };
+    rescaleEdge(clone, 0, 6);
+    beginEdit("rl1", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    input.value = "6m";
+    commit();
+    const room = model.rooms[0];
+    // Single-corner: only v1 moved (to x=6); v2 stays at (4,2).
+    expect(room.verts[1].x).toBeCloseTo(6, 9);
+    expect(room.verts[1].x).toBeCloseTo(clone.verts[1].x, 9);
+    expect(room.verts[2].x).toBe(4);  // untouched neighbour — proves single-corner path
+    expect(room.verts[2].y).toBe(2);
+    rig.cleanup();
+  });
+
+  it("no-op round-trip on a rectangle commits nothing (fmtLen-equality check)", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({
+      id: "rr2", closed: true,
+      verts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }],
+    });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rr2", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    input.value = fmtLen(4); // unchanged
+    commit();
+    const room = model.rooms[0];
+    // Geometry untouched (short-circuit before either resize fn)
+    expect(room.verts[1].x).toBe(4);
+    expect(room.verts[2].x).toBe(4);
+    rig.cleanup();
+  });
+
+  it("invalid rectangle resize (target < MIN_SEG_M) flags input and keeps editor open", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({
+      id: "rr3", closed: true,
+      verts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }],
+    });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rr3", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    input.value = "0.00001m"; // below MIN_SEG_M (1e-4)
+    commit();
+    expect(isEditing()).toBe(true); // still open
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    // Geometry unchanged
+    expect(model.rooms[0].verts[1].x).toBe(4);
+    cancel();
     rig.cleanup();
   });
 });
@@ -3738,7 +4210,7 @@ describe("history.js — depth() reflects _past.length", () => {
 
 // ─── Import hud.js (LLD-22 chip label tests) ─────────────────────────────────
 
-import { init as initHud, update as updateHud } from "../src/js/hud.js";
+import { init as initHud, update as updateHud, setCursorScreen } from "../src/js/hud.js";
 
 // ─── Tests: LLD-22 — view.js MAX_ZOOM raised to 16 ───────────────────────────
 
@@ -4747,6 +5219,124 @@ describe("clearance.js — flush-to-wall consistency (LLD 59)", () => {
     if (!leftWall) throw new Error("No left wall gap found");
     expect(leftWall.status).toBe("bad");
     expect(leftWall.gap).toBe(0);
+  });
+});
+
+// ─── Tests: clearance.js — flush symbol-to-symbol contact reads a fit (LLD 60 Defect 3) ──
+
+describe("clearance.js — flush symbol-to-symbol contact reads a fit (LLD 60 Defect 3)", () => {
+  it("flush contact (right edge === left edge, full y-overlap) → tight, gap 0, not bad", () => {
+    resetClearance();
+    resetSymbolModel();
+    // A: center (1, 5), w=2, h=1 → AABB l=0, r=2, t=4.5, b=5.5
+    // B: center (3, 5), w=2, h=1 → AABB l=2, r=4, t=4.5, b=5.5
+    // dx = max(2-2, 0-4) = 0 (touching on x); dy = max(4.5-5.5, 4.5-5.5) = -1 (y overlap)
+    const symA = mkSym("s0", "sofa",  1, 5, 2, 1, 0);
+    const symB = mkSym("s1", "table", 3, 5, 2, 1, 0);
+    const result = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    expect(result.length).toBe(1);
+    const c = result[0];
+    expect(c.kind).toBe("symbol");
+    expect(c.status).toBe("tight");
+    expect(c.gap).toBe(0);
+    if (worstStatus(result) === "bad") throw new Error("worstStatus must not be bad for a flush symbol contact");
+    // Leader is drawn along the touching x-facing faces (x = 2), not center-to-center.
+    expect(c.a.x).toBeCloseTo(2, 6);
+    expect(c.b.x).toBeCloseTo(2, 6);
+  });
+
+  it("continuity: touching (dx=0) is tight, and a 0.5cm gap is also tight (no worse-when-touching)", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Touching: A r=2, B l=2 → dx=0 → contact → tight
+    const symA = mkSym("s0", "sofa",  1, 5, 2, 1, 0);
+    const symB = mkSym("s1", "table", 3, 5, 2, 1, 0);
+    const touch = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    expect(touch[0].status).toBe("tight");
+    expect(touch[0].gap).toBe(0);
+    // Nudge B right by 0.5cm → B l=2.005 → dx=0.005 > 0 → positive-gap branch, classify(0.005)="tight"
+    const symB2 = mkSym("s1", "table", 3.005, 5, 2, 1, 0);
+    const gapd = computeClearances(symA, { rooms: [], symbols: [symA, symB2] });
+    expect(gapd[0].status).toBe("tight");
+    expect(gapd[0].gap).toBeCloseTo(0.005, 6);
+    // The discontinuity is gone: touching is NOT worse (bad) than a small gap (tight).
+  });
+
+  it("vertical flush contact (bottom edge === top edge, full x-overlap) → tight, leader on shared face", () => {
+    resetClearance();
+    resetSymbolModel();
+    // A: center (5, 1), w=2, h=1 → AABB l=4, r=6, t=0.5, b=1.5
+    // B: center (5, 3), w=2, h=1 → AABB l=4, r=6, t=2.5, b=3.5 ... that's a 1m gap.
+    // Seat flush: B center (5, 2.5) → AABB t=2.0, b=3.0. Still a gap. We need B.t === A.b = 1.5.
+    // B center (5, 2), w=2, h=1 → AABB t=1.5, b=2.5. Now A.b(1.5) === B.t(1.5) → dy=0, dx=-2 (x overlap).
+    const symA = mkSym("s0", "bed",   5, 1, 2, 1, 0);
+    const symB = mkSym("s1", "table", 5, 2, 2, 1, 0);
+    const result = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    expect(result.length).toBe(1);
+    const c = result[0];
+    expect(c.status).toBe("tight");
+    expect(c.gap).toBe(0);
+    // Vertical face pair (dy>=dx path): leader on shared face y = 1.5, same x.
+    expect(c.a.y).toBeCloseTo(1.5, 6);
+    expect(c.b.y).toBeCloseTo(1.5, 6);
+    expect(c.a.x).toBeCloseTo(c.b.x, 6);
+  });
+
+  it("genuine 2-D overlap (~3cm into each other on both axes) → still bad, gap 0", () => {
+    resetClearance();
+    resetSymbolModel();
+    // A: center (1, 5), w=2, h=1 → AABB l=0, r=2, t=4.5, b=5.5
+    // B: center (2.97, 4.97), w=2, h=1 → AABB l=1.97, r=3.97, t=4.47, b=5.47
+    // dx = max(1.97-2, 0-3.97) = -0.03; dy = max(4.47-5.5, 4.5-5.47) = max(-1.03,-0.97) = -0.97
+    // sep = max(dx,dy) = -0.03 < -1e-4 → genuine 2-D interpenetration → bad
+    const symA = mkSym("s0", "sofa",  1, 5, 2, 1, 0);
+    const symB = mkSym("s1", "table", 2.97, 4.97, 2, 1, 0);
+    const result = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    expect(result.length).toBe(1);
+    const c = result[0];
+    expect(c.status).toBe("bad");
+    expect(c.gap).toBe(0);
+    // Genuine overlap keeps the center-to-center leader.
+    expect(c.a.x).toBeCloseTo(1, 6);
+    expect(c.b.x).toBeCloseTo(2.97, 6);
+  });
+
+  it("boundary: sub-mm contact inside SYM_CONTACT_EPS is tight; a nudge beyond it is bad", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Inside tolerance: dx = -5e-5 (half of SYM_CONTACT_EPS=1e-4), dy overlapping →
+    //   sep = -5e-5 >= -1e-4 → tight. (Comfortably inside, immune to ~1e-16 FP noise.)
+    // A: l=0, r=2 (center 1); B.l = r - 5e-5 = 1.99995 → B center = 1.99995+1 = 2.99995
+    const symA = mkSym("s0", "sofa",  1, 5, 2, 1, 0);
+    const symBin = mkSym("s1", "table", 2.99995, 5, 2, 1, 0);
+    const inEps = computeClearances(symA, { rooms: [], symbols: [symA, symBin] });
+    expect(inEps[0].status).toBe("tight");
+    expect(inEps[0].gap).toBe(0);
+    // Beyond tolerance on the nearest axis (dx = -2e-4), other axis still overlapping → bad.
+    // B.l = 2 - 2e-4 = 1.9998 → B center = 2.9998; sep = -2e-4 < -1e-4 → bad.
+    const symBbeyond = mkSym("s1", "table", 2.9998, 5, 2, 1, 0);
+    const beyond = computeClearances(symA, { rooms: [], symbols: [symA, symBbeyond] });
+    expect(beyond[0].status).toBe("bad");
+    expect(beyond[0].gap).toBe(0);
+  });
+
+  it("opening neighbour (door) produces no symbol contact row even when flush", () => {
+    resetClearance();
+    resetSymbolModel();
+    // Sofa flush against a door: the door is an opening → skipped as a neighbour.
+    const sofa = mkSym("s0", "sofa", 1, 5, 2, 1, 0);       // AABB r=2
+    const door = mkSym("s1", "door", 3, 5, 2, 0.12, 0);    // AABB l=2 (flush) but opening
+    const result = computeClearances(sofa, { rooms: [], symbols: [sofa, door] });
+    const symbolRows = result.filter(c => c.kind === "symbol");
+    expect(symbolRows.length).toBe(0);
+  });
+
+  it("classify() untouched: classify(0) still bad, negative still bad (epsilon lives in the symbol branch)", () => {
+    setThreshold(0.60);
+    expect(classify(0)).toBe("bad");
+    expect(classify(-0.00005)).toBe("bad");  // within SYM_CONTACT_EPS but classify has no epsilon
+    expect(classify(-1)).toBe("bad");
+    resetClearance();
   });
 });
 
@@ -5975,6 +6565,165 @@ describe("nearestObjectAlignment — empty candidates", () => {
   });
 });
 
+// ─── Tests: LLD-60 Defect 1 — coherent corners (primary candidate) ────────────
+
+describe("nearestObjectAlignment — phantom corner: X and Y cannot come from different neighbours", () => {
+  it("P in range on X only, Q in range on Y only → exactly one axis applies, from the closer candidate", () => {
+    // Drag AABB: x:[0,2] (maxX=2), y:[0,2] (maxY=2), cx=1, cy=1
+    // Candidate P: aligns on X only — P.minX=2.05 (facing drag.maxX=2, gap 0.05); P.Y far.
+    // Candidate Q: aligns on Y only — Q.minY=2.10 (facing drag.maxY=2, gap 0.10); Q.X far.
+    const drag = mkAABB(0, 2, 0, 2);
+    const P = mkAABB(2.05, 4, 40, 42);   // X match gap 0.05; Y ~40 away
+    const Q = mkAABB(40, 42, 2.10, 4);   // Y match gap 0.10; X ~40 away
+    const result = nearestObjectAlignment(drag, [P, Q], 0.2);
+    // Phantom guard: NOT both axes applied simultaneously.
+    const bothApplied = result.x !== null && result.y !== null;
+    if (bothApplied) throw new Error("Phantom corner: X and Y both applied from different neighbours");
+    // Exactly one axis is non-null.
+    const nonNullCount = (result.x !== null ? 1 : 0) + (result.y !== null ? 1 : 0);
+    expect(nonNullCount).toBe(1);
+    // The applied axis is P's X (smaller bestAxisGap 0.05 < 0.10), tracing to P.minX=2.05.
+    if (result.x === null) throw new Error("Expected the closer candidate P's X axis to win");
+    expect(result.x.line).toBeCloseTo(2.05, 9);
+    expect(result.y).toBe(null);
+  });
+
+  it("phantom guard is comparator-driven: primary emits its OWN axis even when a NON-primary has a strictly-tighter single-axis gap on that same axis", () => {
+    // This is the inverse of "strictly-tighter single wins": here the tighter single-axis
+    // gap belongs to a NON-primary candidate, and the primary must still emit its own X
+    // (never borrow the other candidate's tighter X) — locking out the phantom.
+    // Drag: x:[0,2] maxX=2, y:[0,2] maxY=2.
+    // Candidate R (the primary): matches BOTH axes → bestAxisGap = min(0.06, 0.06) = 0.06.
+    //   R.minX=2.06 (X facing gap 0.06), R.minY=2.06 (Y facing gap 0.06).
+    // Candidate S: matches X ONLY, strictly tighter on X (gap 0.02) → S.minX=2.02; S.Y far.
+    //   S's bestAxisGap = 0.02 < R's 0.06 → S is the PRIMARY by rule 1.
+    // So the winner is S (single X axis), NOT a corner mixing S.x + R.y.
+    const drag = mkAABB(0, 2, 0, 2);
+    const R = mkAABB(2.06, 4, 2.06, 4);
+    const S = mkAABB(2.02, 4, 40, 42);
+    const result = nearestObjectAlignment(drag, [R, S], 0.2);
+    // S wins outright (tighter bestAxisGap). Single X axis, tracing to S.minX=2.02.
+    if (result.x === null) throw new Error("Expected S's X to win as primary");
+    expect(result.x.line).toBeCloseTo(2.02, 9);
+    // Crucially Y must be null — R's Y must NOT be borrowed onto S's X (no phantom).
+    expect(result.y).toBe(null);
+  });
+});
+
+describe("nearestObjectAlignment — same-object corner preferred", () => {
+  it("one candidate in range on both axes → both x and y non-null, both lines from that candidate", () => {
+    // Drag: x:[0,2] maxX=2, y:[0,2] maxY=2. Single candidate C facing on both axes.
+    const drag = mkAABB(0, 2, 0, 2);
+    const C = mkAABB(2.05, 4, 2.07, 4); // X gap 0.05, Y gap 0.07
+    const result = nearestObjectAlignment(drag, [C], 0.2);
+    if (result.x === null) throw new Error("Expected x match");
+    if (result.y === null) throw new Error("Expected y match");
+    expect(result.x.line).toBeCloseTo(2.05, 9); // C.minX
+    expect(result.y.line).toBeCloseTo(2.07, 9); // C.minY
+  });
+});
+
+describe("nearestObjectAlignment — both-axes tie-break (corner-affinity)", () => {
+  it("A in range on X only at gap g; B in range on both axes with best-axis gap g → B wins (both axes)", () => {
+    // Drag: x:[0,2] maxX=2, y:[0,2] maxY=2.
+    // A: X only, facing gap g=0.05 at line 2.05 (A.minX=2.05); A.Y far.
+    // B: both axes — X via LEFT-edge align at a DISTINCT line 0.05 (B.minX=0.05 gap 0.05),
+    //    Y facing gap 0.09 (B.minY=2.09). B's bestAxisGap = min(0.05, 0.09) = 0.05, tying A
+    //    within TIE_EPS → corner-affinity picks B.
+    // A's and B's X gaps tie at 0.05 but land on DIFFERENT lines (2.05 vs 0.05), so the emitted
+    // x.line uniquely identifies the winner — this ALSO fails pre-fix (which, resolving X
+    // independently, would keep A's line 2.05 as first-seen on the tie → a phantom X-from-A +
+    // Y-from-B corner).
+    const drag = mkAABB(0, 2, 0, 2);
+    const A = mkAABB(2.05, 4, 40, 42);
+    const B = mkAABB(0.05, 1.5, 2.09, 3);
+    const result = nearestObjectAlignment(drag, [A, B], 0.2);
+    // B wins → BOTH axes emitted, both tracing to B.
+    if (result.x === null) throw new Error("Expected x match from B");
+    if (result.y === null) throw new Error("Expected y match from B (corner-affinity)");
+    expect(result.x.line).toBeCloseTo(0.05, 9); // B's X line, NOT A's 2.05 (proves single-source)
+    expect(result.y.line).toBeCloseTo(2.09, 9);
+  });
+});
+
+describe("nearestObjectAlignment — strictly-tighter single wins over both-axes", () => {
+  it("A single-axis gap strictly < B best-axis gap → A wins its single axis, no corner override", () => {
+    // Drag: x:[0,2] maxX=2, y:[0,2] maxY=2.
+    // A: X only, gap 0.02 (A.minX=2.02); A.Y far.
+    // B: both axes, best-axis gap 0.06 (B.minX=2.06, B.minY=2.06).
+    //    A's 0.02 is strictly < B's 0.06 → A wins by rule 1, not overridden by corner-affinity.
+    const drag = mkAABB(0, 2, 0, 2);
+    const A = mkAABB(2.02, 4, 40, 42);
+    const B = mkAABB(2.06, 4, 2.06, 4);
+    const result = nearestObjectAlignment(drag, [A, B], 0.2);
+    if (result.x === null) throw new Error("Expected A's X to win");
+    expect(result.x.line).toBeCloseTo(2.02, 9);
+    expect(result.y).toBe(null); // A matches X only; B's corner must not override
+  });
+});
+
+// ─── Tests: LLD-60 Defect 2 — two-tier threshold (contact wider than edge) ────
+
+describe("nearestObjectAlignment — facing edge in the widened contact band", () => {
+  it("facing pair (drag.maxX ↔ cand.minX) at gap 0.25: matches with contact=0.275, no match with single 0.20", () => {
+    // Drag: x:[0,2] maxX=2; Y far from cand so no Y match.
+    // Cand.minX = 2.25 → facing gap 0.25.
+    const drag = mkAABB(0, 2, 0, 1);
+    const cand = mkAABB(2.25, 4, 40, 42);
+    // Two-tier: edge=0.20, contact=0.275 → facing gap 0.25 <= 0.275 → X match, facing:true.
+    const widened = nearestObjectAlignment(drag, [cand], 0.20, 0.275);
+    if (widened.x === null) throw new Error("Expected X match within the widened contact band");
+    expect(widened.x.facing).toBe(true);
+    expect(widened.x.line).toBeCloseTo(2.25, 9);
+    // Single 0.20 threshold (default contact = edge) → facing gap 0.25 > 0.20 → NO match.
+    const narrow = nearestObjectAlignment(drag, [cand], 0.20);
+    expect(narrow.x).toBe(null);
+  });
+});
+
+describe("nearestObjectAlignment — same-side edge NOT widened", () => {
+  it("same-side pair (drag.minX ↔ cand.minX) at gap 0.25 with edge=0.20, contact=0.275 → no X match", () => {
+    // Drag: x:[0,2] minX=0. Same-side (minX↔minX) uses the tighter edge threshold.
+    // Cand.minX = 0.25 → same-side gap 0.25 > edge 0.20 → no match, even though contact=0.275.
+    // Guard the other pairs out of range: cand.maxX and cand.cx far; Y far.
+    const drag = mkAABB(0, 2, 0, 1);
+    const cand = mkAABB(0.25, 40, 40, 42); // minX=0.25, maxX=40, cx≈20.125
+    const result = nearestObjectAlignment(drag, [cand], 0.20, 0.275);
+    // drag.minX(0)↔cand.minX(0.25): same-side gap 0.25 > 0.20 (edge) → filtered.
+    // drag.maxX(2)↔cand.minX(0.25): facing gap -1.75 → out of contact band too.
+    // No X match.
+    expect(result.x).toBe(null);
+  });
+});
+
+describe("nearestObjectAlignment — within old window: two-tier call unchanged", () => {
+  it("facing pair at gap 0.1 matches identically under single-threshold and two-threshold calls", () => {
+    const drag = mkAABB(0, 2, 0, 1);
+    const cand = mkAABB(2.1, 4, 40, 42); // facing gap 0.1
+    const single = nearestObjectAlignment(drag, [cand], 0.2);
+    const twoTier = nearestObjectAlignment(drag, [cand], 0.2, 0.275);
+    if (single.x === null || twoTier.x === null) throw new Error("Expected X match in both calls");
+    expect(single.x.delta).toBeCloseTo(twoTier.x.delta, 12); // identical delta, no drift
+    expect(single.x.delta).toBeCloseTo(0.1, 9);
+  });
+});
+
+describe("nearestObjectAlignment — back-compat default at edge-threshold boundary", () => {
+  it("three-arg call reproduces pre-fix result on a facing pair at the edge-threshold boundary", () => {
+    // Facing pair exactly at the threshold: gap == threshold is inclusive (<=).
+    // Use exactly-representable values (2.5 - 2 == 0.5) to avoid FP boundary noise.
+    const drag = mkAABB(0, 2, 0, 1);
+    const cand = mkAABB(2.5, 4, 40, 42); // facing gap 0.5 == threshold
+    const result = nearestObjectAlignment(drag, [cand], 0.5); // no contactThresholdM
+    if (result.x === null) throw new Error("Expected X match at the inclusive boundary (default contact = edge)");
+    expect(result.x.delta).toBeCloseTo(0.5, 9);
+    // And just beyond the boundary → no match (default single-window behaviour).
+    const candBeyond = mkAABB(2.6, 4, 40, 42); // facing gap 0.6 > threshold
+    const beyond = nearestObjectAlignment(drag, [candBeyond], 0.5);
+    expect(beyond.x).toBe(null);
+  });
+});
+
 // ─── Tests: LLD-34 regression — plan JSON unaffected ─────────────────────────
 
 describe("LLD-34 — alignment adds NO new keys to plan JSON", () => {
@@ -5986,6 +6735,8 @@ describe("LLD-34 — alignment adds NO new keys to plan JSON", () => {
     if (json.includes("alignY"))     throw new Error("'alignY' leaked into plan JSON");
     if (json.includes("activeGuide"))throw new Error("'activeGuide' leaked into plan JSON");
     if (json.includes("ALIGN_PX"))   throw new Error("'ALIGN_PX' leaked into plan JSON");
+    if (json.includes("ALIGN_CONTACT_PX")) throw new Error("'ALIGN_CONTACT_PX' leaked into plan JSON");
+    if (json.includes("facing"))     throw new Error("'facing' leaked into plan JSON");
   });
 });
 
@@ -6448,6 +7199,83 @@ describe("LLD-34 integration — drag beside another symbol, edges coincident on
     expect(r._alignX.kind).toBe("center");
     // After apply: drag.cx + delta = cand.cx
     expect(r.x).toBeCloseTo(5.05, 5);
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+});
+
+// ─── Tests: LLD-60 integration — place-beside reliability + corner coherence ──
+
+describe("LLD-60 integration — place-beside reliability at the contact threshold", () => {
+  it("facing edges ~10px apart (0.25m @ zoom 1, outside the 8px edge window) still snap to contact", () => {
+    // At zoom 1, pxPerM=40 → ALIGN_PX=8 is 0.20m, ALIGN_CONTACT_PX=11 is 0.275m.
+    // A facing gap of 0.25m (10px) is OUTSIDE the old 8px window but inside the contact band.
+    resetAll();
+    setGridSnap(true);
+    setSnapMode("off"); // isolate alignment (no grid, no wall)
+    const box = makeBox(5, 5);       // 1×1 → AABB maxX=5.5
+    const cand = mkAABB(5.75, 7, 0, 10); // facing: cand.minX=5.75, gap=0.25 (10px)
+    const r = resolvePlacementForTest(200, 200, false, box, [cand]);
+    expect(r.snapType).toBe("align");
+    if (r._alignX === null) throw new Error("Expected a facing X match in the widened contact band");
+    expect(r._alignX.facing).toBe(true);
+    // Edges become coincident on drop: drag.maxX (r.x + 0.5) == cand.minX.
+    expect(r.x + 0.5).toBeCloseTo(cand.minX, 6);
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+});
+
+describe("LLD-60 integration — corner coherence: drag into an L never mixes two neighbours", () => {
+  it("P near on X only, Q near on Y only → resolved corner comes from a single object, not a mix", () => {
+    // Two neighbours forming an L around the drag's bottom-right:
+    //   P offers an X alignment only (its Y is far); Q offers a Y alignment only (its X is far).
+    // Drag box 1×1 at (5,5): AABB x:[4.5,5.5], y:[4.5,5.5].
+    resetAll();
+    setGridSnap(true);
+    setSnapMode("off");
+    const box = makeBox(5, 5);
+    const P = mkAABB(5.55, 7, 40, 42);  // facing X gap 0.05; Y ~40 away
+    const Q = mkAABB(40, 42, 5.60, 8);  // facing Y gap 0.10; X ~40 away
+    const r = resolvePlacementForTest(200, 200, false, box, [P, Q]);
+    // Coherent-corner guarantee: object alignment supplies at most ONE axis here
+    // (both cannot come from different neighbours). No rooms → no room-center fill.
+    const bothObjAxes = r._alignX !== null && r._alignY !== null;
+    if (bothObjAxes) throw new Error("Phantom corner at resolver level: X and Y from different neighbours");
+    // The tighter neighbour P wins its X axis; Y stays unsnapped (raw).
+    if (r._alignX === null) throw new Error("Expected P's X alignment to win");
+    expect(r._alignX.line).toBeCloseTo(5.55, 9);
+    expect(r._alignY).toBe(null);
+    setGridSnap(true);
+    setSnapMode("auto");
+  });
+});
+
+describe("LLD-60 integration — place-beside → clearance reads a fit (Defect 2 + 3)", () => {
+  it("a place-beside snap produces a 0-gap contact that the clearance model reads as tight, not overlap", () => {
+    resetAll();
+    resetClearance();
+    resetSymbolModel();
+    setGridSnap(true);
+    setSnapMode("off");
+    // Neighbour symB (a real Sym): center (6.25,5), 1×1 → AABB l=5.75, r=6.75, t=4.5, b=5.5.
+    const symB = mkSym("s1", "table", 6.25, 5, 1, 1, 0);
+    const candB = mkAABB(5.75, 6.75, 4.5, 5.5);
+    // Drag a 1×1 sofa at (5,5) — facing gap to symB.l is 0.25m (10px), a contact-band snap.
+    const box = makeBox(5, 5);
+    const r = resolvePlacementForTest(200, 200, false, box, [candB]);
+    expect(r.snapType).toBe("align");
+    if (r._alignX === null) throw new Error("Expected the place-beside facing snap");
+    expect(r._alignX.facing).toBe(true);
+    // Land the dragged symbol at the resolved position and read clearance to symB.
+    const symA = mkSym("s0", "sofa", r.x, r.y, 1, 1, 0); // r.x ≈ 5.25 → AABB r = 5.75 == symB.l
+    const clr = computeClearances(symA, { rooms: [], symbols: [symA, symB] });
+    const row = clr.find(c => c.kind === "symbol" && c.neighbourId === "s1");
+    if (!row) throw new Error("Expected a symbol clearance row to the neighbour");
+    expect(row.status).toBe("tight"); // a fit — NOT "bad"/overlap
+    expect(row.gap).toBe(0);
+    if (worstStatus(clr) === "bad") throw new Error("Place-beside contact must not read as overlap");
+    resetClearance();
     setGridSnap(true);
     setSnapMode("auto");
   });
@@ -8136,7 +8964,7 @@ function _makeDockDOM() {
     openings: ["door", "window"],
     living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf"],
     kitchen:  ["fridge", "stove", "sink", "washer"],
-    bedroom:  ["bed", "wardrobe"],
+    bedroom:  ["bed", "wardrobe", "nightstand", "dresser", "cabinet"],
     bath:     ["toilet", "bathtub"],
   };
 
@@ -8196,7 +9024,7 @@ describe("LLD-50 — dock tabs: structure integrity", () => {
     expect(rows.length).toBe(5);
   });
 
-  it("union of all dock-item[data-type] equals the 16 catalog keys", () => {
+  it("union of all dock-item[data-type] equals the 19 catalog keys", () => {
     const dock = _makeDockDOM();
     const types = Array.from(dock.querySelectorAll(".dock-item[data-type]")).map(b => b.dataset.type);
     _removeDockDOM(dock);
@@ -8205,7 +9033,7 @@ describe("LLD-50 — dock tabs: structure integrity", () => {
     if (JSON.stringify(dockTypes) !== JSON.stringify(catalogKeys)) {
       throw new Error(`Dock types don't match catalog keys.\nDock: ${dockTypes.join(", ")}\nCatalog: ${catalogKeys.join(", ")}`);
     }
-    expect(types.length).toBe(16);
+    expect(types.length).toBe(19);
   });
 
   it("no tab button has a data-type attribute", () => {
@@ -8334,6 +9162,259 @@ describe("LLD-50 — plan round-trip: new-type symbol survives serialize→valid
     const v = validatePlan(JSON.parse(json));
     if (!v) throw new Error("validatePlan rejected plan after serialize of all new types");
     if (v.symbols.symbols.length !== newTypes.length) throw new Error(`Expected ${newTypes.length} symbols, got ${v.symbols.symbols.length}`);
+    resetSymbolModel();
+  });
+});
+
+// ─── LLD 70: bedroom & storage pieces (nightstand, dresser, cabinet) ─────────
+
+const LLD70_TYPES = ["nightstand", "dresser", "cabinet"];
+
+describe("LLD 70 — catalog integrity: nightstand, dresser, cabinet", () => {
+  it("all three types exist in CATALOG", () => {
+    for (const t of LLD70_TYPES) {
+      if (!(t in CATALOG)) throw new Error(`${t} missing from CATALOG`);
+    }
+  });
+
+  it("all three have category 'bedroom'", () => {
+    for (const t of LLD70_TYPES) {
+      if (CATALOG[t].category !== "bedroom") {
+        throw new Error(`${t}.category should be 'bedroom', got '${CATALOG[t].category}'`);
+      }
+    }
+  });
+
+  it("all three have non-empty label", () => {
+    for (const t of LLD70_TYPES) {
+      const label = CATALOG[t].label;
+      if (!label || label.trim() === "") throw new Error(`${t} has empty label`);
+    }
+  });
+
+  it("all three have finite w, h, min, max", () => {
+    for (const t of LLD70_TYPES) {
+      const cat = CATALOG[t];
+      for (const key of ["w", "h", "min", "max"]) {
+        if (!isFinite(cat[key])) throw new Error(`${t}.${key} is not finite: ${cat[key]}`);
+      }
+    }
+  });
+
+  it("min <= w <= max and min <= h <= max for all three", () => {
+    for (const t of LLD70_TYPES) {
+      const { w, h, min, max } = CATALOG[t];
+      if (w < min || w > max) throw new Error(`${t}: w=${w} not in [${min},${max}]`);
+      if (h < min || h > max) throw new Error(`${t}: h=${h} not in [${min},${max}]`);
+    }
+  });
+
+  it("none of the three has openings:true", () => {
+    for (const t of LLD70_TYPES) {
+      if (CATALOG[t].openings) throw new Error(`${t} unexpectedly has openings:true`);
+    }
+  });
+
+  it("spot-check: CATALOG.nightstand.category === 'bedroom'", () => {
+    expect(CATALOG.nightstand.category).toBe("bedroom");
+  });
+
+  it("spot-check: CATALOG.dresser.category === 'bedroom'", () => {
+    expect(CATALOG.dresser.category).toBe("bedroom");
+  });
+
+  it("spot-check: CATALOG.cabinet.category === 'bedroom'", () => {
+    expect(CATALOG.cabinet.category).toBe("bedroom");
+  });
+});
+
+describe("LLD 70 — createSymbol: new types return correct Sym", () => {
+  it("createSymbol returns correct type, catalog defaults, rot:0, and string id", () => {
+    resetSymbolModel();
+    for (const t of LLD70_TYPES) {
+      const s = createSymbol(t, 1, 2);
+      if (s.type !== t) throw new Error(`${t}: type mismatch`);
+      if (Math.abs(s.w - CATALOG[t].w) > 1e-9) throw new Error(`${t}: w mismatch`);
+      if (Math.abs(s.h - CATALOG[t].h) > 1e-9) throw new Error(`${t}: h mismatch`);
+      if (s.rot !== 0) throw new Error(`${t}: rot should be 0`);
+      if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(`${t}: invalid id ${s.id}`);
+    }
+  });
+});
+
+describe("LLD 70 — clampDim: new types clamp at min and max", () => {
+  it("nightstand: clampDim below min clamps to min", () => {
+    const { min } = CATALOG.nightstand;
+    expect(clampDim("nightstand", min - 0.1)).toBeCloseTo(min, 9);
+  });
+
+  it("nightstand: clampDim above max clamps to max", () => {
+    const { max } = CATALOG.nightstand;
+    expect(clampDim("nightstand", max + 1)).toBeCloseTo(max, 9);
+  });
+
+  it("dresser: clampDim below min clamps to min", () => {
+    const { min } = CATALOG.dresser;
+    expect(clampDim("dresser", min - 0.1)).toBeCloseTo(min, 9);
+  });
+
+  it("dresser: clampDim above max clamps to max", () => {
+    const { max } = CATALOG.dresser;
+    expect(clampDim("dresser", max + 1)).toBeCloseTo(max, 9);
+  });
+
+  it("cabinet: clampDim below min clamps to min", () => {
+    const { min } = CATALOG.cabinet;
+    expect(clampDim("cabinet", min - 0.1)).toBeCloseTo(min, 9);
+  });
+
+  it("cabinet: clampDim above max clamps to max", () => {
+    const { max } = CATALOG.cabinet;
+    expect(clampDim("cabinet", max + 1)).toBeCloseTo(max, 9);
+  });
+});
+
+describe("LLD 70 — resizeSymbol: new types clamp on huge/tiny inputs", () => {
+  it("nightstand w huge clamps to max, returns changed=true", () => {
+    const s = createSymbol("nightstand", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG.nightstand.max, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("nightstand h tiny clamps to min, returns changed=true", () => {
+    const s = createSymbol("nightstand", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG.nightstand.min, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("dresser w huge clamps to max, returns changed=true", () => {
+    const s = createSymbol("dresser", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG.dresser.max, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("dresser h tiny clamps to min, returns changed=true", () => {
+    const s = createSymbol("dresser", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG.dresser.min, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("cabinet w huge clamps to max, returns changed=true", () => {
+    const s = createSymbol("cabinet", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG.cabinet.max, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("cabinet h tiny clamps to min, returns changed=true", () => {
+    const s = createSymbol("cabinet", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG.cabinet.min, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("in-range value unchanged, returns changed=false", () => {
+    const s = createSymbol("dresser", 0, 0);
+    const orig = s.w;
+    const changed = resizeSymbol(s, "w", orig);
+    expect(changed).toBe(false);
+    expect(s.w).toBeCloseTo(orig, 9);
+  });
+});
+
+describe("LLD 70 — dock: bedroom row contains all five bedroom types", () => {
+  it("bedroom row has 5 dock-item buttons including nightstand, dresser, cabinet", () => {
+    const dock = _makeDockDOM();
+    const bedroomRow = dock.querySelector("[role='tabpanel'][data-category='bedroom']");
+    if (!bedroomRow) { _removeDockDOM(dock); throw new Error("No bedroom tabpanel row found"); }
+    const items = Array.from(bedroomRow.querySelectorAll(".dock-item[data-type]"));
+    const types = items.map(b => b.dataset.type);
+    _removeDockDOM(dock);
+    if (types.length !== 5) throw new Error(`Expected 5 bedroom items, got ${types.length}: ${types.join(", ")}`);
+    for (const t of ["bed", "wardrobe", "nightstand", "dresser", "cabinet"]) {
+      if (!types.includes(t)) throw new Error(`Missing type '${t}' in bedroom row`);
+    }
+  });
+
+  it("each new bedroom button has a descriptive aria-label", () => {
+    const dock = _makeDockDOM();
+    const bedroomRow = dock.querySelector("[role='tabpanel'][data-category='bedroom']");
+    if (!bedroomRow) { _removeDockDOM(dock); throw new Error("No bedroom tabpanel row found"); }
+    for (const t of LLD70_TYPES) {
+      const btn = bedroomRow.querySelector(`[data-type="${t}"]`);
+      if (!btn) { _removeDockDOM(dock); throw new Error(`No button for ${t} in bedroom row`); }
+      const label = btn.getAttribute("aria-label");
+      if (!label || label.trim() === "") {
+        _removeDockDOM(dock);
+        throw new Error(`${t} button missing aria-label`);
+      }
+    }
+    _removeDockDOM(dock);
+  });
+
+  it("no new bedroom tab carries a data-type attribute", () => {
+    const dock = _makeDockDOM();
+    const tabs = dock.querySelectorAll("[role='tab']");
+    for (const tab of tabs) {
+      if (tab.dataset.type) {
+        _removeDockDOM(dock);
+        throw new Error(`Tab for category "${tab.dataset.category}" has data-type="${tab.dataset.type}"`);
+      }
+    }
+    _removeDockDOM(dock);
+  });
+});
+
+describe("LLD 70 — round-trip: new bedroom types survive serialize→validate", () => {
+  it("plan with nightstand/dresser/cabinet passes validatePlan", () => {
+    resetSymbolModel();
+    for (const t of LLD70_TYPES) addSymbol(createSymbol(t, 1, 1));
+    const plan = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(plan)));
+    if (!v) throw new Error("validatePlan rejected plan with LLD-70 types");
+    resetSymbolModel();
+  });
+
+  it("nightstand survives serializePlan → JSON.parse → validatePlan with type intact", () => {
+    resetSymbolModel();
+    const s = createSymbol("nightstand", 3, 4);
+    addSymbol(s);
+    const json = serializePlan(buildPlan());
+    const v = validatePlan(JSON.parse(json));
+    if (!v) throw new Error("validatePlan rejected re-parsed plan with nightstand");
+    if (v.symbols.symbols[0].type !== "nightstand") {
+      throw new Error("nightstand type lost after round-trip");
+    }
+    resetSymbolModel();
+  });
+
+  it("dresser survives serializePlan → JSON.parse → validatePlan with type intact", () => {
+    resetSymbolModel();
+    const s = createSymbol("dresser", 1, 2);
+    addSymbol(s);
+    const json = serializePlan(buildPlan());
+    const v = validatePlan(JSON.parse(json));
+    if (!v) throw new Error("validatePlan rejected re-parsed plan with dresser");
+    if (v.symbols.symbols[0].type !== "dresser") {
+      throw new Error("dresser type lost after round-trip");
+    }
+    resetSymbolModel();
+  });
+
+  it("cabinet survives serializePlan → JSON.parse → validatePlan with type intact", () => {
+    resetSymbolModel();
+    const s = createSymbol("cabinet", 2, 3);
+    addSymbol(s);
+    const json = serializePlan(buildPlan());
+    const v = validatePlan(JSON.parse(json));
+    if (!v) throw new Error("validatePlan rejected re-parsed plan with cabinet");
+    if (v.symbols.symbols[0].type !== "cabinet") {
+      throw new Error("cabinet type lost after round-trip");
+    }
     resetSymbolModel();
   });
 });
@@ -9359,6 +10440,1737 @@ describe("onboarding.js — Esc handling (LLD-60)", () => {
     setOnboardingSeen(false);
   });
 });
+
+// ─── LLD 61: SVG structural assertions ───────────────────────────────────────
+
+import {
+  init as initWallRender,
+  render as wallRenderRender,
+} from "../src/js/wallRender.js";
+
+import {
+  init as initSymbolRender,
+  render as symbolRenderRender,
+  getRotateHandleScreen,
+} from "../src/js/symbolRender.js";
+
+// ─── LLD 61 helpers ───────────────────────────────────────────────────────────
+
+const NS_SVG_61 = "http://www.w3.org/2000/svg";
+
+/**
+ * Parse a buildExportSvg() string into a queryable Document.
+ * @param {string} svgStr
+ * @returns {Document}
+ */
+function parseSvg(svgStr) {
+  return new DOMParser().parseFromString(svgStr, "image/svg+xml");
+}
+
+/**
+ * Parse a "x1,y1 x2,y2 …" points string into [{x,y}] objects.
+ * @param {string} pointsAttr
+ * @returns {{x:number,y:number}[]}
+ */
+function parsePoints(pointsAttr) {
+  return (pointsAttr || "").trim().split(/\s+/).filter(Boolean).map(pair => {
+    const [x, y] = pair.split(",");
+    return { x: parseFloat(x), y: parseFloat(y) };
+  });
+}
+
+/**
+ * Build a minimal DOM rig for wallRender and symbolRender tests.
+ * Returns fresh detached SVG <g> nodes and HTML <div>s.
+ * Calls init on both modules with the fresh nodes.
+ *
+ * @param {object} [opts]
+ * @param {()=>*} [opts.getSnap]
+ * @param {()=>*} [opts.getHighlight]
+ * @param {()=>*} [opts.getEditingEdge]
+ * @param {()=>*} [opts.getSelectedId]
+ * @param {()=>*} [opts.getPlacementGhost]
+ * @param {()=>*} [opts.getEditingDim]
+ */
+function makeRenderRig61(opts = {}) {
+  const gWorld    = document.createElementNS(NS_SVG_61, "g");
+  const gDraft    = document.createElementNS(NS_SVG_61, "g");
+  const gSnap     = document.createElementNS(NS_SVG_61, "g");
+  const labels    = document.createElement("div");
+  const dimLabels = document.createElement("div");
+  const gSymbols  = document.createElementNS(NS_SVG_61, "g");
+  const gOverlay  = document.createElementNS(NS_SVG_61, "g");
+
+  initWallRender(
+    gWorld, gDraft, gSnap, labels, dimLabels,
+    opts.getSnap        || (() => null),
+    opts.getHighlight   || (() => null),
+    opts.getEditingEdge || (() => null)
+  );
+
+  initSymbolRender(
+    gSymbols, gOverlay, dimLabels,
+    opts.getSelectedId      || (() => null),
+    opts.getPlacementGhost  || (() => null),
+    opts.getEditingDim      || (() => null)
+  );
+
+  return { gWorld, gDraft, gSnap, labels, dimLabels, gSymbols, gOverlay };
+}
+
+// ─── Tests: LLD 61 — exportImg.buildExportSvg (structural) ───────────────────
+
+describe("exportImg.buildExportSvg — structural", () => {
+
+  // Constants hardcoded as documented literals — see exportImg.js.
+  // EXPORT_PX_PER_M = 96, MARGIN_M = 0.5
+  // For a room with minX=0, minY=0: originX = -0.5, originY = -0.5
+  // exportPx(worldX) = (worldX - originX) * 96 = (worldX + 0.5) * 96
+
+  it("produces valid SVG with no <parsererror>", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) {
+      throw new Error("buildExportSvg produced malformed SVG: " + doc.querySelector("parsererror").textContent);
+    }
+  });
+
+  it("single <svg> root with viewBox consistent with content", () => {
+    resetAll();
+    setUnit("m");
+    // Room: 3m wide × 2m tall, min at (0,0).
+    // wM = 3 + 2*0.5 = 4, hM = 2 + 2*0.5 = 3 → W = 4*96 = 384, H = 3*96 = 288
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    const svgs = doc.querySelectorAll("svg");
+    if (svgs.length !== 1) throw new Error(`Expected 1 <svg>, got ${svgs.length}`);
+    const svg = svgs[0];
+    const vb = svg.getAttribute("viewBox");
+    if (!vb) throw new Error("Missing viewBox attribute");
+    // viewBox must be "0 0 W H"
+    const [vbX, vbY, vbW, vbH] = vb.split(" ").map(Number);
+    if (vbX !== 0 || vbY !== 0) throw new Error(`viewBox should start at 0 0, got: ${vb}`);
+    const W = 4 * 96;  // 384
+    const H = 3 * 96;  // 288
+    expect(vbW).toBeCloseTo(W, 6);
+    expect(vbH).toBeCloseTo(H, 6);
+    // width and height attributes should also match
+    expect(parseFloat(svg.getAttribute("width"))).toBeCloseTo(W, 6);
+    expect(parseFloat(svg.getAttribute("height"))).toBeCloseTo(H, 6);
+  });
+
+  it("closed room → <polygon> with correct margin-offset coordinates", () => {
+    resetAll();
+    setUnit("m");
+    // Unit square room at (0,0)–(1,0)–(1,1)–(0,1)
+    // originX = 0 - 0.5 = -0.5, originY = 0 - 0.5 = -0.5
+    // vertex (0,0) → exportPx = (0+0.5)*96 = 48, same for y
+    // vertex (1,0) → (1.5*96, 0.5*96) = (144, 48)
+    // vertex (1,1) → (144, 144)
+    // vertex (0,1) → (48, 144)
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    // There should be at least 1 fill polygon (closed room)
+    const polygons = doc.querySelectorAll("polygon");
+    if (polygons.length === 0) throw new Error("Expected at least one <polygon> for closed room");
+
+    // The fill polygon is the first polygon emitted
+    const fillPoly = polygons[0];
+    const pts = parsePoints(fillPoly.getAttribute("points"));
+    if (pts.length !== 4) throw new Error(`Expected 4 points, got ${pts.length}: ${fillPoly.getAttribute("points")}`);
+
+    const expected = [
+      { x: 0.5 * 96, y: 0.5 * 96 },
+      { x: 1.5 * 96, y: 0.5 * 96 },
+      { x: 1.5 * 96, y: 1.5 * 96 },
+      { x: 0.5 * 96, y: 1.5 * 96 },
+    ];
+    for (let i = 0; i < 4; i++) {
+      expect(pts[i].x).toBeCloseTo(expected[i].x, 4);
+      expect(pts[i].y).toBeCloseTo(expected[i].y, 4);
+    }
+  });
+
+  it("2 m edge spans 192 px in export space (coordinate scale = 96 px/m)", () => {
+    resetAll();
+    setUnit("m");
+    // Room with a 2m horizontal edge from (0,0) to (2,0)
+    model.rooms.push({ id: "w0", closed: false, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    // Find a polyline (open room → polyline for body)
+    const polylines = doc.querySelectorAll("polyline");
+    if (polylines.length === 0) throw new Error("Expected <polyline> for open room");
+    const pts = parsePoints(polylines[0].getAttribute("points"));
+    // x span = (2 - 0) * 96 = 192
+    const xSpan = Math.abs(pts[1].x - pts[0].x);
+    expect(xSpan).toBeCloseTo(192, 4);
+  });
+
+  it("dimension labels: n edges → n <text> nodes per closed room", () => {
+    resetAll();
+    setUnit("m");
+    // Closed rectangle: 4 edges → 4 dimension labels
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const texts = doc.querySelectorAll("text");
+    if (texts.length !== 4) throw new Error(`Expected 4 <text> nodes for 4 edges, got ${texts.length}`);
+  });
+
+  it("room edges + symbols → correct total <text> count", () => {
+    resetAll();
+    setUnit("m");
+    // Closed 4-edge room + 2 symbols → 4 + 2 = 6 text nodes
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+    addSymbol(createSymbol("bed", 1, 1));
+    addSymbol(createSymbol("chair", 2, 1));
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const texts = doc.querySelectorAll("text");
+    if (texts.length !== 6) throw new Error(`Expected 6 <text> nodes (4 edge + 2 symbol), got ${texts.length}`);
+  });
+
+  it("text content is XML-safe: no raw < or & characters", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 },
+    ]});
+    addSymbol(createSymbol("table", 1, 1));
+    const svgStr = buildExportSvg();
+    // Check the raw SVG string has no unescaped & outside entities or unescaped <
+    // A well-formed SVG must not have bare & or < inside attribute/text values
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror — likely unescaped XML char");
+    // Verify text nodes round-trip correctly (no raw < or & as DOM text)
+    const texts = doc.querySelectorAll("text");
+    for (const t of texts) {
+      if (t.textContent.includes("<") || t.textContent.includes(">")) {
+        throw new Error(`Text node contains unescaped < or >: "${t.textContent}"`);
+      }
+    }
+  });
+
+  it("empty plan → minimal SVG: one <rect>, zero <polygon>, zero <text>", () => {
+    resetAll();
+    const svgStr = buildExportSvg();
+    if (!svgStr.startsWith("<?xml")) throw new Error("SVG does not start with <?xml");
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in empty-plan SVG");
+    const rects = doc.querySelectorAll("rect");
+    if (rects.length !== 1) throw new Error(`Expected 1 <rect> (bg), got ${rects.length}`);
+    const polygons = doc.querySelectorAll("polygon");
+    if (polygons.length !== 0) throw new Error(`Expected 0 <polygon> for empty plan, got ${polygons.length}`);
+    const texts = doc.querySelectorAll("text");
+    if (texts.length !== 0) throw new Error(`Expected 0 <text> for empty plan, got ${texts.length}`);
+  });
+
+  it("background rect fill is #14140f", () => {
+    resetAll();
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const rect = doc.querySelector("rect");
+    if (!rect) throw new Error("No <rect> found");
+    const fill = rect.getAttribute("fill");
+    if (fill !== "#14140f") throw new Error(`Expected bg fill #14140f, got ${fill}`);
+  });
+
+});
+
+// ─── Tests: LLD 61 — wallRender.render (mounted SVG) ─────────────────────────
+
+describe("wallRender.render", () => {
+
+  // At identity view (zoom=1, panX=0, panY=0):
+  //   worldToScreen(wx, wy) = { x: wx * 40, y: wy * 40 }
+  // BASE_PX_PER_M = 40
+
+  it("closed room: #world gets fill + body + centerline polygons + N vertex-dot circles", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    // 4-vertex closed room
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+    wallRenderRender();
+    const polygons = rig.gWorld.querySelectorAll("polygon");
+    // fill (1) + body (1) + centerline (1) = 3 polygons
+    if (polygons.length !== 3) throw new Error(`Expected 3 polygons in #world, got ${polygons.length}`);
+    const circles = rig.gWorld.querySelectorAll("circle");
+    // 4 vertex dots
+    if (circles.length !== 4) throw new Error(`Expected 4 circle vertex dots, got ${circles.length}`);
+  });
+
+  it("closed room: body polygon points match worldToScreen at identity (×40)", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 },
+    ]});
+    wallRenderRender();
+    // Body polygon is the second polygon (fill first, body second)
+    const polygons = rig.gWorld.querySelectorAll("polygon");
+    if (polygons.length < 2) throw new Error(`Expected ≥2 polygons, got ${polygons.length}`);
+    const bodyPts = parsePoints(polygons[1].getAttribute("points"));
+    const expected = [
+      { x: 0 * 40, y: 0 * 40 },
+      { x: 2 * 40, y: 0 * 40 },
+      { x: 2 * 40, y: 1 * 40 },
+      { x: 0 * 40, y: 1 * 40 },
+    ];
+    if (bodyPts.length !== 4) throw new Error(`Expected 4 body polygon points, got ${bodyPts.length}`);
+    for (let i = 0; i < 4; i++) {
+      expect(bodyPts[i].x).toBeCloseTo(expected[i].x, 4);
+      expect(bodyPts[i].y).toBeCloseTo(expected[i].y, 4);
+    }
+  });
+
+  it("vertex-dot cx/cy match worldToScreen at identity", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 1, y: 2 }, { x: 4, y: 2 }, { x: 4, y: 5 }, { x: 1, y: 5 },
+    ]});
+    wallRenderRender();
+    const circles = rig.gWorld.querySelectorAll("circle");
+    if (circles.length !== 4) throw new Error(`Expected 4 vertex dots, got ${circles.length}`);
+    const expectedCenters = [
+      { x: 1 * 40, y: 2 * 40 },
+      { x: 4 * 40, y: 2 * 40 },
+      { x: 4 * 40, y: 5 * 40 },
+      { x: 1 * 40, y: 5 * 40 },
+    ];
+    for (let i = 0; i < 4; i++) {
+      expect(parseFloat(circles[i].getAttribute("cx"))).toBeCloseTo(expectedCenters[i].x, 4);
+      expect(parseFloat(circles[i].getAttribute("cy"))).toBeCloseTo(expectedCenters[i].y, 4);
+    }
+  });
+
+  it("2-vertex chain: #draft gets body polyline + centerline polyline + dots; #world empty", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.chain.push({ x: 0, y: 0 }, { x: 2, y: 0 });
+    wallRenderRender();
+    if (rig.gWorld.childElementCount !== 0) throw new Error(`Expected empty #world for chain-only, got ${rig.gWorld.childElementCount} children`);
+    const draftPolylines = rig.gDraft.querySelectorAll("polyline");
+    // body polyline + centerline polyline = 2 polylines
+    if (draftPolylines.length !== 2) throw new Error(`Expected 2 polylines in #draft, got ${draftPolylines.length}`);
+    const draftCircles = rig.gDraft.querySelectorAll("circle");
+    // 2 vertex dots for 2-vertex chain
+    if (draftCircles.length !== 2) throw new Error(`Expected 2 vertex-dot circles in #draft, got ${draftCircles.length}`);
+  });
+
+  it("1-vertex chain: #draft gets only 1 vertex dot (no polyline)", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.chain.push({ x: 1, y: 1 });
+    wallRenderRender();
+    const polylines = rig.gDraft.querySelectorAll("polyline");
+    if (polylines.length !== 0) throw new Error(`Expected 0 polylines for 1-vert chain, got ${polylines.length}`);
+    const circles = rig.gDraft.querySelectorAll("circle");
+    if (circles.length !== 1) throw new Error(`Expected 1 vertex dot for 1-vert chain, got ${circles.length}`);
+  });
+
+  it("snap glyph (type=grid): #snap gets diamond <polygon> + center <circle>", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61({ getSnap: () => ({ x: 2, y: 3, type: "grid" }) });
+    wallRenderRender();
+    const snapPolys = rig.gSnap.querySelectorAll("polygon");
+    if (snapPolys.length !== 1) throw new Error(`Expected 1 diamond polygon in #snap, got ${snapPolys.length}`);
+    const snapCircles = rig.gSnap.querySelectorAll("circle");
+    if (snapCircles.length !== 1) throw new Error(`Expected 1 center circle in #snap, got ${snapCircles.length}`);
+  });
+
+  it("palette/theme wiring: fill, wallBody, wallLine attributes come from palette() tokens", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Use dark theme so palette is deterministic fallback
+    themeSetTheme("dark");
+    const rig = makeRenderRig61();
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 },
+    ]});
+    wallRenderRender();
+    const p = palette();
+    const polygons = rig.gWorld.querySelectorAll("polygon");
+    // fill polygon (index 0): fill = p.roomFill
+    if (polygons[0].getAttribute("fill") !== p.roomFill) {
+      throw new Error(`Fill polygon: expected fill=${p.roomFill}, got ${polygons[0].getAttribute("fill")}`);
+    }
+    // body polygon (index 1): stroke = p.wallBody
+    if (polygons[1].getAttribute("stroke") !== p.wallBody) {
+      throw new Error(`Body polygon: expected stroke=${p.wallBody}, got ${polygons[1].getAttribute("stroke")}`);
+    }
+    // centerline polygon (index 2): stroke = p.wallLine (not highlighted)
+    if (polygons[2].getAttribute("stroke") !== p.wallLine) {
+      throw new Error(`Centerline polygon: expected stroke=${p.wallLine}, got ${polygons[2].getAttribute("stroke")}`);
+    }
+  });
+
+  it("idempotent redraw: calling render() twice yields the same child count", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 },
+    ]});
+    wallRenderRender();
+    const count1 = rig.gWorld.childElementCount;
+    wallRenderRender();
+    const count2 = rig.gWorld.childElementCount;
+    if (count1 !== count2) throw new Error(`Second render changed child count: ${count1} → ${count2}`);
+  });
+
+  it("#draft and #snap are empty when there is no chain and no snap", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    model.rooms.push({ id: "w0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 },
+    ]});
+    wallRenderRender();
+    if (rig.gDraft.childElementCount !== 0) throw new Error(`Expected empty #draft, got ${rig.gDraft.childElementCount}`);
+    if (rig.gSnap.childElementCount !== 0) throw new Error(`Expected empty #snap, got ${rig.gSnap.childElementCount}`);
+  });
+
+});
+
+// ─── Tests: LLD 61 — symbolRender.render (mounted SVG) ───────────────────────
+
+describe("symbolRender.render", () => {
+
+  it("two symbols → two body <polygon>s in #symbols", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("table", 2, 2));
+    addSymbol(createSymbol("chair", 4, 4));
+    symbolRenderRender();
+    const polys = rig.gSymbols.querySelectorAll("polygon");
+    if (polys.length < 2) throw new Error(`Expected ≥2 body polygons for 2 symbols, got ${polys.length}`);
+  });
+
+  it("body polygon points equal screen-projected corners (identity view: ×40)", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    const sym = createSymbol("table", 2, 2);
+    // table: w=1.2, h=0.8, rot=0
+    addSymbol(sym);
+    symbolRenderRender();
+    const polys = rig.gSymbols.querySelectorAll("polygon");
+    if (polys.length === 0) throw new Error("Expected at least one body polygon");
+    const bodyPts = parsePoints(polys[0].getAttribute("points"));
+    if (bodyPts.length !== 4) throw new Error(`Expected 4 body polygon points, got ${bodyPts.length}`);
+
+    // corners(sym) at rot=0: TL=(-hw,-hh), TR=(hw,-hh), BR=(hw,hh), BL=(-hw,hh) + center
+    // sym.x=2, sym.y=2, hw=0.6, hh=0.4
+    // worldToScreen: *40 at identity
+    const expectedWorld = [
+      { x: 2 - 0.6, y: 2 - 0.4 },
+      { x: 2 + 0.6, y: 2 - 0.4 },
+      { x: 2 + 0.6, y: 2 + 0.4 },
+      { x: 2 - 0.6, y: 2 + 0.4 },
+    ];
+    for (let i = 0; i < 4; i++) {
+      expect(bodyPts[i].x).toBeCloseTo(expectedWorld[i].x * 40, 4);
+      expect(bodyPts[i].y).toBeCloseTo(expectedWorld[i].y * 40, 4);
+    }
+  });
+
+  it("rotated symbol body points are non-axis-aligned", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    const sym = createSymbol("table", 3, 3);
+    sym.rot = 45;
+    addSymbol(sym);
+    symbolRenderRender();
+    const polys = rig.gSymbols.querySelectorAll("polygon");
+    if (polys.length === 0) throw new Error("Expected body polygon");
+    const bodyPts = parsePoints(polys[0].getAttribute("points"));
+    // For a 45-degree rotation, x and y of all 4 corners should not all be equal in pairs
+    // (i.e., the bounding box has equal width and height but individual x/y differ from axis-aligned)
+    const allXSame = bodyPts.every(pt => Math.abs(pt.x - bodyPts[0].x) < 0.01);
+    const allYSame = bodyPts.every(pt => Math.abs(pt.y - bodyPts[0].y) < 0.01);
+    if (allXSame || allYSame) throw new Error("Rotated symbol points appear axis-aligned");
+    // Verify not identical to rot=0 TL/TR
+    const unrotatedTLX = (3 - sym.w / 2) * 40;
+    if (Math.abs(bodyPts[0].x - unrotatedTLX) < 0.1) {
+      throw new Error("Rotated symbol TL x matches non-rotated value — rotation not applied");
+    }
+  });
+
+  it("unselected symbol: stroke=symStroke, stroke-width=1.5, fill=symFill", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    themeSetTheme("dark");
+    const rig = makeRenderRig61({ getSelectedId: () => null });
+    addSymbol(createSymbol("table", 2, 2));
+    symbolRenderRender();
+    const p = palette();
+    const poly = rig.gSymbols.querySelectorAll("polygon")[0];
+    if (!poly) throw new Error("No body polygon found");
+    if (poly.getAttribute("stroke") !== p.symStroke) {
+      throw new Error(`Unselected: expected stroke=${p.symStroke}, got ${poly.getAttribute("stroke")}`);
+    }
+    if (poly.getAttribute("stroke-width") !== "1.5") {
+      throw new Error(`Unselected: expected stroke-width=1.5, got ${poly.getAttribute("stroke-width")}`);
+    }
+    if (poly.getAttribute("fill") !== p.symFill) {
+      throw new Error(`Unselected: expected fill=${p.symFill}, got ${poly.getAttribute("fill")}`);
+    }
+  });
+
+  it("selected symbol: stroke=gold, stroke-width=2, fill=symSelFill + selection-box + rotate handle in #overlay", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    themeSetTheme("dark");
+    const sym = createSymbol("table", 2, 2);
+    addSymbol(sym);
+    const rig = makeRenderRig61({ getSelectedId: () => sym.id });
+    symbolRenderRender();
+    const p = palette();
+    // Body polygon should have selected styling
+    const bodyPoly = rig.gSymbols.querySelectorAll("polygon")[0];
+    if (!bodyPoly) throw new Error("No body polygon");
+    if (bodyPoly.getAttribute("stroke") !== p.gold) {
+      throw new Error(`Selected: expected stroke=${p.gold}, got ${bodyPoly.getAttribute("stroke")}`);
+    }
+    if (bodyPoly.getAttribute("stroke-width") !== "2") {
+      throw new Error(`Selected: expected stroke-width=2, got ${bodyPoly.getAttribute("stroke-width")}`);
+    }
+    if (bodyPoly.getAttribute("fill") !== p.symSelFill) {
+      throw new Error(`Selected: expected fill=${p.symSelFill}, got ${bodyPoly.getAttribute("fill")}`);
+    }
+    // #overlay should have selection-box polygon
+    const overlayPolys = rig.gOverlay.querySelectorAll("polygon");
+    if (overlayPolys.length === 0) throw new Error("Expected selection-box polygon in #overlay");
+    // #overlay should have rotate handle circle
+    const overlayCircles = rig.gOverlay.querySelectorAll("circle");
+    if (overlayCircles.length === 0) throw new Error("Expected rotate handle circle in #overlay");
+  });
+
+  it("selected vs unselected styling differ", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    themeSetTheme("dark");
+    const sym = createSymbol("table", 2, 2);
+    addSymbol(sym);
+
+    // Unselected state
+    const rig1 = makeRenderRig61({ getSelectedId: () => null });
+    symbolRenderRender();
+    const unselPoly = rig1.gSymbols.querySelectorAll("polygon")[0];
+    const unselStroke = unselPoly.getAttribute("stroke");
+    const unselFill   = unselPoly.getAttribute("fill");
+
+    // Selected state (fresh rig so #overlay counts are isolated)
+    const rig2 = makeRenderRig61({ getSelectedId: () => sym.id });
+    symbolRenderRender();
+    const selPoly = rig2.gSymbols.querySelectorAll("polygon")[0];
+    const selStroke = selPoly.getAttribute("stroke");
+    const selFill   = selPoly.getAttribute("fill");
+
+    if (unselStroke === selStroke) throw new Error(`stroke unchanged between selected/unselected: ${unselStroke}`);
+    if (unselFill === selFill) throw new Error(`fill unchanged between selected/unselected: ${unselFill}`);
+    if (rig1.gOverlay.childElementCount !== 0) throw new Error("Unselected: overlay should be empty");
+    if (rig2.gOverlay.childElementCount === 0) throw new Error("Selected: overlay should be non-empty");
+  });
+
+  it("placement ghost: #overlay gets dashed ghost <polygon> + center snap <circle>", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const ghost = { type: "bed", x: 3, y: 3, w: 1.5, h: 2, rot: 0 };
+    const rig = makeRenderRig61({ getPlacementGhost: () => ghost });
+    symbolRenderRender();
+    // No symbols in model, so gSymbols is empty
+    if (rig.gSymbols.childElementCount !== 0) throw new Error("gSymbols should be empty when model is empty");
+    // Overlay: ghost polygon + snap circle
+    const overlayPolys = rig.gOverlay.querySelectorAll("polygon");
+    if (overlayPolys.length === 0) throw new Error("Expected ghost polygon in #overlay");
+    const overlayCircles = rig.gOverlay.querySelectorAll("circle");
+    if (overlayCircles.length === 0) throw new Error("Expected snap center circle in #overlay");
+    // Ghost polygon should have stroke-dasharray
+    const ghostPoly = overlayPolys[0];
+    const dashArr = ghostPoly.getAttribute("stroke-dasharray");
+    if (!dashArr || dashArr.trim() === "") throw new Error("Ghost polygon has no stroke-dasharray");
+  });
+
+  it("palette wiring: symbol body colors come from palette() tokens", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    themeSetTheme("dark");
+    const rig = makeRenderRig61({ getSelectedId: () => null });
+    addSymbol(createSymbol("chair", 1, 1));
+    symbolRenderRender();
+    const p = palette();
+    const poly = rig.gSymbols.querySelectorAll("polygon")[0];
+    if (!poly) throw new Error("No body polygon");
+    if (poly.getAttribute("fill") !== p.symFill) {
+      throw new Error(`body fill should be palette().symFill (${p.symFill}), got ${poly.getAttribute("fill")}`);
+    }
+    if (poly.getAttribute("stroke") !== p.symStroke) {
+      throw new Error(`body stroke should be palette().symStroke (${p.symStroke}), got ${poly.getAttribute("stroke")}`);
+    }
+  });
+
+  it("dim-labels div is not cleared by symbolRender (only appended)", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const sym = createSymbol("table", 2, 2);
+    addSymbol(sym);
+    const rig = makeRenderRig61({ getSelectedId: () => sym.id });
+    // Pre-populate the dimLabels div with a sentinel element
+    const sentinel = document.createElement("span");
+    sentinel.className = "sentinel";
+    rig.dimLabels.appendChild(sentinel);
+    symbolRenderRender();
+    // symbolRender must not have cleared the dimLabels — sentinel should still be present
+    if (!rig.dimLabels.querySelector(".sentinel")) {
+      throw new Error("symbolRender cleared dimLabels (it should only append, not clear)");
+    }
+  });
+
+});
+
+// ─── LLD 70 — render suite (requires makeRenderRig61 + symbolRenderRender) ────
+
+describe("LLD 70 — render: new types produce base polygon plus glyph children", () => {
+  it("nightstand renders base <polygon> plus at least one glyph child in #symbols", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("nightstand", 2, 2));
+    symbolRenderRender();
+    const children = Array.from(rig.gSymbols.children);
+    if (children.length === 0) throw new Error("No children in #symbols for nightstand");
+    const poly = children[0];
+    if (poly.tagName !== "polygon") throw new Error(`First child should be polygon, got ${poly.tagName}`);
+    const glyphChildren = children.slice(1);
+    if (glyphChildren.length === 0) throw new Error("nightstand produced no glyph children");
+    const hasLineOrCircle = glyphChildren.some(el => el.tagName === "line" || el.tagName === "circle");
+    if (!hasLineOrCircle) throw new Error("nightstand glyph has no line or circle");
+  });
+
+  it("dresser renders base <polygon> plus at least one glyph child in #symbols", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("dresser", 2, 2));
+    symbolRenderRender();
+    const children = Array.from(rig.gSymbols.children);
+    if (children.length === 0) throw new Error("No children in #symbols for dresser");
+    const poly = children[0];
+    if (poly.tagName !== "polygon") throw new Error(`First child should be polygon, got ${poly.tagName}`);
+    const glyphChildren = children.slice(1);
+    if (glyphChildren.length === 0) throw new Error("dresser produced no glyph children");
+    const hasLine = glyphChildren.some(el => el.tagName === "line");
+    if (!hasLine) throw new Error("dresser glyph has no line");
+  });
+
+  it("cabinet renders base <polygon> plus at least one glyph child in #symbols", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("cabinet", 2, 2));
+    symbolRenderRender();
+    const children = Array.from(rig.gSymbols.children);
+    if (children.length === 0) throw new Error("No children in #symbols for cabinet");
+    const poly = children[0];
+    if (poly.tagName !== "polygon") throw new Error(`First child should be polygon, got ${poly.tagName}`);
+    const glyphChildren = children.slice(1);
+    if (glyphChildren.length === 0) throw new Error("cabinet produced no glyph children");
+    const hasLineOrCircle = glyphChildren.some(el => el.tagName === "line" || el.tagName === "circle");
+    if (!hasLineOrCircle) throw new Error("cabinet glyph has no line or circle");
+  });
+});
+
+// ─── LLD 62: Layout / Geometry assertions ─────────────────────────────────────
+
+// ── Rect helpers ─────────────────────────────────────────────────────────────
+
+/** Returns true if rects a and b overlap (share interior area). */
+function rectsOverlap(a, b) {
+  return !(a.right <= b.left || b.right <= a.left ||
+           a.bottom <= b.top || b.bottom <= a.top);
+}
+
+/**
+ * Returns true if rect inner is entirely within rect outer, within tol pixels.
+ * @param {DOMRect} inner
+ * @param {DOMRect} outer
+ * @param {number} [tol=1]
+ */
+function rectInside(inner, outer, tol = 1) {
+  return (
+    inner.left   >= outer.left   - tol &&
+    inner.right  <= outer.right  + tol &&
+    inner.top    >= outer.top    - tol &&
+    inner.bottom <= outer.bottom + tol
+  );
+}
+
+// ── Layout rig helpers ────────────────────────────────────────────────────────
+
+/**
+ * Fixed-size stage rig for dimEntry/symbolDimEntry layout tests.
+ * Sets stage to an explicit 800×600 position:relative container so that
+ * getBoundingClientRect() reflects the JS-set style.left/top values.
+ * Returns { stage, dimLabels, cleanup }.
+ */
+function makeLayoutDimRig() {
+  const stage = document.createElement("div");
+  stage.className = "stage";
+  stage.style.position = "relative";
+  stage.style.width = "800px";
+  stage.style.height = "600px";
+  stage.style.overflow = "hidden";
+  const dimLabels = document.createElement("div");
+  dimLabels.className = "dim-labels";
+  stage.appendChild(dimLabels);
+  document.body.appendChild(stage);
+  return {
+    stage, dimLabels,
+    cleanup() { document.body.removeChild(stage); },
+  };
+}
+
+/**
+ * HUD LAYOUT rig — distinct from existing makeHudRig() at line 4137.
+ * Builds the real HUD DOM inside an 800×600 position:relative container,
+ * injects the minimal positioning CSS subset from src/index.html (lines 327–415),
+ * places a simulated tool-rail alongside it, and returns refs + cleanup.
+ *
+ * CSS source: src/index.html lines 327–415 (.hud, .hud-cell) and 519–533 (.tool-rail).
+ */
+function makeHudLayoutRig() {
+  // Fixed 800×600 container
+  const container = document.createElement("div");
+  container.style.position = "relative";
+  container.style.width = "800px";
+  container.style.height = "600px";
+  container.style.overflow = "hidden";
+
+  // Inject minimal positioning CSS subset (source: src/index.html)
+  const style = document.createElement("style");
+  style.textContent = `
+    /* Subset from src/index.html .hud / .hud-cell (lines 327–346) */
+    .lld62-hud {
+      position: absolute;
+      bottom: 1.25rem;
+      right: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.15rem;
+      pointer-events: none;
+    }
+    .lld62-hud-cell {
+      padding: 0.2rem 0.55rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      white-space: nowrap;
+    }
+    /* Subset from src/index.html .tool-rail (lines 519–533) */
+    .lld62-tool-rail {
+      position: absolute;
+      left: 1.25rem;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      padding: 0.4rem 0.3rem;
+      border-radius: 8px;
+      width: 2.8rem;
+    }
+  `;
+  container.appendChild(style);
+
+  // HUD DOM
+  const hud = document.createElement("div");
+  hud.className = "lld62-hud";
+
+  const elZoom = document.createElement("span");
+  elZoom.className = "lld62-hud-cell";
+  const elScale = document.createElement("span");
+  elScale.className = "lld62-hud-cell";
+  const elCursor = document.createElement("span");
+  elCursor.className = "lld62-hud-cell hud-cursor";
+
+  const elImp = document.createElement("button");
+  elImp.className = "lld62-hud-cell";
+  const elMet = document.createElement("button");
+  elMet.className = "lld62-hud-cell";
+
+  const snapModeBtn = document.createElement("button");
+  snapModeBtn.id = "hud-snap-mode-lld62";
+  snapModeBtn.className = "lld62-hud-cell";
+  const snapModeVal = document.createElement("span");
+  snapModeVal.id = "hud-snap-mode-val";
+  snapModeBtn.appendChild(snapModeVal);
+
+  const gridToggleBtn = document.createElement("button");
+  gridToggleBtn.id = "hud-grid-toggle-lld62";
+  gridToggleBtn.className = "lld62-hud-cell";
+  const gridToggleVal = document.createElement("span");
+  gridToggleVal.id = "hud-grid-toggle-val";
+  gridToggleBtn.appendChild(gridToggleVal);
+
+  hud.appendChild(elZoom);
+  hud.appendChild(elScale);
+  hud.appendChild(elCursor);
+  hud.appendChild(elImp);
+  hud.appendChild(elMet);
+  hud.appendChild(snapModeBtn);
+  hud.appendChild(gridToggleBtn);
+
+  // Simulated tool-rail
+  const toolRail = document.createElement("div");
+  toolRail.className = "lld62-tool-rail";
+  // Give it a small fixed size so its rect is non-zero
+  toolRail.style.minHeight = "200px";
+
+  container.appendChild(toolRail);
+  container.appendChild(hud);
+  document.body.appendChild(container);
+
+  // init HUD with our nodes
+  initHud(elZoom, elScale, elCursor, elImp, elMet, snapModeBtn, gridToggleBtn);
+
+  return {
+    container, hud, toolRail,
+    cells: { elZoom, elScale, elCursor, snapModeVal, gridToggleVal },
+    cleanup() {
+      document.body.removeChild(container);
+    },
+  };
+}
+
+/**
+ * Clearance LAYOUT rig — distinct from existing makePanelRig() at line 4977.
+ * Wraps makePanelRig()'s panel DOM inside an 800×600 position:relative container,
+ * injects the minimal clearance positioning CSS subset from src/index.html (lines 852–862),
+ * and returns refs + cleanup.
+ *
+ * CSS source: src/index.html lines 852–862 (.clearance — width + display).
+ */
+function makeClearanceLayoutRig() {
+  // Build the panel via the existing rig
+  const panelRig = makePanelRig();
+  // Remove it from body (makePanelRig appended it)
+  document.body.removeChild(panelRig.panel);
+
+  // Fixed 800×600 container
+  const container = document.createElement("div");
+  container.style.position = "relative";
+  container.style.width = "800px";
+  container.style.height = "600px";
+  container.style.overflow = "hidden";
+
+  // Inject minimal CSS subset (source: src/index.html lines 852–862)
+  const style = document.createElement("style");
+  style.textContent = `
+    /* Subset from src/index.html .clearance (lines 852–862) */
+    .clearance {
+      width: 14rem;
+      overflow: hidden;
+      position: absolute;
+      top: 1.25rem;
+      right: 1.25rem;
+    }
+  `;
+  container.appendChild(style);
+
+  container.appendChild(panelRig.panel);
+  document.body.appendChild(container);
+
+  return {
+    container,
+    panel: panelRig.panel,
+    body: panelRig.body,
+    toggle: panelRig.toggle,
+    cleanup() {
+      document.body.removeChild(container);
+    },
+  };
+}
+
+// ─── Category 1: dimEntry layout ─────────────────────────────────────────────
+
+describe("dimEntry — floating input layout", () => {
+  it("anchor at edge midpoint: style.left/top equals worldToScreen of edge-0 midpoint", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Closed 4-vertex room; edge 0 goes from (0,0)→(2,0).
+    // At identity view: worldToScreen(0,0)={0,0}, worldToScreen(2,0)={80,0}
+    // midpoint = (40, 0)
+    model.rooms.push({ id: "lld62-r0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 },
+    ]});
+    const rig = makeLayoutDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("lld62-r0", 0);
+
+    // _positionInput sets style.left/top to the screen midpoint of edge 0
+    // edge 0: verts[0]=(0,0)→verts[1]=(2,0)
+    // worldToScreen(0,0)={0,0}, worldToScreen(2,0)={80,0} → midpoint=(40,0)
+    const input = rig.stage.querySelector(".dim-input");
+    if (!input) throw new Error("Expected .dim-input to be appended to stage");
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    const expectedLeft = (worldToScreen(0, 0).x + worldToScreen(2, 0).x) / 2; // 40
+    const expectedTop  = (worldToScreen(0, 0).y + worldToScreen(2, 0).y) / 2; // 0
+    if (Math.abs(leftPx - expectedLeft) > 1) {
+      throw new Error(`input.style.left ${leftPx} expected ~${expectedLeft}`);
+    }
+    if (Math.abs(topPx - expectedTop) > 1) {
+      throw new Error(`input.style.top ${topPx} expected ~${expectedTop}`);
+    }
+    cancel();
+    rig.cleanup();
+    resetAll();
+  });
+
+  it("inside stage bounds: input bounding rect is within the 800×600 stage rect", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Place room mid-stage: center at (10, 7.5) in world → screen (400, 300)
+    model.rooms.push({ id: "lld62-r1", closed: true, verts: [
+      { x: 9, y: 7 }, { x: 11, y: 7 }, { x: 11, y: 8 }, { x: 9, y: 8 },
+    ]});
+    const rig = makeLayoutDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("lld62-r1", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    if (!input) throw new Error("Expected .dim-input");
+    const stageRect = rig.stage.getBoundingClientRect();
+    const inputRect = input.getBoundingClientRect();
+    // The input is positioned by style.left/top; its rect center should be within stage
+    // Use the style values directly (transform: translate(-50%,-50%) centers it on left/top)
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    const TOL = 2;
+    if (leftPx < -TOL || leftPx > 800 + TOL) {
+      throw new Error(`input left=${leftPx} outside stage width 800`);
+    }
+    if (topPx < -TOL || topPx > 600 + TOL) {
+      throw new Error(`input top=${topPx} outside stage height 600`);
+    }
+    cancel();
+    rig.cleanup();
+    resetAll();
+  });
+
+  it("reposition() tracks the edge after view.panX changes", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    model.rooms.push({ id: "lld62-r2", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 },
+    ]});
+    const rig = makeLayoutDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("lld62-r2", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    if (!input) throw new Error("Expected .dim-input");
+    const leftBefore = parseFloat(input.style.left);
+
+    // Pan by 50px → reposition should update style.left by 50
+    view.panX = 50;
+    // reposition is exported from dimEntry
+    reposition();
+    const leftAfter = parseFloat(input.style.left);
+    if (Math.abs((leftAfter - leftBefore) - 50) > 1) {
+      throw new Error(`After panX=50, left changed by ${leftAfter - leftBefore}, expected ~50`);
+    }
+    cancel();
+    rig.cleanup();
+    resetAll();
+  });
+});
+
+// ─── Category 2: symbolDimEntry layout ───────────────────────────────────────
+
+describe("symbolDimEntry — floating input layout", () => {
+  it("width chip: style.left/top equals top-edge midpoint of projected corners + (0,-14)", () => {
+    resetAll();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // table: w=1.2, h=0.8, rot=0, centered at world (5, 5)
+    // corners at identity: TL=(4.4,4.6), TR=(5.6,4.6), BR=(5.6,5.4), BL=(4.4,5.4)
+    // screen coords: *40 at identity
+    // top-edge midpoint of cs[0]=TL and cs[1]=TR:
+    //   cx = (4.4*40 + 5.6*40)/2 = (176+224)/2 = 200
+    //   cy = (4.6*40 + 4.6*40)/2 = 184
+    // offset for width (rot=0): (0,-14) → left=200, top=170
+    const sym = createSymbol("table", 5, 5);
+    addSymbol(sym);
+    const rig = makeLayoutDimRig();
+    initSymbolDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginSymbolEdit(sym.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    if (!input) throw new Error("Expected .sym-dim-input");
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    // hand-compute: sym.w=1.2, sym.h=0.8; corners at rot=0:
+    //   TL={x:5-0.6, y:5-0.4}={4.4,4.6}, TR={5.6,4.6}
+    // screen *40: TL={176,184}, TR={224,184}
+    // top-edge midpoint cx=200, cy=184; offset (0,-14) → (200,170)
+    const cs = corners(sym).map(c => worldToScreen(c.x, c.y));
+    const expectedCx = (cs[0].x + cs[1].x) / 2;
+    const expectedCy = (cs[0].y + cs[1].y) / 2 - 14;
+    if (Math.abs(leftPx - expectedCx) > 1) {
+      throw new Error(`width input left ${leftPx} expected ~${expectedCx}`);
+    }
+    if (Math.abs(topPx - expectedCy) > 1) {
+      throw new Error(`width input top ${topPx} expected ~${expectedCy}`);
+    }
+    cancelSymbol();
+    rig.cleanup();
+    resetAll();
+    resetSymbolModel();
+  });
+
+  it("depth chip: style.left/top equals left-edge midpoint of projected corners + (-14,0)", () => {
+    resetAll();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // table: w=1.2, h=0.8, rot=0, centered at world (5, 5)
+    // left-edge midpoint of cs[0]=TL and cs[3]=BL at identity:
+    //   cx = (4.4*40 + 4.4*40)/2 = 176
+    //   cy = (4.6*40 + 5.4*40)/2 = (184+216)/2 = 200
+    // offset for depth (rot=0): (-14,0) → left=162, top=200
+    const sym = createSymbol("table", 5, 5);
+    addSymbol(sym);
+    const rig = makeLayoutDimRig();
+    initSymbolDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginSymbolEdit(sym.id, "h");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    if (!input) throw new Error("Expected .sym-dim-input");
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    const cs = corners(sym).map(c => worldToScreen(c.x, c.y));
+    // left-edge: TL=cs[0], BL=cs[3]
+    const expectedCx = (cs[0].x + cs[3].x) / 2 - 14;
+    const expectedCy = (cs[0].y + cs[3].y) / 2;
+    if (Math.abs(leftPx - expectedCx) > 1) {
+      throw new Error(`depth input left ${leftPx} expected ~${expectedCx}`);
+    }
+    if (Math.abs(topPx - expectedCy) > 1) {
+      throw new Error(`depth input top ${topPx} expected ~${expectedCy}`);
+    }
+    cancelSymbol();
+    rig.cleanup();
+    resetAll();
+    resetSymbolModel();
+  });
+
+  it("width chip: style.left within stage bounds (800×600)", () => {
+    resetAll();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const sym = createSymbol("table", 5, 5);
+    addSymbol(sym);
+    const rig = makeLayoutDimRig();
+    initSymbolDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginSymbolEdit(sym.id, "w");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    if (!input) throw new Error("Expected .sym-dim-input");
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    const TOL = 20; // allow for the 14px offset
+    if (leftPx < -TOL || leftPx > 800 + TOL) {
+      throw new Error(`width input left=${leftPx} outside stage`);
+    }
+    if (topPx < -TOL || topPx > 600 + TOL) {
+      throw new Error(`width input top=${topPx} outside stage`);
+    }
+    cancelSymbol();
+    rig.cleanup();
+    resetAll();
+    resetSymbolModel();
+  });
+
+  it("depth chip: style.left within stage bounds (800×600)", () => {
+    resetAll();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const sym = createSymbol("table", 5, 5);
+    addSymbol(sym);
+    const rig = makeLayoutDimRig();
+    initSymbolDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginSymbolEdit(sym.id, "h");
+    const input = rig.stage.querySelector(".sym-dim-input");
+    if (!input) throw new Error("Expected .sym-dim-input");
+    const leftPx = parseFloat(input.style.left);
+    const topPx  = parseFloat(input.style.top);
+    const TOL = 20;
+    if (leftPx < -TOL || leftPx > 800 + TOL) {
+      throw new Error(`depth input left=${leftPx} outside stage`);
+    }
+    if (topPx < -TOL || topPx > 600 + TOL) {
+      throw new Error(`depth input top=${topPx} outside stage`);
+    }
+    cancelSymbol();
+    rig.cleanup();
+    resetAll();
+    resetSymbolModel();
+  });
+});
+
+// ─── Category 3: hud layout ──────────────────────────────────────────────────
+
+describe("hud — layout / no-collision", () => {
+  it("cells visible + populated after init + setCursorScreen + update", () => {
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeHudLayoutRig();
+    setCursorScreen(400, 300);
+    updateHud();
+
+    // Zoom cell: non-empty textContent
+    if (!rig.cells.elZoom.textContent || rig.cells.elZoom.textContent.trim() === "") {
+      throw new Error("Zoom cell has empty textContent");
+    }
+    // Snap mode cell: exists (was written by update)
+    if (!rig.cells.snapModeVal.textContent) {
+      // mode="auto" may show a non-empty label; just verify the element exists
+    }
+    // Grid toggle cell should be non-empty
+    // (In test env getPrefsGridSnap() returns true by default → "On")
+    const gridText = rig.cells.gridToggleVal.textContent;
+    if (!gridText || gridText.trim() === "") {
+      throw new Error(`Grid toggle val has empty textContent, got "${gridText}"`);
+    }
+
+    rig.cleanup();
+    setUnit("ft");
+  });
+
+  it("HUD block sits inside the 800×600 viewport container", () => {
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeHudLayoutRig();
+    setCursorScreen(400, 300);
+    updateHud();
+
+    const containerRect = rig.container.getBoundingClientRect();
+    const hudRect = rig.hud.getBoundingClientRect();
+
+    // HUD is position:absolute inside the container — its rect must be within container
+    if (!rectInside(hudRect, containerRect, 2)) {
+      throw new Error(
+        `HUD rect {left:${hudRect.left.toFixed(0)},top:${hudRect.top.toFixed(0)},right:${hudRect.right.toFixed(0)},bottom:${hudRect.bottom.toFixed(0)}} ` +
+        `not inside container {left:${containerRect.left.toFixed(0)},top:${containerRect.top.toFixed(0)},right:${containerRect.right.toFixed(0)},bottom:${containerRect.bottom.toFixed(0)}}`
+      );
+    }
+
+    rig.cleanup();
+    setUnit("ft");
+  });
+
+  it("HUD does not overlap the tool-rail ('overlapping toolbars' regression)", () => {
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeHudLayoutRig();
+    setCursorScreen(400, 300);
+    updateHud();
+
+    const hudRect      = rig.hud.getBoundingClientRect();
+    const toolRailRect = rig.toolRail.getBoundingClientRect();
+
+    if (rectsOverlap(hudRect, toolRailRect)) {
+      throw new Error(
+        `HUD and tool-rail overlap: ` +
+        `HUD {left:${hudRect.left.toFixed(0)},right:${hudRect.right.toFixed(0)}} ` +
+        `toolRail {left:${toolRailRect.left.toFixed(0)},right:${toolRailRect.right.toFixed(0)}}`
+      );
+    }
+
+    rig.cleanup();
+    setUnit("ft");
+  });
+});
+
+// ─── Category 4: clearancePanel containment ──────────────────────────────────
+
+describe("clearancePanel — panel containment", () => {
+  it("panel rect sits inside the 800×600 viewport container after clrPanelUpdate", () => {
+    resetClearance();
+    resetSymbolModel();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // A closed room + a furniture symbol placed inside it to produce clearance rows
+    const room = mkRoom("lld62-clr0", 0, 0, 10, 8);
+    model.rooms.push(room);
+    const sofa = mkSym("lld62-s0", "sofa", 5, 4, 2, 0.9, 0);
+    const chair = mkSym("lld62-s1", "chair", 2.75, 4, 0.5, 0.5, 0);
+    symbolModel.symbols.push(sofa);
+    symbolModel.symbols.push(chair);
+
+    setEnabled(true);
+    setThreshold(DEFAULT_THRESHOLD);
+
+    const rig = makeClearanceLayoutRig();
+    initClearancePanel({
+      panel: rig.panel,
+      body: rig.body,
+      toggle: rig.toggle,
+      getSelectedId: () => "lld62-s0",
+      getSymbol: () => sofa,
+    });
+    clrPanelUpdate();
+
+    const containerRect = rig.container.getBoundingClientRect();
+    const panelRect = rig.panel.getBoundingClientRect();
+
+    if (!rectInside(panelRect, containerRect, 2)) {
+      throw new Error(
+        `Panel rect {left:${panelRect.left.toFixed(0)},top:${panelRect.top.toFixed(0)},` +
+        `right:${panelRect.right.toFixed(0)},bottom:${panelRect.bottom.toFixed(0)}} ` +
+        `not inside container {left:${containerRect.left.toFixed(0)},top:${containerRect.top.toFixed(0)},` +
+        `right:${containerRect.right.toFixed(0)},bottom:${containerRect.bottom.toFixed(0)}}`
+      );
+    }
+
+    rig.cleanup();
+    resetClearance();
+    symbolModel.symbols.length = 0;
+    model.rooms.length = 0;
+  });
+});
+
+// ─── Category 5: grid.drawGrid line placement ─────────────────────────────────
+
+describe("grid.drawGrid — line placement", () => {
+  it("line count is nonzero and matches hand-computed index range", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const NS_G = "http://www.w3.org/2000/svg";
+    const g = document.createElementNS(NS_G, "g");
+    const W = 800, H = 600;
+    drawGrid(g, W, H);
+    const lines = g.querySelectorAll("line");
+    if (lines.length === 0) throw new Error("drawGrid emitted 0 lines");
+    // At identity view: step = chooseGridStep(56) at zoom=1, pxPerM=40
+    // step*40 >= 56 → step=2 (2*40=80 >= 56)
+    // topLeft=screenToWorld(0,0)=(0,0), botRight=screenToWorld(800,600)=(20,15)
+    // iXMin=floor(0/2)-1=-1, iXMax=ceil(20/2)+1=11 → 13 vertical lines
+    // iYMin=floor(0/2)-1=-1, iYMax=ceil(15/2)+1=9 → 11 horizontal lines
+    // Total = 24; allow ±4 due to floating-point ceiling differences
+    const step = chooseGridStep(56);
+    // Inline screenToWorld for hand-computed index range (view is identity)
+    const s2w = (sx, sy) => {
+      const ppm = view.zoom * BASE_PX_PER_M;
+      return { x: (sx - view.panX) / ppm, y: (sy - view.panY) / ppm };
+    };
+    const tl = s2w(0, 0), br = s2w(W, H);
+    const iXMin = Math.floor(tl.x / step) - 1;
+    const iXMax = Math.ceil(br.x / step) + 1;
+    const iYMin = Math.floor(tl.y / step) - 1;
+    const iYMax = Math.ceil(br.y / step) + 1;
+    const expectedCount = (iXMax - iXMin + 1) + (iYMax - iYMin + 1);
+    if (lines.length !== expectedCount) {
+      throw new Error(`Expected ${expectedCount} lines, got ${lines.length}`);
+    }
+  });
+
+  it("adjacent grid-major vertical lines differ in x by MAJOR_EVERY * step * pxPerM()", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const NS_G = "http://www.w3.org/2000/svg";
+    const g = document.createElementNS(NS_G, "g");
+    drawGrid(g, 800, 600);
+    const majorVerticals = Array.from(g.querySelectorAll("line.grid-major")).filter(l => {
+      // vertical lines have x1 === x2
+      return parseFloat(l.getAttribute("x1")) === parseFloat(l.getAttribute("x2"));
+    });
+    if (majorVerticals.length < 2) {
+      throw new Error(`Need ≥2 major vertical lines, got ${majorVerticals.length}`);
+    }
+    // Sort by x1
+    majorVerticals.sort((a, b) => parseFloat(a.getAttribute("x1")) - parseFloat(b.getAttribute("x1")));
+    const step = chooseGridStep(56);
+    const expectedSpacing = MAJOR_EVERY * step * pxPerM();
+    for (let i = 1; i < majorVerticals.length; i++) {
+      const dx = parseFloat(majorVerticals[i].getAttribute("x1")) - parseFloat(majorVerticals[i-1].getAttribute("x1"));
+      if (Math.abs(dx - expectedSpacing) > 1) {
+        throw new Error(`Major vertical spacing ${dx.toFixed(2)} expected ~${expectedSpacing.toFixed(2)}`);
+      }
+    }
+  });
+
+  it("vertical lines span full height (y1≈0, y2≈600) and horizontal lines span full width (x1≈0, x2≈800)", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const NS_G = "http://www.w3.org/2000/svg";
+    const g = document.createElementNS(NS_G, "g");
+    const W = 800, H = 600;
+    drawGrid(g, W, H);
+    const TOL = 1;
+    // Check vertical lines: x1===x2, y1≈0, y2≈H
+    const allLines = Array.from(g.querySelectorAll("line"));
+    for (const line of allLines) {
+      const x1 = parseFloat(line.getAttribute("x1"));
+      const y1 = parseFloat(line.getAttribute("y1"));
+      const x2 = parseFloat(line.getAttribute("x2"));
+      const y2 = parseFloat(line.getAttribute("y2"));
+      if (Math.abs(x1 - x2) < TOL) {
+        // vertical line
+        if (Math.abs(y1 - 0) > TOL) throw new Error(`Vertical line y1=${y1} expected ≈0`);
+        if (Math.abs(y2 - H) > TOL) throw new Error(`Vertical line y2=${y2} expected ≈${H}`);
+      } else {
+        // horizontal line
+        if (Math.abs(x1 - 0) > TOL) throw new Error(`Horizontal line x1=${x1} expected ≈0`);
+        if (Math.abs(x2 - W) > TOL) throw new Error(`Horizontal line x2=${x2} expected ≈${W}`);
+      }
+    }
+  });
+
+  it("idempotent redraw: calling drawGrid twice yields the same line count", () => {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const NS_G = "http://www.w3.org/2000/svg";
+    const g = document.createElementNS(NS_G, "g");
+    drawGrid(g, 800, 600);
+    const count1 = g.querySelectorAll("line").length;
+    drawGrid(g, 800, 600);
+    const count2 = g.querySelectorAll("line").length;
+    if (count1 !== count2) {
+      throw new Error(`Idempotent redraw: first=${count1}, second=${count2}`);
+    }
+    if (count1 === 0) throw new Error("drawGrid emitted 0 lines");
+  });
+});
+
+// ─── LLD 63: roomTool — room selection + move-drag + carried furniture ────────
+
+import {
+  init as initRoomTool,
+  onSelectDown as roomOnSelectDown,
+  onSelectMove as roomOnSelectMove,
+  onSelectUp as roomOnSelectUp,
+  onTapEmpty as roomOnTapEmpty,
+  onDrawModeEnter as roomOnDrawModeEnter,
+  clearSelection as roomClearSelection,
+  getSelectedRoomId as roomGetSelectedRoomId,
+  hasSelection as roomHasSelection,
+  setHistoryAndToast as roomSetHistoryAndToast,
+  setClearSymbolSelection as roomSetClearSymbolSelection,
+} from "../src/js/roomTool.js";
+
+import {
+  init as initSymbolToolMutex,
+  onSelectDown as symOnSelectDownMutex,
+  hasSelection as symHasSelectionMutex,
+  clearSelection as symClearSelectionMutex,
+  getSelectedId as symGetSelectedIdMutex,
+  selectSymbol as symSelectSymbolMutex,
+  setClearRoomSelection as symSetClearRoomSelectionMutex,
+} from "../src/js/symbolTool.js";
+
+// Reset both models + view for roomTool tests.
+function _resetRoomTool() {
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  setGridSnap(true);
+  setSnapMode("off"); // free follow by default (tests that need grid set it on)
+}
+
+// A no-op spy commit for roomTool.
+function _spyCommit() {
+  let count = 0;
+  const spy = () => { count++; };
+  spy.callCount = () => count;
+  return spy;
+}
+
+describe("LLD 63 — roomTool: carried-furniture membership (center, not AABB)", () => {
+  it("carried set = symbols whose center is inside the room polygon; outside excluded", () => {
+    _resetRoomTool();
+    const spy = _spyCommit();
+    roomSetHistoryAndToast({ commit: spy }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    // 4x4 room from (0,0) to (4,4). At identity view world→screen ×40.
+    model.rooms.push({ id: "cf0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    // Symbol centered at (2,2) — inside; symbol at (10,10) — outside.
+    const inside  = createSymbol("chair", 2, 2);  addSymbol(inside);
+    const outside = createSymbol("chair", 10, 10); addSymbol(outside);
+
+    // Press inside the room interior at screen (80,80)=world(2,2).
+    const consumed = roomOnSelectDown(80, 80);
+    expect(consumed).toBe(true);
+    expect(roomGetSelectedRoomId()).toBe("cf0");
+
+    // Drag to screen (120,80)=world(3,2): dx=+1, dy=0.
+    roomOnSelectMove(120, 80);
+    roomOnSelectUp(120, 80);
+
+    // Inside symbol carried by (+1,0); outside symbol unchanged.
+    expect(inside.x).toBeCloseTo(3, 9);
+    expect(inside.y).toBeCloseTo(2, 9);
+    expect(outside.x).toBe(10);
+    expect(outside.y).toBe(10);
+    // Room translated by same delta.
+    expect(model.rooms[0].verts[0].x).toBeCloseTo(1, 9);
+    expect(spy.callCount()).toBe(1);
+    roomClearSelection();
+  });
+
+  it("a symbol added mid-drag is NOT grabbed (membership snapshotted at down)", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    model.rooms.push({ id: "cf1", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    roomOnSelectDown(80, 80); // no symbols present at down → empty carried set
+    const late = createSymbol("chair", 2, 2); addSymbol(late); // added AFTER down
+    roomOnSelectMove(120, 80); // dx=+1
+    roomOnSelectUp(120, 80);
+    // Late symbol was not in the snapshot → unchanged.
+    expect(late.x).toBe(2);
+    expect(late.y).toBe(2);
+    roomClearSelection();
+  });
+
+  it("a door seated ON the room's wall IS carried (center on the boundary; pointInRoom would miss it)", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    model.rooms.push({ id: "cf2", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    // Door cut into the BOTTOM wall: center on the edge y=4. This point gives
+    // pointInRoom === FALSE (the even-odd ray cast excludes it), so the OLD
+    // interior-only rule would leave it behind — the wall-proximity rule carries
+    // it. (Chosen over the top edge y=0, where pointInRoom happens to return true
+    // and so wouldn't discriminate old vs. new behaviour.)
+    const door = createSymbol("door", 2, 4); addSymbol(door);
+    // A far-inside chair as a control (carried by the interior rule).
+    const chair = createSymbol("chair", 2, 2); addSymbol(chair);
+
+    roomOnSelectDown(80, 80);           // world(2,2) — room interior
+    roomOnSelectMove(120, 80);          // dx=+1, dy=0
+    roomOnSelectUp(120, 80);
+
+    // The wall-mounted door travels with the room (proximity-to-wall rule).
+    expect(door.x).toBeCloseTo(3, 9);
+    expect(door.y).toBeCloseTo(4, 9);
+    // Chair still carried too.
+    expect(chair.x).toBeCloseTo(3, 9);
+    roomClearSelection();
+  });
+
+  it("a door on a DIFFERENT room's wall is NOT carried (per-room segment scoping)", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    // Room A (moved) at (0,0)-(4,4); Room B far away at (10,10)-(14,14).
+    model.rooms.push({ id: "ra", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    model.rooms.push({ id: "rb", closed: true, verts: [
+      { x: 10, y: 10 }, { x: 14, y: 10 }, { x: 14, y: 14 }, { x: 10, y: 14 },
+    ]});
+    // Door on room B's wall (center on y=10 edge of B) — not on any A wall.
+    const bDoor = createSymbol("door", 12, 10); addSymbol(bDoor);
+
+    roomOnSelectDown(80, 80);           // selects room A (world 2,2)
+    roomOnSelectMove(120, 80);          // dx=+1
+    roomOnSelectUp(120, 80);
+
+    // Room B's door is untouched — the carry test only measures A's own segments.
+    expect(bDoor.x).toBe(12);
+    expect(bDoor.y).toBe(10);
+    roomClearSelection();
+  });
+});
+
+describe("LLD 63 — roomTool: rigid move + grid snap of reference vertex", () => {
+  it("dragging the room interior translates all verts rigidly (free follow, snap off)", () => {
+    _resetRoomTool();
+    setGridSnap(false);
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    // Off-grid room so we can prove rigidity.
+    model.rooms.push({ id: "mv0", closed: true, verts: [
+      { x: 0.3, y: 0.7 }, { x: 4.3, y: 0.7 }, { x: 4.3, y: 3.7 }, { x: 0.3, y: 3.7 },
+    ]});
+    const areaBefore = polygonArea(model.rooms[0].verts);
+    // Down at world(2,2)=screen(80,80); the reference vertex is verts[0]=(0.3,0.7).
+    roomOnSelectDown(80, 80);
+    // Move pointer to world(3.5,2.5)=screen(140,100): pointer delta (1.5,0.5).
+    roomOnSelectMove(140, 100);
+    roomOnSelectUp(140, 100);
+    const r = model.rooms[0];
+    // Rigid: shape preserved (area unchanged), all verts shifted by (1.5,0.5).
+    expect(r.verts[0].x).toBeCloseTo(1.8, 9);
+    expect(r.verts[0].y).toBeCloseTo(1.2, 9);
+    expect(r.verts[2].x).toBeCloseTo(5.8, 9);
+    expect(polygonArea(r.verts)).toBeCloseTo(areaBefore, 9);
+    roomClearSelection();
+  });
+
+  it("grid snap ON lands reference vertex (verts[0]) on a grid multiple", () => {
+    _resetRoomTool();
+    setGridSnap(true);
+    setSnapMode(0.25); // fixed 0.25m step (zoom-independent, a valid SNAP_PRESET)
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    // Off-grid room; reference vertex verts[0] = (0.3, 0.7).
+    model.rooms.push({ id: "mv1", closed: true, verts: [
+      { x: 0.3, y: 0.7 }, { x: 4.3, y: 0.7 }, { x: 4.3, y: 3.7 }, { x: 0.3, y: 3.7 },
+    ]});
+    // Grab at world(2,2)=screen(80,80). Offset from ref = (1.7, 1.3).
+    roomOnSelectDown(80, 80);
+    // Move to pointer world(2.15,2.1)=screen(86,84):
+    //   raw ref target = (2.15-1.7, 2.1-1.3) = (0.45, 0.8) — OFF grid.
+    //   snap to 0.25 → (round(1.8)*0.25, round(3.2)*0.25) = (0.5, 0.75).
+    roomOnSelectMove(86, 84);
+    roomOnSelectUp(86, 84);
+    const r = model.rooms[0];
+    // verts[0] snapped ONTO a 0.25 multiple (proves snap fired: 0.45→0.5, 0.8→0.75).
+    expect(r.verts[0].x).toBeCloseTo(0.5, 9);
+    expect(r.verts[0].y).toBeCloseTo(0.75, 9);
+    // Rigid: opposite corner shifted by the same delta (0.2, 0.05).
+    expect(r.verts[2].x).toBeCloseTo(4.5, 9);
+    expect(r.verts[2].y).toBeCloseTo(3.75, 9);
+    setSnapMode("off");
+    roomClearSelection();
+  });
+
+  it("Down on empty canvas returns false (no selection); open/degenerate rooms not selectable", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    // Open polyline (closed:false) + a closed room far away.
+    model.rooms.push({ id: "op0", closed: false, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 },
+    ]});
+    // Click at world(2,2)=screen(80,80): interior of the polyline bbox but it's OPEN.
+    expect(roomOnSelectDown(80, 80)).toBe(false);
+    expect(roomHasSelection()).toBe(false);
+    roomClearSelection();
+  });
+
+  it("overlapping rooms: last matching closed room wins (topmost draw order)", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+    // Two rooms sharing the interior at world(2,2).
+    model.rooms.push({ id: "ov-under", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    model.rooms.push({ id: "ov-over", closed: true, verts: [
+      { x: 1, y: 1 }, { x: 3, y: 1 }, { x: 3, y: 3 }, { x: 1, y: 3 },
+    ]});
+    roomOnSelectDown(80, 80); // world(2,2) inside both → last one wins
+    expect(roomGetSelectedRoomId()).toBe("ov-over");
+    roomClearSelection();
+  });
+
+  it("onDrawModeEnter + onTapEmpty clear the room selection", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+    model.rooms.push({ id: "clr0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    roomOnSelectDown(80, 80);
+    expect(roomHasSelection()).toBe(true);
+    roomOnDrawModeEnter();
+    expect(roomHasSelection()).toBe(false);
+    // Re-select then tap empty.
+    roomOnSelectDown(80, 80);
+    expect(roomHasSelection()).toBe(true);
+    roomOnTapEmpty();
+    expect(roomHasSelection()).toBe(false);
+  });
+});
+
+describe("LLD 63 — selection mutex (room ↔ symbol, the HIGH fix)", () => {
+  // Model the dispatcher directly: symbols win ties; picking one clears the other.
+  // (The dispatcher itself lives in main.js and isn't unit-reachable, so we call
+  //  the tool APIs the way main.js wires them.)
+  function _wireMutex() {
+    // roomTool clears symbol selection on its own room-hit success path.
+    roomSetClearSymbolSelection(symClearSelectionMutex);
+  }
+
+  it("select symbol → select room: room is selected, symbol deselected", () => {
+    _resetRoomTool();
+    // Init both tools with stub DOM.
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolToolMutex({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    initRoomTool({ stage: document.createElement("div") });
+    _wireMutex();
+
+    // A room covering the interior, and a symbol at (2,2) inside it.
+    model.rooms.push({ id: "mx0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    const sym = createSymbol("chair", 2, 2); addSymbol(sym);
+
+    // First select the symbol (screen 80,80 = world 2,2).
+    expect(symOnSelectDownMutex(80, 80)).toBe(true);
+    expect(symHasSelectionMutex()).toBe(true);
+
+    // Now click bare room floor away from the symbol. Symbol is 'chair' (~0.45m)
+    // centered at (2,2); click at world(0.3,0.3)=screen(12,12) misses the symbol.
+    // Emulate the dispatcher: symbols try first, miss, then roomTool consumes.
+    const symConsumed = symOnSelectDownMutex(12, 12);
+    expect(symConsumed).toBe(false);
+    const roomConsumed = roomOnSelectDown(12, 12);
+    expect(roomConsumed).toBe(true);
+
+    // The room is selected; the symbol was cleared by the injected mutex.
+    expect(roomGetSelectedRoomId()).toBe("mx0");
+    expect(symHasSelectionMutex()).toBe(false);
+    roomClearSelection();
+    symClearSelectionMutex();
+  });
+
+  it("select room → select symbol: symbol is selected, room deselected (dispatcher order)", () => {
+    _resetRoomTool();
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolToolMutex({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    initRoomTool({ stage: document.createElement("div") });
+    _wireMutex();
+
+    model.rooms.push({ id: "mx1", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    const sym = createSymbol("chair", 2, 2); addSymbol(sym);
+
+    // Select the room first (click bare floor at world 0.3,0.3).
+    expect(roomOnSelectDown(12, 12)).toBe(true);
+    expect(roomHasSelection()).toBe(true);
+
+    // Now click the symbol. Dispatcher: symbolTool tries first and consumes;
+    // main.js then calls roomClearSelection() (the mutex on a symbol hit).
+    const symConsumed = symOnSelectDownMutex(80, 80); // world(2,2) hits the chair
+    expect(symConsumed).toBe(true);
+    roomClearSelection(); // dispatcher does this on a symbol hit
+    expect(symHasSelectionMutex()).toBe(true);
+    expect(roomHasSelection()).toBe(false);
+    expect(roomGetSelectedRoomId()).toBe(null);
+    roomClearSelection();
+    symClearSelectionMutex();
+  });
+
+  it("dock-drop placement (selectSymbol, bypasses dispatcher) still clears the room selection", () => {
+    // Regression for the mutex gap: dock drag-drop calls selectSymbol() directly,
+    // NOT through the main.js dispatcher, so the reverse injection
+    // (setClearRoomSelection) must fire from inside selectSymbol — otherwise a
+    // room stays selected under the just-placed symbol (dual selection footgun).
+    _resetRoomTool();
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolToolMutex({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    initRoomTool({ stage: document.createElement("div") });
+    _wireMutex();
+    // Wire the REVERSE injection the way main.js does.
+    symSetClearRoomSelectionMutex(roomClearSelection);
+
+    model.rooms.push({ id: "mx2", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+
+    // Select the room first.
+    expect(roomOnSelectDown(12, 12)).toBe(true);
+    expect(roomHasSelection()).toBe(true);
+
+    // Simulate a dock drop landing inside the room: selectSymbol directly.
+    const dropped = createSymbol("chair", 2, 2); addSymbol(dropped);
+    symSelectSymbolMutex(dropped.id);
+
+    // The placed symbol is selected AND the room selection was dropped by the mutex.
+    expect(symHasSelectionMutex()).toBe(true);
+    expect(roomHasSelection()).toBe(false);
+    expect(roomGetSelectedRoomId()).toBe(null);
+    roomClearSelection();
+    symClearSelectionMutex();
+  });
+});
+
 
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
