@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Share-link conflict — favor shared (mockups)</title>
+<style>
+  :root {
+    --bg:         #14140f;
+    --bg-deep:    #100f0b;
+    --ink:        #ece7d6;
+    --muted:      #8f8a78;
+    --gold:       #c9a84c;
+    --gold-soft:  rgba(201, 168, 76, 0.55);
+    --grid-fine:  rgba(201, 168, 76, 0.055);
+    --grid-major: rgba(201, 168, 76, 0.14);
+    --panel:      rgba(20, 20, 15, 0.72);
+    --hairline:   rgba(201, 168, 76, 0.18);
+    --font-ui:      "DM Sans", system-ui, sans-serif;
+    --font-mono:    "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-ui);
+    color: var(--ink);
+    background: var(--bg-deep);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── page scaffolding for the mockup gallery ─────────────────────────── */
+  .page-head {
+    max-width: 940px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 0.5rem;
+  }
+  .page-head h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    color: var(--gold);
+    font-size: 1.5rem;
+    margin: 0 0 0.4rem;
+  }
+  .page-head p {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin: 0.2rem 0;
+    max-width: 60ch;
+  }
+  .toggle-row {
+    max-width: 940px;
+    margin: 1.2rem auto 0;
+    padding: 0 1.5rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .toggle-row button {
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    padding: 0.4rem 0.85rem;
+    border-radius: 100px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .toggle-row button:hover { color: var(--gold); border-color: var(--gold-soft); }
+  .toggle-row button.active { color: var(--gold); border-color: var(--gold); }
+
+  .variant {
+    max-width: 940px;
+    margin: 1.4rem auto 3rem;
+    padding: 0 1.5rem;
+  }
+  .variant > h2 {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--ink);
+    letter-spacing: 0.03em;
+    margin: 0 0 0.15rem;
+  }
+  .variant > .note {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin: 0 0 0.9rem;
+    max-width: 66ch;
+  }
+
+  /* ── fake editor stage (backdrop shared by all variants) ─────────────── */
+  .stage {
+    position: relative;
+    height: 460px;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse at 50% 0%, var(--bg) 0%, var(--bg-deep) 100%);
+    background-color: var(--bg-deep);
+  }
+  .stage-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--grid-fine) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+      linear-gradient(var(--grid-major) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+    background-size: 22px 22px, 22px 22px, 110px 110px, 110px 110px;
+  }
+  /* a sketched "local" room, so the conflict has real stakes */
+  .stage-room {
+    position: absolute;
+    left: 34%;
+    top: 32%;
+    width: 200px;
+    height: 150px;
+    border: 2px solid var(--gold-soft);
+    background: rgba(201,168,76,0.05);
+  }
+  .stage-room::after {
+    content: "Studio · 18.6 m²";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  /* top-right action cluster stand-in */
+  .stage-actions {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    display: flex;
+    gap: 0.35rem;
+    z-index: 5;
+  }
+  .stage-actions button {
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    padding: 0.3rem 0.7rem;
+    border-radius: 100px;
+  }
+  .stage-title {
+    position: absolute;
+    top: 0.85rem;
+    left: 1rem;
+    z-index: 5;
+  }
+  .stage-title .t {
+    font-family: var(--font-display);
+    color: var(--gold);
+    font-size: 0.95rem;
+  }
+
+  /* ═══ VARIANT A — shared-favoring banner ═════════════════════════════ */
+  .banner-a {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    z-index: 20;
+    background: rgba(20,20,15,0.94);
+    border-bottom: 1px solid var(--gold-soft);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    padding: 0.7rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    font-family: var(--font-mono);
+    flex-wrap: wrap;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+  }
+  /* thumbnail preview of the incoming shared plan */
+  .banner-a .thumb {
+    width: 46px; height: 34px;
+    flex-shrink: 0;
+    border: 1px solid var(--gold-soft);
+    border-radius: 4px;
+    background:
+      linear-gradient(var(--grid-major) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+      var(--bg);
+    background-size: 8px 8px, 8px 8px;
+    position: relative;
+  }
+  .banner-a .thumb::after {
+    content: "";
+    position: absolute;
+    left: 22%; top: 25%;
+    width: 55%; height: 45%;
+    border: 1.5px solid var(--gold);
+  }
+  .banner-a .b-text { flex: 1; min-width: 12rem; }
+  .banner-a .b-text .b-title {
+    color: var(--ink);
+    font-size: 0.76rem;
+    font-weight: 500;
+  }
+  .banner-a .b-text .b-sub {
+    color: var(--muted);
+    font-size: 0.68rem;
+    margin-top: 0.1rem;
+  }
+  .banner-a .b-btns { display: flex; gap: 0.5rem; align-items: center; }
+  /* primary: filled gold — the safe, obvious default */
+  .btn-primary {
+    background: var(--gold);
+    border: 1px solid var(--gold);
+    color: #14140f;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 0.4rem 1rem;
+    border-radius: 100px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: filter 0.15s, transform 0.1s;
+  }
+  .btn-primary:hover { filter: brightness(1.12); }
+  .btn-primary:active { transform: translateY(1px); }
+  /* secondary: quiet text button */
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 100px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .btn-ghost:hover { color: var(--ink); border-color: var(--hairline); }
+
+  /* ═══ VARIANT B — auto-open + undo toast ═════════════════════════════ */
+  /* The shared plan is already applied to the stage; a toast offers one-tap undo. */
+  .toast-b {
+    position: absolute;
+    left: 50%;
+    bottom: 1.1rem;
+    transform: translateX(-50%);
+    z-index: 20;
+    background: rgba(20,20,15,0.95);
+    border: 1px solid var(--gold-soft);
+    border-radius: 100px;
+    padding: 0.5rem 0.7rem 0.5rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+    max-width: calc(100% - 2rem);
+  }
+  .toast-b .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--gold);
+    flex-shrink: 0;
+  }
+  .toast-b .toast-action-btn {
+    background: transparent;
+    border: 1px solid var(--gold-soft);
+    color: var(--gold);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 0.28rem 0.8rem;
+    border-radius: 100px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, background 0.15s;
+  }
+  .toast-b .toast-action-btn:hover { background: rgba(201,168,76,0.12); }
+  /* shared room rendered onto the stage (bigger, offset — visibly different) */
+  .stage-room--shared {
+    left: 26%; top: 22%;
+    width: 260px; height: 190px;
+    border-color: var(--gold);
+    background: rgba(201,168,76,0.08);
+  }
+  .stage-room--shared::after { content: "Shared: 1-BR · 41.2 m²"; color: var(--gold); }
+
+  /* ═══ VARIANT C — centered modal chooser with previews ═══════════════ */
+  .scrim-c {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    background: rgba(10,10,7,0.6);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+  .modal-c {
+    width: 100%;
+    max-width: 440px;
+    background: rgba(20,20,15,0.97);
+    border: 1px solid var(--gold-soft);
+    border-radius: 12px;
+    padding: 1.3rem 1.3rem 1.1rem;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    font-family: var(--font-mono);
+  }
+  .modal-c h3 {
+    font-family: var(--font-display);
+    color: var(--gold);
+    font-weight: 400;
+    font-size: 1.05rem;
+    margin: 0 0 0.25rem;
+  }
+  .modal-c .m-sub {
+    color: var(--muted);
+    font-size: 0.72rem;
+    margin: 0 0 1rem;
+  }
+  .choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
+  .choice {
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 0.7rem;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    background: transparent;
+    text-align: left;
+    color: var(--ink);
+    font-family: var(--font-mono);
+  }
+  .choice:hover { border-color: var(--gold-soft); }
+  /* the shared choice is pre-highlighted as the recommended default */
+  .choice--shared {
+    border-color: var(--gold);
+    background: rgba(201,168,76,0.07);
+  }
+  .choice .c-thumb {
+    height: 66px;
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    background:
+      linear-gradient(var(--grid-fine) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+      var(--bg);
+    background-size: 9px 9px, 9px 9px;
+    position: relative;
+    margin-bottom: 0.55rem;
+  }
+  .choice .c-thumb::after {
+    content: "";
+    position: absolute;
+    border: 1.5px solid var(--gold-soft);
+  }
+  .choice--shared .c-thumb::after { left: 20%; top: 20%; width: 58%; height: 52%; border-color: var(--gold); }
+  .choice--local  .c-thumb::after { left: 30%; top: 32%; width: 40%; height: 36%; }
+  .choice .c-label { font-size: 0.74rem; font-weight: 500; }
+  .choice .c-meta  { font-size: 0.66rem; color: var(--muted); margin-top: 0.1rem; }
+  .choice--shared .c-tag {
+    display: inline-block;
+    font-size: 0.6rem;
+    color: #14140f;
+    background: var(--gold);
+    padding: 0.05rem 0.4rem;
+    border-radius: 100px;
+    margin-bottom: 0.4rem;
+  }
+  .modal-c .m-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+
+  /* ── responsive: stack banner + modal choices on narrow screens ──────── */
+  @media (max-width: 560px) {
+    .banner-a { gap: 0.5rem; }
+    .banner-a .b-btns { width: 100%; justify-content: space-between; }
+    .choice-grid { grid-template-columns: 1fr; }
+    .stage { height: 520px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet" />
+</head>
+<body>
+<div class="page-head">
+  <h1>Share link vs. local autosave — favor the shared plan</h1>
+  <p>Issue #85: opening a share link over a different autosaved plan currently shows a
+     50/50 chooser where local can silently win. A present hash = explicit "open this"
+     intent and should be the safe default. Three directions below.</p>
+  <p>Toggle the states inside each stage to see the flow. Same graph-paper aesthetic and
+     tokens as the live editor.</p>
+</div>
+
+<div class="toggle-row" id="variant-nav">
+  <button data-target="var-a" class="active">A · Shared-favoring banner</button>
+  <button data-target="var-b">B · Auto-open + undo toast (recommended)</button>
+  <button data-target="var-c">C · Modal chooser with previews</button>
+</div>
+
+<!-- ═══ VARIANT A ═══ -->
+<section class="variant" id="var-a">
+  <h2>A — Shared-favoring banner (minimal change)</h2>
+  <p class="note">Keeps the existing top banner but rebalances it: a preview thumbnail of
+     the incoming plan, "Open shared" as the filled primary, and "Keep my current work"
+     demoted to a quiet ghost button. Nothing is applied until the author chooses, but the
+     safe default is unmistakable. Smallest diff from today's code.</p>
+  <div class="stage">
+    <div class="stage-grid"></div>
+    <div class="stage-title"><span class="t">floorplan</span></div>
+    <div class="stage-actions">
+      <button>Share</button><button>Export</button><button>⋯</button>
+    </div>
+    <div class="stage-room"></div>
+
+    <div class="banner-a" id="banner-a">
+      <div class="thumb" aria-hidden="true"></div>
+      <div class="b-text">
+        <div class="b-title">This link opens a shared plan</div>
+        <div class="b-sub">It's different from your last autosaved sketch on this device.</div>
+      </div>
+      <div class="b-btns">
+        <button class="btn-primary" onclick="flashA('shared')">Open shared</button>
+        <button class="btn-ghost" onclick="flashA('local')">Keep my current work</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ VARIANT B ═══ -->
+<section class="variant" id="var-b" style="display:none">
+  <h2>B — Auto-open shared + one-tap undo (recommended)</h2>
+  <p class="note">A present hash is honored immediately: the shared plan is applied and
+     fit-to-content, exactly like the incognito / clean-open path. A non-blocking toast
+     confirms and offers "Keep my last plan instead" for a few seconds — a one-tap undo
+     that restores the local autosave. Zero friction for the roommate story, and the
+     author's link never appears broken. The autosaved plan is not overwritten until the
+     author edits, so undo is lossless.</p>
+  <div class="stage">
+    <div class="stage-grid"></div>
+    <div class="stage-title"><span class="t">floorplan</span></div>
+    <div class="stage-actions">
+      <button>Share</button><button>Export</button><button>⋯</button>
+    </div>
+    <!-- the shared plan is already on the canvas -->
+    <div class="stage-room stage-room--shared" id="room-b"></div>
+
+    <div class="toast-b" id="toast-b">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="toast-b-msg">Opened the shared plan</span>
+      <button class="toast-action-btn" onclick="undoB()">Keep my last plan instead</button>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ VARIANT C ═══ -->
+<section class="variant" id="var-c" style="display:none">
+  <h2>C — Modal chooser with side-by-side previews</h2>
+  <p class="note">A centered, hard-to-miss dialog that blocks the canvas until the author
+     decides. Both plans get a thumbnail so the choice is concrete; the shared plan is
+     pre-selected and tagged "From this link" as the recommended default. Highest clarity,
+     but also the heaviest interruption — best if we expect real ambiguity about which
+     plan the author wants.</p>
+  <div class="stage">
+    <div class="stage-grid"></div>
+    <div class="stage-title"><span class="t">floorplan</span></div>
+    <div class="stage-actions">
+      <button>Share</button><button>Export</button><button>⋯</button>
+    </div>
+    <div class="stage-room"></div>
+
+    <div class="scrim-c" id="scrim-c">
+      <div class="modal-c" role="dialog" aria-modal="true" aria-labelledby="mc-title">
+        <h3 id="mc-title">Open the shared plan?</h3>
+        <p class="m-sub">This link contains a plan that differs from your last sketch on
+           this device. Which do you want to work on?</p>
+        <div class="choice-grid">
+          <button class="choice choice--shared" onclick="flashC('shared')">
+            <span class="c-tag">From this link</span>
+            <div class="c-thumb" aria-hidden="true"></div>
+            <div class="c-label">Shared plan</div>
+            <div class="c-meta">1-BR · 41.2 m² · 3 rooms</div>
+          </button>
+          <button class="choice choice--local" onclick="flashC('local')">
+            <div class="c-thumb" aria-hidden="true"></div>
+            <div class="c-label">My last plan</div>
+            <div class="c-meta">Studio · 18.6 m² · autosaved</div>
+          </button>
+        </div>
+        <div class="m-foot">
+          <button class="btn-ghost" onclick="flashC('local')">Keep mine</button>
+          <button class="btn-primary" onclick="flashC('shared')">Open shared</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  // ── variant switcher ──────────────────────────────────────────────────
+  const nav = document.getElementById("variant-nav");
+  const sections = { "var-a": "var-a", "var-b": "var-b", "var-c": "var-c" };
+  nav.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-target]");
+    if (!btn) return;
+    [...nav.children].forEach(b => b.classList.toggle("active", b === btn));
+    Object.keys(sections).forEach(id => {
+      document.getElementById(id).style.display = (id === btn.dataset.target) ? "" : "none";
+    });
+  });
+
+  // ── Variant A: choose then confirm ────────────────────────────────────
+  function flashA(choice) {
+    const banner = document.getElementById("banner-a");
+    banner.querySelector(".b-text .b-title").textContent =
+      choice === "shared" ? "Opened the shared plan ✓" : "Kept your current work ✓";
+    banner.querySelector(".b-text .b-sub").textContent =
+      choice === "shared"
+        ? "Canvas fit to the shared plan."
+        : "Your autosaved sketch is untouched.";
+    banner.querySelector(".b-btns").style.opacity = "0.3";
+    banner.querySelector(".b-btns").style.pointerEvents = "none";
+    setTimeout(() => { location.reload && resetA(banner); }, 1600);
+  }
+  function resetA(banner) {
+    banner.querySelector(".b-text .b-title").textContent = "This link opens a shared plan";
+    banner.querySelector(".b-text .b-sub").textContent =
+      "It's different from your last autosaved sketch on this device.";
+    banner.querySelector(".b-btns").style.opacity = "";
+    banner.querySelector(".b-btns").style.pointerEvents = "";
+  }
+
+  // ── Variant B: undo restores local ────────────────────────────────────
+  function undoB() {
+    const room = document.getElementById("room-b");
+    const toast = document.getElementById("toast-b");
+    room.classList.remove("stage-room--shared");
+    document.getElementById("toast-b-msg").textContent = "Restored your last plan";
+    toast.querySelector(".toast-action-btn").style.display = "none";
+    setTimeout(() => {
+      room.classList.add("stage-room--shared");
+      document.getElementById("toast-b-msg").textContent = "Opened the shared plan";
+      toast.querySelector(".toast-action-btn").style.display = "";
+    }, 1800);
+  }
+
+  // ── Variant C: pick a plan, dismiss modal ─────────────────────────────
+  function flashC(choice) {
+    const scrim = document.getElementById("scrim-c");
+    scrim.style.transition = "opacity 0.25s";
+    scrim.style.opacity = "0";
+    setTimeout(() => {
+      scrim.style.opacity = "1";
+      // re-highlight the recommended default for the next viewer
+      const shared = scrim.querySelector(".choice--shared");
+      shared.style.outline = choice === "shared" ? "1px solid var(--gold)" : "none";
+    }, 900);
+  }
+</script>
+</body>
+</html>
