@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Discrete furniture snapping — design options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #14140f; --bg-deep: #100f0b; --ink: #ece7d6; --muted: #8f8a78;
+    --gold: #c9a84c; --gold-soft: rgba(201,168,76,0.55);
+    --panel: rgba(20,20,15,0.72); --hairline: rgba(201,168,76,0.18);
+    --font-ui: "DM Sans", system-ui, sans-serif;
+    --font-mono: "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+    --sym-stroke: #d9be6e; --sym-fill: rgba(201,168,76,0.12);
+    --sym-sel-fill: rgba(201,168,76,0.18);
+    --snap-close: #9cd67a; --snap-teal: #7fd0c8; --align-edge: #b98bd9;
+    --error: #e57373;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-ui);
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 800px at 20% -10%, #1b1a12 0%, transparent 60%),
+      linear-gradient(160deg, var(--bg) 0%, var(--bg-deep) 100%);
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  header.hero { margin-bottom: 2.5rem; }
+  header.hero .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin: 0 0 0.6rem;
+  }
+  header.hero h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 1.9rem;
+    color: var(--ink);
+    margin: 0 0 0.7rem;
+  }
+  header.hero p {
+    max-width: 60ch;
+    color: var(--muted);
+    margin: 0.2rem 0;
+    font-size: 0.95rem;
+  }
+  header.hero p .m { color: var(--ink); font-family: var(--font-mono); }
+
+  /* ── Option section ─────────────────────────────────────── */
+  .option { margin-bottom: 3.2rem; }
+  .option > .opt-head { margin-bottom: 1rem; }
+  .opt-tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    color: var(--bg-deep);
+    background: var(--gold);
+    padding: 0.12rem 0.5rem;
+    border-radius: 3px;
+    font-weight: 500;
+  }
+  .opt-head h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 1.3rem;
+    margin: 0.6rem 0 0.35rem;
+    color: var(--ink);
+  }
+  .opt-head p { margin: 0; color: var(--muted); font-size: 0.9rem; max-width: 68ch; }
+  .opt-head .verdict {
+    margin-top: 0.5rem; font-size: 0.85rem; color: var(--muted);
+  }
+  .opt-head .verdict b { color: var(--gold); font-weight: 500; }
+
+  /* ── Simulated editor stage ─────────────────────────────── */
+  .stage {
+    position: relative;
+    height: 380px;
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    overflow: hidden;
+    background:
+      linear-gradient(rgba(201,168,76,0.055) 1px, transparent 1px) 0 0 / 28px 28px,
+      linear-gradient(90deg, rgba(201,168,76,0.055) 1px, transparent 1px) 0 0 / 28px 28px,
+      linear-gradient(rgba(201,168,76,0.13) 1px, transparent 1px) 0 0 / 140px 140px,
+      linear-gradient(90deg, rgba(201,168,76,0.13) 1px, transparent 1px) 0 0 / 140px 140px,
+      var(--bg-deep);
+  }
+  .stage-note {
+    position: absolute;
+    left: 0.85rem; top: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    padding: 0.15rem 0.45rem;
+    max-width: 15rem;
+  }
+
+  /* ── The symbol (a bed) on the canvas ───────────────────── */
+  .sym {
+    position: absolute;
+    border: 1.6px solid var(--sym-stroke);
+    background: var(--sym-sel-fill);
+    border-radius: 4px;
+  }
+  .sym .sym-label {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--sym-stroke);
+    opacity: 0.85;
+    pointer-events: none;
+  }
+  /* selection handles */
+  .handle {
+    position: absolute; width: 9px; height: 9px;
+    background: var(--bg-deep);
+    border: 1.4px solid var(--gold);
+    border-radius: 2px;
+    transform: translate(-50%, -50%);
+  }
+  .handle.nw { left: 0; top: 0; }
+  .handle.ne { left: 100%; top: 0; }
+  .handle.sw { left: 0; top: 100%; }
+  .handle.se { left: 100%; top: 100%; }
+  .handle.n  { left: 50%; top: 0; }
+  .handle.s  { left: 50%; top: 100%; }
+  .handle.e  { left: 100%; top: 50%; }
+  .handle.w  { left: 0; top: 50%; }
+
+  /* ── Dimension chip (matches app .dim-chip) ─────────────── */
+  .dim-chip {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    white-space: nowrap;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex; align-items: center; gap: 0.3rem;
+  }
+  .dim-chip:hover { border-color: var(--gold); color: var(--gold); }
+  /* discrete chip carries a preset name badge */
+  .dim-chip.discrete {
+    border-color: var(--gold-soft);
+    color: var(--gold);
+  }
+  .dim-chip .preset-name {
+    font-size: 0.58rem;
+    padding: 0 0.28rem;
+    border-radius: 6px;
+    background: rgba(201,168,76,0.16);
+    color: var(--gold);
+    letter-spacing: 0.02em;
+  }
+  .dim-chip .caret {
+    font-size: 0.55rem; opacity: 0.7; margin-left: 0.05rem;
+  }
+
+  /* ── Snap tag near cursor (matches app .snap-tag) ───────── */
+  .snap-tag {
+    position: absolute;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    white-space: nowrap;
+    color: var(--snap-close);
+  }
+
+  /* ── Ghost snap markers (Option A) ──────────────────────── */
+  .rung {
+    position: absolute;
+    border: 1.4px dashed rgba(201,168,76,0.4);
+    border-radius: 4px;
+    background: rgba(201,168,76,0.04);
+  }
+  .rung.active {
+    border-style: solid;
+    border-color: var(--snap-close);
+    background: rgba(156,214,122,0.10);
+  }
+  .rung .rung-label {
+    position: absolute; top: -0.95rem; left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    color: rgba(201,168,76,0.55);
+    white-space: nowrap;
+  }
+  .rung.active .rung-label { color: var(--snap-close); }
+
+  /* ── Preset picker popover (Option B) ───────────────────── */
+  .preset-pop {
+    position: absolute;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 0.35rem;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    min-width: 9.5rem;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 12;
+  }
+  .preset-pop .pop-title {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 0.2rem 0.45rem 0.35rem;
+  }
+  .preset-opt {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 0.8rem;
+    padding: 0.32rem 0.45rem;
+    border-radius: 5px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink);
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .preset-opt:hover { background: rgba(201,168,76,0.10); }
+  .preset-opt.selected {
+    border-color: var(--gold-soft);
+    background: rgba(201,168,76,0.14);
+  }
+  .preset-opt .p-name { color: var(--ink); }
+  .preset-opt.selected .p-name { color: var(--gold); }
+  .preset-opt .p-dim { color: var(--muted); font-size: 0.64rem; }
+  .preset-opt .tick {
+    color: var(--gold); font-size: 0.7rem; width: 0.8rem; display: inline-block;
+  }
+  .preset-pop .pop-sep {
+    height: 1px; background: var(--hairline); margin: 0.3rem 0.2rem;
+  }
+  .preset-pop .custom-row {
+    padding: 0.3rem 0.45rem; font-family: var(--font-mono);
+    font-size: 0.64rem; color: var(--muted); display:flex; align-items:center; gap: 0.4rem;
+  }
+  .preset-pop .custom-row input {
+    width: 4.2rem; background: var(--bg-deep);
+    border: 1px solid var(--hairline); color: var(--ink);
+    font-family: var(--font-mono); font-size: 0.64rem;
+    border-radius: 3px; padding: 0.1rem 0.3rem;
+  }
+
+  /* ── Inline dim input (Option C variant) ────────────────── */
+  .dim-input {
+    position: absolute; transform: translate(-50%,-50%);
+    font-family: var(--font-mono); font-size: 0.65rem;
+    width: 5.5rem; padding: 0.1rem 0.35rem; border-radius: 3px;
+    background: var(--panel); border: 1px solid var(--gold);
+    color: var(--ink); outline: none;
+    box-shadow: 0 0 0 2px rgba(201,168,76,0.25);
+  }
+  .dim-input.datalist-hint {
+    box-shadow: 0 0 0 2px rgba(127,208,200,0.25);
+    border-color: var(--snap-teal);
+  }
+  .toast {
+    position: absolute; left: 50%; bottom: 0.85rem; transform: translateX(-50%);
+    font-family: var(--font-mono); font-size: 0.66rem;
+    background: var(--panel); border: 1px solid var(--hairline);
+    color: var(--ink); padding: 0.35rem 0.7rem; border-radius: 6px;
+    display: flex; gap: 0.6rem; align-items: center;
+  }
+  .toast .t-accent { color: var(--snap-close); }
+
+  /* legend / comparison table */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 0.5rem 1.4rem;
+    font-size: 0.8rem; color: var(--muted);
+    margin-top: 0.9rem; font-family: var(--font-mono);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .swatch { width: 0.8rem; height: 0.8rem; border-radius: 2px; display: inline-block; }
+
+  .compare {
+    width: 100%; border-collapse: collapse; margin-top: 1rem;
+    font-size: 0.86rem;
+  }
+  .compare th, .compare td {
+    text-align: left; padding: 0.55rem 0.7rem;
+    border-bottom: 1px solid var(--hairline);
+    vertical-align: top;
+  }
+  .compare th {
+    font-family: var(--font-mono); font-size: 0.7rem;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--gold);
+    font-weight: 500;
+  }
+  .compare td.crit { color: var(--muted); font-family: var(--font-mono); font-size: 0.78rem; width: 12rem; }
+  .compare tr:last-child td { border-bottom: none; }
+  .yes { color: var(--snap-close); } .no { color: var(--error); } .mid { color: var(--gold); }
+  .footnote { margin-top: 2.5rem; color: var(--muted); font-size: 0.85rem; max-width: 70ch; }
+  .footnote code { font-family: var(--font-mono); color: var(--ink); background: rgba(201,168,76,0.08); padding: 0 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <p class="eyebrow">Floorplan · LLD 90 · Frontend exploration</p>
+    <h1>Hard-snap discrete furniture to standard sizes</h1>
+    <p>Some furniture is genuinely discrete: beds come in <span class="m">6</span> mattress sizes,
+       ranges / fridges / washers in fixed <span class="m">24 / 30 / 36″</span> widths. The catalog already
+       carries these as <span class="m">presets</span>, but resize still free-scales within the per-axis
+       bounds — so a bed can land at <span class="m">1.20 m</span> wide, between Full (1.37) and nothing real.</p>
+    <p>These three options each answer one question: <b style="color:var(--ink)">when a piece is
+       flagged <span class="m">discrete:true</span>, how does resizing feel?</b> They are ordered
+       from most-automatic to most-explicit. The stages below are static illustrations of the key states.</p>
+  </header>
+
+  <!-- ═══════════════ OPTION A ═══════════════ -->
+  <section class="option">
+    <div class="opt-head">
+      <span class="opt-tag">Option A · Magnetic rungs</span>
+      <h2>Resize magnetically snaps to the nearest preset</h2>
+      <p>Dragging a resize handle (or typing a value) is continuous, but on release it hard-snaps to the
+         nearest preset instead of clamping to the continuous range. During the drag, faint "rung" outlines
+         mark every valid size; the one you're about to land on lights up green and its name shows in the
+         cursor snap-tag. Reuses the existing wall-flush / alignment snap-tag vocabulary — nothing new to learn.</p>
+      <p class="verdict"><b>Best for:</b> feels native to the tool. No extra clicks. The chip stays a plain
+         measurement. Tradeoff: you can't see the whole size ladder at once, and a fine drag can feel "sticky".</p>
+    </div>
+    <div class="stage">
+      <div class="stage-note">Dragging the east handle of a bed →<br>ghost rungs = Twin · Full · Queen · King</div>
+
+      <!-- rung ghosts, anchored to bed left edge at x=180 -->
+      <div class="rung"        style="left:180px; top:120px; width:78px;  height:150px;"><span class="rung-label">Twin 0.97</span></div>
+      <div class="rung"        style="left:180px; top:120px; width:110px; height:150px;"><span class="rung-label">Full 1.37</span></div>
+      <div class="rung active" style="left:180px; top:120px; width:122px; height:150px;"><span class="rung-label">Queen 1.52</span></div>
+      <div class="rung"        style="left:180px; top:120px; width:154px; height:150px;"><span class="rung-label">King 1.93</span></div>
+
+      <!-- the live symbol snapped to Queen -->
+      <div class="sym" style="left:180px; top:120px; width:122px; height:150px;">
+        <span class="sym-label">Bed</span>
+        <div class="handle nw"></div><div class="handle ne"></div>
+        <div class="handle sw"></div><div class="handle se"></div>
+        <div class="handle n"></div><div class="handle s"></div>
+        <div class="handle e"></div><div class="handle w"></div>
+        <!-- dimension chips, plain measurements -->
+        <div class="dim-chip" style="left:50%; top:-2px;">1.52 m</div>
+        <div class="dim-chip" style="left:-2px; top:50%;">2.03 m</div>
+      </div>
+
+      <!-- cursor snap-tag lighting up the landed preset -->
+      <div class="snap-tag" style="left:320px; top:150px;">Queen · snap</div>
+    </div>
+    <div class="legend">
+      <span><span class="swatch" style="background:rgba(201,168,76,0.4)"></span>preset rung (candidate)</span>
+      <span><span class="swatch" style="background:var(--snap-close)"></span>rung you'll land on</span>
+      <span><span class="swatch" style="background:var(--sym-stroke)"></span>live symbol</span>
+    </div>
+  </section>
+
+  <!-- ═══════════════ OPTION B ═══════════════ -->
+  <section class="option">
+    <div class="opt-head">
+      <span class="opt-tag">Option B · Size chip → picker</span>
+      <h2>The dimension chip becomes a size picker</h2>
+      <p>For discrete types the chip stops being a free-text field. It shows the current preset <em>name</em>
+         next to the measurement (<span class="m">Queen · 1.52 m ▾</span>). Tapping it opens a small popover
+         listing every real size with its dimensions; the current one is ticked. This makes the whole ladder
+         visible and turns resize into a recognition task rather than "guess the number". A dragged handle still
+         hard-snaps (as Option A) so both entry points agree.</p>
+      <p class="verdict"><b>Best for:</b> discoverability — a first-timer sees "oh, beds come in these sizes".
+         Mobile-friendly (tap targets, no fiddly drag). Tradeoff: the chip is wider and behaves differently from
+         the free-scale chips on non-discrete furniture.</p>
+    </div>
+    <div class="stage">
+      <div class="stage-note">Tapped the width chip on a bed →<br>preset picker, current size ticked</div>
+
+      <!-- the bed -->
+      <div class="sym" style="left:150px; top:130px; width:122px; height:150px;">
+        <span class="sym-label">Bed</span>
+        <div class="handle nw"></div><div class="handle ne"></div>
+        <div class="handle sw"></div><div class="handle se"></div>
+        <div class="handle n"></div><div class="handle s"></div>
+        <div class="handle e"></div><div class="handle w"></div>
+        <!-- discrete chip: name badge + measure + caret -->
+        <div class="dim-chip discrete" style="left:50%; top:-2px;">
+          <span class="preset-name">Queen</span>1.52 m<span class="caret">▾</span>
+        </div>
+        <!-- depth chip also discrete but here just showing measure -->
+        <div class="dim-chip discrete" style="left:-2px; top:50%;">2.03 m</div>
+      </div>
+
+      <!-- popover anchored under the width chip -->
+      <div class="preset-pop" style="left:250px; top:118px;">
+        <div class="pop-title">Bed size</div>
+        <div class="preset-opt"><span class="tick"></span><span class="p-name">Twin</span><span class="p-dim">0.97 × 1.91 m</span></div>
+        <div class="preset-opt"><span class="tick"></span><span class="p-name">Twin XL</span><span class="p-dim">0.97 × 2.03 m</span></div>
+        <div class="preset-opt"><span class="tick"></span><span class="p-name">Full</span><span class="p-dim">1.37 × 1.91 m</span></div>
+        <div class="preset-opt selected"><span class="tick">✓</span><span class="p-name">Queen</span><span class="p-dim">1.52 × 2.03 m</span></div>
+        <div class="preset-opt"><span class="tick"></span><span class="p-name">King</span><span class="p-dim">1.93 × 2.03 m</span></div>
+        <div class="preset-opt"><span class="tick"></span><span class="p-name">Cal King</span><span class="p-dim">1.83 × 2.13 m</span></div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><span class="swatch" style="background:rgba(201,168,76,0.16)"></span>preset name badge on chip</span>
+      <span><span class="swatch" style="background:rgba(201,168,76,0.14)"></span>selected size</span>
+    </div>
+  </section>
+
+  <!-- ═══════════════ OPTION C ═══════════════ -->
+  <section class="option">
+    <div class="opt-head">
+      <span class="opt-tag">Option C · Snap-on-commit</span>
+      <h2>Keep the text field — snap the entered number, tell the user</h2>
+      <p>The smallest change. The inline text input stays exactly as it is today, so nothing about the
+         interaction moves. When you type a value and hit Enter, the number snaps to the nearest preset and a
+         toast confirms what happened (<span class="m">"Snapped to Queen · 1.52 m"</span>) with a one-tap Undo.
+         The input gets a subtle teal ring + preset suggestions (a native datalist) while you type, hinting the
+         field is discrete. The chip afterwards can optionally show the preset name.</p>
+      <p class="verdict"><b>Best for:</b> minimal surface area / fastest to ship — reuses <span class="m">symbolDimEntry.js</span>
+         verbatim, just swaps clamp for snap in <span class="m">resizeSymbol</span>. Tradeoff: least discoverable
+         (you only learn sizes are discrete <em>after</em> a snap surprises you).</p>
+    </div>
+    <div class="stage">
+      <div class="stage-note">Typed "1.44" → Enter →<br>snapped to nearest preset, toast + Undo</div>
+
+      <div class="sym" style="left:160px; top:120px; width:122px; height:150px;">
+        <span class="sym-label">Bed</span>
+        <div class="handle nw"></div><div class="handle ne"></div>
+        <div class="handle sw"></div><div class="handle se"></div>
+        <div class="handle n"></div><div class="handle s"></div>
+        <div class="handle e"></div><div class="handle w"></div>
+      </div>
+
+      <!-- inline text input with teal discrete ring, mid-edit -->
+      <div class="dim-input datalist-hint" style="left:221px; top:106px;">1.44 m</div>
+      <div class="preset-pop" style="left:250px; top:120px; min-width:8rem;">
+        <div class="pop-title">Nearest sizes</div>
+        <div class="preset-opt"><span class="tick"></span><span class="p-name">Full</span><span class="p-dim">1.37 m</span></div>
+        <div class="preset-opt selected"><span class="tick">→</span><span class="p-name">Queen</span><span class="p-dim">1.52 m</span></div>
+        <div class="preset-opt"><span class="tick"></span><span class="p-name">King</span><span class="p-dim">1.93 m</span></div>
+      </div>
+
+      <!-- confirmation toast after commit -->
+      <div class="toast">
+        <span>Snapped to <span class="t-accent">Queen · 1.52 m</span></span>
+        <span style="color:var(--gold); cursor:pointer;">Undo</span>
+      </div>
+    </div>
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--snap-teal)"></span>discrete field (teal ring)</span>
+      <span><span class="swatch" style="background:rgba(201,168,76,0.14)"></span>nearest preset (target)</span>
+    </div>
+  </section>
+
+  <!-- ═══════════════ COMPARISON ═══════════════ -->
+  <section class="option">
+    <div class="opt-head">
+      <span class="opt-tag">Compare</span>
+      <h2>Which one?</h2>
+      <p>All three share the same core rule (<span class="m">discrete:true</span> types snap resize to the
+         nearest preset instead of clamping). They differ only in how visible that rule is at the moment of resize.
+         They can also stack — B and C are complementary, and A's magnetic drag pairs with either.</p>
+    </div>
+    <table class="compare">
+      <thead>
+        <tr><th>Criterion</th><th>A · Magnetic rungs</th><th>B · Size picker</th><th>C · Snap-on-commit</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="crit">Ships fastest</td><td class="mid">medium — needs ghost-rung render</td><td class="no">largest — new chip + popover</td><td class="yes">smallest — swap clamp→snap</td></tr>
+        <tr><td class="crit">Discoverable</td><td class="mid">during drag only</td><td class="yes">whole ladder visible</td><td class="no">only after a snap</td></tr>
+        <tr><td class="crit">Touch-friendly</td><td class="no">precise drag needed</td><td class="yes">big tap targets</td><td class="mid">keyboard/text</td></tr>
+        <tr><td class="crit">New UI vocabulary</td><td class="yes">reuses snap-tag</td><td class="no">new picker component</td><td class="yes">reuses toast + input</td></tr>
+        <tr><td class="crit">Consistent w/ free-scale furniture</td><td class="yes">chip unchanged</td><td class="no">chip diverges</td><td class="yes">chip unchanged</td></tr>
+        <tr><td class="crit">MCP parity</td><td colspan="3" style="color:var(--muted)">All three: <code style="font-family:var(--font-mono)">resize_symbol</code> / <code style="font-family:var(--font-mono)">place_symbol</code> snap server-side identically; the result reports <span class="m">snappedTo</span> preset name.</td></tr>
+      </tbody>
+    </table>
+    <p class="footnote">
+      <b style="color:var(--ink)">Recommendation:</b> ship <b style="color:var(--gold)">C as the baseline behavior</b>
+      (the snap rule everyone gets) and layer <b style="color:var(--gold)">B</b> on top for discoverability —
+      the discrete chip becomes a picker, and typing still works. Option A's magnetic drag is a nice-to-have that
+      can follow once handle-drag resize exists. Under the hood all three need the same two things the issue calls for:
+      a <code>discrete:true</code> flag on the relevant CATALOG entries (bed, fridge, stove, washer, and any other
+      genuinely-standardized type), and a <code>snapToPreset(type, dim, metres)</code> helper that
+      <code>resizeSymbol</code> and the MCP mutators call instead of <code>clampDim</code> for discrete types.
+    </p>
+  </section>
+</div>
+</body>
+</html>
