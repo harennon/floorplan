@@ -5,7 +5,11 @@ floorplan's geometry core (`../src/js`) as agent tools for a closed
 requirement-satisfying design loop:
 
 > agent proposes geometry → server evaluates against the brief → agent reads the
-> violations (with a concrete `suggestedMove`) → agent adjusts → repeat until `satisfied`.
+> violations (with a concrete `suggestedMove`) → agent fixes only the REAL violations
+> (overlaps, containment, boxed-in, walkway deficits on traffic paths) — it does NOT
+> spread a seating/work group apart to clear an intra-group gap. For layout *quality*
+> (focal point, a real conversation/work group, TV distance, symmetry) it follows the
+> `floorplan-interior-design` skill (`.claude/skills/`).
 
 This is a **prototype to iterate the agent tool/feedback design**, not a shippable npm
 package. See `docs/lld/32-mcp-server-agent-driven-floorplan.md` for the full design.
