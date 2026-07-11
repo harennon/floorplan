@@ -13548,6 +13548,100 @@ describe("LLD 82 — applyWxH core logic", () => {
   });
 });
 
+// ─── Tests: LLD 82 — blur relatedTarget guard (timer-race fix) ───────────────
+//
+// _onWxHBlur now uses relatedTarget instead of a 150ms timer so the two-field
+// flow (type W, Tab to H, type H, click Set) never reverts W before Apply runs.
+// These tests exercise the guard using synthetic FocusEvent with relatedTarget.
+
+describe("LLD 82 — blur relatedTarget guard: tab between fields preserves values", () => {
+  it("blur W to H (relatedTarget = H input) → W value is NOT restored", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "blt1", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }
+    ]});
+    const rig = makeWxhRig(() => "blt1");
+    measureUpdate();
+    // User types a new value in W
+    rig.wxhW.value = "7.77";
+    // Simulate blur from W with relatedTarget = H (tab-between-fields)
+    const blurEvent = new FocusEvent("blur", { bubbles: true, relatedTarget: rig.wxhH });
+    rig.wxhW.dispatchEvent(blurEvent);
+    // W must NOT be restored to "4.00"
+    if (rig.wxhW.value !== "7.77") {
+      throw new Error(`W was restored (timer-race regression): expected 7.77, got ${rig.wxhW.value}`);
+    }
+    rig.cleanup();
+    resetModel();
+    setUnit("ft");
+  });
+
+  it("blur W to Apply button (relatedTarget = Apply) → W value is NOT restored", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "blt2", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }
+    ]});
+    const rig = makeWxhRig(() => "blt2");
+    measureUpdate();
+    rig.wxhW.value = "9.99";
+    // Blur with relatedTarget = Apply button (click-Set path)
+    const blurEvent = new FocusEvent("blur", { bubbles: true, relatedTarget: rig.wxhApply });
+    rig.wxhW.dispatchEvent(blurEvent);
+    if (rig.wxhW.value !== "9.99") {
+      throw new Error(`W was restored before Set fired: expected 9.99, got ${rig.wxhW.value}`);
+    }
+    rig.cleanup();
+    resetModel();
+    setUnit("ft");
+  });
+
+  it("blur W to outside element (relatedTarget = external element) → W IS restored", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "blt3", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }
+    ]});
+    const rig = makeWxhRig(() => "blt3");
+    measureUpdate();
+    rig.wxhW.value = "9.99";
+    // Blur with relatedTarget = something outside wxhBox
+    const external = document.createElement("button");
+    document.body.appendChild(external);
+    const blurEvent = new FocusEvent("blur", { bubbles: true, relatedTarget: external });
+    rig.wxhW.dispatchEvent(blurEvent);
+    // W SHOULD be restored to "4.00" (abandonment)
+    if (rig.wxhW.value !== "4.00") {
+      throw new Error(`W was not restored on abandonment: expected 4.00, got ${rig.wxhW.value}`);
+    }
+    document.body.removeChild(external);
+    rig.cleanup();
+    resetModel();
+    setUnit("ft");
+  });
+
+  it("blur W with no relatedTarget (null) → W IS restored (Tab outside document)", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({ id: "blt4", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }
+    ]});
+    const rig = makeWxhRig(() => "blt4");
+    measureUpdate();
+    rig.wxhW.value = "9.99";
+    // Blur with no relatedTarget (null)
+    const blurEvent = new FocusEvent("blur", { bubbles: true, relatedTarget: null });
+    rig.wxhW.dispatchEvent(blurEvent);
+    if (rig.wxhW.value !== "4.00") {
+      throw new Error(`W was not restored when relatedTarget=null: expected 4.00, got ${rig.wxhW.value}`);
+    }
+    rig.cleanup();
+    resetModel();
+    setUnit("ft");
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 

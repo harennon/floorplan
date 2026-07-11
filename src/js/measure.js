@@ -292,15 +292,21 @@ function _refreshWxh() {
     _wxhUnit.textContent = unitLabel();
   }
 
-  // Prefill fields — skip a field the user currently has focused
+  // Prefill fields — skip ALL prefills when any element in the W×H block has
+  // focus (user is mid-edit: typing in W, tabbed to H, or hovering Set).
+  // This prevents the frequent render loop from clobbering a field the user
+  // just typed in but has not yet submitted (e.g. typed W, tabbed to H).
   const active = typeof document !== "undefined" ? document.activeElement : null;
-  if (_wxhW && _wxhW !== active) {
-    _wxhW.value = fmtLen(dims.w);
-    _wxhW.removeAttribute("aria-invalid");
-  }
-  if (_wxhH && _wxhH !== active) {
-    _wxhH.value = fmtLen(dims.h);
-    _wxhH.removeAttribute("aria-invalid");
+  const blockHasFocus = _wxhBox && active && _wxhBox.contains(active);
+  if (!blockHasFocus) {
+    if (_wxhW) {
+      _wxhW.value = fmtLen(dims.w);
+      _wxhW.removeAttribute("aria-invalid");
+    }
+    if (_wxhH) {
+      _wxhH.value = fmtLen(dims.h);
+      _wxhH.removeAttribute("aria-invalid");
+    }
   }
 }
 
@@ -387,24 +393,28 @@ function _cancelWxH() {
 
 /**
  * Blur handler: re-prefill the blurred field (discard typed-but-not-applied value).
- * Uses a small timeout so Enter-key → apply → blur doesn't double-cancel.
+ * Only restores when focus leaves the W×H block entirely — tabbing between fields
+ * or clicking the Set button does NOT revert the field, so the two-field flow
+ * (type W, Tab, type H, click Set) works correctly regardless of timing.
  */
 function _onWxHBlur(e) {
-  // Small delay: let a click on Apply fire first before we restore
+  // If focus is moving to another element inside the W×H block (the other input
+  // field or the Apply button), this is not an abandonment — don't restore.
+  const relatedTarget = e.relatedTarget;
+  if (_wxhBox && relatedTarget && _wxhBox.contains(relatedTarget)) return;
+
   const field = e.target;
-  setTimeout(() => {
-    const room = _getSelectedRect();
-    if (!room) return;
-    const dims = rectDims(room);
-    if (!dims) return;
-    if (field === _wxhW) {
-      _wxhW.value = fmtLen(dims.w);
-      _wxhW.removeAttribute("aria-invalid");
-    } else if (field === _wxhH) {
-      _wxhH.value = fmtLen(dims.h);
-      _wxhH.removeAttribute("aria-invalid");
-    }
-  }, 150);
+  const room = _getSelectedRect();
+  if (!room) return;
+  const dims = rectDims(room);
+  if (!dims) return;
+  if (field === _wxhW) {
+    _wxhW.value = fmtLen(dims.w);
+    _wxhW.removeAttribute("aria-invalid");
+  } else if (field === _wxhH) {
+    _wxhH.value = fmtLen(dims.h);
+    _wxhH.removeAttribute("aria-invalid");
+  }
 }
 
 // ── Private ───────────────────────────────────────────────────────────────────
