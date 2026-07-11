@@ -137,7 +137,7 @@ test("regression: dumped plan has exactly the plan.js key set (no brief/threshol
   const doc = tools.tool_get_plan().document;
   assert.deepEqual(
     Object.keys(doc).sort(),
-    ["app", "schema", "symbols", "unit", "view", "walls"]
+    ["app", "measurements", "schema", "symbols", "unit", "view", "walls"]
   );
   // No brief/threshold field anywhere in the serialized JSON.
   const json = JSON.stringify(doc);

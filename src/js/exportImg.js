@@ -8,6 +8,7 @@
 
 import { model as wallsModel, edgeLength, WALL_M } from "./walls.js";
 import { model as symbolsModel, corners, CATALOG } from "./symbols.js";
+import { model as measurementsModel } from "./measurements.js";
 import { fmtLen, unitLabel } from "./units.js";
 import { palette } from "./theme.js";
 
@@ -51,6 +52,13 @@ export function contentBounds() {
       maxX = Math.max(maxX, c.x);
       maxY = Math.max(maxY, c.y);
     }
+  }
+
+  for (const me of measurementsModel.measurements) {
+    minX = Math.min(minX, me.a.x, me.b.x);
+    minY = Math.min(minY, me.a.y, me.b.y);
+    maxX = Math.max(maxX, me.a.x, me.b.x);
+    maxY = Math.max(maxY, me.a.y, me.b.y);
   }
 
   if (!isFinite(minX)) return null;
@@ -149,6 +157,19 @@ export function buildExportSvg() {
     // Type label at center
     const label = CATALOG[sym.type]?.label || sym.type;
     body += `<text x="${wx(sym.x)}" y="${wy(sym.y)}" font-family='${FONT_FAMILY}' font-size="9" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(label)}</text>\n`;
+  }
+
+  // ── Measurements ─────────────────────────────────────────────────────────────
+  for (const me of measurementsModel.measurements) {
+    const ax = wx(me.a.x), ay = wy(me.a.y);
+    const bx = wx(me.b.x), by = wy(me.b.y);
+    body += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="${p.dim}" stroke-width="1.5" stroke-linecap="round"/>\n`;
+
+    const dist = edgeLength(me.a, me.b);
+    const mx = (ax + bx) / 2;
+    const my = (ay + by) / 2;
+    const labelText = `${fmtLen(dist)} ${unitLabel()}`;
+    body += `<text x="${mx}" y="${my}" font-family='${FONT_FAMILY}' font-size="10" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(labelText)}</text>\n`;
   }
 
   return [

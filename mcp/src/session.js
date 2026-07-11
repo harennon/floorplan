@@ -17,6 +17,7 @@ import {
   applyPlan,
   hydrateWalls,
   hydrateSymbols,
+  hydrateMeasurements,
   setThreshold,
   DEFAULT_THRESHOLD,
 } from "./core.js";
@@ -29,6 +30,7 @@ export function emptyPlan() {
     app: "floorplan",
     walls: { rooms: [], chain: [] },
     symbols: { symbols: [] },
+    measurements: [],
     view: { zoom: 1, panX: 0, panY: 0 },
     unit: "m",
   };
@@ -83,6 +85,7 @@ export function dumpPlan() {
 export function resetAll() {
   hydrateWalls({ rooms: [], chain: [] });
   hydrateSymbols({ symbols: [] });
+  hydrateMeasurements({ measurements: [] });
   setThreshold(DEFAULT_THRESHOLD);
   clearBrief();
 }
