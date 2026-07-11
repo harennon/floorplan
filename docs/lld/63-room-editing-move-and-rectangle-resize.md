@@ -152,13 +152,15 @@ computed **once at drag start** (snapshot the set of carried symbol ids using
 for the whole drag even if the room briefly slides off it, and a symbol that starts outside is
 never grabbed mid-drag.
 
-**Known limitation this decision inherits (surfaced to QA, not buried):** doors/windows are
-`model.symbols` whose centers sit essentially **on** the wall (≈ 0.06 m off the centerline), and
-`pointInRoom` is not reliable for on-boundary points — so a room's own door may or may not be judged
-inside and carried. Well-inside furniture (beds/sofas/tables) carries reliably; boundary-hugging
-openings are the coin-flip case. This is promoted to an explicit **"Known limitation for QA"**
-callout in Frontend Design (with the observable symptom + v1 workaround) and Edge Case 6. Boundary-
-aware door attachment is out of scope for v1.
+**Openings carry by a wall-proximity rule (not the interior test).** Doors/windows are
+`model.symbols` whose centers sit essentially **on** the wall (≈ 0.06 m off the centerline), where
+`pointInRoom` is unreliable for on-boundary points — so a naive interior test leaves a room's own
+door behind (a per-door coin-flip). Instead, **carry membership is split by symbol kind:**
+furniture (non-openings) uses `pointInRoom(room, sym.x, sym.y)` (strict interior); **openings**
+(`CATALOG[type].openings`) are carried when their center is within `WALL_M` (0.12 m) of one of the
+moved room's **own** wall segments, via the new pure `pointNearRoomWall(room, x, y, tolM)`
+(walls.js, Node-clean). This is scoped to that room's edges, so a door on a neighbour's (or a shared)
+wall is not falsely grabbed. Net: a room's own doors/windows travel with it reliably.
 
 **Migration note (if ever deferred to walls-only):** because carry is computed from geometry at
 drag start and never persisted, switching to walls-only (or to option (c)) is a localized change in
@@ -509,15 +511,14 @@ the current `rescaleEdge` behaviour, which applies the parsed value verbatim.
    in-flight consumed select gesture at the pre-pinch position (`_selectHooks.onUp` on 2nd pointer)
    and sets `_gestureCancelled`. `roomTool.onSelectUp` therefore commits the room at wherever it
    was — consistent with how symbol drags handle pinch interruption. No half-applied state.
-6. **A door/window on the moved room's boundary (carry is unreliable) — KNOWN LIMITATION.** Carry
-   membership is `pointInRoom(room, sym.x, sym.y)` on the symbol center. A wall-flush door's center
-   sits ≈ 0.06 m off the wall centerline — effectively **on** the polygon boundary — and
-   `pointInRoom` (even-odd ray cast) is not guaranteed for on-boundary points (`clearance.js:161`).
-   So whether a room's own door travels with it is effectively a per-door coin-flip. **Observable
-   symptom:** after moving a room, a door/window may be left behind on the old wall line. **v1
-   workaround:** re-select and nudge/drag the stray opening. This is called out as an explicit
-   **Known limitation for QA** in Frontend Design (so it is not filed as a bug). Boundary-aware door
-   attachment is out of scope for v1. Non-boundary furniture (centers well inside) carries reliably.
+6. **A door/window on the moved room's wall.** Openings are carried by wall-proximity, not the
+   interior test: an opening whose center is within `WALL_M` (0.12 m) of one of the moved room's own
+   wall segments (`pointNearRoomWall`) rides along. A wall-flush door's center sits ≈ 0.06 m off the
+   centerline — well inside that band — so a room's own doors/windows travel with it reliably, even
+   though `pointInRoom` (even-odd ray cast) is unreliable for such on-boundary points
+   (`clearance.js:161`). Per-room segment scoping means a door on a neighbour's (or a shared) wall is
+   NOT grabbed by the wrong room. Non-opening furniture (centers well inside) still uses the strict
+   `pointInRoom` interior test.
 7. **Move makes the room overlap another room or push furniture through a wall.** Allowed — the
    editor is a freeform sketcher, not a constraint solver. Clearance annotations (if a symbol is
    selected) recompute on the next render and will flag tight/bad gaps, which is the intended
@@ -604,19 +605,17 @@ entry point is added in this LLD (keyboard room-selection/nudge is a possible fo
 with LLD 54 having added symbol nudge). The selection outline is a visual cue; the measure panel
 already lists rooms with area/perimeter for non-visual context.
 
-**⚠️ Known limitation for QA — a room's own door/window may or may not travel with it.**
-Furniture-carry membership is `pointInRoom(room, sym.x, sym.y)` on the symbol *center*.
-`pointInRoom` (even-odd ray cast) does **not** give a guaranteed result for points exactly on the
-polygon boundary (documented at `clearance.js:161`). A wall-flush door/window sits with its center
-~`h/2` (≈ 0.06 m) off the wall centerline — i.e. effectively **on** the room boundary — so whether a
-given door is judged "inside" and carried with the room is effectively a per-door coin-flip.
-**Observable symptom for QA:** after moving a room, one of its doors/windows may stay behind on the
-old wall line while the room (and its furniture) moves. **v1 workaround:** the user re-selects and
-nudges/drags the stray door into place. Boundary-aware door attachment (treating a door as belonging
-to the wall it's flush against) is deliberately **out of scope for v1** (see Scope); this callout
-exists so QA treats a left-behind door as a *known limitation*, not a bug to file. Furniture with
-centers well inside the room (beds, sofas, tables) carries reliably — the limitation is specific to
-boundary-hugging openings.
+**Doors/windows travel with their room (wall-proximity carry).** A wall-flush door/window sits with
+its center ~`h/2` (≈ 0.06 m) off the wall centerline — effectively **on** the room boundary — where
+`pointInRoom` (even-odd ray cast) gives no guaranteed result (`clearance.js:161`), so a naive
+interior test would leave openings behind (a per-door coin-flip). Instead, openings
+(`CATALOG[type].openings`) are carried when their center is within `WALL_M` (0.12 m) of one of the
+moved room's **own** wall segments (`pointNearRoomWall`, a pure Node-clean helper in `walls.js`);
+non-opening furniture keeps the strict `pointInRoom` interior test. Per-room segment scoping means an
+opening on a neighbour's (or a shared) wall is not grabbed by the wrong room. **QA expectation:**
+after moving a room, its own doors/windows move with it (previously they could be left behind — that
+earlier limitation is resolved). Residual edge: an opening straddling a *shared* wall between two
+rooms attaches to whichever room is moved (both are within `WALL_M`); acceptable for v1.
 
 **Auto-merge render-path note.** `wallRender.js` is **not** currently on the `autoMerge.renderPaths`
 list in `.claude/project.json`, but this feature changes the live editor's render output (selection

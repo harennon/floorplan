@@ -392,6 +392,41 @@ export function rescaleEdge(room, edgeIndex, targetLenM) {
 export const RIGHT_ANGLE_COS_TOL = 0.087; // cos(85°)
 
 /**
+ * True if world point (x, y) lies within `tolM` of ANY of this room's own wall
+ * segments (edges between consecutive verts, plus the closing edge for a closed
+ * room). Pure; no global reads. Used by room-move to carry wall-mounted openings
+ * (doors/windows), whose centers sit ON the wall line and so fail the strict
+ * pointInRoom interior test. Scoped to the given room's edges only, so an opening
+ * on a NEIGHBOUR's wall (or a shared wall) is not falsely attributed here.
+ * @param {Room} room
+ * @param {number} x  world metres
+ * @param {number} y  world metres
+ * @param {number} tolM  distance threshold, world metres
+ * @returns {boolean}
+ */
+export function pointNearRoomWall(room, x, y, tolM) {
+  const verts = room.verts;
+  const n = verts.length;
+  if (n < 2) return false;
+  const tol2 = tolM * tolM;
+  const last = room.closed ? n : n - 1; // closed: include verts[n-1]→verts[0]
+  for (let i = 0; i < last; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % n];
+    // Squared distance from (x,y) to segment ab.
+    const abx = b.x - a.x, aby = b.y - a.y;
+    const apx = x - a.x, apy = y - a.y;
+    const len2 = abx * abx + aby * aby;
+    let t = len2 > 0 ? (apx * abx + apy * aby) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = a.x + t * abx, cy = a.y + t * aby;
+    const ddx = x - cx, ddy = y - cy;
+    if (ddx * ddx + ddy * ddy <= tol2) return true;
+  }
+  return false;
+}
+
+/**
  * Translate every vertex of a room by (dx, dy) world metres. Rigid — shape,
  * angles, and edge lengths are all preserved. Mutates room.verts in place.
  * No-op-safe on dx===0 && dy===0. Works for closed and open rooms.

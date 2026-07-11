@@ -135,7 +135,7 @@ import {
   gridSnap, closestEndpoint, canClose, resolveSnap,
   allVertices, placeVertex, closeRoom, finishChain, undoPoint,
   edgeLength, polygonArea, perimeter, roomMetrics, rescaleEdge,
-  moveRoom, isRectangle, rescaleRectEdge, RIGHT_ANGLE_COS_TOL,
+  moveRoom, isRectangle, rescaleRectEdge, RIGHT_ANGLE_COS_TOL, pointNearRoomWall,
 } from "../src/js/walls.js";
 
 // ─── Tests: view.js ───────────────────────────────────────────────────────────
@@ -1131,6 +1131,39 @@ function _assertRectAfterResize(room, K, L, perpBefore) {
   // Still a rectangle (all angles 90°)
   expect(isRectangle(room)).toBe(true);
 }
+
+describe("walls.js — pointNearRoomWall (LLD 63: opening carry)", () => {
+  const room = { id: "pw", closed: true, verts: [
+    { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+  ] };
+  it("point exactly on a wall segment is 'near' (tol 0.12)", () => {
+    expect(pointNearRoomWall(room, 2, 0, 0.12)).toBe(true);   // on top edge
+    expect(pointNearRoomWall(room, 0, 2, 0.12)).toBe(true);   // on left edge
+    expect(pointNearRoomWall(room, 4, 3, 0.12)).toBe(true);   // on right edge
+  });
+  it("point just inside the wall band is near; well inside the interior is not", () => {
+    expect(pointNearRoomWall(room, 2, 0.05, 0.12)).toBe(true);  // 5cm off top wall
+    expect(pointNearRoomWall(room, 2, 2, 0.12)).toBe(false);    // room center
+  });
+  it("point outside the wall band (beyond tol) is not near", () => {
+    expect(pointNearRoomWall(room, 2, 0.5, 0.12)).toBe(false);  // 50cm off top wall
+    expect(pointNearRoomWall(room, 6, 2, 0.12)).toBe(false);    // outside entirely
+  });
+  it("clamps to the segment ends (corner proximity, not infinite line)", () => {
+    // (5,0) is on the infinite line through the top edge but 1m past corner v1 → far.
+    expect(pointNearRoomWall(room, 5, 0, 0.12)).toBe(false);
+    // Near corner v1=(4,0) within tol → true.
+    expect(pointNearRoomWall(room, 4.05, 0.05, 0.12)).toBe(true);
+  });
+  it("open room: closing edge is NOT tested", () => {
+    const open = { id: "op", closed: false, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 },
+    ] };
+    // Point near the (would-be) closing edge v2→v0 is not near any real segment.
+    expect(pointNearRoomWall(open, 0, 2, 0.12)).toBe(false); // left closing edge absent
+    expect(pointNearRoomWall(open, 2, 0, 0.12)).toBe(true);  // real top edge present
+  });
+});
 
 describe("walls.js — rescaleRectEdge (LLD 63)", () => {
   it("worked case: v0=(0,0) v1=(4,0) v2=(4,3) v3=(0,3), edit e0 to L=6", () => {
@@ -11213,6 +11246,62 @@ describe("LLD 63 — roomTool: carried-furniture membership (center, not AABB)",
     // Late symbol was not in the snapshot → unchanged.
     expect(late.x).toBe(2);
     expect(late.y).toBe(2);
+    roomClearSelection();
+  });
+
+  it("a door seated ON the room's wall IS carried (center on the boundary; pointInRoom would miss it)", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    model.rooms.push({ id: "cf2", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    // Door cut into the BOTTOM wall: center on the edge y=4. This point gives
+    // pointInRoom === FALSE (the even-odd ray cast excludes it), so the OLD
+    // interior-only rule would leave it behind — the wall-proximity rule carries
+    // it. (Chosen over the top edge y=0, where pointInRoom happens to return true
+    // and so wouldn't discriminate old vs. new behaviour.)
+    const door = createSymbol("door", 2, 4); addSymbol(door);
+    // A far-inside chair as a control (carried by the interior rule).
+    const chair = createSymbol("chair", 2, 2); addSymbol(chair);
+
+    roomOnSelectDown(80, 80);           // world(2,2) — room interior
+    roomOnSelectMove(120, 80);          // dx=+1, dy=0
+    roomOnSelectUp(120, 80);
+
+    // The wall-mounted door travels with the room (proximity-to-wall rule).
+    expect(door.x).toBeCloseTo(3, 9);
+    expect(door.y).toBeCloseTo(4, 9);
+    // Chair still carried too.
+    expect(chair.x).toBeCloseTo(3, 9);
+    roomClearSelection();
+  });
+
+  it("a door on a DIFFERENT room's wall is NOT carried (per-room segment scoping)", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    // Room A (moved) at (0,0)-(4,4); Room B far away at (10,10)-(14,14).
+    model.rooms.push({ id: "ra", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    model.rooms.push({ id: "rb", closed: true, verts: [
+      { x: 10, y: 10 }, { x: 14, y: 10 }, { x: 14, y: 14 }, { x: 10, y: 14 },
+    ]});
+    // Door on room B's wall (center on y=10 edge of B) — not on any A wall.
+    const bDoor = createSymbol("door", 12, 10); addSymbol(bDoor);
+
+    roomOnSelectDown(80, 80);           // selects room A (world 2,2)
+    roomOnSelectMove(120, 80);          // dx=+1
+    roomOnSelectUp(120, 80);
+
+    // Room B's door is untouched — the carry test only measures A's own segments.
+    expect(bDoor.x).toBe(12);
+    expect(bDoor.y).toBe(10);
     roomClearSelection();
   });
 });

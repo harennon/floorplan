@@ -21,9 +21,9 @@
  */
 
 import { screenToWorld } from "./view.js";
-import { model as wallsModel, moveRoom, gridSnap } from "./walls.js";
+import { model as wallsModel, moveRoom, gridSnap, pointNearRoomWall, WALL_M } from "./walls.js";
 import { pointInRoom } from "./clearance.js";
-import { model as symbolsModel, getSymbol, moveSymbol } from "./symbols.js";
+import { model as symbolsModel, getSymbol, moveSymbol, CATALOG } from "./symbols.js";
 import { gridSnap as prefsGridSnap } from "./prefs.js";
 import { snapStep } from "./grid.js";
 import { scheduleRender } from "./surface.js";
@@ -124,11 +124,20 @@ export function onSelectDown(sx, sy) {
   _dragOffsetX = wp.x - ref.x;
   _dragOffsetY = wp.y - ref.y;
 
-  // Snapshot carried symbols: centers inside the room polygon at drag start
-  // (computed once — a symbol that starts inside stays attached the whole drag).
+  // Snapshot carried symbols at drag start (computed once — a symbol that starts
+  // attached stays attached the whole drag). Two membership rules:
+  //   • Furniture: center strictly inside the room polygon (pointInRoom).
+  //   • Openings (doors/windows): their center sits ON the wall line, so the
+  //     interior test is a coin-flip and usually leaves them behind. Instead
+  //     carry an opening if its center is within WALL_M of one of THIS room's
+  //     own wall segments — i.e. it's cut into a wall of the room being moved.
   _carriedSymbolIds = [];
   for (const sym of symbolsModel.symbols) {
-    if (pointInRoom(hitRoom, sym.x, sym.y)) _carriedSymbolIds.push(sym.id);
+    const isOpening = !!CATALOG[sym.type]?.openings;
+    const attached = isOpening
+      ? pointNearRoomWall(hitRoom, sym.x, sym.y, WALL_M)
+      : pointInRoom(hitRoom, sym.x, sym.y);
+    if (attached) _carriedSymbolIds.push(sym.id);
   }
 
   scheduleRender();
