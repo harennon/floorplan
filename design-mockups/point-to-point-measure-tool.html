@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Measure tool — point-to-point annotations (mockup)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --bg:         #14140f;
+    --bg-deep:    #100f0b;
+    --ink:        #ece7d6;
+    --muted:      #8f8a78;
+    --gold:       #c9a84c;
+    --gold-soft:  rgba(201, 168, 76, 0.55);
+    --grid-fine:  rgba(201, 168, 76, 0.055);
+    --grid-major: rgba(201, 168, 76, 0.14);
+    --panel:      rgba(20, 20, 15, 0.72);
+    --hairline:   rgba(201, 168, 76, 0.18);
+    --font-ui:      "DM Sans", system-ui, sans-serif;
+    --font-mono:    "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+    --wall-line:     #d9be6e;
+    --sym-fill:      rgba(201,168,76,0.12);
+    --sym-stroke:    #d9be6e;
+    /* Measure-tool accent: a distinct cool teal so annotations read as
+       "measurement", not "wall". Reuses the existing snap-teal hue. */
+    --measure:       #7fd0c8;
+    --measure-soft:  rgba(127, 208, 200, 0.55);
+    --measure-fill:  rgba(127, 208, 200, 0.10);
+    --measure-glow:  rgba(127, 208, 200, 0.28);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--font-ui);
+    color: var(--ink);
+    background: var(--bg-deep);
+    overflow: hidden;
+  }
+  .stage {
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse at 50% 40%, var(--bg) 0%, var(--bg-deep) 100%);
+  }
+  /* Graph-paper grid */
+  .grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--grid-fine) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+      linear-gradient(var(--grid-major) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+    background-size: 22px 22px, 22px 22px, 110px 110px, 110px 110px;
+    pointer-events: none;
+  }
+  .caption {
+    position: absolute;
+    left: 50%;
+    bottom: 1.1rem;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 0.3rem 0.7rem;
+    backdrop-filter: blur(8px);
+    white-space: nowrap;
+    z-index: 20;
+  }
+
+  /* ── Tool rail (left-center) ─────────────────────────────────────────── */
+  .tool-rail {
+    position: absolute;
+    left: 1.25rem;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 0.4rem 0.3rem;
+    backdrop-filter: blur(8px);
+    z-index: 15;
+  }
+  .tool-rail button {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    width: 2.4rem;
+    height: 2.4rem;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.1rem;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
+  }
+  .tool-rail button:hover { color: var(--ink); border-color: var(--hairline); }
+  .tool-rail button[aria-pressed="true"] {
+    color: var(--gold);
+    background: rgba(201, 168, 76, 0.1);
+    border-color: var(--gold-soft);
+  }
+  /* Measure tool, when active, glows teal (its own accent) rather than gold */
+  .tool-rail button.tool-measure[aria-pressed="true"] {
+    color: var(--measure);
+    background: var(--measure-fill);
+    border-color: var(--measure-soft);
+  }
+  .tool-key-hint { font-size: 0.5rem; color: var(--muted); opacity: 0.7; }
+  .tool-rail-sep { width: 100%; height: 1px; background: var(--hairline); margin: 0.1rem 0; }
+
+  /* ── Canvas geometry (illustrative rooms + furniture) ─────────────────── */
+  .canvas-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .room-fill { fill: rgba(201,168,76,0.06); stroke: var(--wall-line); stroke-width: 3; }
+  .sym-body { fill: var(--sym-fill); stroke: var(--sym-stroke); stroke-width: 1.6; }
+  .sym-label {
+    font-family: var(--font-mono); font-size: 10px; fill: var(--muted);
+    text-anchor: middle; letter-spacing: 0.04em;
+  }
+
+  /* Persistent measurement dimension line */
+  .measure-line {
+    stroke: var(--measure);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+  }
+  /* Extension ticks at each endpoint (perpendicular to the line) */
+  .measure-tick { stroke: var(--measure); stroke-width: 1.6; stroke-linecap: round; }
+  /* Endpoint node */
+  .measure-node { fill: var(--bg-deep); stroke: var(--measure); stroke-width: 1.6; }
+  /* In-progress rubber-band (dashed) while placing point B */
+  .measure-draft {
+    stroke: var(--measure);
+    stroke-width: 1.4;
+    stroke-dasharray: 5 4;
+    stroke-linecap: round;
+    opacity: 0.85;
+  }
+  /* Selected annotation: brighter line + halo on nodes */
+  .measure--selected .measure-line { stroke-width: 2.2; }
+  .measure--selected .measure-node { r: 5; filter: drop-shadow(0 0 4px var(--measure-glow)); }
+
+  /* Snap indicator ring shown under the live cursor point */
+  .snap-ring { fill: none; stroke: var(--measure); stroke-width: 1.4; opacity: 0.9; }
+  .snap-cross { stroke: var(--measure); stroke-width: 1.2; opacity: 0.9; }
+
+  /* ── HTML overlay: distance-label chips ───────────────────────────────── */
+  .overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .measure-chip {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 500;
+    padding: 0.12rem 0.4rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    background: var(--panel);
+    border: 1px solid var(--measure-soft);
+    color: var(--measure);
+    line-height: 1.4;
+    pointer-events: auto;
+    cursor: pointer;
+    user-select: none;
+    backdrop-filter: blur(6px);
+    transition: box-shadow 0.12s, border-color 0.12s;
+  }
+  .measure-chip.is-selected {
+    border-color: var(--measure);
+    box-shadow: 0 0 0 1px var(--measure), 0 0 10px var(--measure-glow);
+  }
+  /* Tiny delete affordance appears on the selected chip */
+  .measure-chip .chip-x {
+    display: none;
+    margin-left: 0.35rem;
+    color: var(--muted);
+    border-left: 1px solid var(--hairline);
+    padding-left: 0.3rem;
+  }
+  .measure-chip.is-selected .chip-x { display: inline; }
+  .measure-chip .chip-x:hover { color: var(--ink); }
+
+  /* Snap-type label that trails the cursor while placing */
+  .snap-tag {
+    position: absolute;
+    transform: translate(14px, -50%);
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--measure);
+    background: var(--panel);
+    border: 1px solid var(--measure-soft);
+    border-radius: 4px;
+    padding: 0.08rem 0.3rem;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  /* Anchor badge: shown on an endpoint that is bound to an object (live-follow) */
+  .anchor-badge {
+    fill: var(--measure);
+    opacity: 0.9;
+  }
+
+  /* ── Section header banner + variant switcher (mockup chrome only) ─────── */
+  .mock-topbar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.6rem 1rem;
+    background: linear-gradient(180deg, rgba(16,15,11,0.92), rgba(16,15,11,0.0));
+    z-index: 30;
+    font-family: var(--font-mono);
+  }
+  .mock-title { font-family: var(--font-display); font-size: 0.95rem; color: var(--gold); }
+  .mock-sub { font-size: 0.62rem; color: var(--muted); }
+  .mock-scene-tabs { margin-left: auto; display: flex; gap: 0.3rem; }
+  .mock-scene-tabs button {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 5px;
+    padding: 0.28rem 0.55rem;
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .mock-scene-tabs button:hover { color: var(--ink); }
+  .mock-scene-tabs button.active {
+    color: var(--measure);
+    border-color: var(--measure-soft);
+    background: var(--measure-fill);
+  }
+
+  .scene { display: none; }
+  .scene.active { display: block; }
+
+  /* Toast (delete undo) */
+  .toast {
+    position: absolute;
+    left: 50%;
+    bottom: 3.4rem;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 0.4rem 0.75rem;
+    backdrop-filter: blur(8px);
+    z-index: 25;
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+  }
+  .toast button {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--gold);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="grid"></div>
+
+  <div class="mock-topbar">
+    <div>
+      <div class="mock-title">Measure tool</div>
+      <div class="mock-sub">point-to-point persistent annotations &middot; warm-blueprint</div>
+    </div>
+    <div class="mock-scene-tabs">
+      <button data-scene="idle" class="active">1 · Placing</button>
+      <button data-scene="selected">2 · Selected + delete</button>
+      <button data-scene="object">3 · Object-anchored</button>
+      <button data-scene="mobile">4 · Mobile</button>
+    </div>
+  </div>
+
+  <!-- Tool rail: Select / Wall / Measure -->
+  <nav class="tool-rail" aria-label="Drawing tools">
+    <button aria-label="Select tool (V)" aria-pressed="false">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M4 2 L4 13 L7 10 L9 14 L11 13 L9 9 L13 9 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+      </svg>
+      <span class="tool-key-hint">V</span>
+    </button>
+    <button aria-label="Draw wall tool (W)" aria-pressed="false">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+      </svg>
+      <span class="tool-key-hint">W</span>
+    </button>
+    <button class="tool-measure" aria-label="Measure tool (M)" aria-pressed="true">
+      <!-- tape / ruler glyph -->
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M2 6 h12 v4 h-12 z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+        <path d="M4.5 6 v2 M7 6 v2.5 M9.5 6 v2 M12 6 v2.5" stroke="currentColor" stroke-width="1.1"/>
+      </svg>
+      <span class="tool-key-hint">M</span>
+    </button>
+    <div class="tool-rail-sep" aria-hidden="true"></div>
+    <button aria-label="Undo" disabled style="opacity:.35">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M5 4 L1 8 L5 12 M1 8 H10 Q14 8 14 5 Q14 2 10 2 H7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </nav>
+  <!-- ══════════════ SCENE 1 · PLACING ══════════════ -->
+  <div class="scene active" data-scene="idle">
+    <svg class="canvas-svg" viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid slice">
+      <!-- Room -->
+      <rect class="room-fill" x="330" y="150" width="520" height="380" rx="2"/>
+      <!-- Furniture: couch -->
+      <rect class="sym-body" x="380" y="200" width="150" height="60" rx="4"/>
+      <text class="sym-label" x="455" y="235">couch</text>
+      <!-- Furniture: table -->
+      <rect class="sym-body" x="620" y="360" width="120" height="80" rx="4"/>
+      <text class="sym-label" x="680" y="405">table</text>
+
+      <!-- A completed, persistent measurement (couch → table diagonal) -->
+      <g>
+        <line class="measure-line" x1="530" y1="260" x2="620" y2="360"/>
+        <line class="measure-tick" x1="524" y1="252" x2="536" y2="268"/>
+        <line class="measure-tick" x1="614" y1="352" x2="626" y2="368"/>
+        <circle class="measure-node" cx="530" cy="260" r="4"/>
+        <circle class="measure-node" cx="620" cy="360" r="4"/>
+      </g>
+
+      <!-- In-progress: point A placed at a wall corner, rubber-band to cursor -->
+      <g>
+        <line class="measure-draft" x1="330" y1="530" x2="770" y2="300"/>
+        <circle class="measure-node" cx="330" cy="530" r="4"/>
+        <!-- snap indicator at the live cursor (snapping to top wall) -->
+        <circle class="snap-ring" cx="770" cy="300" r="8"/>
+        <line class="snap-cross" x1="762" y1="300" x2="778" y2="300"/>
+        <line class="snap-cross" x1="770" y1="292" x2="770" y2="308"/>
+      </g>
+    </svg>
+
+    <div class="overlay">
+      <!-- persistent chip -->
+      <div class="measure-chip" style="left:57.4%; top:43%;">4.7 ft</div>
+      <!-- live distance readout following the rubber-band midpoint -->
+      <div class="measure-chip" style="left:45.8%; top:57.6%;">12.1 ft</div>
+      <!-- snap-type tag trailing cursor -->
+      <div class="snap-tag" style="left:64.2%; top:41.7%;">edge</div>
+    </div>
+
+    <div class="caption">
+      Measure active · Click point A, then point B · endpoints snap to grid / wall vertices / object corners · Alt = free
+    </div>
+  </div>
+  <!-- ══════════════ SCENE 2 · SELECTED + DELETE ══════════════ -->
+  <div class="scene" data-scene="selected">
+    <svg class="canvas-svg" viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid slice">
+      <rect class="room-fill" x="330" y="150" width="520" height="380" rx="2"/>
+      <rect class="sym-body" x="380" y="200" width="150" height="60" rx="4"/>
+      <text class="sym-label" x="455" y="235">couch</text>
+      <rect class="sym-body" x="640" y="180" width="90" height="130" rx="4"/>
+      <text class="sym-label" x="685" y="250">window wall</text>
+
+      <!-- Two persistent measurements; the horizontal one is SELECTED -->
+      <g class="measure--selected">
+        <line class="measure-line" x1="530" y1="230" x2="640" y2="230"/>
+        <line class="measure-tick" x1="530" y1="221" x2="530" y2="239"/>
+        <line class="measure-tick" x1="640" y1="221" x2="640" y2="239"/>
+        <circle class="measure-node" cx="530" cy="230" r="4"/>
+        <circle class="measure-node" cx="640" cy="230" r="4"/>
+      </g>
+      <g>
+        <line class="measure-line" x1="455" y1="260" x2="455" y2="530"/>
+        <line class="measure-tick" x1="446" y1="260" x2="464" y2="260"/>
+        <line class="measure-tick" x1="446" y1="530" x2="464" y2="530"/>
+        <circle class="measure-node" cx="455" cy="260" r="4"/>
+        <circle class="measure-node" cx="455" cy="530" r="4"/>
+      </g>
+    </svg>
+
+    <div class="overlay">
+      <div class="measure-chip is-selected" style="left:48.7%; top:31.9%;">
+        3.6 ft <span class="chip-x" title="Delete (Del)">✕</span>
+      </div>
+      <div class="measure-chip" style="left:37.9%; top:54.9%;">8.9 ft</div>
+    </div>
+
+    <div class="toast">
+      Measurement deleted <button>Undo</button>
+    </div>
+
+    <div class="caption">
+      Select tool · Click a dimension line or its chip to select · Delete key or ✕ removes it (committed to history &amp; autosave)
+    </div>
+  </div>
+
+  <!-- ══════════════ SCENE 3 · OBJECT-ANCHORED (live-follow) ══════════════ -->
+  <div class="scene" data-scene="object">
+    <svg class="canvas-svg" viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid slice">
+      <rect class="room-fill" x="330" y="150" width="520" height="380" rx="2"/>
+      <!-- couch (moved) with a ghost of prior position to imply follow -->
+      <rect class="sym-body" x="380" y="380" width="150" height="60" rx="4"/>
+      <text class="sym-label" x="455" y="415">couch</text>
+      <!-- window drawn as opening on the top wall -->
+      <rect x="560" y="144" width="120" height="12" fill="var(--measure-fill)" stroke="var(--measure)" stroke-width="1.4"/>
+      <text class="sym-label" x="620" y="134">window</text>
+
+      <!-- measurement anchored: couch top edge → window center; follows on move -->
+      <g>
+        <line class="measure-line" x1="455" y1="380" x2="620" y2="150"/>
+        <line class="measure-tick" x1="449" y1="372" x2="461" y2="388"/>
+        <line class="measure-tick" x1="614" y1="142" x2="626" y2="158"/>
+        <!-- anchored endpoints drawn as squares (bound to an object id) -->
+        <rect class="anchor-badge" x="450" y="375" width="10" height="10" rx="2"/>
+        <rect class="anchor-badge" x="615" y="145" width="10" height="10" rx="2"/>
+      </g>
+    </svg>
+
+    <div class="overlay">
+      <div class="measure-chip" style="left:44.8%; top:36.8%;">
+        <span style="opacity:.7; font-size:.55rem; margin-right:.3rem;">⚓</span>9.4 ft
+      </div>
+    </div>
+
+    <div class="caption">
+      Object-anchored: square endpoints bind to an object (couch ⇢ window) and re-solve to nearest edge when the object moves — live CAD-style dimension
+    </div>
+  </div>
+  <!-- ══════════════ SCENE 4 · MOBILE ══════════════ -->
+  <div class="scene" data-scene="mobile">
+    <svg class="canvas-svg" viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid slice">
+      <rect class="room-fill" x="430" y="180" width="340" height="360" rx="2"/>
+      <rect class="sym-body" x="470" y="230" width="120" height="55" rx="4"/>
+      <text class="sym-label" x="530" y="262">bed</text>
+
+      <!-- one completed measurement -->
+      <g>
+        <line class="measure-line" x1="590" y1="257" x2="770" y2="257"/>
+        <line class="measure-tick" x1="590" y1="248" x2="590" y2="266"/>
+        <line class="measure-tick" x1="770" y1="248" x2="770" y2="266"/>
+        <circle class="measure-node" cx="590" cy="257" r="4"/>
+        <circle class="measure-node" cx="770" cy="257" r="4"/>
+      </g>
+      <!-- placing point B: loupe magnifier over the target corner -->
+      <circle cx="770" cy="480" r="46" fill="var(--bg)" stroke="var(--measure-soft)" stroke-width="1.6"/>
+      <circle class="snap-ring" cx="770" cy="480" r="9"/>
+      <line class="snap-cross" x1="761" y1="480" x2="779" y2="480"/>
+      <line class="snap-cross" x1="770" y1="471" x2="770" y2="489"/>
+      <line class="measure-draft" x1="430" y1="540" x2="770" y2="480"/>
+      <circle class="measure-node" cx="430" cy="540" r="4"/>
+    </svg>
+
+    <div class="overlay">
+      <div class="measure-chip" style="left:56.6%; top:35.7%;">4.9 ft</div>
+      <div class="measure-chip" style="left:50%; top:74%;">11.2 ft</div>
+    </div>
+
+    <div class="caption">
+      Touch: finger-down shows the magnifier loupe so the snap point is visible under the fingertip; lift to drop point B (reuses LLD 57 loupe)
+    </div>
+  </div>
+
+</div><!-- /.stage -->
+
+<script>
+  const tabs = document.querySelectorAll(".mock-scene-tabs button");
+  const scenes = document.querySelectorAll(".scene");
+  tabs.forEach(t => t.addEventListener("click", () => {
+    const name = t.dataset.scene;
+    tabs.forEach(x => x.classList.toggle("active", x === t));
+    scenes.forEach(s => s.classList.toggle("active", s.dataset.scene === name));
+  }));
+
+  // Demonstrate chip selection toggling in scene 2
+  document.querySelectorAll(".measure-chip").forEach(chip => {
+    chip.addEventListener("click", (e) => {
+      if (e.target.classList.contains("chip-x")) return;
+      chip.classList.toggle("is-selected");
+    });
+  });
+</script>
+</body>
+</html>
