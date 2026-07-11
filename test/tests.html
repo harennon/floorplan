@@ -135,6 +135,7 @@ import {
   gridSnap, closestEndpoint, canClose, resolveSnap,
   allVertices, placeVertex, closeRoom, finishChain, undoPoint,
   edgeLength, polygonArea, perimeter, roomMetrics, rescaleEdge,
+  moveRoom, isRectangle, rescaleRectEdge, RIGHT_ANGLE_COS_TOL,
 } from "../src/js/walls.js";
 
 // ─── Tests: view.js ───────────────────────────────────────────────────────────
@@ -936,6 +937,341 @@ describe("walls.js — rescaleEdge", () => {
     // max valid edgeIndex for open room with 3 verts = 1 (edges 0-1, 1-2)
     expect(rescaleEdge(room, 2, 1)).toBe(false);
     expect(rescaleEdge(room, -1, 1)).toBe(false);
+  });
+});
+
+// ─── Tests: walls.js — LLD 63: moveRoom ──────────────────────────────────────
+
+/** Rotate a point (x,y) about the origin by `deg` degrees. */
+function _rotPt(x, y, deg) {
+  const r = (deg * Math.PI) / 180;
+  const c = Math.cos(r), s = Math.sin(r);
+  return { x: x * c - y * s, y: x * s + y * c };
+}
+
+/** Build a closed 4-vert room from an array of {x,y}. */
+function _closedRoom(id, verts) {
+  return { id, closed: true, verts: verts.map(v => ({ x: v.x, y: v.y })) };
+}
+
+/** Rotate every vertex of a room's verts array by `deg` about origin (returns new room). */
+function _rotateRoom(room, deg) {
+  return { ...room, verts: room.verts.map(v => _rotPt(v.x, v.y, deg)) };
+}
+
+/** Interior corner cosines for a closed 4-vert room (|cos| at each corner). */
+function _cornerCosines(room) {
+  const v = room.verts;
+  const n = v.length;
+  const edges = [];
+  for (let i = 0; i < n; i++) {
+    const a = v[i], b = v[(i + 1) % n];
+    const ex = b.x - a.x, ey = b.y - a.y;
+    const len = Math.sqrt(ex * ex + ey * ey);
+    edges.push({ x: ex / len, y: ey / len });
+  }
+  return edges.map((_, i) => {
+    const e0 = edges[i], e1 = edges[(i + 1) % n];
+    return Math.abs(e0.x * e1.x + e0.y * e1.y);
+  });
+}
+
+describe("walls.js — moveRoom (LLD 63)", () => {
+  it("rigid translate: all verts shift by (dx,dy); area & perimeter invariant", () => {
+    const room = mkRoom("m0", 0, 0, 4, 3);
+    const areaBefore = polygonArea(room.verts);
+    const perimBefore = perimeter(room.verts, true);
+    moveRoom(room, 2, -5);
+    expect(room.verts[0].x).toBeCloseTo(2, 12);
+    expect(room.verts[0].y).toBeCloseTo(-5, 12);
+    expect(room.verts[1].x).toBeCloseTo(6, 12);
+    expect(room.verts[2].y).toBeCloseTo(-2, 12);
+    expect(room.verts[3].x).toBeCloseTo(2, 12);
+    // Rigid: area + perimeter unchanged
+    expect(polygonArea(room.verts)).toBeCloseTo(areaBefore, 12);
+    expect(perimeter(room.verts, true)).toBeCloseTo(perimBefore, 12);
+  });
+
+  it("edge lengths preserved after translate", () => {
+    const room = mkRoom("m1", 1, 1, 5, 4);
+    const e0 = edgeLength(room.verts[0], room.verts[1]);
+    const e1 = edgeLength(room.verts[1], room.verts[2]);
+    moveRoom(room, -3, 7);
+    expect(edgeLength(room.verts[0], room.verts[1])).toBeCloseTo(e0, 12);
+    expect(edgeLength(room.verts[1], room.verts[2])).toBeCloseTo(e1, 12);
+  });
+
+  it("dx===0 && dy===0 leaves verts numerically identical (no-op-safe)", () => {
+    const room = mkRoom("m2", 0, 0, 2, 2);
+    const before = room.verts.map(v => ({ x: v.x, y: v.y }));
+    moveRoom(room, 0, 0);
+    for (let i = 0; i < before.length; i++) {
+      expect(room.verts[i].x).toBe(before[i].x);
+      expect(room.verts[i].y).toBe(before[i].y);
+    }
+  });
+
+  it("works on an open polyline room (all verts shifted)", () => {
+    const room = { id: "m3", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 2 }] };
+    moveRoom(room, 10, 20);
+    expect(room.verts[0].x).toBe(10);
+    expect(room.verts[0].y).toBe(20);
+    expect(room.verts[1].x).toBe(11);
+    expect(room.verts[2].y).toBe(22);
+  });
+
+  it("negative deltas shift correctly", () => {
+    const room = mkRoom("m4", 5, 5, 9, 8);
+    moveRoom(room, -5, -5);
+    expect(room.verts[0].x).toBe(0);
+    expect(room.verts[0].y).toBe(0);
+    expect(room.verts[2].x).toBe(4);
+    expect(room.verts[2].y).toBe(3);
+  });
+});
+
+// ─── Tests: walls.js — LLD 63: isRectangle ───────────────────────────────────
+
+describe("walls.js — isRectangle (LLD 63)", () => {
+  it("true for an axis-aligned 4-vert closed rectangle", () => {
+    expect(isRectangle(mkRoom("r0", 0, 0, 4, 3))).toBe(true);
+  });
+
+  it("true for a rectangle rotated 30° (rotation-agnostic)", () => {
+    const rect = mkRoom("r1", 0, 0, 4, 3);
+    expect(isRectangle(_rotateRoom(rect, 30))).toBe(true);
+  });
+
+  it("true for a near-rectangle within 5° tolerance (~87° corners)", () => {
+    // Rhomboid whose corner |cos| ≈ cos(87°) ≈ 0.0523 < RIGHT_ANGLE_COS_TOL(0.087).
+    const a = 0.0523 / Math.sqrt(1 - 0.0523 * 0.0523);
+    const room = _closedRoom("r2", [
+      { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1 + a, y: 1 }, { x: a, y: 1 },
+    ]);
+    expect(isRectangle(room)).toBe(true);
+  });
+
+  it("false for an open polyline", () => {
+    const room = { id: "r3", closed: false, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ] };
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("false for a triangle (3 verts)", () => {
+    const room = { id: "r4", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 3 },
+    ] };
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("false for a 5-vert polygon", () => {
+    const room = { id: "r5", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 2, y: 4 }, { x: 0, y: 3 },
+    ] };
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("false for an L-shape (6 verts → fails 4-vert check)", () => {
+    const room = { id: "r6", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 2 }, { x: 2, y: 2 }, { x: 2, y: 4 }, { x: 0, y: 4 },
+    ] };
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("false for a parallelogram (60°/120° corners)", () => {
+    // Slant so corner cos = cos(60°) = 0.5 >> tolerance.
+    const room = _closedRoom("r7", [
+      { x: 0, y: 0 }, { x: 2, y: 0 }, { x: 3, y: Math.sqrt(3) }, { x: 1, y: Math.sqrt(3) },
+    ]);
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("false for a rectangle with one edge < MIN_SEG_M (degenerate)", () => {
+    const room = _closedRoom("r8", [
+      { x: 0, y: 0 }, { x: MIN_SEG_M * 0.5, y: 0 }, { x: MIN_SEG_M * 0.5, y: 3 }, { x: 0, y: 3 },
+    ]);
+    expect(isRectangle(room)).toBe(false);
+  });
+
+  it("boundary: |cos| just below RIGHT_ANGLE_COS_TOL → true; just above → false (<= inclusive)", () => {
+    const mkRhomboid = (dot) => {
+      const a = dot / Math.sqrt(1 - dot * dot);
+      return _closedRoom("rb", [
+        { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1 + a, y: 1 }, { x: a, y: 1 },
+      ]);
+    };
+    // Just inside → rectangle
+    expect(isRectangle(mkRhomboid(RIGHT_ANGLE_COS_TOL - 1e-4))).toBe(true);
+    // Just outside → not a rectangle
+    expect(isRectangle(mkRhomboid(RIGHT_ANGLE_COS_TOL + 1e-3))).toBe(false);
+  });
+});
+
+// ─── Tests: walls.js — LLD 63: rescaleRectEdge ───────────────────────────────
+
+/**
+ * Assert a room is a rectangle with edge K == L, opposite edge parallel+equal,
+ * both perpendicular sides equal to their originals, and all corners 90°.
+ */
+function _assertRectAfterResize(room, K, L, perpBefore) {
+  const v = room.verts;
+  const vK = v[K], vK1 = v[(K + 1) % 4], vK2 = v[(K + 2) % 4], vK3 = v[(K + 3) % 4];
+  // Edited edge == L
+  expect(edgeLength(vK, vK1)).toBeCloseTo(L, 9);
+  // Opposite edge (v(K+2)→v(K+3)) parallel + equal length
+  const eK  = { x: vK1.x - vK.x,  y: vK1.y - vK.y };
+  const eOpp = { x: vK3.x - vK2.x, y: vK3.y - vK2.y }; // e(K+2)
+  expect(edgeLength(vK2, vK3)).toBeCloseTo(L, 9);
+  // Parallel: cross product ≈ 0
+  expect(eK.x * eOpp.y - eK.y * eOpp.x).toBeCloseTo(0, 8);
+  // Perpendicular sides unchanged
+  expect(edgeLength(vK1, vK2)).toBeCloseTo(perpBefore, 9);
+  expect(edgeLength(vK3, vK)).toBeCloseTo(perpBefore, 9);
+  // Still a rectangle (all angles 90°)
+  expect(isRectangle(room)).toBe(true);
+}
+
+describe("walls.js — rescaleRectEdge (LLD 63)", () => {
+  it("worked case: v0=(0,0) v1=(4,0) v2=(4,3) v3=(0,3), edit e0 to L=6", () => {
+    const room = _closedRoom("q0", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    const ok = rescaleRectEdge(room, 0, 6);
+    expect(ok).toBe(true);
+    // v0 and v3 unchanged
+    expect(room.verts[0].x).toBe(0); expect(room.verts[0].y).toBe(0);
+    expect(room.verts[3].x).toBe(0); expect(room.verts[3].y).toBe(3);
+    // v1 and v2 each moved by u·(L-|e0|) = (2,0)
+    expect(room.verts[1].x).toBeCloseTo(6, 12); expect(room.verts[1].y).toBeCloseTo(0, 12);
+    expect(room.verts[2].x).toBeCloseTo(6, 12); expect(room.verts[2].y).toBeCloseTo(3, 12);
+    _assertRectAfterResize(room, 0, 6, 3);
+  });
+
+  it("moves exactly v(K+1) and v(K+2); vK and v(K+3) stay fixed (all 4 edges)", () => {
+    for (let K = 0; K < 4; K++) {
+      const room = _closedRoom("q" + K, [
+        { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+      ]);
+      const before = room.verts.map(v => ({ x: v.x, y: v.y }));
+      const eKlen = edgeLength(room.verts[K], room.verts[(K + 1) % 4]);
+      const perp = edgeLength(room.verts[(K + 1) % 4], room.verts[(K + 2) % 4]);
+      const L = eKlen + 2; // grow by 2
+      const ok = rescaleRectEdge(room, K, L);
+      expect(ok).toBe(true);
+      // vK and v(K+3) unchanged
+      expect(room.verts[K].x).toBe(before[K].x);
+      expect(room.verts[K].y).toBe(before[K].y);
+      expect(room.verts[(K + 3) % 4].x).toBe(before[(K + 3) % 4].x);
+      expect(room.verts[(K + 3) % 4].y).toBe(before[(K + 3) % 4].y);
+      // v(K+1) and v(K+2) moved
+      const moved1 = room.verts[(K + 1) % 4].x !== before[(K + 1) % 4].x
+                  || room.verts[(K + 1) % 4].y !== before[(K + 1) % 4].y;
+      const moved2 = room.verts[(K + 2) % 4].x !== before[(K + 2) % 4].x
+                  || room.verts[(K + 2) % 4].y !== before[(K + 2) % 4].y;
+      if (!moved1) throw new Error(`edge ${K}: v(K+1) should have moved`);
+      if (!moved2) throw new Error(`edge ${K}: v(K+2) should have moved`);
+      _assertRectAfterResize(room, K, L, perp);
+    }
+  });
+
+  it("does not shear: result is still a rectangle (anti-parallelogram)", () => {
+    const room = _closedRoom("qs", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    rescaleRectEdge(room, 1, 7); // grow a vertical edge
+    // No corner drifts off 90°
+    for (const c of _cornerCosines(room)) expect(c).toBeCloseTo(0, 9);
+    expect(isRectangle(room)).toBe(true);
+  });
+
+  it("works on a rectangle rotated 30° (grows along local axis; stays rectangle)", () => {
+    const axis = _closedRoom("qr", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    const room = _rotateRoom(axis, 30);
+    const perp = edgeLength(room.verts[1], room.verts[2]);
+    const ok = rescaleRectEdge(room, 0, 6);
+    expect(ok).toBe(true);
+    _assertRectAfterResize(room, 0, 6, perp);
+  });
+
+  it("shrinking (L < |eK|, 4→2) works symmetrically; stays rectangle", () => {
+    const room = _closedRoom("qsh", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    const ok = rescaleRectEdge(room, 0, 2);
+    expect(ok).toBe(true);
+    expect(room.verts[1].x).toBeCloseTo(2, 12);
+    expect(room.verts[2].x).toBeCloseTo(2, 12);
+    _assertRectAfterResize(room, 0, 2, 3);
+  });
+
+  it("returns false (no-op) for targetLenM < MIN_SEG_M", () => {
+    const room = _closedRoom("qm", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    const before = room.verts.map(v => ({ x: v.x, y: v.y }));
+    expect(rescaleRectEdge(room, 0, MIN_SEG_M * 0.5)).toBe(false);
+    for (let i = 0; i < 4; i++) {
+      expect(room.verts[i].x).toBe(before[i].x);
+      expect(room.verts[i].y).toBe(before[i].y);
+    }
+  });
+
+  it("returns false for edgeIndex out of [0,3]", () => {
+    const room = _closedRoom("qi", [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]);
+    expect(rescaleRectEdge(room, 4, 5)).toBe(false);
+    expect(rescaleRectEdge(room, -1, 5)).toBe(false);
+  });
+
+  it("returns false for a non-rectangle input (self-guard)", () => {
+    const tri = { id: "qt", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 3 },
+    ] };
+    const before = tri.verts.map(v => ({ x: v.x, y: v.y }));
+    expect(rescaleRectEdge(tri, 0, 6)).toBe(false);
+    for (let i = 0; i < tri.verts.length; i++) {
+      expect(tri.verts[i].x).toBe(before[i].x);
+      expect(tri.verts[i].y).toBe(before[i].y);
+    }
+  });
+
+  it("near-rectangle (88° corners) is NOT regularized: edge becomes L but corners stay 88° (EC13)", () => {
+    // Build a rhomboid whose corner |cos| = cos(88°) ≈ 0.0349 (within tolerance).
+    const dot = Math.cos((88 * Math.PI) / 180); // ≈ 0.0349
+    const a = dot / Math.sqrt(1 - dot * dot);
+    const room = _closedRoom("qn", [
+      { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1 + a, y: 1 }, { x: a, y: 1 },
+    ]);
+    expect(isRectangle(room)).toBe(true); // passes within tolerance
+    const K = 0;
+    const vKbefore  = { x: room.verts[K].x,           y: room.verts[K].y };
+    const vK1before = { x: room.verts[(K + 1) % 4].x, y: room.verts[(K + 1) % 4].y };
+    const L = 3;
+    const ok = rescaleRectEdge(room, K, L);
+    expect(ok).toBe(true);
+    // Edited edge equals L; vK stays put, v(K+1) slides along u=(1,0) by (L-1).
+    expect(room.verts[K].x).toBe(vKbefore.x);
+    expect(room.verts[K].y).toBe(vKbefore.y);
+    expect(room.verts[(K + 1) % 4].x).toBe(vK1before.x + L - 1);
+    expect(edgeLength(room.verts[K], room.verts[(K + 1) % 4])).toBeCloseTo(L, 9);
+    // The LOW-fix contract: assert the NEAR-side corners are unchanged — NOT
+    // "all corner angles unchanged" (that is false in general; a tilted opposite
+    // edge lets the far corners drift toward 90°). Here the shape is a parallelogram
+    // so all corners keep the same |cos|, but the assertions below deliberately
+    // check only the two near corners + that it is still not a true rectangle.
+    // _cornerCosines[i] is the corner at v[(i+1)%4]: index 3 = corner at v0(=vK),
+    // index 0 = corner at v1(=v(K+1)).
+    const cosines = _cornerCosines(room);
+    // (a) near-side corner angles (at vK and v(K+1)) are unchanged (≈88°, not squared up)
+    expect(cosines[3]).toBeCloseTo(dot, 6); // corner at vK
+    expect(cosines[0]).toBeCloseTo(dot, 6); // corner at v(K+1)
+    // (b) still NOT a true rectangle: at least one corner remains off 90°.
+    const anyOff = cosines.some(c => c > 1e-3);
+    if (!anyOff) throw new Error("near-rectangle was unexpectedly squared up to exact 90°");
   });
 });
 
@@ -2209,6 +2545,108 @@ describe("dimEntry — dim-input aria-label is set", () => {
     if (input.getAttribute("aria-invalid") === "true") {
       throw new Error("aria-invalid should be cleared after cancel");
     }
+    rig.cleanup();
+  });
+});
+
+// ─── Tests: dimEntry.js — LLD 63 rectangle-vs-general routing ────────────────
+
+describe("dimEntry — LLD 63: rectangle edit routes to rescaleRectEdge (stays rectangle)", () => {
+  it("committing a larger length on a rectangle keeps all four angles 90° (no shear)", () => {
+    resetModel();
+    setUnit("m");
+    // Axis-aligned 4x3 rectangle.
+    model.rooms.push({
+      id: "rr1", closed: true,
+      verts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }],
+    });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rr1", 0); // edge 0 = bottom, |e0| = 4
+    const input = rig.stage.querySelector(".dim-input");
+    input.value = "6m";
+    commit();
+    const room = model.rooms[0];
+    // Edited edge is 6; opposite edge also 6 (rectangle path — NOT single-corner shear)
+    expect(edgeLength(room.verts[0], room.verts[1])).toBeCloseTo(6, 9);
+    expect(edgeLength(room.verts[2], room.verts[3])).toBeCloseTo(6, 9);
+    // v2 moved with v1 (rectangle path); a single-corner rescaleEdge would have
+    // left v2 at x=4. Rectangle path moves it to x=6.
+    expect(room.verts[2].x).toBeCloseTo(6, 9);
+    // Still a rectangle
+    expect(isRectangle(room)).toBe(true);
+    rig.cleanup();
+  });
+});
+
+describe("dimEntry — LLD 63: non-rectangle edit routes to unchanged rescaleEdge (single-corner)", () => {
+  it("committing a length on an L-shaped room applies single-corner rescaleEdge", () => {
+    resetModel();
+    setUnit("m");
+    // L-shape (6 verts) — not a rectangle. Edge 0 = (0,0)→(4,0), |e0| = 4.
+    model.rooms.push({
+      id: "rl1", closed: true,
+      verts: [
+        { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 2 },
+        { x: 2, y: 2 }, { x: 2, y: 4 }, { x: 0, y: 4 },
+      ],
+    });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    // Cross-check against calling rescaleEdge directly on an identical clone.
+    const clone = { id: "clone", closed: true, verts: model.rooms[0].verts.map(v => ({ x: v.x, y: v.y })) };
+    rescaleEdge(clone, 0, 6);
+    beginEdit("rl1", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    input.value = "6m";
+    commit();
+    const room = model.rooms[0];
+    // Single-corner: only v1 moved (to x=6); v2 stays at (4,2).
+    expect(room.verts[1].x).toBeCloseTo(6, 9);
+    expect(room.verts[1].x).toBeCloseTo(clone.verts[1].x, 9);
+    expect(room.verts[2].x).toBe(4);  // untouched neighbour — proves single-corner path
+    expect(room.verts[2].y).toBe(2);
+    rig.cleanup();
+  });
+
+  it("no-op round-trip on a rectangle commits nothing (fmtLen-equality check)", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({
+      id: "rr2", closed: true,
+      verts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }],
+    });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rr2", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    input.value = fmtLen(4); // unchanged
+    commit();
+    const room = model.rooms[0];
+    // Geometry untouched (short-circuit before either resize fn)
+    expect(room.verts[1].x).toBe(4);
+    expect(room.verts[2].x).toBe(4);
+    rig.cleanup();
+  });
+
+  it("invalid rectangle resize (target < MIN_SEG_M) flags input and keeps editor open", () => {
+    resetModel();
+    setUnit("m");
+    model.rooms.push({
+      id: "rr3", closed: true,
+      verts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }],
+    });
+    const rig = makeDimRig();
+    initDimEntry({ stage: rig.stage, dimLabels: rig.dimLabels });
+    beginEdit("rr3", 0);
+    const input = rig.stage.querySelector(".dim-input");
+    input.value = "0.00001m"; // below MIN_SEG_M (1e-4)
+    commit();
+    expect(isEditing()).toBe(true); // still open
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    // Geometry unchanged
+    expect(model.rooms[0].verts[1].x).toBe(4);
+    cancel();
     rig.cleanup();
   });
 });
@@ -10676,6 +11114,323 @@ describe("grid.drawGrid — line placement", () => {
       throw new Error(`Idempotent redraw: first=${count1}, second=${count2}`);
     }
     if (count1 === 0) throw new Error("drawGrid emitted 0 lines");
+  });
+});
+
+// ─── LLD 63: roomTool — room selection + move-drag + carried furniture ────────
+
+import {
+  init as initRoomTool,
+  onSelectDown as roomOnSelectDown,
+  onSelectMove as roomOnSelectMove,
+  onSelectUp as roomOnSelectUp,
+  onTapEmpty as roomOnTapEmpty,
+  onDrawModeEnter as roomOnDrawModeEnter,
+  clearSelection as roomClearSelection,
+  getSelectedRoomId as roomGetSelectedRoomId,
+  hasSelection as roomHasSelection,
+  setHistoryAndToast as roomSetHistoryAndToast,
+  setClearSymbolSelection as roomSetClearSymbolSelection,
+} from "../src/js/roomTool.js";
+
+import {
+  init as initSymbolToolMutex,
+  onSelectDown as symOnSelectDownMutex,
+  hasSelection as symHasSelectionMutex,
+  clearSelection as symClearSelectionMutex,
+  getSelectedId as symGetSelectedIdMutex,
+  selectSymbol as symSelectSymbolMutex,
+  setClearRoomSelection as symSetClearRoomSelectionMutex,
+} from "../src/js/symbolTool.js";
+
+// Reset both models + view for roomTool tests.
+function _resetRoomTool() {
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  setGridSnap(true);
+  setSnapMode("off"); // free follow by default (tests that need grid set it on)
+}
+
+// A no-op spy commit for roomTool.
+function _spyCommit() {
+  let count = 0;
+  const spy = () => { count++; };
+  spy.callCount = () => count;
+  return spy;
+}
+
+describe("LLD 63 — roomTool: carried-furniture membership (center, not AABB)", () => {
+  it("carried set = symbols whose center is inside the room polygon; outside excluded", () => {
+    _resetRoomTool();
+    const spy = _spyCommit();
+    roomSetHistoryAndToast({ commit: spy }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    // 4x4 room from (0,0) to (4,4). At identity view world→screen ×40.
+    model.rooms.push({ id: "cf0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    // Symbol centered at (2,2) — inside; symbol at (10,10) — outside.
+    const inside  = createSymbol("chair", 2, 2);  addSymbol(inside);
+    const outside = createSymbol("chair", 10, 10); addSymbol(outside);
+
+    // Press inside the room interior at screen (80,80)=world(2,2).
+    const consumed = roomOnSelectDown(80, 80);
+    expect(consumed).toBe(true);
+    expect(roomGetSelectedRoomId()).toBe("cf0");
+
+    // Drag to screen (120,80)=world(3,2): dx=+1, dy=0.
+    roomOnSelectMove(120, 80);
+    roomOnSelectUp(120, 80);
+
+    // Inside symbol carried by (+1,0); outside symbol unchanged.
+    expect(inside.x).toBeCloseTo(3, 9);
+    expect(inside.y).toBeCloseTo(2, 9);
+    expect(outside.x).toBe(10);
+    expect(outside.y).toBe(10);
+    // Room translated by same delta.
+    expect(model.rooms[0].verts[0].x).toBeCloseTo(1, 9);
+    expect(spy.callCount()).toBe(1);
+    roomClearSelection();
+  });
+
+  it("a symbol added mid-drag is NOT grabbed (membership snapshotted at down)", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    model.rooms.push({ id: "cf1", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    roomOnSelectDown(80, 80); // no symbols present at down → empty carried set
+    const late = createSymbol("chair", 2, 2); addSymbol(late); // added AFTER down
+    roomOnSelectMove(120, 80); // dx=+1
+    roomOnSelectUp(120, 80);
+    // Late symbol was not in the snapshot → unchanged.
+    expect(late.x).toBe(2);
+    expect(late.y).toBe(2);
+    roomClearSelection();
+  });
+});
+
+describe("LLD 63 — roomTool: rigid move + grid snap of reference vertex", () => {
+  it("dragging the room interior translates all verts rigidly (free follow, snap off)", () => {
+    _resetRoomTool();
+    setGridSnap(false);
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    // Off-grid room so we can prove rigidity.
+    model.rooms.push({ id: "mv0", closed: true, verts: [
+      { x: 0.3, y: 0.7 }, { x: 4.3, y: 0.7 }, { x: 4.3, y: 3.7 }, { x: 0.3, y: 3.7 },
+    ]});
+    const areaBefore = polygonArea(model.rooms[0].verts);
+    // Down at world(2,2)=screen(80,80); the reference vertex is verts[0]=(0.3,0.7).
+    roomOnSelectDown(80, 80);
+    // Move pointer to world(3.5,2.5)=screen(140,100): pointer delta (1.5,0.5).
+    roomOnSelectMove(140, 100);
+    roomOnSelectUp(140, 100);
+    const r = model.rooms[0];
+    // Rigid: shape preserved (area unchanged), all verts shifted by (1.5,0.5).
+    expect(r.verts[0].x).toBeCloseTo(1.8, 9);
+    expect(r.verts[0].y).toBeCloseTo(1.2, 9);
+    expect(r.verts[2].x).toBeCloseTo(5.8, 9);
+    expect(polygonArea(r.verts)).toBeCloseTo(areaBefore, 9);
+    roomClearSelection();
+  });
+
+  it("grid snap ON lands reference vertex (verts[0]) on a grid multiple", () => {
+    _resetRoomTool();
+    setGridSnap(true);
+    setSnapMode(0.25); // fixed 0.25m step (zoom-independent, a valid SNAP_PRESET)
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    // Off-grid room; reference vertex verts[0] = (0.3, 0.7).
+    model.rooms.push({ id: "mv1", closed: true, verts: [
+      { x: 0.3, y: 0.7 }, { x: 4.3, y: 0.7 }, { x: 4.3, y: 3.7 }, { x: 0.3, y: 3.7 },
+    ]});
+    // Grab at world(2,2)=screen(80,80). Offset from ref = (1.7, 1.3).
+    roomOnSelectDown(80, 80);
+    // Move to pointer world(2.15,2.1)=screen(86,84):
+    //   raw ref target = (2.15-1.7, 2.1-1.3) = (0.45, 0.8) — OFF grid.
+    //   snap to 0.25 → (round(1.8)*0.25, round(3.2)*0.25) = (0.5, 0.75).
+    roomOnSelectMove(86, 84);
+    roomOnSelectUp(86, 84);
+    const r = model.rooms[0];
+    // verts[0] snapped ONTO a 0.25 multiple (proves snap fired: 0.45→0.5, 0.8→0.75).
+    expect(r.verts[0].x).toBeCloseTo(0.5, 9);
+    expect(r.verts[0].y).toBeCloseTo(0.75, 9);
+    // Rigid: opposite corner shifted by the same delta (0.2, 0.05).
+    expect(r.verts[2].x).toBeCloseTo(4.5, 9);
+    expect(r.verts[2].y).toBeCloseTo(3.75, 9);
+    setSnapMode("off");
+    roomClearSelection();
+  });
+
+  it("Down on empty canvas returns false (no selection); open/degenerate rooms not selectable", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+
+    // Open polyline (closed:false) + a closed room far away.
+    model.rooms.push({ id: "op0", closed: false, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 },
+    ]});
+    // Click at world(2,2)=screen(80,80): interior of the polyline bbox but it's OPEN.
+    expect(roomOnSelectDown(80, 80)).toBe(false);
+    expect(roomHasSelection()).toBe(false);
+    roomClearSelection();
+  });
+
+  it("overlapping rooms: last matching closed room wins (topmost draw order)", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+    // Two rooms sharing the interior at world(2,2).
+    model.rooms.push({ id: "ov-under", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    model.rooms.push({ id: "ov-over", closed: true, verts: [
+      { x: 1, y: 1 }, { x: 3, y: 1 }, { x: 3, y: 3 }, { x: 1, y: 3 },
+    ]});
+    roomOnSelectDown(80, 80); // world(2,2) inside both → last one wins
+    expect(roomGetSelectedRoomId()).toBe("ov-over");
+    roomClearSelection();
+  });
+
+  it("onDrawModeEnter + onTapEmpty clear the room selection", () => {
+    _resetRoomTool();
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    roomSetClearSymbolSelection(() => {});
+    initRoomTool({ stage: document.createElement("div") });
+    model.rooms.push({ id: "clr0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    roomOnSelectDown(80, 80);
+    expect(roomHasSelection()).toBe(true);
+    roomOnDrawModeEnter();
+    expect(roomHasSelection()).toBe(false);
+    // Re-select then tap empty.
+    roomOnSelectDown(80, 80);
+    expect(roomHasSelection()).toBe(true);
+    roomOnTapEmpty();
+    expect(roomHasSelection()).toBe(false);
+  });
+});
+
+describe("LLD 63 — selection mutex (room ↔ symbol, the HIGH fix)", () => {
+  // Model the dispatcher directly: symbols win ties; picking one clears the other.
+  // (The dispatcher itself lives in main.js and isn't unit-reachable, so we call
+  //  the tool APIs the way main.js wires them.)
+  function _wireMutex() {
+    // roomTool clears symbol selection on its own room-hit success path.
+    roomSetClearSymbolSelection(symClearSelectionMutex);
+  }
+
+  it("select symbol → select room: room is selected, symbol deselected", () => {
+    _resetRoomTool();
+    // Init both tools with stub DOM.
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolToolMutex({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    initRoomTool({ stage: document.createElement("div") });
+    _wireMutex();
+
+    // A room covering the interior, and a symbol at (2,2) inside it.
+    model.rooms.push({ id: "mx0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    const sym = createSymbol("chair", 2, 2); addSymbol(sym);
+
+    // First select the symbol (screen 80,80 = world 2,2).
+    expect(symOnSelectDownMutex(80, 80)).toBe(true);
+    expect(symHasSelectionMutex()).toBe(true);
+
+    // Now click bare room floor away from the symbol. Symbol is 'chair' (~0.45m)
+    // centered at (2,2); click at world(0.3,0.3)=screen(12,12) misses the symbol.
+    // Emulate the dispatcher: symbols try first, miss, then roomTool consumes.
+    const symConsumed = symOnSelectDownMutex(12, 12);
+    expect(symConsumed).toBe(false);
+    const roomConsumed = roomOnSelectDown(12, 12);
+    expect(roomConsumed).toBe(true);
+
+    // The room is selected; the symbol was cleared by the injected mutex.
+    expect(roomGetSelectedRoomId()).toBe("mx0");
+    expect(symHasSelectionMutex()).toBe(false);
+    roomClearSelection();
+    symClearSelectionMutex();
+  });
+
+  it("select room → select symbol: symbol is selected, room deselected (dispatcher order)", () => {
+    _resetRoomTool();
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolToolMutex({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    initRoomTool({ stage: document.createElement("div") });
+    _wireMutex();
+
+    model.rooms.push({ id: "mx1", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    const sym = createSymbol("chair", 2, 2); addSymbol(sym);
+
+    // Select the room first (click bare floor at world 0.3,0.3).
+    expect(roomOnSelectDown(12, 12)).toBe(true);
+    expect(roomHasSelection()).toBe(true);
+
+    // Now click the symbol. Dispatcher: symbolTool tries first and consumes;
+    // main.js then calls roomClearSelection() (the mutex on a symbol hit).
+    const symConsumed = symOnSelectDownMutex(80, 80); // world(2,2) hits the chair
+    expect(symConsumed).toBe(true);
+    roomClearSelection(); // dispatcher does this on a symbol hit
+    expect(symHasSelectionMutex()).toBe(true);
+    expect(roomHasSelection()).toBe(false);
+    expect(roomGetSelectedRoomId()).toBe(null);
+    roomClearSelection();
+    symClearSelectionMutex();
+  });
+
+  it("dock-drop placement (selectSymbol, bypasses dispatcher) still clears the room selection", () => {
+    // Regression for the mutex gap: dock drag-drop calls selectSymbol() directly,
+    // NOT through the main.js dispatcher, so the reverse injection
+    // (setClearRoomSelection) must fire from inside selectSymbol — otherwise a
+    // room stays selected under the just-placed symbol (dual selection footgun).
+    _resetRoomTool();
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolToolMutex({ stage: document.createElement("div"), dock, inspector: insp, setTool: () => {}, isDrawMode: () => false });
+    roomSetHistoryAndToast({ commit: () => {} }, () => {});
+    initRoomTool({ stage: document.createElement("div") });
+    _wireMutex();
+    // Wire the REVERSE injection the way main.js does.
+    symSetClearRoomSelectionMutex(roomClearSelection);
+
+    model.rooms.push({ id: "mx2", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+
+    // Select the room first.
+    expect(roomOnSelectDown(12, 12)).toBe(true);
+    expect(roomHasSelection()).toBe(true);
+
+    // Simulate a dock drop landing inside the room: selectSymbol directly.
+    const dropped = createSymbol("chair", 2, 2); addSymbol(dropped);
+    symSelectSymbolMutex(dropped.id);
+
+    // The placed symbol is selected AND the room selection was dropped by the mutex.
+    expect(symHasSelectionMutex()).toBe(true);
+    expect(roomHasSelection()).toBe(false);
+    expect(roomGetSelectedRoomId()).toBe(null);
+    roomClearSelection();
+    symClearSelectionMutex();
   });
 });
 
