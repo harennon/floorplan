@@ -12,7 +12,7 @@
  */
 
 import { fmtLen, parseLen, onChange as onUnitChange } from "./units.js";
-import { model, edgeLength, rescaleEdge } from "./walls.js";
+import { model, edgeLength, rescaleEdge, isRectangle, rescaleRectEdge } from "./walls.js";
 import { scheduleRender } from "./surface.js";
 import { worldToScreen } from "./view.js";
 
@@ -195,7 +195,13 @@ export function commit() {
     return;
   }
 
-  const ok = rescaleEdge(room, _editing.edgeIndex, targetM);
+  // Rectangle-preserving resize when the room is a rectangle (LLD 63): grow/shrink
+  // along the edited wall's direction so all four angles stay 90°. Non-rectangular
+  // rooms keep the unchanged single-corner rescaleEdge (its MCP set_edge_length
+  // contract must not change).
+  const ok = isRectangle(room)
+    ? rescaleRectEdge(room, _editing.edgeIndex, targetM)
+    : rescaleEdge(room, _editing.edgeIndex, targetM);
   if (!ok) {
     // Too-small target or degenerate edge
     _input.setAttribute("aria-invalid", "true");
