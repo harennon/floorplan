@@ -1826,8 +1826,8 @@ const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshel
                      "nightstand", "dresser", "cabinet"];
 
 describe("LLD-45 — catalog integrity: all new types present and valid", () => {
-  it("every new type exists in CATALOG with a valid category (updated by LLD-50)", () => {
-    const VALID_CATS = new Set(["openings", "living", "kitchen", "bedroom", "bath"]);
+  it("every new type exists in CATALOG with a valid category (updated by LLD-50/LLD-76)", () => {
+    const VALID_CATS = new Set(["openings", "living", "kitchen", "bedroom", "bath", "outdoor"]);
     for (const t of LLD45_TYPES) {
       if (!(t in CATALOG)) throw new Error(`${t} missing from CATALOG`);
       if (!VALID_CATS.has(CATALOG[t].category)) throw new Error(`${t} has invalid category:'${CATALOG[t].category}'`);
@@ -8829,8 +8829,8 @@ import { initDockTabs, setActiveCategory } from "../src/js/dockTabs.js";
 
 // ─── LLD-50 — catalog taxonomy integrity ─────────────────────────────────────
 
-describe("LLD-50 — catalog: every entry has a valid 5-value category", () => {
-  const VALID_CATS = new Set(["openings", "living", "kitchen", "bedroom", "bath"]);
+describe("LLD-50 — catalog: every entry has a valid category", () => {
+  const VALID_CATS = new Set(["openings", "living", "kitchen", "bedroom", "bath", "outdoor"]);
 
   it("no entry retains the old 'furniture' category", () => {
     for (const [type, entry] of Object.entries(CATALOG)) {
@@ -8840,7 +8840,7 @@ describe("LLD-50 — catalog: every entry has a valid 5-value category", () => {
     }
   });
 
-  it("every category value is one of the 5 valid values", () => {
+  it("every category value is one of the valid values", () => {
     for (const [type, entry] of Object.entries(CATALOG)) {
       if (!VALID_CATS.has(entry.category)) {
         throw new Error(`${type} has invalid category:"${entry.category}"`);
@@ -8957,8 +8957,8 @@ function _makeDockDOM() {
   tablist.setAttribute("role", "tablist");
   tablist.className = "dock-tabs";
 
-  const categories = ["openings", "living", "kitchen", "bedroom", "bath"];
-  const tabLabels  = { openings: "Openings", living: "Living", kitchen: "Kitchen", bedroom: "Bedroom", bath: "Bath" };
+  const categories = ["openings", "living", "kitchen", "bedroom", "bath", "outdoor"];
+  const tabLabels  = { openings: "Openings", living: "Living", kitchen: "Kitchen", bedroom: "Bedroom", bath: "Bath", outdoor: "Outdoor" };
   // Item types per category (matching CATALOG)
   const itemsByCategory = {
     openings: ["door", "window"],
@@ -8966,6 +8966,7 @@ function _makeDockDOM() {
     kitchen:  ["fridge", "stove", "sink", "washer"],
     bedroom:  ["bed", "wardrobe", "nightstand", "dresser", "cabinet"],
     bath:     ["toilet", "bathtub"],
+    outdoor:  ["patio-table", "patio-chair", "parasol", "planter"],
   };
 
   for (let i = 0; i < categories.length; i++) {
@@ -9010,18 +9011,18 @@ function _removeDockDOM(dock) {
 }
 
 describe("LLD-50 — dock tabs: structure integrity", () => {
-  it("dock has exactly 5 tabs (one per category)", () => {
+  it("dock has exactly 6 tabs (one per category)", () => {
     const dock = _makeDockDOM();
     const tabs = dock.querySelectorAll("[role='tab'][data-category]");
     _removeDockDOM(dock);
-    expect(tabs.length).toBe(5);
+    expect(tabs.length).toBe(6);
   });
 
-  it("dock has exactly 5 tabpanel rows (one per category)", () => {
+  it("dock has exactly 6 tabpanel rows (one per category)", () => {
     const dock = _makeDockDOM();
     const rows = dock.querySelectorAll("[role='tabpanel'][data-category]");
     _removeDockDOM(dock);
-    expect(rows.length).toBe(5);
+    expect(rows.length).toBe(6);
   });
 
   it("union of all dock-item[data-type] equals the catalog keys", () => {
@@ -9081,7 +9082,7 @@ describe("LLD-50 — dock tabs: initial state after initDockTabs", () => {
 });
 
 describe("LLD-50 — dock tabs: setActiveCategory", () => {
-  it("setActiveCategory('kitchen') shows only kitchen row, hides other four", () => {
+  it("setActiveCategory('kitchen') shows only kitchen row, hides other five", () => {
     const dock = _makeDockDOM();
     initDockTabs(dock);
     setActiveCategory(dock, "kitchen");
@@ -9092,8 +9093,8 @@ describe("LLD-50 — dock tabs: setActiveCategory", () => {
     if (visibleRows.length !== 1 || visibleRows[0].dataset.category !== "kitchen") {
       throw new Error(`Expected only kitchen row visible, got: ${visibleRows.map(r => r.dataset.category).join(", ")}`);
     }
-    if (hiddenRows.length !== 4) {
-      throw new Error(`Expected 4 hidden rows, got ${hiddenRows.length}`);
+    if (hiddenRows.length !== 5) {
+      throw new Error(`Expected 5 hidden rows, got ${hiddenRows.length}`);
     }
   });
 
@@ -9109,10 +9110,10 @@ describe("LLD-50 — dock tabs: setActiveCategory", () => {
     }
   });
 
-  it("setActiveCategory cycles through all 5 categories correctly", () => {
+  it("setActiveCategory cycles through all 6 categories correctly", () => {
     const dock = _makeDockDOM();
     initDockTabs(dock);
-    for (const cat of ["openings", "living", "kitchen", "bedroom", "bath"]) {
+    for (const cat of ["openings", "living", "kitchen", "bedroom", "bath", "outdoor"]) {
       setActiveCategory(dock, cat);
       const rows = Array.from(dock.querySelectorAll("[role='tabpanel']"));
       const visible = rows.filter(r => !r.hasAttribute("hidden"));
@@ -12413,6 +12414,251 @@ describe("LLD 63 — selection mutex (room ↔ symbol, the HIGH fix)", () => {
   });
 });
 
+
+// ─── LLD 76: Outdoor/patio category ──────────────────────────────────────────
+
+const LLD76_TYPES = ["patio-table", "patio-chair", "parasol", "planter"];
+
+describe("LLD 76 — catalog integrity: patio-table, patio-chair, parasol, planter", () => {
+  it("all four types exist in CATALOG", () => {
+    for (const t of LLD76_TYPES) {
+      if (!(t in CATALOG)) throw new Error(`${t} missing from CATALOG`);
+    }
+  });
+
+  it("all four have category 'outdoor'", () => {
+    for (const t of LLD76_TYPES) {
+      if (CATALOG[t].category !== "outdoor") {
+        throw new Error(`${t}.category should be 'outdoor', got '${CATALOG[t].category}'`);
+      }
+    }
+  });
+
+  it("all four have non-empty label", () => {
+    for (const t of LLD76_TYPES) {
+      const label = CATALOG[t].label;
+      if (!label || label.trim() === "") throw new Error(`${t} has empty label`);
+    }
+  });
+
+  it("all four have finite w, h, min, max", () => {
+    for (const t of LLD76_TYPES) {
+      const cat = CATALOG[t];
+      for (const key of ["w", "h", "min", "max"]) {
+        if (!isFinite(cat[key])) throw new Error(`${t}.${key} is not finite: ${cat[key]}`);
+      }
+    }
+  });
+
+  it("min <= w <= max and min <= h <= max for all four", () => {
+    for (const t of LLD76_TYPES) {
+      const { w, h, min, max } = CATALOG[t];
+      if (w < min || w > max) throw new Error(`${t}: w=${w} not in [${min},${max}]`);
+      if (h < min || h > max) throw new Error(`${t}: h=${h} not in [${min},${max}]`);
+    }
+  });
+
+  it("none of the four has openings:true", () => {
+    for (const t of LLD76_TYPES) {
+      if (CATALOG[t].openings) throw new Error(`${t} unexpectedly has openings:true`);
+    }
+  });
+
+  it("spot-check: CATALOG['patio-table'].category === 'outdoor'", () => {
+    expect(CATALOG["patio-table"].category).toBe("outdoor");
+  });
+
+  it("spot-check: CATALOG['patio-chair'].category === 'outdoor'", () => {
+    expect(CATALOG["patio-chair"].category).toBe("outdoor");
+  });
+
+  it("spot-check: CATALOG['parasol'].category === 'outdoor'", () => {
+    expect(CATALOG["parasol"].category).toBe("outdoor");
+  });
+
+  it("spot-check: CATALOG['planter'].category === 'outdoor'", () => {
+    expect(CATALOG["planter"].category).toBe("outdoor");
+  });
+});
+
+describe("LLD 76 — createSymbol: new types return correct Sym", () => {
+  it("createSymbol returns correct type, catalog defaults, rot:0, and string id", () => {
+    resetSymbolModel();
+    for (const t of LLD76_TYPES) {
+      const s = createSymbol(t, 1, 2);
+      if (s.type !== t) throw new Error(`${t}: type mismatch`);
+      if (Math.abs(s.w - CATALOG[t].w) > 1e-9) throw new Error(`${t}: w mismatch`);
+      if (Math.abs(s.h - CATALOG[t].h) > 1e-9) throw new Error(`${t}: h mismatch`);
+      if (s.rot !== 0) throw new Error(`${t}: rot should be 0`);
+      if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(`${t}: invalid id ${s.id}`);
+    }
+  });
+});
+
+describe("LLD 76 — clampDim: new types clamp at min and max", () => {
+  it("patio-table: clampDim below min clamps to min", () => {
+    const { min } = CATALOG["patio-table"];
+    expect(clampDim("patio-table", min - 0.1)).toBeCloseTo(min, 9);
+  });
+
+  it("patio-table: clampDim above max clamps to max", () => {
+    const { max } = CATALOG["patio-table"];
+    expect(clampDim("patio-table", max + 1)).toBeCloseTo(max, 9);
+  });
+
+  it("parasol: clampDim below min clamps to min", () => {
+    const { min } = CATALOG["parasol"];
+    expect(clampDim("parasol", min - 0.1)).toBeCloseTo(min, 9);
+  });
+
+  it("parasol: clampDim above max clamps to max", () => {
+    const { max } = CATALOG["parasol"];
+    expect(clampDim("parasol", max + 1)).toBeCloseTo(max, 9);
+  });
+
+  it("planter: clampDim below min clamps to min", () => {
+    const { min } = CATALOG["planter"];
+    expect(clampDim("planter", min - 0.1)).toBeCloseTo(min, 9);
+  });
+
+  it("planter: clampDim above max clamps to max", () => {
+    const { max } = CATALOG["planter"];
+    expect(clampDim("planter", max + 1)).toBeCloseTo(max, 9);
+  });
+});
+
+describe("LLD 76 — resizeSymbol: new types clamp on huge/tiny inputs", () => {
+  it("patio-table w huge clamps to max, returns changed=true", () => {
+    const s = createSymbol("patio-table", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG["patio-table"].max, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("patio-table h tiny clamps to min, returns changed=true", () => {
+    const s = createSymbol("patio-table", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG["patio-table"].min, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("parasol w huge clamps to max, returns changed=true", () => {
+    const s = createSymbol("parasol", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG["parasol"].max, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("planter h tiny clamps to min, returns changed=true", () => {
+    const s = createSymbol("planter", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG["planter"].min, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("in-range value unchanged, returns changed=false", () => {
+    const s = createSymbol("parasol", 0, 0);
+    const orig = s.w;
+    const changed = resizeSymbol(s, "w", orig);
+    expect(changed).toBe(false);
+    expect(s.w).toBeCloseTo(orig, 9);
+  });
+});
+
+describe("LLD 76 — dock: outdoor row contains all four outdoor types", () => {
+  it("outdoor row has 4 dock-item buttons: patio-table, patio-chair, parasol, planter", () => {
+    const dock = _makeDockDOM();
+    const outdoorRow = dock.querySelector("[role='tabpanel'][data-category='outdoor']");
+    if (!outdoorRow) { _removeDockDOM(dock); throw new Error("No outdoor tabpanel row found"); }
+    const items = Array.from(outdoorRow.querySelectorAll(".dock-item[data-type]"));
+    const types = items.map(b => b.dataset.type);
+    _removeDockDOM(dock);
+    if (types.length !== 4) throw new Error(`Expected 4 outdoor items, got ${types.length}: ${types.join(", ")}`);
+    for (const t of LLD76_TYPES) {
+      if (!types.includes(t)) throw new Error(`Missing type '${t}' in outdoor row`);
+    }
+  });
+
+  it("each outdoor button has a descriptive aria-label", () => {
+    const dock = _makeDockDOM();
+    const outdoorRow = dock.querySelector("[role='tabpanel'][data-category='outdoor']");
+    if (!outdoorRow) { _removeDockDOM(dock); throw new Error("No outdoor tabpanel row found"); }
+    for (const t of LLD76_TYPES) {
+      const btn = outdoorRow.querySelector(`[data-type="${t}"]`);
+      if (!btn) { _removeDockDOM(dock); throw new Error(`No button for ${t} in outdoor row`); }
+      const label = btn.getAttribute("aria-label");
+      if (!label || label.trim() === "") {
+        _removeDockDOM(dock);
+        throw new Error(`${t} button missing aria-label`);
+      }
+    }
+    _removeDockDOM(dock);
+  });
+
+  it("setActiveCategory('outdoor') shows only outdoor row, hides other five", () => {
+    const dock = _makeDockDOM();
+    initDockTabs(dock);
+    setActiveCategory(dock, "outdoor");
+    const rows = Array.from(dock.querySelectorAll("[role='tabpanel']"));
+    const visibleRows = rows.filter(r => !r.hasAttribute("hidden"));
+    const hiddenRows  = rows.filter(r =>  r.hasAttribute("hidden"));
+    _removeDockDOM(dock);
+    if (visibleRows.length !== 1 || visibleRows[0].dataset.category !== "outdoor") {
+      throw new Error(`Expected only outdoor row visible, got: ${visibleRows.map(r => r.dataset.category).join(", ")}`);
+    }
+    if (hiddenRows.length !== 5) {
+      throw new Error(`Expected 5 hidden rows, got ${hiddenRows.length}`);
+    }
+  });
+
+  it("setActiveCategory('outdoor') sets aria-selected='true' only on outdoor tab", () => {
+    const dock = _makeDockDOM();
+    initDockTabs(dock);
+    setActiveCategory(dock, "outdoor");
+    const tabs = Array.from(dock.querySelectorAll("[role='tab']"));
+    const selectedTabs = tabs.filter(t => t.getAttribute("aria-selected") === "true");
+    _removeDockDOM(dock);
+    if (selectedTabs.length !== 1 || selectedTabs[0].dataset.category !== "outdoor") {
+      throw new Error(`Expected outdoor tab selected only, got: ${selectedTabs.map(t => t.dataset.category).join(", ")}`);
+    }
+  });
+});
+
+describe("LLD 76 — round-trip: outdoor types survive serialize→validate", () => {
+  it("plan with all four outdoor types passes validatePlan", () => {
+    resetSymbolModel();
+    for (const t of LLD76_TYPES) addSymbol(createSymbol(t, 1, 1));
+    const plan = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(plan)));
+    if (!v) throw new Error("validatePlan rejected plan with LLD-76 types");
+    resetSymbolModel();
+  });
+
+  it("parasol survives serializePlan → JSON.parse → validatePlan with type intact", () => {
+    resetSymbolModel();
+    const s = createSymbol("parasol", 3, 4);
+    addSymbol(s);
+    const json = serializePlan(buildPlan());
+    const v = validatePlan(JSON.parse(json));
+    if (!v) throw new Error("validatePlan rejected re-parsed plan with parasol");
+    if (v.symbols.symbols[0].type !== "parasol") {
+      throw new Error("parasol type lost after round-trip");
+    }
+    resetSymbolModel();
+  });
+
+  it("plan with outdoor types serializes and re-validates (all 4 new types)", () => {
+    resetSymbolModel();
+    for (const t of LLD76_TYPES) addSymbol(createSymbol(t, 0, 0));
+    const json = serializePlan(buildPlan());
+    const v = validatePlan(JSON.parse(json));
+    if (!v) throw new Error("validatePlan rejected plan after serialize of all outdoor types");
+    if (v.symbols.symbols.length !== LLD76_TYPES.length) {
+      throw new Error(`Expected ${LLD76_TYPES.length} symbols, got ${v.symbols.symbols.length}`);
+    }
+    resetSymbolModel();
+  });
+});
 
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results

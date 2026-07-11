@@ -13,9 +13,10 @@
 /** @typedef {"door"|"window"|"bed"|"sofa"|"table"|"chair"|"desk"|"fridge"
  *   |"toilet"|"bathtub"|"sink"|"stove"|"wardrobe"|"bookshelf"|"tv"|"washer"
  *   |"armchair"|"coffee-table"|"dining-table-round"
- *   |"nightstand"|"dresser"|"cabinet"} SymbolType */
+ *   |"nightstand"|"dresser"|"cabinet"
+ *   |"patio-table"|"patio-chair"|"parasol"|"planter"} SymbolType */
 /** @typedef {{ id:string, type:SymbolType, x:number, y:number, w:number, h:number, rot:number }} Sym */
-/** @typedef {"openings"|"living"|"kitchen"|"bedroom"|"bath"} SymCategory */
+/** @typedef {"openings"|"living"|"kitchen"|"bedroom"|"bath"|"outdoor"} SymCategory */
 
 // ── In-memory model ───────────────────────────────────────────────────────────
 
@@ -58,6 +59,10 @@ export const CATALOG = {
   cabinet:    { label: "Cabinet",    category: "bedroom", w: 0.90, h: 0.40, min: 0.30, max: 2.50 },
   toilet:    { label: "Toilet",    category: "bath",     w: 0.40, h: 0.70, min: 0.30, max: 1.00 },
   bathtub:   { label: "Bathtub",   category: "bath",     w: 1.70, h: 0.75, min: 0.30, max: 2.20 },
+  "patio-table": { label: "Patio Table", category: "outdoor", w: 0.90, h: 0.90, min: 0.40, max: 2.00 },
+  "patio-chair": { label: "Patio Chair", category: "outdoor", w: 0.65, h: 0.70, min: 0.40, max: 1.10 },
+  parasol:       { label: "Parasol",     category: "outdoor", w: 2.00, h: 2.00, min: 0.90, max: 3.50 },
+  planter:       { label: "Planter",     category: "outdoor", w: 0.50, h: 0.50, min: 0.20, max: 1.50 },
 };
 
 // ── CRUD ───────────────────────────────────────────────────────────────────────
