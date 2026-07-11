@@ -3,6 +3,12 @@
 > **Status: RESEARCH / DESIGN.** This LLD maps each auto-checkable design rule to a
 > concrete formula and a concrete MCP surface, weighs options, and recommends a scope +
 > phasing. It does **not** authorize implementation; a human picks a phase to build.
+>
+> **Extended by [LLD 72a](72a-phase1-interior-design-skill-plan.md)** — Phase 1's skill
+> is modularized (a common core + per-room-type reference files) and its scope is expanded
+> from this doc's living/bedroom focus to four room-type contexts (living, kitchen, bedroom,
+> gaming). 72a supersedes this doc's flat-`SKILL.md` packaging (rule content carried over
+> verbatim) and records the kitchen/gaming expansion.
 
 ## Scope
 
