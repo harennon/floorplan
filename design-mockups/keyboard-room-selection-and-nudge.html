@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Keyboard room selection + arrow-key nudge — mockup (LLD 63 follow-up)</title>
+<style>
+/* ── palette (mirrors src/js/theme.js dark blueprint) ── */
+:root{
+  --bg:#14140f; --bg-deep:#100f0b; --ink:#ece7d6; --muted:#8f8a78;
+  --gold:#c9a84c; --wall-line:#d9be6e; --wall-line-hi:#e8cf7a;
+  --room-fill:rgba(201,168,76,0.07); --room-fill-hi:rgba(201,168,76,0.15);
+  --snap-grid:#7fd0c8; --snap-point:#e0b64f; --snap-close:#9cd67a;
+  --panel:#1b1b14; --panel-line:rgba(217,190,110,0.16);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg); color:var(--ink); font-family:var(--font);
+  font-size:14px; line-height:1.45; overflow:hidden;
+}
+
+/* ── page scaffold ── */
+.wrap{max-width:1180px;margin:0 auto;height:100%;display:flex;flex-direction:column;padding:20px 22px}
+header.doc{flex:0 0 auto;padding-bottom:14px;border-bottom:1px solid var(--panel-line)}
+header.doc h1{font-size:17px;margin:0 0 3px;letter-spacing:.2px}
+header.doc h1 b{color:var(--snap-point)}
+header.doc p{margin:0;color:var(--muted);font-size:12.5px}
+.tag{display:inline-block;font:600 10px/1 var(--mono);color:var(--bg);
+  background:var(--snap-point);padding:3px 6px;border-radius:4px;vertical-align:1px;margin-right:6px}
+
+.scenes{flex:1 1 auto;overflow-y:auto;padding:16px 2px 40px;display:flex;flex-direction:column;gap:26px}
+.scene{display:flex;flex-direction:column;gap:9px}
+.scene-hd{display:flex;align-items:baseline;gap:10px}
+.scene-hd .n{font:700 11px/1 var(--mono);color:var(--snap-point);
+  border:1px solid var(--snap-point);border-radius:50%;width:22px;height:22px;
+  display:grid;place-items:center;flex:0 0 auto}
+.scene-hd h2{font-size:13.5px;margin:0}
+.scene-hd .desc{color:var(--muted);font-size:12px;margin-left:auto;text-align:right;max-width:46%}
+
+/* ── the editor mock: canvas + measure panel side by side ── */
+.editor{display:grid;grid-template-columns:1fr 236px;gap:14px;
+  border:1px solid var(--panel-line);border-radius:10px;overflow:hidden;background:var(--bg-deep)}
+.canvas{position:relative;min-height:280px}
+.canvas svg{display:block;width:100%;height:100%}
+.hint{position:absolute;left:12px;bottom:11px;font:12px/1.3 var(--mono);
+  color:var(--muted);background:rgba(20,20,15,.72);border:1px solid var(--panel-line);
+  padding:6px 9px;border-radius:6px;max-width:62%}
+.hint b{color:var(--ink)}
+kbd{font:600 11px/1 var(--mono);color:var(--ink);background:#26261c;
+  border:1px solid var(--panel-line);border-bottom-width:2px;border-radius:4px;
+  padding:2px 5px;display:inline-block;min-width:15px;text-align:center}
+
+/* toast (nudge/selection feedback) */
+.toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+  font:12px/1 var(--mono);color:var(--ink);background:rgba(27,27,20,.94);
+  border:1px solid var(--panel-line);padding:8px 12px;border-radius:7px;white-space:nowrap}
+.toast.gold{border-color:var(--snap-point);color:var(--snap-point)}
+
+/* ── measure panel (mirrors .measure in the real app) ── */
+.measure{background:var(--panel);border-left:1px solid var(--panel-line);
+  display:flex;flex-direction:column;font-size:12.5px}
+.measure-hd{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--panel-line)}
+.measure-hd .t{font-weight:600;letter-spacing:.3px}
+.measure-hd .badge{margin-left:auto;font:600 9.5px/1 var(--mono);color:var(--muted);
+  border:1px solid var(--panel-line);border-radius:4px;padding:3px 5px}
+.measure-total{padding:9px 12px;color:var(--muted);border-bottom:1px solid var(--panel-line)}
+.measure-total b{color:var(--ink);font-family:var(--mono)}
+.measure-list{padding:6px}
+.measure-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;
+  padding:8px 9px;border-radius:6px;cursor:pointer;outline:none;
+  border:1px solid transparent;transition:background .12s,border-color .12s}
+.measure-row .lbl{font-weight:600}
+.measure-row .area{font-family:var(--mono);text-align:right}
+.measure-row .perim{grid-column:1/3;color:var(--muted);font-family:var(--mono);font-size:11px}
+.measure-row:hover{background:var(--room-fill-hi)}
+/* keyboard-focused row: the NEW entry point */
+.measure-row.focus{border-color:var(--snap-point);
+  background:rgba(224,182,79,.12);box-shadow:0 0 0 1px rgba(224,182,79,.35) inset}
+.measure-row.focus .lbl::after{content:"◂ selected";font:600 10px var(--mono);
+  color:var(--snap-point);margin-left:8px;letter-spacing:.3px}
+
+/* legend / callouts */
+.notes{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:12px;color:var(--muted)}
+.notes .k{color:var(--ink)}
+.chip{display:inline-flex;align-items:center;gap:6px}
+.sw{width:12px;height:12px;border-radius:3px;flex:0 0 auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="doc">
+    <h1><span class="tag">LLD 63 ▸</span>Keyboard room selection <b>+</b> arrow-key nudge</h1>
+    <p>Follow-up to LLD 63 (pointer-only room move) — mirrors LLD 54, which added keyboard nudge after the pointer-only symbol select of LLD 21. No new chrome: the existing <b>Measure panel</b> becomes the keyboard entry point; arrows nudge exactly like symbols.</p>
+  </header>
+  <div class="scenes" id="scenes"></div>
+</div>
+
+<script>
+// ── tiny SVG floor-plan renderer shared by every scene ────────────────────────
+// World coords are in "grid cells" (~0.5 m each); we map to a 520x300 viewBox.
+const VB = {w:520, h:300};
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs){ const e=document.createElementNS(NS,tag);
+  for(const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+
+// A room = {id, label, pts:[[x,y]...], area, perim}
+// state.sel = selected room id (null); state.dx/dy = nudge offset applied to sel room
+function drawPlan(svg, rooms, state){
+  state = state || {};
+  svg.setAttribute("viewBox", `0 0 ${VB.w} ${VB.h}`);
+  svg.innerHTML = "";
+  // graph-paper grid
+  const grid = el("g", {opacity:"0.5"});
+  for(let x=0;x<=VB.w;x+=20) grid.appendChild(el("line",{x1:x,y1:0,x2:x,y2:VB.h,stroke:"var(--snap-grid)","stroke-width":x%100===0?"0.6":"0.3",opacity:x%100===0?"0.28":"0.14"}));
+  for(let y=0;y<=VB.h;y+=20) grid.appendChild(el("line",{x1:0,y1:y,x2:VB.w,y2:y,stroke:"var(--snap-grid)","stroke-width":y%100===0?"0.6":"0.3",opacity:y%100===0?"0.28":"0.14"}));
+  svg.appendChild(grid);
+
+  for(const r of rooms){
+    const isSel = state.sel === r.id;
+    let pts = r.pts;
+    if(isSel && (state.dx||state.dy)){
+      // faint ghost of the pre-nudge position
+      const gd = r.pts.map((p,i)=>(i?"L":"M")+p[0]+" "+p[1]).join(" ")+" Z";
+      svg.appendChild(el("path",{d:gd, fill:"none", stroke:"var(--muted)",
+        "stroke-width":"1","stroke-dasharray":"2 4", opacity:"0.6"}));
+      pts = pts.map(([x,y])=>[x+state.dx, y+state.dy]);
+    }
+    const d = pts.map((p,i)=>(i?"L":"M")+p[0]+" "+p[1]).join(" ")+" Z";
+    // room fill
+    svg.appendChild(el("path",{d, fill:isSel?"var(--room-fill-hi)":"var(--room-fill)",
+      stroke:"var(--wall-line)","stroke-width":"3","stroke-linejoin":"round"}));
+    // selection outline: 1.5px dashed gold, just inside the wall (per LLD 63 Frontend Design)
+    if(isSel){
+      svg.appendChild(el("path",{d, fill:"none", stroke:"var(--snap-point)",
+        "stroke-width":"1.5","stroke-dasharray":"6 4","stroke-linejoin":"round"}));
+    }
+    // label at centroid
+    const cx = pts.reduce((s,p)=>s+p[0],0)/pts.length;
+    const cy = pts.reduce((s,p)=>s+p[1],0)/pts.length;
+    const t = el("text",{x:cx,y:cy-4,"text-anchor":"middle",
+      fill:isSel?"var(--snap-point)":"var(--muted)","font-family":"var(--mono)","font-size":"11","font-weight":isSel?"700":"500"});
+    t.textContent = r.label; svg.appendChild(t);
+    const a = el("text",{x:cx,y:cy+11,"text-anchor":"middle",
+      fill:"var(--muted)","font-family":"var(--mono)","font-size":"9"});
+    a.textContent = r.area; svg.appendChild(a);
+  }
+}
+
+// Sample studio plan (bed, bath, living) — used across scenes
+function samplePlan(){
+  return [
+    {id:"r1", label:"Living",  area:"18.4 m²", perim:"17.2 m", pts:[[60,60],[280,60],[280,220],[60,220]]},
+    {id:"r2", label:"Bedroom", area:"11.9 m²", perim:"13.8 m", pts:[[300,60],[460,60],[460,180],[300,180]]},
+    {id:"r3", label:"Bath",    area:"4.2 m²",  perim:"8.4 m",  pts:[[300,200],[400,200],[400,260],[300,260]]},
+  ];
+}
+
+// Build a measure panel DOM node reflecting selection state
+function measurePanel(rooms, selId){
+  const p = document.createElement("div"); p.className="measure";
+  p.innerHTML = `
+    <div class="measure-hd"><span class="t">Measure</span>
+      <span class="badge">Tab ⇆ to cycle</span></div>
+    <div class="measure-total">Total floor area <b>34.5 m²</b></div>
+    <div class="measure-list"></div>`;
+  const list = p.querySelector(".measure-list");
+  rooms.forEach(r=>{
+    const row = document.createElement("div");
+    row.className = "measure-row" + (r.id===selId?" focus":"");
+    row.tabIndex = 0;
+    row.innerHTML = `<span class="lbl">${r.label}</span>
+      <span class="area">${r.area}</span>
+      <span class="perim">perimeter ${r.perim}</span>`;
+    list.appendChild(row);
+  });
+  return p;
+}
+
+// Build one static scene card
+function scene(n, title, desc, {rooms, sel, dx, dy, hint, toast, toastGold}){
+  const s = document.createElement("section"); s.className="scene";
+  const hd = document.createElement("div"); hd.className="scene-hd";
+  hd.innerHTML = `<span class="n">${n}</span><h2>${title}</h2><span class="desc">${desc}</span>`;
+  s.appendChild(hd);
+  const ed = document.createElement("div"); ed.className="editor";
+  const cv = document.createElement("div"); cv.className="canvas";
+  const svg = document.createElementNS(NS,"svg"); cv.appendChild(svg);
+  drawPlan(svg, rooms, {sel, dx, dy});
+  if(hint){ const h=document.createElement("div"); h.className="hint"; h.innerHTML=hint; cv.appendChild(h); }
+  if(toast){ const t=document.createElement("div"); t.className="toast"+(toastGold?" gold":""); t.innerHTML=toast; cv.appendChild(t); }
+  ed.appendChild(cv);
+  ed.appendChild(measurePanel(rooms, sel));
+  s.appendChild(ed);
+  return s;
+}
+
+const scenes = document.getElementById("scenes");
+
+// Scene 1 — nothing selected, resting state
+scenes.appendChild(scene(1,
+  "Resting state — no room selected",
+  "Same editor as today. The Measure panel already lists every closed room; each row is focusable. Now it doubles as the keyboard entry point.",
+  {rooms:samplePlan(), sel:null, dx:0, dy:0,
+   hint:`Press <kbd>Tab</kbd> or click a Measure row to select a room. Then <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> to nudge.`}));
+
+// Scene 2 — Tab / arrow cycling selects a room (focus is the selection)
+scenes.appendChild(scene(2,
+  "Tab / ↑↓ cycles rooms — focus IS selection",
+  "Focusing a Measure row selects that room; the dashed-gold outline (same treatment as pointer-select from LLD 63) appears on canvas. No new list, no new mode.",
+  {rooms:samplePlan(), sel:"r2", dx:0, dy:0,
+   hint:`<b>Bedroom</b> selected via keyboard. Row shows the focus ring; canvas shows the dashed-gold outline. <kbd>↓</kbd> moves to next room, <kbd>⇧</kbd>+<kbd>Tab</kbd> back.`,
+   toast:`Selected <b>Bedroom</b> · 11.9 m²`, toastGold:true}));
+
+// Scene 3 — arrow-key nudge moves the selected room
+scenes.appendChild(scene(3,
+  "Arrow-key nudge — one grid step",
+  "Arrows translate the whole selected room rigidly (walls + carried furniture), reusing LLD 63's moveRoom. Same keys/step as symbol nudge (LLD 54): step = grid step, ⇧ = ×4 coarse.",
+  {rooms:samplePlan(), sel:"r2", dx:40, dy:-20,
+   hint:`<kbd>→</kbd> then <kbd>↑</kbd>: Bedroom shifted one grid step right, one up. Ghost shows original position. A burst of taps = <b>one</b> undo step (400 ms debounce, exactly like symbols).`,
+   toast:`Nudged · <kbd>⌘Z</kbd> to undo the whole move`}));
+
+// Scene 4 — coarse nudge + collision-freeform note
+scenes.appendChild(scene(4,
+  "Coarse nudge (Shift) + freeform overlap",
+  "⇧+arrow moves ×4. Rooms may overlap — the editor is a sketcher, not a solver (matches pointer-drag). Esc / clicking empty canvas / switching to Draw clears the selection.",
+  {rooms:samplePlan(), sel:"r3", dx:-40, dy:-120,
+   hint:`<kbd>⇧</kbd>+<kbd>↑</kbd> nudges <b>Bath</b> a coarse step. Selection survives until <kbd>Esc</kbd> or a tool switch — parallel to symbol behaviour.`}));
+
+// Scene 5 — interactive: real Tab + arrow keys drive the last editor
+const live = document.createElement("section"); live.className="scene";
+live.innerHTML = `<div class="scene-hd"><span class="n">5</span>
+  <h2>Try it — live</h2>
+  <span class="desc">Click the canvas, then use <kbd>Tab</kbd> / <kbd>↑</kbd><kbd>↓</kbd> to select a room and <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> (hold <kbd>⇧</kbd> for coarse) to nudge. <kbd>Esc</kbd> deselects.</span></div>`;
+const ed = document.createElement("div"); ed.className="editor";
+const cv = document.createElement("div"); cv.className="canvas";
+cv.tabIndex = 0; cv.style.cursor="pointer";
+const lsvg = document.createElementNS(NS,"svg"); cv.appendChild(lsvg);
+const lhint = document.createElement("div"); lhint.className="hint";
+lhint.innerHTML = `Focus me, then press <kbd>Tab</kbd>.`;
+cv.appendChild(lhint);
+ed.appendChild(cv);
+const lrooms = samplePlan();
+const S = {sel:null, dx:0, dy:0};
+const mp = measurePanel(lrooms, null);
+ed.appendChild(mp);
+live.appendChild(ed);
+scenes.appendChild(live);
+
+// Add a legend under everything
+const legend = document.createElement("section"); legend.className="scene";
+legend.innerHTML = `<div class="notes">
+  <span class="chip"><span class="sw" style="background:var(--snap-point)"></span><span class="k">Selection outline / focus</span> — dashed gold (LLD 63)</span>
+  <span class="chip"><span class="sw" style="background:var(--wall-line)"></span><span class="k">Walls</span></span>
+  <span class="chip"><span class="sw" style="background:var(--snap-grid);opacity:.5"></span><span class="k">Grid — nudge step</span></span>
+  <span class="chip"><span class="k">Keys mirror LLD 54:</span> arrows = 1 step · ⇧ = ×4 · burst = 1 undo</span>
+</div>`;
+scenes.appendChild(legend);
+
+// ── live interactivity ────────────────────────────────────────────────────────
+let mp2 = mp;
+function render(){
+  drawPlan(lsvg, lrooms, S);
+  // sync measure focus classes without full rebuild
+  const rows = mp2.querySelectorAll(".measure-row");
+  rows.forEach((row,i)=>row.classList.toggle("focus", lrooms[i].id===S.sel));
+  lhint.innerHTML = S.sel
+    ? `<b>${lrooms.find(r=>r.id===S.sel).label}</b> selected · arrows to nudge · <kbd>⇧</kbd> coarse · <kbd>Esc</kbd> deselect`
+    : `Focus me, then press <kbd>Tab</kbd> to select a room.`;
+}
+function wireRows(panel){
+  panel.querySelectorAll(".measure-row").forEach((row,i)=>{
+    row.addEventListener("focus", ()=>{ S.sel=lrooms[i].id; S.dx=0; S.dy=0; render(); });
+    row.addEventListener("click", ()=>{ row.focus(); });
+  });
+}
+wireRows(mp2);
+function step(shift){ return (shift?40:20); } // 20px = one grid cell
+function handle(e){
+  const k=e.key;
+  if(k==="Escape"){ S.sel=null; S.dx=0; S.dy=0; render(); e.preventDefault(); return; }
+  if(k==="Tab"){
+    const idx = lrooms.findIndex(r=>r.id===S.sel);
+    const next = e.shiftKey ? (idx<=0?lrooms.length-1:idx-1) : (idx+1)%lrooms.length;
+    S.sel=lrooms[next].id; S.dx=0; S.dy=0; render(); e.preventDefault(); return;
+  }
+  if(!S.sel) return;
+  const st = step(e.shiftKey); let used=true;
+  if(k==="ArrowUp")         S.dy-=st;
+  else if(k==="ArrowDown")  S.dy+=st;
+  else if(k==="ArrowLeft")  S.dx-=st;
+  else if(k==="ArrowRight") S.dx+=st;
+  else used=false;
+  if(used){ render(); e.preventDefault(); }
+}
+cv.addEventListener("keydown", handle);
+mp2.addEventListener("keydown", handle);
+cv.addEventListener("click", ()=>cv.focus());
+render();
+</script>
+</body>
+</html>
