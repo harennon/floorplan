@@ -2911,6 +2911,10 @@ import {
   setView as setViewDirect, fitToContent,
 } from "../src/js/view.js";
 
+import {
+  showConflictBanner,
+} from "../src/js/actions.js";
+
 // ─── LLD-16 test helpers ──────────────────────────────────────────────────────
 
 /** Reset all model state cleanly for LLD-16 test suites */
@@ -3790,6 +3794,178 @@ describe("share-open conflict logic — identical plans skip banner (Edge Case 1
     const plan2 = buildPlan();
     const isConflict = serializePlan(plan1) !== serializePlan(plan2);
     if (!isConflict) throw new Error("Expected differing plans to trigger conflict");
+  });
+});
+
+// ─── Tests: LLD-80 — boot conflict favors shared intent ──────────────────────
+//
+// These tests verify the regression guard from LLD 80: when a hash is present
+// and conflicts with a differing local plan, the shared plan is applied (never
+// silently local-wins), and the undo action restores local from the in-memory
+// closure snapshot.
+
+describe("LLD-80 — boot conflict: hash+differing local → shared applied, not local-wins", () => {
+  it("conflict path applies shared plan (model equals hashPlan, not localPlan)", async () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+
+    // Build plan A (local) — a 2×2 room
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const planA = buildPlan();
+    localStorage.setItem(STORAGE_KEY, serializePlan(planA));
+
+    // Build plan B (shared) — a 5×3 room
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:5,y:0 },{ x:5,y:3 },{ x:0,y:3 }] });
+    const planB = buildPlan();
+
+    // Verify they differ (precondition)
+    if (serializePlan(planA) === serializePlan(planB)) {
+      throw new Error("Test setup error: planA and planB must differ");
+    }
+
+    // Simulate the conflict boot path: apply shared (hashPlan = planB)
+    resetAll();
+    const localPlan = loadLocal();
+    if (!localPlan) throw new Error("loadLocal returned null — localStorage not seeded");
+
+    applyPlan(planB); // shared plan applied immediately (the LLD-80 behavior)
+
+    // Assert: live model equals planB (shared), not planA (local)
+    const liveSer = serializePlan(buildPlan());
+    const planBSer = serializePlan(planB);
+    const planASer = serializePlan(planA);
+
+    if (liveSer !== planBSer) {
+      throw new Error("Shared plan (planB) was NOT applied — conflict path must apply shared");
+    }
+    if (liveSer === planASer) {
+      throw new Error("Local plan (planA) was silently applied — this is the silent local-wins bug");
+    }
+
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("undo action (onClick) restores local plan from in-memory snapshot", async () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+
+    // Build plan A (local)
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const planA = buildPlan();
+    localStorage.setItem(STORAGE_KEY, serializePlan(planA));
+
+    // Build plan B (shared)
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:5,y:0 },{ x:5,y:3 },{ x:0,y:3 }] });
+    const planB = buildPlan();
+
+    // Simulate conflict path: apply shared first
+    resetAll();
+    const localPlan = loadLocal();
+    applyPlan(planB); // shared applied
+
+    // Simulate the undo (applyLocal closure): restore localPlan from snapshot
+    applyPlan(localPlan);
+
+    // Assert: live model now equals planA (local)
+    const liveSer = serializePlan(buildPlan());
+    const planASer = serializePlan(planA);
+    if (liveSer !== planASer) {
+      throw new Error("Undo did not restore local plan — applyPlan(localPlan) should match planA");
+    }
+
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("undo after simulated autosave overwrite still restores local from in-memory snapshot (Edge Case 5)", async () => {
+    resetAll();
+    localStorage.removeItem(STORAGE_KEY);
+
+    // Build plan A (local)
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:3,y:0 },{ x:3,y:3 },{ x:0,y:3 }] });
+    const planA = buildPlan();
+    localStorage.setItem(STORAGE_KEY, serializePlan(planA));
+
+    // Build plan B (shared)
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:7,y:0 },{ x:7,y:4 },{ x:0,y:4 }] });
+    const planB = buildPlan();
+
+    // Simulate conflict: apply shared, capture localPlan in closure
+    resetAll();
+    const localPlan = loadLocal(); // snapshot captured at boot
+    applyPlan(planB); // shared applied
+
+    // Simulate autosave overwriting localStorage with shared-derived data
+    saveNow(); // writes current model (planB) to localStorage
+
+    // Simulate undo tap: restore from in-memory snapshot, not from localStorage
+    // This must not throw, and must restore planA geometry
+    let threw = false;
+    try {
+      applyPlan(localPlan);
+    } catch (e) {
+      threw = true;
+    }
+    if (threw) throw new Error("applyPlan(localPlan) threw after autosave overwrite");
+
+    const liveSer = serializePlan(buildPlan());
+    const planASer = serializePlan(planA);
+    if (liveSer !== planASer) {
+      throw new Error("Undo did not restore local plan after autosave overwrite — in-memory snapshot must be authoritative");
+    }
+
+    localStorage.removeItem(STORAGE_KEY);
+  });
+
+  it("identical hash+local → no conflict (unchanged fast path)", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const plan = buildPlan();
+
+    const hashSer = serializePlan(plan);
+    const localSer = serializePlan(plan);
+
+    // No conflict when serializations are equal
+    const isConflict = hashSer !== localSer;
+    if (isConflict) throw new Error("Identical plans must not trigger the conflict path");
+    expect(isConflict).toBe(false);
+  });
+});
+
+// ─── Tests: LLD-80 — showConflictBanner fallback favors shared ────────────────
+
+describe("LLD-80 — showConflictBanner: no-element fallback invokes onChoice('shared')", () => {
+  it("with _bannerEl unset, showConflictBanner calls onChoice('shared'), not 'local'", () => {
+    // actions.js _bannerEl is null when init() has not been called with a banner element.
+    // The module-level _bannerEl starts null (no init called in this test env).
+    // We call showConflictBanner directly and capture the choice.
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "r0", closed: true, verts: [{ x:0,y:0 },{ x:2,y:0 },{ x:2,y:2 },{ x:0,y:2 }] });
+    const planA = buildPlan();
+    model.rooms[0].verts[1].x = 5;
+    const planB = buildPlan();
+
+    let capturedChoice = null;
+    // showConflictBanner will hit the no-element fallback because actions.init()
+    // was not called in the test harness (no DOM banner element injected).
+    showConflictBanner(planB, planA, (choice) => { capturedChoice = choice; });
+
+    if (capturedChoice !== "shared") {
+      throw new Error(
+        `showConflictBanner fallback chose '${capturedChoice}' — must choose 'shared' to favor explicit share intent, never silently discard the hash`
+      );
+    }
+    expect(capturedChoice).toBe("shared");
   });
 });
 

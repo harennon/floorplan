@@ -625,25 +625,25 @@ document.addEventListener("DOMContentLoaded", () => {
         if (toastEl) showToast("Restored your last plan");
         render();
       } else {
-        // Conflict: show banner-with-choice; apply nothing yet
-        showConflictBanner(hashPlan, localPlan, (choice) => {
-          if (choice === "shared") {
-            applyPlan(hashPlan);
-            historyReset(); // reseed baseline after restore (Edge Case 12)
-            const bounds = contentBounds();
-            if (bounds) {
-              fitToContent(bounds, vW, vH);
-            } else {
-              resetView(vW, vH);
-            }
-            if (toastEl) showToast("Opened shared plan");
-          } else {
-            applyPlan(localPlan);
-            historyReset(); // reseed baseline after restore (Edge Case 12)
-          }
+        // Conflict: hash present AND differs from local. A present hash is explicit
+        // user intent — auto-open the shared plan, offer a one-tap undo to local.
+        const applyShared = () => {
+          applyPlan(hashPlan);
+          historyReset(); // reseed baseline after restore (Edge Case 12)
+          const bounds = contentBounds();
+          if (bounds) fitToContent(bounds, vW, vH); else resetView(vW, vH);
+        };
+        const applyLocal = () => {
+          applyPlan(localPlan);
+          historyReset(); // reseed baseline after restore (Edge Case 12)
           render();
+        };
+        applyShared();
+        render();
+        showToast("Opened shared plan", {
+          label: "Keep my last plan instead",
+          onClick: applyLocal,
         });
-        // Don't call render yet — banner choice will trigger it
         return;
       }
     } else if (hashPlan) {
