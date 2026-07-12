@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catalog: kitchen counter + island — mockup (LLD 105)</title>
+  <style>
+    :root, [data-theme="dark"] {
+      --bg: #14140f; --bg-deep: #100f0b; --ink: #ece7d6; --muted: #8f8a78;
+      --gold: #c9a84c; --gold-soft: rgba(201,168,76,0.55);
+      --panel: rgba(20,20,15,0.72); --hairline: rgba(201,168,76,0.18);
+      --font-mono: "DM Mono","Courier New",monospace;
+      --snap-teal: #7fd0c8;
+      --clr-ok: #7fd0c8; --clr-tight: #e0b64f; --clr-bad: #e57373;
+      --clr-ok-fill: rgba(127,208,200,0.14); --clr-tight-fill: rgba(224,182,79,0.16);
+      --sym-fill: rgba(60,58,44,0.55); --sym-stroke: #b9b291;
+    }
+    [data-theme="light"] {
+      --bg: #f3ecda; --bg-deep: #e7dcc2; --ink: #3a3020; --muted: #8a7c60;
+      --gold: #a9812a; --gold-soft: rgba(169,129,42,0.5);
+      --panel: rgba(248,242,228,0.82); --hairline: rgba(120,96,50,0.22);
+      --snap-teal: #2f8f86;
+      --clr-ok: #2f8f86; --clr-tight: #b07d1e; --clr-bad: #d0574f;
+      --clr-ok-fill: rgba(47,143,134,0.12); --clr-tight-fill: rgba(176,125,30,0.14);
+      --sym-fill: rgba(180,170,140,0.5); --sym-stroke: #6a5f42;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background:
+        radial-gradient(120% 90% at 50% -10%, var(--bg) 0%, var(--bg-deep) 100%) fixed;
+      color: var(--ink); font-family: var(--font-mono);
+      font-size: 14px; line-height: 1.5; padding-bottom: 4rem;
+    }
+    code { color: var(--gold); }
+    .page-head { padding: 2rem 2rem 0.5rem; max-width: 1180px; margin: 0 auto; }
+    h1 { color: var(--gold); font-weight: 500; font-size: 1.5rem; margin: 0 0 0.4rem; letter-spacing: 0.01em; }
+    .sub { color: var(--muted); max-width: 60ch; margin: 0 0 0.8rem; }
+    .theme-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+    .sub-inline { color: var(--muted); font-size: 0.75rem; opacity: 0.8; }
+    #theme-toggle {
+      background: var(--panel); border: 1px solid var(--hairline); color: var(--muted);
+      font-family: var(--font-mono); font-size: 0.75rem; padding: 0.35rem 0.7rem;
+      border-radius: 6px; cursor: pointer; transition: color 0.12s, border-color 0.12s;
+    }
+    #theme-toggle:hover { color: var(--gold); border-color: var(--gold-soft); }
+    main { max-width: 1180px; margin: 0 auto; padding: 1rem 2rem; display: grid; gap: 1.5rem; }
+    .page-foot { max-width: 1180px; margin: 0 auto; padding: 1rem 2rem; color: var(--muted); font-size: 0.75rem; }
+    .chip-inline { color: var(--gold); }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 0.2rem 0 0.5rem; vertical-align: middle; }
+    .dot.ok { background: var(--clr-ok); } .dot.tight { background: var(--clr-tight); } .dot.bad { background: var(--clr-bad); }
+  </style>
+  <style id="style-cards">
+    .card { background: var(--panel); border: 1px solid var(--hairline); border-radius: 10px; padding: 1.2rem 1.4rem; }
+    .card > h2 { font-size: 1.05rem; color: var(--ink); font-weight: 500; margin: 0 0 0.15rem; }
+    .card > .card-sub { color: var(--muted); font-size: 0.8rem; margin: 0 0 1rem; max-width: 72ch; }
+    .badge { display: inline-block; font-size: 0.65rem; padding: 0.1rem 0.45rem; border-radius: 4px;
+      border: 1px solid var(--gold-soft); color: var(--gold); margin-left: 0.5rem; vertical-align: middle; }
+    .badge.rec { background: rgba(201,168,76,0.12); }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+
+    /* ── Dock palette (mirrors .symbol-dock / .dock-item) ── */
+    .dock { background: var(--bg-deep); border: 1px solid var(--hairline); border-radius: 8px; padding: 0.5rem; }
+    .dock-tabs { display: flex; gap: 0.15rem; border-bottom: 1px solid var(--hairline); margin-bottom: 0.5rem; padding-bottom: 0.4rem; flex-wrap: wrap; }
+    .dock-tab { background: transparent; border: none; color: var(--muted); font-family: var(--font-mono);
+      font-size: 0.72rem; padding: 0.25rem 0.55rem; border-radius: 5px; cursor: pointer; }
+    .dock-tab[aria-selected="true"] { color: var(--gold); background: rgba(201,168,76,0.1); }
+    .dock-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .dock-item { background: transparent; border: 1px solid var(--hairline); border-radius: 7px;
+      color: var(--muted); font-family: var(--font-mono); font-size: 0.62rem; cursor: pointer;
+      width: 4.2rem; padding: 0.5rem 0.2rem; display: flex; flex-direction: column; align-items: center;
+      gap: 0.3rem; transition: color 0.12s, border-color 0.12s, background 0.12s; }
+    .dock-item:hover { color: var(--gold); border-color: var(--gold-soft); }
+    .dock-item.is-new { border-color: var(--gold-soft); }
+    .dock-item.is-new::after { content: "new"; font-size: 0.5rem; color: var(--gold); letter-spacing: 0.05em; }
+    .dock-item svg { color: var(--ink); }
+
+    /* ── Inspector preset chips (mirrors .insp-presets / .insp-chip) ── */
+    .insp { margin-top: 0.9rem; background: var(--bg-deep); border: 1px solid var(--hairline);
+      border-radius: 8px; padding: 0.6rem 0.7rem; }
+    .insp-label { font-size: 0.66rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.4rem; }
+    .insp-presets { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+    .insp-chip { background: transparent; border: 1px solid transparent; color: var(--muted);
+      font-family: var(--font-mono); font-size: 0.65rem; padding: 0.2rem 0.5rem; border-radius: 5px;
+      cursor: pointer; white-space: nowrap; transition: color 0.12s, border-color 0.12s, background 0.12s; }
+    .insp-chip:hover { color: var(--gold); border-color: var(--gold-soft); }
+    .insp-chip[aria-pressed="true"] { color: var(--gold); background: rgba(201,168,76,0.12); border-color: var(--gold-soft); }
+    .swatch-row { display: flex; gap: 0.3rem; margin-top: 0.5rem; }
+    .swatch { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--muted); cursor: pointer; padding: 0; }
+    .swatch[aria-pressed="true"] { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+    /* ── Bounds table ── */
+    table.bounds { width: 100%; border-collapse: collapse; font-size: 0.72rem; margin-top: 0.8rem; }
+    table.bounds th, table.bounds td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--hairline); }
+    table.bounds th { color: var(--muted); font-weight: 500; }
+    table.bounds td code { color: var(--gold); }
+    .note { font-size: 0.72rem; color: var(--muted); margin-top: 0.7rem; padding-left: 0.8rem; border-left: 2px solid var(--gold-soft); }
+
+    /* ── Option compare table ── */
+    table.compare { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    table.compare th, table.compare td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+    table.compare th { color: var(--gold); font-weight: 500; }
+    table.compare td:first-child { color: var(--muted); width: 22%; }
+  </style>
+  <style id="style-svg">
+    .stage { background:
+        repeating-linear-gradient(0deg, transparent, transparent 23px, var(--hairline) 23px, var(--hairline) 24px),
+        repeating-linear-gradient(90deg, transparent, transparent 23px, var(--hairline) 23px, var(--hairline) 24px),
+        var(--bg-deep);
+      border: 1px solid var(--hairline); border-radius: 8px; width: 100%; height: auto; display: block; }
+    .glyph-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1rem; }
+    .glyph-cell { background: var(--bg-deep); border: 1px solid var(--hairline); border-radius: 8px; padding: 0.7rem; text-align: center; }
+    .glyph-cell svg { display: block; margin: 0 auto 0.4rem; }
+    .glyph-name { font-size: 0.7rem; color: var(--ink); }
+    .glyph-dim { font-size: 0.62rem; color: var(--muted); }
+    .wall { fill: none; stroke: var(--sym-stroke); stroke-width: 6; opacity: 0.5; }
+    .sym { fill: var(--sym-fill); stroke: var(--sym-stroke); stroke-width: 1.5; stroke-linejoin: round; }
+    .sym-sel { fill: none; stroke: var(--gold); stroke-width: 2; stroke-dasharray: 5 3; }
+    .ink { stroke: var(--sym-stroke); fill: none; }
+    .ink-soft { stroke: var(--sym-stroke); fill: none; opacity: 0.5; }
+    .applfill { fill: var(--sym-stroke); opacity: 0.7; }
+    .leader { stroke-width: 1.4; }
+    .leader.ok { stroke: var(--clr-ok); } .leader.tight { stroke: var(--clr-tight); } .leader.bad { stroke: var(--clr-bad); }
+    .clr-band.ok { fill: var(--clr-ok-fill); } .clr-band.tight { fill: var(--clr-tight-fill); }
+    .clr-lbl { font-family: var(--font-mono); font-size: 11px; }
+    .clr-lbl.ok { fill: var(--clr-ok); } .clr-lbl.tight { fill: var(--clr-tight); } .clr-lbl.bad { fill: var(--clr-bad); }
+    .dim-chip { fill: var(--panel); stroke: var(--hairline); }
+    .dim-txt { fill: var(--gold); font-family: var(--font-mono); font-size: 10px; }
+    .cap { font-family: var(--font-mono); fill: var(--muted); font-size: 11px; }
+    .legend { display: flex; gap: 1.2rem; flex-wrap: wrap; margin-top: 0.8rem; font-size: 0.72rem; color: var(--muted); }
+    .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+  </style>
+</head>
+<body>
+  <header class="page-head">
+    <h1>Kitchen counter / countertop + island</h1>
+    <p class="sub">Catalog addition mockup · LLD 105 · follow-up from LLD 72a “Catalog gaps”.
+      New catalog types let the interior-design skill (and a future <code>check_layout</code>)
+      measure landing zones instead of describing them in prose.</p>
+    <div class="theme-row">
+      <button id="theme-toggle" type="button">Toggle light / dark</button>
+      <span class="sub-inline">These are throwaway design artifacts, not production code.</span>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <section class="card">
+      <h2>The decision: one type or two?</h2>
+      <p class="card-sub">Counter (against-wall prep run) and island (free-standing prep block) are the
+        two catalog gaps LLD 72a names. They differ only in default footprint and where they seat —
+        both are plain rectangular furniture in the <code>kitchen</code> category. The question is whether
+        to ship them as one flexible type or two distinct dock items.</p>
+      <table class="compare">
+        <thead><tr><th></th><th>Option A — two types <span class="badge rec">recommended</span></th><th>Option B — one <code>counter</code> type</th></tr></thead>
+        <tbody>
+          <tr><td>Dock items</td>
+            <td>Two: <b>Counter</b> and <b>Island</b>, side by side in the Kitchen tab.</td>
+            <td>One: <b>Counter</b>; a very wide/deep preset stands in for an island.</td></tr>
+          <tr><td>Skill / check_layout</td>
+            <td>Can reason “counter run vs island” directly by <code>type</code> — matches kitchen.md’s
+              distinct “run” vs “island” aisle language.</td>
+            <td>Must infer island-ness from size — fragile heuristic; no clean predicate.</td></tr>
+          <tr><td>Presets</td>
+            <td>Counter: standard 61 cm-deep runs by length. Island: 61–122 cm deep blocks.
+              Each list stays short and real.</td>
+            <td>One mixed list mingling shallow runs and deep blocks — harder to scan.</td></tr>
+          <tr><td>Glyph read</td>
+            <td>Counter = seam + backsplash edge; Island = seam + rounded overhang. Distinct at a glance.</td>
+            <td>One glyph must serve both roles.</td></tr>
+          <tr><td>Cost</td>
+            <td>Two CATALOG entries + two glyph branches + two dock buttons. Follows the exact
+              post-#98 pattern (bounds + presets, non-circular, non-discrete).</td>
+            <td>Marginally less markup; pushes complexity onto the skill and the user.</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Recommendation: <b>Option A (two types)</b>. It is the small-surface-area choice that
+        actually unblocks a <code>check_layout</code> evaluator — the evaluator can key landing-zone rules off
+        <code>type === "counter"</code> / <code>"island"</code> rather than a size guess. The rest of this mockup shows Option A;
+        the dock section also previews Option B so you can compare.</p>
+    </section>
+
+    <section class="card" id="dock-card">
+      <h2>1 · Palette / dock placement</h2>
+      <p class="card-sub">New items live in the existing <code>Kitchen</code> tab of the symbol dock, appended after
+        the four appliances. Same <code>.dock-item</code> button (18×18 inline SVG glyph + label) as every other piece.</p>
+      <div id="dock-mounts"></div>
+      <div class="legend">
+        <span><span class="dot" style="background:var(--gold)"></span>“new” hint fades after first session (decorative only in this mockup)</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2 · Glyphs &amp; catalog geometry</h2>
+      <p class="card-sub">Rendered the way <code>symbolRender._renderInterior</code> would draw them: a body polygon
+        plus a type-specific interior glyph. Counter reads as a run (long seam + thin backsplash strip on the
+        wall edge); island reads as a free block (seam + rounded overhang lip, no backsplash).</p>
+      <div class="glyph-grid" id="glyph-mounts"></div>
+      <table class="bounds" id="bounds-table"></table>
+      <p class="note">Per-axis bounds &amp; presets follow the post-#98 catalog contract (see <code>src/js/symbols.js</code>).
+        Both are ordinary furniture: not <code>circular</code>, not <code>discrete</code> (a counter is cut-to-fit, so free resize
+        within bounds + optional preset chips — no hard snap). <code>anchorable</code> like appliances so a counter seats
+        flush to a wall run.</p>
+    </section>
+
+    <section class="card">
+      <h2>3 · Inspector — presets &amp; color</h2>
+      <p class="card-sub">When a counter or island is selected, the inspector shows preset chips (<code>#insp-presets</code>)
+        and the kitchen color swatch strip (<code>appliance + wood + neutral</code>, per <code>palette.js</code>). Counters are
+        typically stone/wood, so wood + neutral swatches lead.</p>
+      <div class="cols" id="insp-mounts"></div>
+    </section>
+
+    <section class="card">
+      <h2>4 · The payoff — measurable landing zones</h2>
+      <p class="card-sub">This is <em>why</em> the type exists. Today the skill can only say “leave ~0.38 m of counter
+        beside the fridge”. With a real <code>counter</code> object, clearance annotations (the existing overlay in
+        <code>clearanceRender.js</code>) measure the actual gap between appliance and counter — and a future
+        <code>check_layout</code> can pass/fail each NKBA landing rule.</p>
+      <div id="clr-mount"></div>
+      <div class="legend">
+        <span><span class="dot ok"></span>≥ target — landing zone satisfied</span>
+        <span><span class="dot tight"></span>below target — advise, don’t fail hard</span>
+        <span><span class="dot bad"></span>overlap / no counter</span>
+      </div>
+      <table class="bounds" id="rules-table"></table>
+    </section>
+
+  </main>
+
+  <footer class="page-foot">
+    <p>Aesthetic mirrors <code>src/index.html</code>: dark-gold blueprint, DM Mono, gold accent
+      <span class="chip-inline">#c9a84c</span>, clearance status
+      <span class="dot ok"></span>ok <span class="dot tight"></span>tight <span class="dot bad"></span>bad.</p>
+  </footer>
+
+  <script>
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+      const el = document.documentElement;
+      el.dataset.theme = el.dataset.theme === "dark" ? "light" : "dark";
+    });
+
+    // ── SVG glyphs for the 18×18 dock buttons ──────────────────────────────
+    const dockGlyph = {
+      counter: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="1.5" y="6" width="15" height="6" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <line x1="1.5" y1="6" x2="16.5" y2="6" stroke="currentColor" stroke-width="1.6"/>
+          <line x1="9" y1="6" x2="9" y2="12" stroke="currentColor" stroke-width="0.8" opacity="0.6"/>
+        </svg>`,
+      island: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="3" y="4" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+          <rect x="4.5" y="5.5" width="9" height="7" rx="1" stroke="currentColor" stroke-width="0.7" opacity="0.5"/>
+        </svg>`,
+      fridge: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="4" y="2" width="10" height="14" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <line x1="4" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1" opacity="0.7"/>
+          <line x1="12" y1="4.5" x2="12" y2="6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`,
+      stove: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="2" y="3" width="14" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <circle cx="6" cy="7.5" r="1.8" stroke="currentColor" stroke-width="0.9"/><circle cx="12" cy="7.5" r="1.8" stroke="currentColor" stroke-width="0.9"/>
+          <circle cx="6" cy="12.5" r="1.8" stroke="currentColor" stroke-width="0.9"/><circle cx="12" cy="12.5" r="1.8" stroke="currentColor" stroke-width="0.9"/></svg>`,
+      sink: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="3" y="5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <rect x="4.5" y="6.5" width="9" height="6" rx="0.8" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.08"/>
+          <circle cx="9" cy="5.5" r="1" fill="currentColor"/></svg>`,
+      washer: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <rect x="2" y="2" width="14" height="14" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <circle cx="9" cy="10" r="4" stroke="currentColor" stroke-width="1.1"/>
+          <rect x="6" y="3" width="3.5" height="2" rx="0.5" stroke="currentColor" stroke-width="0.8" fill="currentColor" fill-opacity="0.1"/></svg>`,
+    };
+
+    function dockItem(type, label, isNew) {
+      return `<button class="dock-item${isNew ? " is-new" : ""}" data-type="${type}">
+        ${dockGlyph[type]}<span>${label}</span></button>`;
+    }
+    function dockTabs(active) {
+      return ["Openings","Living","Kitchen","Bedroom","Bath","Outdoor"]
+        .map(t => `<button class="dock-tab" aria-selected="${t===active}">${t}</button>`).join("");
+    }
+
+    document.getElementById("dock-mounts").innerHTML = `
+      <div style="display:grid;gap:1rem;grid-template-columns:1fr 1fr">
+        <div>
+          <div class="insp-label">Option A — Kitchen tab with two new items <span class="badge rec">recommended</span></div>
+          <div class="dock">
+            <div class="dock-tabs">${dockTabs("Kitchen")}</div>
+            <div class="dock-row">
+              ${dockItem("fridge","Fridge")}${dockItem("stove","Stove")}
+              ${dockItem("sink","Sink")}${dockItem("washer","Washer")}
+              ${dockItem("counter","Counter",true)}${dockItem("island","Island",true)}
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="insp-label">Option B — one Counter item</div>
+          <div class="dock">
+            <div class="dock-tabs">${dockTabs("Kitchen")}</div>
+            <div class="dock-row">
+              ${dockItem("fridge","Fridge")}${dockItem("stove","Stove")}
+              ${dockItem("sink","Sink")}${dockItem("washer","Washer")}
+              ${dockItem("counter","Counter",true)}
+            </div>
+          </div>
+        </div>
+      </div>`;
+  </script>
+
+  <script>
+    // ── To-scale glyph preview. PPM = px per metre for the cells. ───────────
+    // Draws body polygon + interior glyph the way symbolRender would.
+    function counterBody(cx, cy, wpx, hpx, sel) {
+      const x = cx - wpx/2, y = cy - hpx/2;
+      return `
+        <rect class="sym" x="${x}" y="${y}" width="${wpx}" height="${hpx}" rx="1"/>
+        <!-- backsplash strip on the "wall" (top) edge -->
+        <rect class="ink-soft" x="${x}" y="${y}" width="${wpx}" height="${Math.min(6,hpx*0.22)}" fill="var(--sym-stroke)" fill-opacity="0.18" stroke="none"/>
+        <line class="ink" x1="${x}" y1="${y+Math.min(6,hpx*0.22)}" x2="${x+wpx}" y2="${y+Math.min(6,hpx*0.22)}" stroke-width="1"/>
+        <!-- seam mid-run -->
+        <line class="ink-soft" x1="${cx}" y1="${y}" x2="${cx}" y2="${y+hpx}"/>
+        ${sel ? `<rect class="sym-sel" x="${x-2}" y="${y-2}" width="${wpx+4}" height="${hpx+4}" rx="1"/>` : ""}`;
+    }
+    function islandBody(cx, cy, wpx, hpx, sel) {
+      const x = cx - wpx/2, y = cy - hpx/2, lip = Math.min(5, wpx*0.09);
+      return `
+        <rect class="sym" x="${x}" y="${y}" width="${wpx}" height="${hpx}" rx="3"/>
+        <!-- overhang lip: inset rounded rect, all sides free -->
+        <rect class="ink-soft" x="${x+lip}" y="${y+lip}" width="${wpx-2*lip}" height="${hpx-2*lip}" rx="2"/>
+        <line class="ink-soft" x1="${cx}" y1="${y+lip}" x2="${cx}" y2="${y+hpx-lip}"/>
+        ${sel ? `<rect class="sym-sel" x="${x-2}" y="${y-2}" width="${wpx+4}" height="${hpx+4}" rx="3"/>` : ""}`;
+    }
+
+    const PPM = 44;
+    function glyphCell(name, dimLabel, wM, hM, kind) {
+      const wpx = wM*PPM, hpx = hM*PPM;
+      const W = Math.max(wpx+24, 130), H = hpx+24;
+      const body = kind==="island" ? islandBody(W/2, H/2, wpx, hpx) : counterBody(W/2, H/2, wpx, hpx);
+      return `<div class="glyph-cell">
+        <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${body}</svg>
+        <div class="glyph-name">${name}</div><div class="glyph-dim">${dimLabel}</div></div>`;
+    }
+
+    document.getElementById("glyph-mounts").innerHTML = [
+      glyphCell("Counter · default", "2.44 × 0.61 m", 2.44, 0.61, "counter"),
+      glyphCell("Counter · short run", "1.22 × 0.61 m", 1.22, 0.61, "counter"),
+      glyphCell("Island · default", "1.22 × 0.91 m", 1.22, 0.91, "island"),
+      glyphCell("Island · large", "1.83 × 1.07 m", 1.83, 1.07, "island"),
+    ].join("");
+
+    document.getElementById("bounds-table").innerHTML = `
+      <thead><tr><th>type</th><th>default w×h</th><th>min–max w</th><th>min–max h (depth)</th><th>presets</th></tr></thead>
+      <tbody>
+        <tr><td><code>counter</code></td><td>2.44 × 0.61</td><td>0.30 – 3.66</td><td>0.55 – 0.71</td>
+          <td>24″ run · 48″ · 72″ (2.44) · 96″ · 120″; depth 25″ std / 28″ deep</td></tr>
+        <tr><td><code>island</code></td><td>1.22 × 0.91</td><td>0.61 – 3.05</td><td>0.61 – 1.22</td>
+          <td>Compact 48×36 · Standard 72×40 · Large 84×42 · Double 96×48</td></tr>
+      </tbody>`;
+
+    // ── Inspector previews ─────────────────────────────────────────────────
+    const wood = [["#c8a96a","Oak"],["#7a4f2e","Walnut"],["#4a2e1a","Espresso"]];
+    const neutral = [["#f0f0ee","White"],["#b0b8be","Stainless"],["#2a2a2a","Matte black"]];
+    function swatches(list, activeIdx) {
+      return list.map(([hex,nm],i)=>`<button class="swatch" title="${nm}" style="background:${hex}"
+        ${i===activeIdx?'aria-pressed="true"':''}></button>`).join("");
+    }
+    function inspPanel(title, chips, activeChip, sw, swActive) {
+      const chipHtml = chips.map((c,i)=>`<button class="insp-chip" ${i===activeChip?'aria-pressed="true"':''}>${c}</button>`).join("");
+      return `<div class="insp">
+        <div class="insp-label">${title} — size presets</div>
+        <div class="insp-presets">${chipHtml}</div>
+        <div class="insp-label" style="margin-top:0.7rem">color (kitchen: appliance · wood · neutral)</div>
+        <div class="swatch-row">${swatches(sw, swActive)}</div>
+      </div>`;
+    }
+    document.getElementById("insp-mounts").innerHTML =
+      inspPanel("Counter", ["24″ run","48″","72″","96″","120″","25″ deep","28″ deep"], 2, wood.concat(neutral), 0) +
+      inspPanel("Island", ["Compact 48×36","Standard 72×40","Large 84×42","Double 96×48"], 1, wood.concat(neutral), 1);
+
+    // ── Payoff: a wall run with fridge | counter | stove and measured landings.
+    // Scene in metres, drawn along one wall. P = px per metre.
+    (function () {
+      const P = 90, ox = 30, oy = 46;             // origin px, top wall at oy
+      const mx = m => ox + m * P, my = m => oy + m * P;
+      const depth = 0.61;                          // counter/appliance depth (m)
+      // layout along x (m): fridge[0..0.76] gap0.20 counter[0.96..2.30] stove[2.30..3.06]
+      const pieces = [
+        { x0: 0.00, x1: 0.76, kind: "fridge", lbl: "Fridge" },
+        { x0: 0.96, x1: 2.30, kind: "counter", lbl: "Counter (prep run)" },
+        { x0: 2.30, x1: 3.06, kind: "stove", lbl: "Stove" },
+      ];
+      const W = mx(3.5) + 20, H = my(depth) + 120;
+      let svg = `<svg class="stage" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+      // wall line at top
+      svg += `<line class="wall" x1="${mx(-0.15)}" y1="${oy}" x2="${mx(3.35)}" y2="${oy}"/>`;
+      // pieces
+      for (const p of pieces) {
+        const x = mx(p.x0), w = (p.x1 - p.x0) * P, h = depth * P;
+        if (p.kind === "counter") {
+          svg += counterBody(x + w/2, oy + h/2, w, h, true);
+        } else {
+          svg += `<rect class="sym" x="${x}" y="${oy}" width="${w}" height="${h}" rx="1"/>`;
+          if (p.kind === "fridge") {
+            svg += `<line class="ink" x1="${x+3}" y1="${oy+h*0.3}" x2="${x+w-3}" y2="${oy+h*0.3}" stroke-width="1"/>
+              <line class="ink" x1="${x+w-6}" y1="${oy+h*0.42}" x2="${x+w-6}" y2="${oy+h*0.58}" stroke-width="1.4" stroke="var(--gold)"/>`;
+          } else {
+            const bx=[0.28,0.72], by=[0.34,0.66];
+            for (const fx of bx) for (const fy of by)
+              svg += `<circle class="ink-soft" cx="${x+w*fx}" cy="${oy+h*fy}" r="${Math.min(w,h)*0.11}"/>`;
+          }
+        }
+        svg += `<text class="cap" x="${x + w/2}" y="${oy + h + 16}" text-anchor="middle">${p.lbl}</text>`;
+      }
+      // landing-zone measurements (double-headed leaders under the top wall band)
+      function landing(x0, x1, status, txt) {
+        const y = oy + depth*P*0.5, xa = mx(x0), xb = mx(x1);
+        return `<rect class="clr-band ${status}" x="${xa}" y="${oy}" width="${xb-xa}" height="${depth*P}"/>
+          <line class="leader ${status}" x1="${xa}" y1="${y}" x2="${xb}" y2="${y}"/>
+          <line class="leader ${status}" x1="${xa}" y1="${y-4}" x2="${xa}" y2="${y+4}"/>
+          <line class="leader ${status}" x1="${xb}" y1="${y-4}" x2="${xb}" y2="${y+4}"/>
+          <text class="clr-lbl ${status}" x="${(xa+xb)/2}" y="${y-6}" text-anchor="middle">${txt}</text>`;
+      }
+      // fridge handle-side landing = counter start - fridge end = 0.96-0.76 = 0.20 (BAD: <0.38)
+      svg += landing(0.76, 0.96, "bad", "0.20 m · &lt; 0.38");
+      // continuous counter prep run = 1.34 m (OK: >=0.91)
+      svg += landing(0.96, 2.30, "ok", "1.34 m prep");
+      // note callout for stove landing (counter abuts stove = 0 landing that side, but run provides it)
+      svg += `<text class="cap" x="${mx(1.63)}" y="${H-30}" text-anchor="middle">Fridge landing fails (0.20 m); slide fridge left or widen gap → counter fills it.</text>`;
+      svg += `<text class="cap" x="${mx(1.63)}" y="${H-14}" text-anchor="middle" fill="var(--clr-ok)">The counter object is what makes these gaps measurable at all.</text>`;
+      svg += `</svg>`;
+      document.getElementById("clr-mount").innerHTML = svg;
+    })();
+
+    document.getElementById("rules-table").innerHTML = `
+      <thead><tr><th>NKBA landing rule (kitchen.md)</th><th>target</th><th>needs counter/island?</th></tr></thead>
+      <tbody>
+        <tr><td>Fridge handle-side landing</td><td><code>≥ 0.38 m</code></td><td>yes — measure fridge↔counter gap</td></tr>
+        <tr><td>Stove each side</td><td><code>0.30 – 0.61 m</code></td><td>yes — counter run on either flank</td></tr>
+        <tr><td>Sink each side</td><td><code>0.46 – 0.61 m</code></td><td>yes</td></tr>
+        <tr><td>Continuous prep run</td><td><code>≈ 0.91 m</code></td><td>yes — a single counter span</td></tr>
+        <tr><td>Aisle: run ↔ island</td><td><code>≥ 1.07 m</code> (1 cook)</td><td>island unlocks the second edge to measure from</td></tr>
+      </tbody>`;
+  </script>
+</body>
+</html>
