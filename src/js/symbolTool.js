@@ -144,6 +144,7 @@ let _roomCenters = [];
 let _stage         = null;
 let _dock          = null;
 let _inspector     = null;
+let _presetsRow    = null;   // #insp-presets row element
 let _snapTagEl     = null;   // .snap-tag (shared with wallTool; symbol path owns it during gestures)
 let _gSymOverlay   = null;   // #symbol-overlay SVG group (for flush guide line)
 let _setToolFn     = null;  // wallTool.setTool injected reference
@@ -187,6 +188,12 @@ export function init(refs) {
     if (btnDuplicate) btnDuplicate.addEventListener("click", _onDuplicate);
     if (btnDelete)    btnDelete.addEventListener("click",    _onDelete);
     if (btnLock)      btnLock.addEventListener("click",      _onToggleLockAspect);
+
+    // Preset chips row — delegated click listener wired once at init
+    _presetsRow = _inspector.querySelector(".insp-presets") || null;
+    if (_presetsRow) {
+      _presetsRow.addEventListener("click", _onPresetChipClick);
+    }
   }
 
   // NOTE (LLD-21): _onKeyDown (Delete/Backspace) is NOT registered here.
@@ -842,6 +849,111 @@ function _deleteSelected() {
   scheduleRender();
 }
 
+// ── Preset chips ──────────────────────────────────────────────────────────────
+
+/**
+ * Find the preset whose {w,h} exactly matches the symbol, or null.
+ * Uses strict === comparison; preset values are authored at 2-decimal metre
+ * precision and resizeSymbol stores them verbatim, so strict equality is safe.
+ * @param {import("./symbols.js").Sym} sym
+ * @returns {import("./symbols.js").SymPreset|null}
+ */
+function _matchingPreset(sym) {
+  const presets = CATALOG[sym.type]?.presets;
+  if (!presets) return null;
+  return presets.find(p => p.w === sym.w && p.h === sym.h) ?? null;
+}
+
+/**
+ * (Re)build the .insp-presets row for the given symbol's type and set the
+ * active chip (matched preset, else Custom). No-op / hidden row when the type
+ * has no presets.
+ * @param {import("./symbols.js").Sym} sym
+ */
+function _renderPresetChips(sym) {
+  if (!_presetsRow) return;
+  const presets = CATALOG[sym.type]?.presets;
+
+  // Clear existing chips
+  _presetsRow.innerHTML = "";
+
+  if (!presets || presets.length === 0) {
+    // Hide row for types with no presets
+    _presetsRow.classList.remove("has-presets");
+    return;
+  }
+
+  _presetsRow.classList.add("has-presets");
+
+  const matched = _matchingPreset(sym);
+
+  for (const p of presets) {
+    const btn = document.createElement("button");
+    btn.className = "insp-chip";
+    btn.dataset.presetName = p.name;
+    btn.textContent = p.name;
+    const isActive = matched !== null && matched.name === p.name;
+    btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+    if (isActive) btn.classList.add("insp-chip--active");
+    _presetsRow.appendChild(btn);
+  }
+
+  // Trailing Custom chip — always present when presets exist
+  const customBtn = document.createElement("button");
+  customBtn.className = "insp-chip";
+  customBtn.dataset.presetName = "__custom__";
+  customBtn.textContent = "Custom";
+  const customActive = matched === null;
+  customBtn.setAttribute("aria-pressed", customActive ? "true" : "false");
+  if (customActive) customBtn.classList.add("insp-chip--active");
+  _presetsRow.appendChild(customBtn);
+}
+
+/**
+ * Delegated click handler for the .insp-presets row.
+ * @param {MouseEvent} e
+ */
+function _onPresetChipClick(e) {
+  const btn = e.target.closest("[data-preset-name]");
+  if (!btn) return;
+  _applyPreset(btn.dataset.presetName);
+}
+
+/**
+ * Apply a preset by name to the selected symbol: two clamped resizeSymbol calls,
+ * commit, re-render chips + inspector. No-op if name is "__custom__" or unknown.
+ * @param {string} presetName
+ */
+function _applyPreset(presetName) {
+  if (presetName === "__custom__") return;
+  if (!_selectedId) return;
+  const sym = getSymbol(_selectedId);
+  if (!sym) return;
+
+  const presets = CATALOG[sym.type]?.presets;
+  if (!presets) return;
+  const preset = presets.find(p => p.name === presetName);
+  if (!preset) return;
+
+  // Cancel any open inline dim edit before applying (Edge Case 8 per LLD)
+  if (isDimEditing()) cancelDimEdit();
+
+  // Flush any pending nudge so undo ordering is correct
+  flushNudge();
+
+  // Apply: two clamped resizeSymbol calls (lockAspect=false)
+  resizeSymbol(sym, "w", preset.w, false);
+  resizeSymbol(sym, "h", preset.h, false);
+
+  // Commit to history (dirty-check handles the no-op case)
+  if (_historyCommit) _historyCommit();
+
+  // Re-render chips to move active state, then reposition inspector (height may change)
+  _renderPresetChips(sym);
+  _positionInspector(sym);
+  scheduleRender();
+}
+
 // ── Inspector visibility ───────────────────────────────────────────────────────
 
 function _showInspector(sym) {
@@ -854,6 +966,9 @@ function _showInspector(sym) {
   if (btnLock) {
     btnLock.setAttribute("aria-pressed", _lockAspect ? "true" : "false");
   }
+
+  // Render size-preset chip row for this symbol's type
+  _renderPresetChips(sym);
 }
 
 function _hideInspector() {
@@ -1312,4 +1427,23 @@ export function resolvePlacementForTest(sx, sy, altHeld, boxLike, candidateAABBs
     _candidateAABBs = prevAABBs;
     _roomCenters = prevRooms;
   }
+}
+
+/**
+ * Test-only export of _matchingPreset.
+ * Returns the matching SymPreset for a Sym, or null.
+ * @param {import("./symbols.js").Sym} sym
+ * @returns {import("./symbols.js").SymPreset|null}
+ */
+export function matchingPresetForTest(sym) {
+  return _matchingPreset(sym);
+}
+
+/**
+ * Test-only export of _applyPreset.
+ * Requires _selectedId and the symbol to be set externally before calling.
+ * @param {string} presetName
+ */
+export function applyPresetForTest(presetName) {
+  return _applyPreset(presetName);
 }

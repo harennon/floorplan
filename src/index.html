@@ -1363,8 +1363,8 @@
       .symbol-inspector {
         position: fixed;
         display: none; /* hidden by default; .visible adds display:flex */
-        align-items: center;
-        gap: 0.2rem;
+        flex-direction: column;
+        gap: 0;
         background: var(--panel);
         border: 1px solid var(--hairline);
         border-radius: 8px;
@@ -1376,6 +1376,11 @@
       }
       .symbol-inspector.visible {
         display: flex;
+      }
+      .insp-row {
+        display: flex;
+        align-items: center;
+        gap: 0.2rem;
       }
       .insp-btn {
         background: transparent;
@@ -1408,11 +1413,54 @@
         background: var(--hairline);
         flex-shrink: 0;
       }
+      .insp-presets {
+        display: none; /* shown by JS when type has presets */
+        flex-direction: row;
+        align-items: center;
+        gap: 0.2rem;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        margin-top: 0.25rem;
+        padding-top: 0.2rem;
+        border-top: 1px solid var(--hairline);
+        /* scrollbar hidden for clean look */
+        scrollbar-width: none;
+      }
+      .insp-presets::-webkit-scrollbar { display: none; }
+      .insp-presets.has-presets { display: flex; }
+      .insp-chip {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        padding: 0.15rem 0.4rem;
+        border-radius: 5px;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+        min-height: 1.4rem;
+        transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .insp-chip:hover {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+      }
+      .insp-chip--active,
+      .insp-chip[aria-pressed="true"] {
+        color: var(--gold);
+        background: rgba(201,168,76,0.12);
+        border-color: var(--gold-soft);
+      }
+      @media (pointer: coarse) {
+        .insp-chip { min-height: 1.9rem; padding: 0.2rem 0.5rem; }
+      }
 
       /* ── Ghost / selection animation (reduced motion) ─────────────────────── */
       @media (prefers-reduced-motion: reduce) {
         .dock-item,
         .insp-btn,
+        .insp-chip,
         .dim-chip,
         .measure-row,
         .measure-toggle { transition: none; }
@@ -2201,33 +2249,37 @@
       </div>
 
       <!-- Symbol inspector (floating, hidden until a symbol is selected) -->
-      <div class="symbol-inspector" id="symbol-inspector" role="toolbar" aria-label="Symbol inspector">
-        <button class="insp-btn" data-action="rotate90" aria-label="Rotate 90 degrees">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M3 8 A5 5 0 1 1 8 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
-            <polyline points="3,5 3,8 6,8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </button>
-        <button class="insp-btn" data-action="duplicate" aria-label="Duplicate symbol">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="5" y="2" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
-            <rect x="2" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="var(--bg-deep,#100f0b)"/>
-          </svg>
-        </button>
-        <button class="insp-btn" data-action="delete" aria-label="Delete symbol">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <polyline points="2,4 14,4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-            <path d="M5 4 V13 H11 V4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
-            <polyline points="6,4 6,2 10,2 10,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </button>
-        <div class="insp-sep" aria-hidden="true"></div>
-        <button class="insp-btn" data-action="lock-aspect" aria-label="Lock aspect ratio" aria-pressed="false">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="4" y="7" width="8" height="7" rx="1.2" stroke="currentColor" stroke-width="1.4"/>
-            <path d="M5.5 7 V5 A2.5 2.5 0 0 1 10.5 5 V7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
-          </svg>
-        </button>
+      <div class="symbol-inspector" id="symbol-inspector" aria-label="Symbol inspector">
+        <div class="insp-row" role="toolbar" aria-label="Symbol actions">
+          <button class="insp-btn" data-action="rotate90" aria-label="Rotate 90 degrees">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3 8 A5 5 0 1 1 8 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+              <polyline points="3,5 3,8 6,8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </button>
+          <button class="insp-btn" data-action="duplicate" aria-label="Duplicate symbol">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="5" y="2" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+              <rect x="2" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="var(--bg-deep,#100f0b)"/>
+            </svg>
+          </button>
+          <button class="insp-btn" data-action="delete" aria-label="Delete symbol">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <polyline points="2,4 14,4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <path d="M5 4 V13 H11 V4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+              <polyline points="6,4 6,2 10,2 10,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </button>
+          <div class="insp-sep" aria-hidden="true"></div>
+          <button class="insp-btn" data-action="lock-aspect" aria-label="Lock aspect ratio" aria-pressed="false">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="4" y="7" width="8" height="7" rx="1.2" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M5.5 7 V5 A2.5 2.5 0 0 1 10.5 5 V7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+            </svg>
+          </button>
+        </div>
+        <!-- Preset chips row — populated by symbolTool.js; hidden when type has no presets -->
+        <div class="insp-presets" id="insp-presets" role="group" aria-label="Size presets"></div>
       </div>
 
       <!-- Transient toast messages -->

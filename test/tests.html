@@ -1455,6 +1455,12 @@ import {
   hitTest, pickSymbol, clampDim, resizeSymbol, moveSymbol, rotateSymbol, corners,
 } from "../src/js/symbols.js";
 
+// ─── Import symbolTool.js (preset helpers only; DOM-independent) ──────────────
+
+import {
+  matchingPresetForTest,
+} from "../src/js/symbolTool.js";
+
 /** Reset symbols model between suites. */
 function resetSymbolModel() {
   symbolModel.symbols.length = 0;
@@ -15275,6 +15281,66 @@ describe("LLD 92 — measureRender: idempotent — double render does not duplic
 
     rig.cleanup();
     hydrateMeasurements({ measurements: [] });
+  });
+});
+
+// ─── Tests: LLD 95 — matchingPresetForTest ───────────────────────────────────
+
+describe("LLD 95 — _matchingPreset (via matchingPresetForTest)", () => {
+  it("returns the correct preset when w/h match exactly (bed Queen → 1.52×2.03)", () => {
+    const sym = createSymbol("bed", 0, 0);
+    sym.w = 1.52;
+    sym.h = 2.03;
+    const p = matchingPresetForTest(sym);
+    if (!p) throw new Error("Expected a matching preset for Queen dims, got null");
+    if (p.name !== "Queen") throw new Error(`Expected preset 'Queen', got '${p.name}'`);
+    expect(p.w).toBeCloseTo(1.52, 9);
+    expect(p.h).toBeCloseTo(2.03, 9);
+  });
+
+  it("returns null when w/h diverge from every preset (→ Custom active)", () => {
+    const sym = createSymbol("bed", 0, 0);
+    sym.w = 1.40;
+    sym.h = 1.95;
+    const p = matchingPresetForTest(sym);
+    if (p !== null) throw new Error(`Expected null for off-catalog dims, got '${p.name}'`);
+  });
+
+  it("for an opening, matches on w with the fixed marker h (door Standard 32\")", () => {
+    const sym = createSymbol("door", 0, 0);
+    // Standard 32" preset: w=0.81, h=0.12 (fixed marker)
+    sym.w = 0.81;
+    sym.h = 0.12; // marker h is always this for door
+    const p = matchingPresetForTest(sym);
+    if (!p) throw new Error("Expected matching preset for door Standard 32\"");
+    if (p.name !== "Standard 32\"") throw new Error(`Expected 'Standard 32"', got '${p.name}'`);
+  });
+
+  it("for a circular type, matches when w===h equals a preset (round table Seats 4)", () => {
+    const sym = createSymbol("dining-table-round", 0, 0);
+    sym.w = 1.00;
+    sym.h = 1.00;
+    const p = matchingPresetForTest(sym);
+    if (!p) throw new Error("Expected matching preset for Seats 4 (1.00×1.00)");
+    if (p.name !== "Seats 4") throw new Error(`Expected 'Seats 4', got '${p.name}'`);
+  });
+
+  it("returns null for a type with no presets (chair)", () => {
+    const sym = createSymbol("chair", 0, 0);
+    const p = matchingPresetForTest(sym);
+    if (p !== null) throw new Error("Expected null for a type with no presets");
+  });
+
+  it("applying a preset sets sym.w/sym.h to exact preset values", () => {
+    const sym = createSymbol("bed", 0, 0);
+    // Twin preset: w=0.97, h=1.91
+    resizeSymbol(sym, "w", 0.97, false);
+    resizeSymbol(sym, "h", 1.91, false);
+    const p = matchingPresetForTest(sym);
+    if (!p) throw new Error("Expected matching preset for Twin dims");
+    if (p.name !== "Twin") throw new Error(`Expected 'Twin', got '${p.name}'`);
+    expect(sym.w).toBeCloseTo(0.97, 9);
+    expect(sym.h).toBeCloseTo(1.91, 9);
   });
 });
 

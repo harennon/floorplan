@@ -57,6 +57,17 @@ const SHARE_BASE = "https://floorplan.danbing.app/#";
 
 const isFiniteNum = (v) => typeof v === "number" && Number.isFinite(v);
 
+/**
+ * Exact-name lookup in CATALOG[type].presets.
+ * Returns the matching SymPreset, or null if the type has no presets or no match.
+ * @param {string} type
+ * @param {string} name
+ * @returns {import("../../src/js/symbols.js").SymPreset|null}
+ */
+function _findPreset(type, name) {
+  return CATALOG[type]?.presets?.find(p => p.name === name) ?? null;
+}
+
 /** Opening near-edge-to-wall-face adjacency slack (metres). */
 const WALL_ADJ_TOL_M = 0.15;
 
@@ -334,28 +345,61 @@ export function tool_resize_room(args) {
 }
 
 /**
- * place_symbol: { type, x, y, w?, h?, rot? }. Dims routed through clampDim.
- * Returns { ok, id, type, w, h, rot, clamped, hIgnored, clearance } or { ok:false }.
+ * place_symbol: { type, x, y, w?, h?, rot?, preset? }. Dims routed through clampDim.
+ * Optional preset:"<name>" resolves to {w,h} from CATALOG[type].presets by exact name.
+ * Explicit w/h args override the preset per-axis.
+ * Returns { ok, id, type, w, h, rot, clamped, hIgnored, presetApplied?, clearance } or { ok:false }.
  */
 export function tool_place_symbol(args) {
-  const { type, x, y, w, h, rot } = args || {};
+  const { type, x, y, w, h, rot, preset } = args || {};
   if (typeof type !== "string" || !(type in CATALOG)) {
     return { ok: false, reason: "unknown symbol type" };
   }
   if (!isFiniteNum(x) || !isFiniteNum(y)) {
     return { ok: false, reason: "x,y must be finite" };
   }
+
+  // Validate preset arg type before any mutation (Edge Case 15 in LLD)
+  if (preset !== undefined && typeof preset !== "string") {
+    return { ok: false, reason: "preset must be a string" };
+  }
+
+  // Resolve preset → {w,h} if supplied. Fail fast on unknown name.
+  let presetApplied = undefined;
+  let presetW = undefined;
+  let presetH = undefined;
+  if (preset !== undefined) {
+    const found = _findPreset(type, preset);
+    if (!found) {
+      const validNames = (CATALOG[type]?.presets ?? []).map(p => p.name);
+      const listStr = validNames.length > 0 ? validNames.join(", ") : "(none — this type has no presets)";
+      return {
+        ok: false,
+        reason: `unknown preset '${preset}' for ${type}; valid: ${listStr}`,
+      };
+    }
+    presetW = found.w;
+    presetH = found.h;
+    presetApplied = found.name;
+  }
+
   const isOpening = !!CATALOG[type].openings;
 
   const sym = createSymbol(type, x, y);
   let clamped = false;
   let hIgnored = false;
 
+  // Apply preset dims first (if resolved); explicit w/h args below will override per-axis.
+  if (presetW !== undefined) resizeSymbol(sym, "w", presetW);
+  if (presetH !== undefined && !isOpening) resizeSymbol(sym, "h", presetH);
+
+  // Explicit w overrides the preset's w
   if (w !== undefined) {
     if (!isFiniteNum(w)) return { ok: false, reason: "w must be finite" };
     if (clampDim(type, "w", w) !== w) clamped = true;
     resizeSymbol(sym, "w", w);
   }
+  // Explicit h overrides the preset's h
   if (h !== undefined) {
     if (!isFiniteNum(h)) return { ok: false, reason: "h must be finite" };
     if (isOpening) {
@@ -381,7 +425,7 @@ export function tool_place_symbol(args) {
   }
 
   addSymbol(sym);
-  return {
+  const result = {
     ok: true,
     id: sym.id,
     type: sym.type,
@@ -392,6 +436,8 @@ export function tool_place_symbol(args) {
     hIgnored,
     clearance: singleClearance(sym.id),
   };
+  if (presetApplied !== undefined) result.presetApplied = presetApplied;
+  return result;
 }
 
 /** move_symbol: { id, x, y }. Returns fresh clearance for the moved symbol. */
