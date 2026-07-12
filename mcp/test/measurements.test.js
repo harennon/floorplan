@@ -1,15 +1,19 @@
 /**
- * MCP integration — measurements model round-trip tests (LLD 81).
+ * MCP integration — measurements model round-trip tests (LLD 81 + 92).
  *
- * Verifies that the measurements collection survives all serialization paths
- * reachable from the MCP server: applyPlan/buildPlan, share hash, and JSON
- * import/export. Also verifies the measurements re-export from core.js.
+ * LLD 81: Verifies that the measurements collection survives all serialization
+ * paths reachable from the MCP server.
+ * LLD 92: Verifies add/remove/getById/length CRUD functions.
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import * as session from "../src/session.js";
-import { measurementsModel, hydrateMeasurements, buildPlan, validatePlan, serializePlan } from "../src/core.js";
+import {
+  measurementsModel, hydrateMeasurements,
+  addMeasurement, removeMeasurement, getMeasurementById, measurementLength,
+  buildPlan, validatePlan, serializePlan,
+} from "../src/core.js";
 import { buildCompact, parseCompact } from "../../src/js/plan.js";
 import * as tools from "../src/tools.js";
 
@@ -130,4 +134,72 @@ test("compact codec: measurements round-trip through buildCompact/parseCompact/v
   assert.equal(restored.measurements.length, 1, "measurement count mismatch");
   assert.equal(restored.measurements[0].a.x, 0);
   assert.equal(restored.measurements[0].b.x, 3);
+});
+
+// ── LLD 92: CRUD functions ────────────────────────────────────────────────────
+
+test("LLD 92: add() appends a {id,a,b} and returns it", () => {
+  session.resetAll();
+  const m = addMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 });
+  assert.equal(measurementsModel.measurements.length, 1, "should have 1 measurement");
+  assert.ok(typeof m.id === "string" && m.id.startsWith("m"), "id must be m<n>");
+  assert.equal(m.a.x, 0);
+  assert.equal(m.b.x, 3);
+});
+
+test("LLD 92: add() mints monotonically increasing ids", () => {
+  session.resetAll();
+  const m1 = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+  const m2 = addMeasurement({ x: 0, y: 0 }, { x: 2, y: 0 });
+  const n1 = parseInt(m1.id.replace("m", ""), 10);
+  const n2 = parseInt(m2.id.replace("m", ""), 10);
+  assert.ok(n2 > n1, `id ${m2.id} should be greater than ${m1.id}`);
+});
+
+test("LLD 92: remove() removes existing measurement (returns true)", () => {
+  session.resetAll();
+  const m = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 1 });
+  const ok = removeMeasurement(m.id);
+  assert.equal(ok, true);
+  assert.equal(measurementsModel.measurements.length, 0);
+});
+
+test("LLD 92: remove() no-op on missing id (returns false)", () => {
+  session.resetAll();
+  const ok = removeMeasurement("m999");
+  assert.equal(ok, false);
+});
+
+test("LLD 92: getById() returns measurement for known id", () => {
+  session.resetAll();
+  const m = addMeasurement({ x: 1, y: 2 }, { x: 3, y: 4 });
+  const found = getMeasurementById(m.id);
+  assert.notEqual(found, null);
+  assert.equal(found.id, m.id);
+});
+
+test("LLD 92: getById() returns null for unknown id", () => {
+  session.resetAll();
+  assert.equal(getMeasurementById("m9999"), null);
+});
+
+test("LLD 92: length() computes Euclidean distance (3-4-5)", () => {
+  const len = measurementLength({ a: { x: 0, y: 0 }, b: { x: 3, y: 4 } });
+  assert.ok(Math.abs(len - 5) < 1e-9, `Expected 5, got ${len}`);
+});
+
+test("LLD 92: length() returns 0 for coincident endpoints", () => {
+  const len = measurementLength({ a: { x: 2, y: 3 }, b: { x: 2, y: 3 } });
+  assert.ok(Math.abs(len) < 1e-9, `Expected 0, got ${len}`);
+});
+
+test("LLD 92: hydrate re-syncs counter past max loaded id (regression)", () => {
+  hydrateMeasurements({ measurements: [
+    { id: "m99", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+  ] });
+  // Add a new one — it must not reuse m99
+  const m = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+  const n = parseInt(m.id.replace("m", ""), 10);
+  assert.ok(n > 99, `Expected id > m99, got ${m.id}`);
+  hydrateMeasurements({ measurements: [] });
 });

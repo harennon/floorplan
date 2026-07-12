@@ -2896,6 +2896,11 @@ import {
   model as measurementsModel,
   hydrate as hydrateMeasurements,
   newId as newMeasurementId,
+  add as addMeasurement,
+  remove as removeMeasurement,
+  getById as getMeasurementById,
+  length as measurementLength,
+  nearestMeasurement,
 } from "../src/js/measurements.js";
 
 import {
@@ -10002,6 +10007,7 @@ const EXPECTED_ACTIONS = new Set([
   "Rotate 90° CCW",
   "Draw wall",
   "Select",
+  "Measure tool",
   "Zoom in",
   "Zoom out",
   "Reset zoom",
@@ -13878,6 +13884,236 @@ describe("LLD 88 — resizeSymbol: circular type mirrors both axes", () => {
     expect(s.w).toBeCloseTo(1.80, 9);
     // h must be unchanged — circular branch must not leak to sofa
     expect(s.h).toBeCloseTo(origH, 9);
+  });
+});
+
+// ─── Tests: LLD 92 — measurements.js CRUD + geometry ─────────────────────────
+
+/** Reset measurements model to clean state. */
+function resetMeasurementsModel() {
+  hydrateMeasurements({ measurements: [] });
+}
+
+describe("LLD 92 — measurements.js: add()", () => {
+  it("appends a {id,a,b} entry and returns it", () => {
+    resetMeasurementsModel();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 });
+    expect(measurementsModel.measurements.length).toBe(1);
+    expect(m.a.x).toBe(0);
+    expect(m.b.x).toBe(3);
+    resetMeasurementsModel();
+  });
+
+  it("mints a monotonic m<n> id", () => {
+    resetMeasurementsModel();
+    const m1 = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    const m2 = addMeasurement({ x: 0, y: 0 }, { x: 2, y: 0 });
+    const n1 = parseInt(m1.id.replace("m", ""), 10);
+    const n2 = parseInt(m2.id.replace("m", ""), 10);
+    if (n2 <= n1) throw new Error(`id ${m2.id} is not greater than ${m1.id}`);
+    resetMeasurementsModel();
+  });
+
+  it("stores a deep copy of the endpoints (input mutation does not corrupt model)", () => {
+    resetMeasurementsModel();
+    const a = { x: 1, y: 2 };
+    const b = { x: 5, y: 6 };
+    addMeasurement(a, b);
+    a.x = 999;
+    expect(measurementsModel.measurements[0].a.x).toBe(1);
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: remove()", () => {
+  it("removes existing measurement and returns true", () => {
+    resetMeasurementsModel();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 1 });
+    const ok = removeMeasurement(m.id);
+    expect(ok).toBe(true);
+    expect(measurementsModel.measurements.length).toBe(0);
+    resetMeasurementsModel();
+  });
+
+  it("no-op on missing id and returns false", () => {
+    resetMeasurementsModel();
+    const ok = removeMeasurement("m999");
+    expect(ok).toBe(false);
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: getById()", () => {
+  it("returns the measurement for a known id", () => {
+    resetMeasurementsModel();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    const found = getMeasurementById(m.id);
+    if (!found) throw new Error("getById returned null for known id");
+    expect(found.id).toBe(m.id);
+    resetMeasurementsModel();
+  });
+
+  it("returns null for unknown id", () => {
+    resetMeasurementsModel();
+    const found = getMeasurementById("m9999");
+    if (found !== null) throw new Error("Expected null for unknown id");
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: length()", () => {
+  it("returns Euclidean distance in metres (3-4-5 triangle)", () => {
+    const m = { a: { x: 0, y: 0 }, b: { x: 3, y: 4 } };
+    expect(measurementLength(m)).toBeCloseTo(5, 9);
+  });
+
+  it("returns 0 for coincident endpoints", () => {
+    const m = { a: { x: 2, y: 3 }, b: { x: 2, y: 3 } };
+    expect(measurementLength(m)).toBeCloseTo(0, 9);
+  });
+
+  it("axis-aligned: 5m horizontal segment", () => {
+    const m = { a: { x: 1, y: 3 }, b: { x: 6, y: 3 } };
+    expect(measurementLength(m)).toBeCloseTo(5, 9);
+  });
+});
+
+describe("LLD 92 — measurements.js: nearestMeasurement()", () => {
+  // Set view to identity for predictable screen coords
+  function _setupView() {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+  }
+
+  it("returns null on empty model", () => {
+    resetMeasurementsModel();
+    _setupView();
+    const r = nearestMeasurement(100, 100, 15);
+    if (r !== null) throw new Error("Expected null on empty model");
+    resetMeasurementsModel();
+  });
+
+  it("hits a segment at its midpoint within tolerance", () => {
+    resetMeasurementsModel();
+    _setupView();
+    // Segment from (10,10) to (50,10) world metres → screen (400,400)...(2000,400)
+    // At zoom=1, BASE=40: screen = world*40
+    addMeasurement({ x: 10, y: 10 }, { x: 50, y: 10 });
+    // Midpoint world=(30,10), screen=(1200,400). Query at (1200,400).
+    const r = nearestMeasurement(1200, 400, 15);
+    if (!r) throw new Error("Expected a hit at midpoint");
+    resetMeasurementsModel();
+  });
+
+  it("misses when query is beyond tolerance", () => {
+    resetMeasurementsModel();
+    _setupView();
+    addMeasurement({ x: 10, y: 10 }, { x: 50, y: 10 });
+    // Midpoint screen=(1200,400). Query 20px away (beyond 15px tolerance).
+    const r = nearestMeasurement(1200, 420, 15);
+    if (r !== null) throw new Error("Expected null when beyond tolerance");
+    resetMeasurementsModel();
+  });
+
+  it("hits near an endpoint", () => {
+    resetMeasurementsModel();
+    _setupView();
+    addMeasurement({ x: 5, y: 5 }, { x: 10, y: 5 });
+    // Endpoint A world=(5,5), screen=(200,200). Query at (202,200) — 2px away.
+    const r = nearestMeasurement(202, 200, 15);
+    if (!r) throw new Error("Expected a hit near endpoint A");
+    resetMeasurementsModel();
+  });
+
+  it("last-match wins on overlapping lines (topmost draw order)", () => {
+    resetMeasurementsModel();
+    _setupView();
+    const m1 = addMeasurement({ x: 5, y: 5 }, { x: 15, y: 5 });
+    const m2 = addMeasurement({ x: 5, y: 5 }, { x: 15, y: 5 }); // exact overlap
+    // Query at midpoint: both segments overlap; last one wins
+    const r = nearestMeasurement(400, 200, 15);
+    if (!r) throw new Error("Expected a hit");
+    if (r.id !== m2.id) throw new Error(`Expected last match ${m2.id}, got ${r.id}`);
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: hydrate counter regression", () => {
+  it("hydrate re-syncs counter past m<n> — regression guard", () => {
+    hydrateMeasurements({ measurements: [
+      { id: "m99", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+    ] });
+    const next = newMeasurementId();
+    const n = parseInt(next.replace("m", ""), 10);
+    if (n <= 99) throw new Error(`newId() ${next} would collide with m99`);
+    hydrateMeasurements({ measurements: [] });
+  });
+});
+
+// ─── Tests: LLD 92 — history.js measurements extension ───────────────────────
+
+/** Reset geometry + history for history+measurement tests. */
+function resetForHistoryMeasurements() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  hydrateWalls({ rooms: [], chain: [] });
+  hydrateSymbols({ symbols: [] });
+  hydrateMeasurements({ measurements: [] });
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  resetHistory();
+}
+
+describe("LLD 92 — history.js: measurements captured in snapshot", () => {
+  it("snapshot captures measurements; apply restores them", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    addMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 });
+    historyCommit();
+    // Now undo: model should go back to empty measurements
+    historyUndo();
+    expect(measurementsModel.measurements.length).toBe(0);
+    // Redo: measurement should come back
+    historyRedo();
+    expect(measurementsModel.measurements.length).toBe(1);
+    resetForHistoryMeasurements();
+  });
+
+  it("add-then-undo removes the measurement", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    addMeasurement({ x: 1, y: 0 }, { x: 5, y: 0 });
+    historyCommit();
+    historyUndo();
+    expect(measurementsModel.measurements.length).toBe(0);
+    resetForHistoryMeasurements();
+  });
+
+  it("delete-then-undo restores the measurement", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 2, y: 2 });
+    historyCommit(); // commit add
+    removeMeasurement(m.id);
+    historyCommit(); // commit remove
+    historyUndo();   // undo remove → measurement should be back
+    expect(measurementsModel.measurements.length).toBe(1);
+    resetForHistoryMeasurements();
+  });
+
+  it("undo of unrelated op (symbol add) preserves existing measurements", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    // Add a measurement and commit
+    addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    historyCommit();
+    // Now do an unrelated op: add a symbol
+    symbolModel.symbols.push({ id: "s0", type: "sofa", x: 5, y: 5, w: 2, h: 1, rot: 0 });
+    historyCommit();
+    // Undo the symbol add
+    historyUndo();
+    // Measurement must still be present
+    expect(measurementsModel.measurements.length).toBe(1);
+    resetForHistoryMeasurements();
   });
 });
 
