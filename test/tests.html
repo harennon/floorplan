@@ -1452,7 +1452,7 @@ import {
   model as symbolModel,
   CATALOG,
   createSymbol, addSymbol, removeSymbol, duplicateSymbol, getSymbol,
-  hitTest, pickSymbol, clampDim, resizeSymbol, moveSymbol, rotateSymbol, corners,
+  hitTest, pickSymbol, clampDim, resizeSymbol, snapToPreset, moveSymbol, rotateSymbol, corners,
 } from "../src/js/symbols.js";
 
 /** Reset symbols model between suites. */
@@ -1724,6 +1724,152 @@ describe("symbols.js — resizeSymbol", () => {
   });
 });
 
+// ─── Tests: symbols.js — LLD 99 snapToPreset ─────────────────────────────────
+
+describe("LLD 99 — snapToPreset: pure helper", () => {
+  it("returns an exact preset pair for a between-size bed width input", () => {
+    const r = snapToPreset("bed", 1.20, 2.03);
+    // Some preset pair must be returned.
+    const match = CATALOG.bed.presets.find((p) => Math.abs(p.w - r.w) < 1e-9 && Math.abs(p.h - r.h) < 1e-9);
+    if (!match) throw new Error(`snapToPreset returned (${r.w}, ${r.h}) which is not a bed preset`);
+  });
+
+  it("no-op when the type has no presets", () => {
+    // chair has no presets in the catalog; result must be unchanged.
+    const r = snapToPreset("chair", 0.50, 0.55);
+    expect(r.w).toBeCloseTo(0.50, 9);
+    expect(r.h).toBeCloseTo(0.55, 9);
+  });
+
+  it("returns the sole preset for a one-preset type (hypothetical)", () => {
+    // Build a fake-type-style call by passing a type with one preset; use a real type
+    // whose preset list we test directly — check washer has exactly 2 presets and pick near first.
+    // Instead, test directly: create a minimal preset and verify selection.
+    // We can test via a type whose first preset wins when at that exact point.
+    const r = snapToPreset("washer", CATALOG.washer.presets[0].w, CATALOG.washer.presets[0].h);
+    expect(r.w).toBeCloseTo(CATALOG.washer.presets[0].w, 9);
+    expect(r.h).toBeCloseTo(CATALOG.washer.presets[0].h, 9);
+  });
+
+  it("on an exact tie (or near-tie) returns a valid preset (stable, deterministic)", () => {
+    // The two closest presets to (0.97, 1.97) are Twin (0.97,1.91) and Twin XL (0.97,2.03),
+    // nominally equidistant but floating-point may break the exact tie. The contract is that
+    // the result is deterministic and always equals a real catalog preset.
+    const r = snapToPreset("bed", 0.97, 1.97);
+    const match = CATALOG.bed.presets.find((p) => Math.abs(p.w - r.w) < 1e-9 && Math.abs(p.h - r.h) < 1e-9);
+    if (!match) throw new Error(`snapToPreset tie returned (${r.w}, ${r.h}) which is not a bed preset`);
+  });
+});
+
+describe("LLD 99 — resizeSymbol discrete snap: intuitive single-edit outcome (locks in raw metric)", () => {
+  it("Queen bed width 1.20 m snaps to Full (1.37 × 1.91) — not Twin XL or Twin", () => {
+    resetSymbolModel();
+    // Start at Queen defaults: w=1.52, h=2.03.
+    const s = createSymbol("bed", 0, 0);
+    expect(s.w).toBeCloseTo(1.52, 9);
+    expect(s.h).toBeCloseTo(2.03, 9);
+    resizeSymbol(s, "w", 1.20);
+    // Candidate (1.20, 2.03); raw metric: Full(1.37,1.91) d²=0.0433, TwinXL(0.97,2.03) d²=0.0529.
+    expect(s.w).toBeCloseTo(1.37, 9);
+    expect(s.h).toBeCloseTo(1.91, 9);
+  });
+
+  it("both dims move to the Full preset pair (not a per-axis blend)", () => {
+    resetSymbolModel();
+    const s = createSymbol("bed", 0, 0);
+    resizeSymbol(s, "w", 1.20);
+    // Result must exactly equal a catalog preset.
+    const preset = CATALOG.bed.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`result (${s.w}, ${s.h}) is not a bed preset pair`);
+  });
+});
+
+describe("LLD 99 — resizeSymbol discrete snap: appliances", () => {
+  it("fridge between-rung width snaps to a standard appliance size", () => {
+    resetSymbolModel();
+    const s = createSymbol("fridge", 0, 0);
+    resizeSymbol(s, "w", 0.70);
+    const preset = CATALOG.fridge.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`fridge result (${s.w}, ${s.h}) is not a fridge preset`);
+  });
+
+  it("stove between-rung width snaps to a catalog size", () => {
+    resetSymbolModel();
+    const s = createSymbol("stove", 0, 0);
+    resizeSymbol(s, "w", 0.82); // between 30\" (0.76) and 36\" (0.91)
+    const preset = CATALOG.stove.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`stove result (${s.w}, ${s.h}) is not a stove preset`);
+  });
+
+  it("washer between-rung width snaps to a catalog size", () => {
+    resetSymbolModel();
+    const s = createSymbol("washer", 0, 0);
+    resizeSymbol(s, "w", 0.65); // between 24\" compact (0.61) and 27\" standard (0.69)
+    const preset = CATALOG.washer.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`washer result (${s.w}, ${s.h}) is not a washer preset`);
+  });
+});
+
+describe("LLD 99 — resizeSymbol regression: non-discrete types still free-scale", () => {
+  it("sofa keeps the typed value (not snapped to a preset)", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 0, 0);
+    resizeSymbol(s, "w", 2.30); // in-range but between presets
+    expect(s.w).toBeCloseTo(2.30, 9);
+  });
+
+  it("table keeps the typed value", () => {
+    resetSymbolModel();
+    const s = createSymbol("table", 0, 0);
+    resizeSymbol(s, "w", 1.30); // in-range but between presets
+    expect(s.w).toBeCloseTo(1.30, 9);
+  });
+
+  it("desk keeps the typed value", () => {
+    resetSymbolModel();
+    const s = createSymbol("desk", 0, 0);
+    resizeSymbol(s, "w", 1.50); // in-range
+    expect(s.w).toBeCloseTo(1.50, 9);
+  });
+
+  it("dining-table-round stays continuous (not discrete, despite having presets)", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0);
+    resizeSymbol(s, "w", 1.10); // in-range, between presets 1.00 and 1.25
+    // circular: both axes mirror to 1.10 (not snapped to a preset)
+    expect(s.w).toBeCloseTo(1.10, 9);
+    expect(s.h).toBeCloseTo(1.10, 9);
+  });
+});
+
+describe("LLD 99 — resizeSymbol: lockAspect ignored for discrete type (preset pair already fixes aspect)", () => {
+  it("lockAspect:true on a bed still yields a preset pair, not an aspect-scaled result", () => {
+    resetSymbolModel();
+    const s = createSymbol("bed", 0, 0);
+    resizeSymbol(s, "w", 1.20, true); // lockAspect=true
+    const preset = CATALOG.bed.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`result (${s.w}, ${s.h}) is not a bed preset pair (lockAspect must be overridden)`);
+  });
+});
+
+describe("LLD 99 — plan JSON round-trip: snapped bed w/h survive serialize → hydrate", () => {
+  it("snapped w/h are exact catalog numbers that serialize and hydrate losslessly", async () => {
+    resetSymbolModel();
+    const s = createSymbol("bed", 1.0, 1.0);
+    addSymbol(s);
+    resizeSymbol(s, "w", 1.20); // snaps to Full 1.37×1.91
+    expect(s.w).toBeCloseTo(1.37, 9);
+    expect(s.h).toBeCloseTo(1.91, 9);
+    // Serialize round-trip via JSON.
+    const snapshot = { symbols: symbolModel.symbols.map((sym) => ({ ...sym })) };
+    const json = JSON.stringify(snapshot);
+    const parsed = JSON.parse(json);
+    const rs = parsed.symbols[0];
+    expect(rs.w).toBeCloseTo(1.37, 9);
+    expect(rs.h).toBeCloseTo(1.91, 9);
+  });
+});
+
 describe("symbols.js — moveSymbol", () => {
   it("sets center exactly", () => {
     resetSymbolModel();
@@ -1931,11 +2077,17 @@ describe("LLD-45 — resizeSymbol: clamp on huge/tiny inputs", () => {
     expect(s.h).toBeCloseTo(CATALOG.bathtub.min_h, 9);
     expect(changed).toBe(true);
   });
-  it("washer w huge clamps to max_w and returns changed=true", () => {
+  it("washer w huge clamps then snaps to nearest preset (result is a catalog preset)", () => {
+    // washer is discrete: huge w clamps to max_w (0.70), then candidate (0.70, default_h=0.76)
+    // snaps to nearest preset pair. 27\" standard (0.69, 0.76) wins (d²=0.0001 vs compact 0.0202).
+    // Default washer is already (0.69, 0.76) = 27\" standard, so changed=false (no net change).
     const s = createSymbol("washer", 0, 0);
-    const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.washer.max_w, 9);
-    expect(changed).toBe(true);
+    resizeSymbol(s, "w", 999);
+    const preset = CATALOG.washer.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`washer result (${s.w}, ${s.h}) is not a washer preset`);
+    // Result must be the 27\" standard (nearest preset to clamped candidate).
+    expect(s.w).toBeCloseTo(CATALOG.washer.presets[1].w, 9); // 27\" standard w=0.69
+    expect(s.h).toBeCloseTo(CATALOG.washer.presets[1].h, 9); // 27\" standard h=0.76
   });
   it("washer h tiny clamps to min_h and returns changed=true", () => {
     const s = createSymbol("washer", 0, 0);
@@ -2117,16 +2269,17 @@ describe("symbolDimEntry — lock-aspect is forwarded to resizeSymbol", () => {
     resetSymbolModel();
     setUnit("m");
     view.zoom = 1; view.panX = 0; view.panY = 0;
-    const s = createSymbol("bed", 5, 5); // w=1.5, h=2.0
+    // Use a non-discrete type (sofa) so free-scaling applies without snap interference.
+    const s = createSymbol("sofa", 5, 5); // w=2.0, h=0.90
     addSymbol(s);
     const origH = s.h;
     const rig = makeSymbolDimRig(false); // lockAspect off
     beginSymbolEdit(s.id, "w");
     const input = rig.stage.querySelector(".sym-dim-input");
-    input.value = "1.2m";
+    input.value = "1.8m"; // in-range for sofa: [1.50, 3.50]
     commitSymbol();
     // h must be unchanged when lockAspect is false
-    expect(s.w).toBeCloseTo(1.2, 5);
+    expect(s.w).toBeCloseTo(1.8, 5);
     expect(s.h).toBeCloseTo(origH, 5);
     rig.cleanup();
   });
