@@ -145,7 +145,7 @@ export const CATALOG = {
 
   // Kitchen — appliance widths snap to imperial rungs (24/30/33/36 in).
   fridge: {
-    label: "Fridge", category: "kitchen", w: 0.76, h: 0.81,
+    label: "Fridge", category: "kitchen", discrete: true, w: 0.76, h: 0.81,
     min_w: 0.55, max_w: 0.91, min_h: 0.58, max_h: 0.91,
     presets: [
       { name: "24\" compact", w: 0.61, h: 0.81 },
@@ -155,7 +155,7 @@ export const CATALOG = {
     ],
   },
   stove: {
-    label: "Stove", category: "kitchen", w: 0.76, h: 0.71,
+    label: "Stove", category: "kitchen", discrete: true, w: 0.76, h: 0.71,
     min_w: 0.61, max_w: 0.91, min_h: 0.66, max_h: 0.74,
     presets: [
       { name: "24\"", w: 0.61, h: 0.71 },
@@ -173,7 +173,7 @@ export const CATALOG = {
     ],
   },
   washer: {
-    label: "Washer", category: "kitchen", w: 0.69, h: 0.76,
+    label: "Washer", category: "kitchen", discrete: true, w: 0.69, h: 0.76,
     min_w: 0.60, max_w: 0.70, min_h: 0.65, max_h: 0.86,
     presets: [
       { name: "24\" compact",  w: 0.61, h: 0.65 },
@@ -183,7 +183,7 @@ export const CATALOG = {
 
   // Bedroom
   bed: {
-    label: "Bed", category: "bedroom", w: 1.52, h: 2.03,
+    label: "Bed", category: "bedroom", discrete: true, w: 1.52, h: 2.03,
     min_w: 0.97, max_w: 1.93, min_h: 1.91, max_h: 2.13,
     presets: [
       { name: "Twin",     w: 0.97, h: 1.91 },
@@ -412,10 +412,39 @@ export function clampDim(type, dim, metres) {
 }
 
 /**
+ * Snap a (w,h) footprint to the nearest catalog preset PAIR for a discrete type.
+ * Chooses the preset minimizing raw squared distance in metres —
+ * (w-p.w)² + (h-p.h)² — so both axes move together to a real, buyable size and the
+ * axis the user edits dominates the pick (see LLD 99 Approach step 2). No-op (returns
+ * {w,h} unchanged) if the type has no presets. Pure; does not mutate.
+ * @param {SymbolType} type
+ * @param {number} w  metres
+ * @param {number} h  metres
+ * @returns {{ w:number, h:number }}
+ */
+export function snapToPreset(type, w, h) {
+  const cat = CATALOG[type];
+  if (!cat || !cat.presets || cat.presets.length === 0) return { w, h };
+  let best = cat.presets[0];
+  let bestD2 = (w - best.w) ** 2 + (h - best.h) ** 2;
+  for (let i = 1; i < cat.presets.length; i++) {
+    const p = cat.presets[i];
+    const d2 = (w - p.w) ** 2 + (h - p.h) ** 2;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = p;
+    }
+  }
+  return { w: best.w, h: best.h };
+}
+
+/**
  * Set width or depth (metres), clamped to type range.
  * lockAspect scales the other dimension to preserve w:h ratio; each result is
  * independently clamped — if a clamp would break the ratio, the edited dim wins.
  * Openings ignore dim="h". Mutates sym. Returns boolean (changed).
+ * Discrete types (bed, fridge, stove, washer) snap both dimensions to the nearest
+ * catalog preset pair after clamping; this takes precedence over lockAspect.
  * @param {Sym} sym
  * @param {"w"|"h"} dim
  * @param {number} metres
@@ -434,6 +463,20 @@ export function resizeSymbol(sym, dim, metres, lockAspect = false) {
     const changed = sym.w !== clamped || sym.h !== clamped;
     sym.w = clamped;
     sym.h = clamped;
+    return changed;
+  }
+
+  // Discrete: snap to nearest catalog preset pair. Takes precedence over lockAspect
+  // (a preset pair already fixes the aspect). Placed after the circular guard because
+  // no discrete type is circular; the two branches never interact.
+  const cat = CATALOG[sym.type];
+  if (cat?.discrete && cat.presets) {
+    const candW = dim === "w" ? clamped : sym.w;
+    const candH = dim === "h" ? clamped : sym.h;
+    const snapped = snapToPreset(sym.type, candW, candH);
+    const changed = sym.w !== snapped.w || sym.h !== snapped.h;
+    sym.w = snapped.w;
+    sym.h = snapped.h;
     return changed;
   }
 

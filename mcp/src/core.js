@@ -51,6 +51,7 @@ export {
   rotateSymbol,
   resizeSymbol,
   clampDim,
+  snapToPreset,
   removeSymbol,
   duplicateSymbol,
   getSymbol,
