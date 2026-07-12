@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>2.5D Isometric Preview · floorplan mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+  rel="stylesheet"
+/>
+<style>
+/* Design tokens lifted from src/index.html (warm blueprint, dark default) */
+:root {
+  --bg:         #14140f;
+  --bg-deep:    #100f0b;
+  --ink:        #ece7d6;
+  --muted:      #8f8a78;
+  --gold:       #c9a84c;
+  --gold-soft:  rgba(201, 168, 76, 0.55);
+  --grid-fine:  rgba(201, 168, 76, 0.055);
+  --grid-major: rgba(201, 168, 76, 0.14);
+  --grid-axis:  rgba(201, 168, 76, 0.34);
+  --panel:      rgba(20, 20, 15, 0.72);
+  --hairline:   rgba(201, 168, 76, 0.18);
+  --font-ui:      "DM Sans", system-ui, sans-serif;
+  --font-mono:    "DM Mono", "Courier New", monospace;
+  --font-display: "Libre Baskerville", Georgia, serif;
+  --wall-body:     rgba(201,168,76,0.30);
+  --wall-line:     #d9be6e;
+  --room-fill:     rgba(201,168,76,0.07);
+  --sym-fill:      rgba(201,168,76,0.12);
+  --sym-stroke:    #d9be6e;
+  --accent-rgb:    201,168,76;
+  /* Preview-only face tints (see LLD notes): three shades per box for the
+     three visible isometric faces — top brightest, left mid, right darkest. */
+  --iso-wall-top:   rgba(201,168,76,0.20);
+  --iso-wall-left:  rgba(201,168,76,0.13);
+  --iso-wall-right: rgba(201,168,76,0.07);
+  --iso-wall-edge:  #d9be6e;
+  --iso-floor:      rgba(201,168,76,0.05);
+}
+html[data-theme="light"] {
+  --bg:         #f3ecda;
+  --bg-deep:    #e7dcc2;
+  --ink:        #3a3020;
+  --muted:      #8a7c60;
+  --gold:       #a9812a;
+  --gold-soft:  rgba(169, 129, 42, 0.5);
+  --grid-fine:  rgba(120, 96, 50, 0.07);
+  --grid-major: rgba(120, 96, 50, 0.16);
+  --grid-axis:  rgba(120, 96, 50, 0.36);
+  --panel:      rgba(248, 242, 228, 0.82);
+  --hairline:   rgba(120, 96, 50, 0.22);
+  --wall-body:     rgba(107,88,54,0.30);
+  --wall-line:     #6b5836;
+  --room-fill:     rgba(107,88,54,0.07);
+  --sym-fill:      rgba(107,88,54,0.12);
+  --sym-stroke:    #6b5836;
+  --accent-rgb:    107,88,54;
+  --iso-wall-top:   rgba(107,88,54,0.22);
+  --iso-wall-left:  rgba(107,88,54,0.14);
+  --iso-wall-right: rgba(107,88,54,0.07);
+  --iso-wall-edge:  #6b5836;
+  --iso-floor:      rgba(107,88,54,0.06);
+}
+
+/* ── Base / stage ─────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+.app { position: relative; width: 100vw; height: 100vh; }
+.stage {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(120% 120% at 50% 0%, var(--bg) 0%, var(--bg-deep) 100%);
+}
+.stage svg { display: block; width: 100%; height: 100%; }
+
+/* Faint graph-paper grid drawn in CSS so both mockup modes share a backdrop */
+.grid-bg {
+  position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    linear-gradient(var(--grid-fine) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+    linear-gradient(var(--grid-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+  background-size: 28px 28px, 28px 28px, 140px 140px, 140px 140px;
+}
+.grid-bg.iso-dim { opacity: 0.25; transition: opacity .35s ease; }
+
+/* ── Brand ────────────────────────────────────────────────────────────── */
+.brand { position: absolute; top: 1.1rem; left: 1.3rem; pointer-events: none; }
+.brand-name {
+  font-family: var(--font-display); font-size: 1.15rem; letter-spacing: .01em;
+  color: var(--gold);
+}
+.brand-sub {
+  font-family: var(--font-mono); font-size: .62rem; letter-spacing: .22em;
+  text-transform: uppercase; color: var(--muted); margin-top: .1rem;
+}
+
+/* ── Tool rail (left-center) — mirrors src .tool-rail ─────────────────── */
+.tool-rail {
+  position: absolute; left: 1.1rem; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: .35rem;
+  padding: .45rem; border-radius: 14px;
+  background: var(--panel); border: 1px solid var(--hairline);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 30px rgba(0,0,0,.35);
+  z-index: 6;
+}
+.tool-rail button {
+  width: 40px; height: 40px; display: flex; align-items: center;
+  justify-content: center; position: relative;
+  border: 1px solid transparent; border-radius: 10px;
+  background: transparent; color: var(--ink); cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.tool-rail button:hover { background: rgba(var(--accent-rgb), .10); }
+.tool-rail button[aria-pressed="true"] {
+  background: rgba(var(--accent-rgb), .16);
+  border-color: var(--gold); color: var(--gold);
+}
+.tool-rail .tool-key-hint {
+  position: absolute; bottom: 2px; right: 4px;
+  font-family: var(--font-mono); font-size: .5rem; color: var(--muted);
+}
+.tool-rail-sep { height: 1px; background: var(--hairline); margin: .2rem .3rem; }
+
+/* Preview toggle sits in its own group, visually distinct (it is a VIEW mode,
+   not an edit tool). Gets an accent ring when active. */
+.tool-rail button.preview-toggle[aria-pressed="true"] {
+  background: var(--gold); color: var(--bg-deep); border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .25);
+}
+
+/* ── Actions cluster (top-right) — mirrors src .actions-cluster ───────── */
+.actions-cluster {
+  position: absolute; top: 1.1rem; right: 1.3rem;
+  display: flex; align-items: center; gap: .5rem; z-index: 6;
+}
+.actions-cluster button {
+  height: 32px; padding: 0 .7rem; display: inline-flex; align-items: center;
+  gap: .35rem; border-radius: 9px; cursor: pointer;
+  font-family: var(--font-mono); font-size: .68rem; letter-spacing: .04em;
+  background: var(--panel); border: 1px solid var(--hairline); color: var(--ink);
+  backdrop-filter: blur(8px); transition: border-color .15s, color .15s;
+}
+.actions-cluster button:hover { border-color: var(--gold); color: var(--gold); }
+
+/* ── Preview mode banner (top-center) ─────────────────────────────────── */
+.preview-banner {
+  position: absolute; top: 1.1rem; left: 50%; transform: translateX(-50%);
+  display: none; align-items: center; gap: .6rem;
+  padding: .4rem .5rem .4rem .85rem; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--gold);
+  backdrop-filter: blur(8px); box-shadow: 0 6px 24px rgba(0,0,0,.3);
+  z-index: 7; animation: bannerIn .35s ease;
+}
+body.preview-on .preview-banner { display: flex; }
+.preview-banner .dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--gold);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb),.2);
+}
+.preview-banner .txt {
+  font-family: var(--font-mono); font-size: .66rem; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--gold);
+}
+.preview-banner .sub { color: var(--muted); text-transform: none; letter-spacing: .02em; }
+.preview-banner .exit {
+  height: 26px; padding: 0 .7rem; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--hairline); background: rgba(var(--accent-rgb),.10);
+  color: var(--ink); font-family: var(--font-mono); font-size: .62rem;
+  letter-spacing: .06em; transition: background .15s;
+}
+.preview-banner .exit:hover { background: rgba(var(--accent-rgb),.2); }
+@keyframes bannerIn { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ── Preview legend + camera controls (bottom-right) ──────────────────── */
+.iso-legend {
+  position: absolute; right: 1.3rem; bottom: 1.2rem; display: none;
+  flex-direction: column; gap: .55rem; z-index: 6;
+  padding: .7rem .8rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--hairline);
+  backdrop-filter: blur(8px); min-width: 172px;
+}
+body.preview-on .iso-legend { display: flex; }
+.iso-legend h4 {
+  margin: 0; font-family: var(--font-mono); font-size: .6rem; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--muted);
+}
+.iso-legend .row { display: flex; align-items: center; gap: .5rem; font-size: .72rem; }
+.iso-legend .swatch { width: 16px; height: 16px; border-radius: 3px; border: 1px solid var(--iso-wall-edge); }
+.iso-legend .swatch.walls { background: var(--iso-wall-left); }
+.iso-legend .swatch.furn  { background: rgba(127,208,200,.22); border-color: #7fd0c8; }
+.iso-cam { display: flex; gap: .3rem; margin-top: .2rem; }
+.iso-cam button {
+  flex: 1; height: 28px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--hairline); background: transparent; color: var(--ink);
+  font-family: var(--font-mono); font-size: .62rem; transition: background .15s, border-color .15s;
+}
+.iso-cam button:hover { background: rgba(var(--accent-rgb),.1); border-color: var(--gold); }
+
+/* Fade/scale transition between 2D editor and 2.5D preview */
+#editor-layer, #preview-layer { transition: opacity .4s ease; }
+#preview-layer { opacity: 0; pointer-events: none; }
+body.preview-on #editor-layer { opacity: 0; pointer-events: none; }
+body.preview-on #preview-layer { opacity: 1; pointer-events: auto; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="grid-bg" id="gridBg"></div>
+
+  <!-- Stage holds both the 2D editor SVG and the 2.5D preview SVG, cross-faded -->
+  <div class="stage" id="stage">
+    <svg id="editor-layer" viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+    <svg id="preview-layer" viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+  </div>
+
+  <!-- Brand -->
+  <div class="brand">
+    <div class="brand-name">floorplan</div>
+    <div class="brand-sub">warm blueprint</div>
+  </div>
+
+  <!-- Tool rail -->
+  <nav class="tool-rail" aria-label="Tools">
+    <button id="tool-select" aria-label="Select (V)" aria-pressed="false">
+      <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 2 L4 13 L7 10 L9 14 L11 13 L9 9 L13 9 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+      <span class="tool-key-hint">V</span>
+    </button>
+    <button id="tool-wall" aria-label="Draw wall (W)" aria-pressed="true">
+      <svg width="16" height="16" viewBox="0 0 16 16"><polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+      <span class="tool-key-hint">W</span>
+    </button>
+    <button id="tool-measure" aria-label="Measure (M)" aria-pressed="false">
+      <svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 8 H14 M2 5 V11 M14 5 V11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>
+      <span class="tool-key-hint">M</span>
+    </button>
+    <div class="tool-rail-sep" aria-hidden="true"></div>
+    <!-- The new whole-plan preview toggle. VIEW mode, not an edit tool. -->
+    <button id="tool-preview" class="preview-toggle" aria-label="3D preview (P)" aria-pressed="false" title="Toggle 2.5D preview (P)">
+      <svg width="17" height="17" viewBox="0 0 16 16">
+        <path d="M8 1.5 L14 5 L8 8.5 L2 5 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
+        <path d="M2 5 L2 11 L8 14.5 L14 11 L14 5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
+        <path d="M8 8.5 L8 14.5" stroke="currentColor" stroke-width="1.1" fill="none"/>
+      </svg>
+      <span class="tool-key-hint">P</span>
+    </button>
+  </nav>
+
+  <!-- Preview mode banner -->
+  <div class="preview-banner" role="status">
+    <span class="dot" aria-hidden="true"></span>
+    <span class="txt">Preview <span class="sub">— view-only, edit in 2D</span></span>
+    <button class="exit" id="exitPreview">Exit ✕</button>
+  </div>
+
+  <!-- Actions cluster -->
+  <div class="actions-cluster">
+    <button id="btn-theme">☀ Theme</button>
+    <button id="btn-share">Share</button>
+    <button id="btn-export">Export</button>
+  </div>
+
+  <!-- Preview legend + camera controls -->
+  <aside class="iso-legend" aria-label="Preview legend">
+    <h4>2.5D Preview</h4>
+    <div class="row"><span class="swatch walls"></span> Walls · ceiling 2.4m</div>
+    <div class="row"><span class="swatch furn"></span> Furniture · catalog height</div>
+    <div class="iso-cam" role="group" aria-label="Camera angle">
+      <button data-cam="NE" aria-pressed="true">NE</button>
+      <button data-cam="NW">NW</button>
+      <button data-cam="SE">SE</button>
+    </div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs) => {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+};
+const cssv = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+/* ── Sample plan (world metres). Mirrors the shape used in src:
+   rooms = {verts:[{x,y}]}, symbols = {type,x,y,w,h,rot}. Heights are the NEW
+   data this LLD adds: CEILING_H for walls, and a per-type height for furniture. */
+const CEILING_H = 2.4;                 // room/ceiling default (renderer reads this)
+const HEIGHTS = {                      // per-type default heights → added to CATALOG
+  sofa: 0.90, bed: 0.55, wardrobe: 2.00, table: 0.75, chair: 0.85,
+  desk: 0.74, tv: 0.55, bookshelf: 1.80, fridge: 1.70, nightstand: 0.50,
+  "coffee-table": 0.42, "dining-table-round": 0.75,
+};
+
+// L-shaped studio outline + an interior partition, in metres.
+const rooms = [
+  { verts: [ {x:0,y:0}, {x:7.2,y:0}, {x:7.2,y:5.4}, {x:4.2,y:5.4}, {x:4.2,y:3.4}, {x:0,y:3.4} ] },
+];
+const symbols = [
+  { type:"bed",            x:1.5, y:1.0, w:1.52, h:2.03, rot:0 },
+  { type:"wardrobe",       x:5.9, y:0.55, w:1.50, h:0.58, rot:0 },
+  { type:"nightstand",     x:2.7, y:0.5, w:0.45, h:0.40, rot:0 },
+  { type:"sofa",           x:5.6, y:3.0, w:2.10, h:0.95, rot:0 },
+  { type:"coffee-table",   x:5.6, y:4.1, w:1.10, h:0.55, rot:0 },
+  { type:"tv",             x:5.6, y:5.0, w:1.40, h:0.40, rot:0 },
+  { type:"desk",           x:1.2, y:4.6, w:1.40, h:0.70, rot:0 },
+  { type:"chair",          x:1.2, y:3.8, w:0.50, h:0.50, rot:0 },
+  { type:"bookshelf",      x:3.6, y:4.9, w:0.80, h:0.30, rot:90 },
+];
+
+/* Rotated footprint corners in world metres (TL,TR,BR,BL) — mirrors symbols.corners() */
+function corners(s) {
+  const r = s.rot * Math.PI/180, c = Math.cos(r), sn = Math.sin(r);
+  const hw = s.w/2, hh = s.h/2;
+  const pt = (lx,ly) => ({ x: s.x + lx*c - ly*sn, y: s.y + lx*sn + ly*c });
+  return [ pt(-hw,-hh), pt(hw,-hh), pt(hw,hh), pt(-hw,hh) ];
+}
+
+/* ── 2D EDITOR renderer (top-down) — represents the "preview OFF" state ─── */
+const PPM_2D = 84;                     // px per metre, plan view
+const OX_2D = 250, OY_2D = 120;        // world-origin offset in the 1000×640 viewBox
+const w2s = (x,y) => ({ x: OX_2D + x*PPM_2D, y: OY_2D + y*PPM_2D });
+
+function render2D() {
+  const svg = document.getElementById("editor-layer");
+  svg.innerHTML = "";
+  const roomFill = cssv("--room-fill"), wallBody = cssv("--wall-body"),
+        wallLine = cssv("--wall-line"), symFill = cssv("--sym-fill"),
+        symStroke = cssv("--sym-stroke");
+
+  for (const room of rooms) {
+    const pts = room.verts.map(v => { const s = w2s(v.x,v.y); return `${s.x},${s.y}`; }).join(" ");
+    svg.appendChild(el("polygon", { points: pts, fill: roomFill, stroke: "none" }));
+    svg.appendChild(el("polygon", { points: pts, fill: "none", stroke: wallBody,
+      "stroke-width": Math.max(6, 0.12*PPM_2D), "stroke-linejoin": "round" }));
+    svg.appendChild(el("polygon", { points: pts, fill: "none", stroke: wallLine,
+      "stroke-width": 1.6, "stroke-linejoin": "round" }));
+  }
+  for (const s of symbols) {
+    const pts = corners(s).map(c => { const p = w2s(c.x,c.y); return `${p.x},${p.y}`; }).join(" ");
+    svg.appendChild(el("polygon", { points: pts, fill: symFill, stroke: symStroke,
+      "stroke-width": 1.4, "stroke-linejoin": "round" }));
+    // tiny label
+    const c = w2s(s.x, s.y);
+    const t = el("text", { x: c.x, y: c.y+3, "text-anchor": "middle",
+      "font-family": "var(--font-mono)", "font-size": 9, fill: cssv("--muted") });
+    t.textContent = s.type.replace(/-/g," ");
+    svg.appendChild(t);
+  }
+}
+
+/* ── 2.5D ISOMETRIC renderer ────────────────────────────────────────────
+   Axonometric projection: world (x,y,z) → screen. Ground plane is world x
+   (east) and y (south, screen-down in 2D); z is height up. We rotate the
+   ground by the camera azimuth, apply a 2:1 dimetric foreshortening, and lift
+   by z. This is pure arithmetic — no WebGL/three.js (guard respected). */
+const ISO = { ppm: 66, ox: 500, oy: 370, zscale: 66, elev: 0.5 };
+let camAz = 0;   // 0=NE, others rotate the ground
+const CAM_AZ = { NE: 0, NW: Math.PI/2, SE: -Math.PI/2 };
+
+function project(x, y, z) {
+  // rotate ground about plan centroid-ish origin
+  const cx = 3.6, cy = 2.7;               // rough plan center (m)
+  const dx = x - cx, dy = y - cy;
+  const ca = Math.cos(camAz), sa = Math.sin(camAz);
+  const rx = dx*ca - dy*sa;
+  const ry = dx*sa + dy*ca;
+  // dimetric: x goes right+down, y goes left+down; z lifts up
+  const sx = ISO.ox + (rx - ry) * ISO.ppm * 0.86;
+  const sy = ISO.oy + (rx + ry) * ISO.ppm * ISO.elev - z * ISO.zscale;
+  return { x: sx, y: sy };
+}
+
+/* Depth key for painter's algorithm: things further back (smaller rx+ry) draw
+   first. Uses footprint center + a small z bias so taller items win ties. */
+function depthKey(x, y) {
+  const cx = 3.6, cy = 2.7, dx = x-cx, dy = y-cy;
+  const ca = Math.cos(camAz), sa = Math.sin(camAz);
+  const rx = dx*ca - dy*sa, ry = dx*sa + dy*ca;
+  return rx + ry;
+}
+
+/* Extrude a footprint (array of world {x,y}) from z0..z1 into SVG faces.
+   Emits: bottom (optional), side quads for each edge, and a top cap. Each face
+   gets a shade so the three visible orientations read as light/mid/dark. */
+function extrude(footprint, z0, z1, opts) {
+  const g = el("g", {});
+  const top = footprint.map(p => project(p.x, p.y, z1));
+  const bot = footprint.map(p => project(p.x, p.y, z0));
+
+  // Side walls: one quad per edge. Shade by facing (screen dx of the edge).
+  const sideFaces = [];
+  for (let i = 0; i < footprint.length; i++) {
+    const j = (i+1) % footprint.length;
+    const quad = [ bot[i], bot[j], top[j], top[i] ];
+    // shade: edges running more left-right get the "front/dark", others "side"
+    const edx = top[j].x - top[i].x;
+    const shade = edx >= 0 ? opts.right : opts.left;
+    const midDepth = (depthKey(footprint[i].x, footprint[i].y) + depthKey(footprint[j].x, footprint[j].y))/2;
+    sideFaces.push({ quad, shade, midDepth });
+  }
+  // back-to-front within the box
+  sideFaces.sort((a,b) => a.midDepth - b.midDepth);
+  for (const f of sideFaces) {
+    g.appendChild(el("polygon", {
+      points: f.quad.map(p=>`${p.x},${p.y}`).join(" "),
+      fill: f.shade, stroke: opts.edge, "stroke-width": opts.sw, "stroke-linejoin": "round",
+      "stroke-opacity": 0.55 }));
+  }
+  // Top cap
+  g.appendChild(el("polygon", {
+    points: top.map(p=>`${p.x},${p.y}`).join(" "),
+    fill: opts.top, stroke: opts.edge, "stroke-width": opts.sw, "stroke-linejoin": "round" }));
+  return g;
+}
+
+function renderPreview() {
+  const svg = document.getElementById("preview-layer");
+  svg.innerHTML = "";
+  const wallOpts = {
+    top: cssv("--iso-wall-top"), left: cssv("--iso-wall-left"),
+    right: cssv("--iso-wall-right"), edge: cssv("--iso-wall-edge"), sw: 1.2,
+  };
+  const furnOpts = {
+    top: "rgba(127,208,200,.30)", left: "rgba(127,208,200,.20)",
+    right: "rgba(127,208,200,.11)", edge: "#7fd0c8", sw: 1.1,
+  };
+
+  // 1) Floor slab (thin) so the room reads as a ground plane
+  for (const room of rooms) {
+    const floor = room.verts.map(v => project(v.x, v.y, 0));
+    svg.appendChild(el("polygon", { points: floor.map(p=>`${p.x},${p.y}`).join(" "),
+      fill: cssv("--iso-floor"), stroke: cssv("--iso-wall-edge"),
+      "stroke-width": 1, "stroke-opacity": .5 }));
+  }
+
+  // 2) Build a draw list of extruded boxes, then paint back-to-front.
+  const drawList = [];
+  // Walls: extrude each wall SEGMENT as a thin box of thickness 0.12m to ceiling.
+  for (const room of rooms) {
+    const n = room.verts.length;
+    for (let i = 0; i < n; i++) {
+      const a = room.verts[i], b = room.verts[(i+1)%n];
+      const foot = wallSegmentFootprint(a, b, 0.12);
+      drawList.push({ depth: depthKey((a.x+b.x)/2,(a.y+b.y)/2), z: CEILING_H,
+        foot, opts: wallOpts });
+    }
+  }
+  // Furniture: extrude footprint to its catalog height.
+  for (const s of symbols) {
+    const h = HEIGHTS[s.type] || 0.5;
+    drawList.push({ depth: depthKey(s.x, s.y), z: h, foot: corners(s), opts: furnOpts });
+  }
+  drawList.sort((a,b) => a.depth - b.depth);
+  for (const item of drawList) {
+    svg.appendChild(extrude(item.foot, 0, item.z, item.opts));
+  }
+}
+
+/* Rectangular footprint for a wall segment a→b of given thickness (metres). */
+function wallSegmentFootprint(a, b, thick) {
+  const dx = b.x-a.x, dy = b.y-a.y, len = Math.hypot(dx,dy) || 1;
+  const nx = -dy/len * thick/2, ny = dx/len * thick/2;
+  return [ {x:a.x+nx,y:a.y+ny}, {x:b.x+nx,y:b.y+ny}, {x:b.x-nx,y:b.y-ny}, {x:a.x-nx,y:a.y-ny} ];
+}
+
+/* ── Wiring: preview toggle, camera, theme ─────────────────────────────── */
+const btnPreview = document.getElementById("tool-preview");
+const gridBg = document.getElementById("gridBg");
+
+function setPreview(on) {
+  document.body.classList.toggle("preview-on", on);
+  btnPreview.setAttribute("aria-pressed", String(on));
+  gridBg.classList.toggle("iso-dim", on);
+  if (on) renderPreview();
+}
+btnPreview.addEventListener("click", () => setPreview(!document.body.classList.contains("preview-on")));
+document.getElementById("exitPreview").addEventListener("click", () => setPreview(false));
+
+// Camera angle buttons (preview-only extra; the shippable cut can defer this)
+document.querySelectorAll(".iso-cam button").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".iso-cam button").forEach(x => x.setAttribute("aria-pressed","false"));
+    b.setAttribute("aria-pressed","true");
+    camAz = CAM_AZ[b.dataset.cam] || 0;
+    renderPreview();
+  });
+});
+
+// Keyboard: P toggles preview (mirrors W/V/M single-key tool shortcuts)
+window.addEventListener("keydown", (e) => {
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+  if (e.key === "p" || e.key === "P") setPreview(!document.body.classList.contains("preview-on"));
+  if (e.key === "Escape" && document.body.classList.contains("preview-on")) setPreview(false);
+});
+
+// Theme toggle (dark ⇄ light) so reviewers can see both palettes
+document.getElementById("btn-theme").addEventListener("click", () => {
+  const light = document.documentElement.getAttribute("data-theme") === "light";
+  document.documentElement.setAttribute("data-theme", light ? "dark" : "light");
+  render2D();
+  if (document.body.classList.contains("preview-on")) renderPreview();
+});
+
+// Simple pseudo tool-rail selection feedback (mockup only)
+["tool-select","tool-wall","tool-measure"].forEach(id => {
+  document.getElementById(id).addEventListener("click", () => {
+    ["tool-select","tool-wall","tool-measure"].forEach(x =>
+      document.getElementById(x).setAttribute("aria-pressed","false"));
+    document.getElementById(id).setAttribute("aria-pressed","true");
+  });
+});
+
+// Initial paint
+render2D();
+</script>
+</body>
+</html>
