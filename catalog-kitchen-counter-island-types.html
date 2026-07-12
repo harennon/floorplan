@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catalog · Counter / Countertop + Island — floorplan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#14140f; --bg-deep:#100f0b; --ink:#ece7d6; --muted:#8f8a78;
+    --gold:#c9a84c; --gold-soft:rgba(201,168,76,0.55);
+    --grid-fine:rgba(201,168,76,0.055); --grid-major:rgba(201,168,76,0.14);
+    --panel:rgba(20,20,15,0.72); --hairline:rgba(201,168,76,0.18);
+    --font-mono:"DM Mono","Courier New",monospace;
+    --display:"Fraunces",Georgia,serif;
+    --snap-teal:#7fd0c8; --ok:#9cd67a; --tight:#e0b64f; --bad:#e07a5f;
+    --sym-fill:rgba(236,231,214,0.045); --sym-stroke:rgba(236,231,214,0.62);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1100px 700px at 78% -8%, rgba(201,168,76,0.06), transparent 60%),
+      linear-gradient(160deg,var(--bg) 0%,var(--bg-deep) 100%);
+    color:var(--ink); font-family:var(--font-mono);
+    min-height:100vh; padding:2.4rem 1.4rem 5rem; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto}
+  header.page{margin-bottom:2rem}
+  .eyebrow{
+    font-size:0.62rem; letter-spacing:0.34em; text-transform:uppercase;
+    color:var(--gold); display:flex; align-items:center; gap:0.6rem;
+  }
+  .eyebrow::before{content:"";width:26px;height:1px;background:var(--gold-soft)}
+  h1{
+    font-family:var(--display); font-weight:600; font-size:clamp(1.9rem,4vw,3rem);
+    margin:0.5rem 0 0.4rem; letter-spacing:-0.01em; line-height:1.02;
+  }
+  h1 em{font-style:italic; color:var(--gold)}
+  .lede{color:var(--muted); max-width:60ch; font-size:0.86rem}
+  .grid{
+    display:grid; grid-template-columns:repeat(12,1fr); gap:1.1rem;
+    margin-top:1.8rem;
+  }
+  .card{
+    background:var(--panel); border:1px solid var(--hairline); border-radius:12px;
+    padding:1.2rem 1.25rem 1.35rem; backdrop-filter:blur(10px);
+    position:relative; overflow:hidden;
+  }
+  .card::before{
+    content:""; position:absolute; inset:0; pointer-events:none; opacity:0.5;
+    background-image:
+      linear-gradient(var(--grid-fine) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid-fine) 1px,transparent 1px);
+    background-size:16px 16px;
+  }
+  .card > *{position:relative}
+  .card h2{
+    font-family:var(--display); font-weight:500; font-size:1.05rem; margin:0 0 0.15rem;
+  }
+  .card .sub{color:var(--muted); font-size:0.68rem; margin-bottom:1rem;
+    letter-spacing:0.04em}
+  .col-4{grid-column:span 4} .col-5{grid-column:span 5}
+  .col-6{grid-column:span 6} .col-7{grid-column:span 7}
+  .col-8{grid-column:span 8} .col-12{grid-column:span 12}
+  @media(max-width:860px){ [class*="col-"]{grid-column:span 12} }
+  .tag{
+    display:inline-block; font-size:0.56rem; letter-spacing:0.14em;
+    text-transform:uppercase; color:var(--gold); border:1px solid var(--gold-soft);
+    border-radius:999px; padding:0.12rem 0.5rem; margin-left:0.5rem; vertical-align:middle;
+  }
+
+  /* ── Dock replica ─────────────────────────────────────────── */
+  .dock{
+    background:var(--bg-deep); border:1px solid var(--hairline); border-radius:10px;
+    overflow:hidden; margin-top:0.4rem;
+  }
+  .dock-tabs{display:flex; border-bottom:1px solid var(--hairline)}
+  .dock-tab{
+    background:transparent; border:none; border-bottom:2px solid transparent;
+    color:var(--muted); font-family:var(--font-mono); font-size:0.52rem;
+    letter-spacing:0.08em; text-transform:uppercase; padding:0.5rem 0.6rem;
+    cursor:pointer; white-space:nowrap;
+  }
+  .dock-tab[aria-selected="true"]{
+    color:var(--gold); border-bottom-color:var(--gold); background:rgba(201,168,76,0.13);
+  }
+  .dock-row{display:flex; gap:0; padding:0.5rem; overflow-x:auto; scrollbar-width:none}
+  .dock-row::-webkit-scrollbar{display:none}
+  .dock-item{
+    background:transparent; border:1px solid transparent; color:var(--muted);
+    font-family:var(--font-mono); font-size:0.55rem; letter-spacing:0.04em;
+    width:3rem; height:3rem; border-radius:7px; cursor:grab; flex-shrink:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:0.15rem; padding:0.2rem 0; transition:color .12s,border-color .12s,background .12s;
+  }
+  .dock-item:hover{color:var(--gold); border-color:var(--gold-soft); background:rgba(201,168,76,0.07)}
+  .dock-item.is-new{
+    color:var(--gold); border-color:var(--gold-soft); background:rgba(201,168,76,0.10);
+    box-shadow:0 0 0 1px rgba(201,168,76,0.12), 0 0 18px -6px var(--gold);
+  }
+  .dock-item.is-new::after{
+    content:"NEW"; position:absolute; margin-top:-2.55rem; margin-left:1.55rem;
+    font-size:0.4rem; letter-spacing:0.1em; color:var(--gold);
+  }
+  .dock-note{color:var(--muted); font-size:0.64rem; margin-top:0.7rem; line-height:1.5}
+  .dock-note b{color:var(--ink); font-weight:500}
+
+  /* ── Canvas ───────────────────────────────────────────────── */
+  .stage{
+    background:var(--bg-deep); border:1px solid var(--hairline); border-radius:10px;
+    position:relative; overflow:hidden;
+  }
+  .stage svg{display:block; width:100%; height:auto}
+  .legend{display:flex; flex-wrap:wrap; gap:0.5rem 1.1rem; margin-top:0.85rem; font-size:0.62rem; color:var(--muted)}
+  .legend span{display:inline-flex; align-items:center; gap:0.4rem}
+  .swatch{width:22px; height:0; border-top:2px dashed currentColor; display:inline-block}
+  .k-ok{color:var(--ok)} .k-tight{color:var(--tight)} .k-bad{color:var(--bad)}
+
+  /* ── Preset picker ────────────────────────────────────────── */
+  .preset-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:0.6rem}
+  .preset-head .type{font-family:var(--display); font-size:0.95rem}
+  .preset-head .dims{font-size:0.66rem; color:var(--muted)}
+  .presets{display:flex; flex-direction:column; gap:0.4rem}
+  .preset{
+    display:flex; align-items:center; justify-content:space-between; gap:0.8rem;
+    background:transparent; border:1px solid var(--hairline); border-radius:8px;
+    padding:0.55rem 0.7rem; cursor:pointer; color:var(--ink);
+    font-family:var(--font-mono); font-size:0.72rem; text-align:left;
+    transition:border-color .12s,background .12s;
+  }
+  .preset:hover{border-color:var(--gold-soft); background:rgba(201,168,76,0.05)}
+  .preset[aria-pressed="true"]{border-color:var(--gold); background:rgba(201,168,76,0.12)}
+  .preset .pname{display:flex; align-items:center; gap:0.55rem}
+  .preset .pico{color:var(--gold); flex-shrink:0}
+  .preset .pdim{color:var(--muted); font-size:0.64rem; letter-spacing:0.03em}
+  .preset[aria-pressed="true"] .pdim{color:var(--ink)}
+
+  /* ── Bounds / chips row ───────────────────────────────────── */
+  .chips{display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.9rem}
+  .chip{
+    font-size:0.62rem; color:var(--ink); background:rgba(236,231,214,0.05);
+    border:1px solid var(--hairline); border-radius:6px; padding:0.28rem 0.55rem;
+  }
+  .chip b{color:var(--gold); font-weight:500}
+  .callout{
+    margin-top:1rem; border-left:2px solid var(--gold-soft); padding:0.15rem 0 0.15rem 0.8rem;
+    color:var(--muted); font-size:0.68rem; line-height:1.55;
+  }
+  .callout b{color:var(--ink); font-weight:500}
+  footer.note{margin-top:2.4rem; color:var(--muted); font-size:0.64rem; text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div class="eyebrow">Catalog · LLD 94 · Kitchen module</div>
+    <h1>Counter, Countertop &amp; <em>Island</em></h1>
+    <p class="lede">Two new catalog types so the plan can model the continuous prep run and
+    the free-standing island the NKBA work-triangle depends on. Per-axis bounds + real
+    cabinetry presets, matching the post-#98 catalog shape. This mockup shows the dock entry,
+    on-canvas glyphs, the preset picker, and the landing-zone clearance read the future
+    <code>check_layout</code> evaluator will surface.</p>
+  </header>
+
+  <div class="grid">
+
+    <!-- ── Dock ── -->
+    <section class="card col-5">
+      <h2>Kitchen dock<span class="tag">2 new</span></h2>
+      <div class="sub">bottom-center palette · Kitchen tab</div>
+      <div class="dock" role="group" aria-label="Kitchen palette">
+        <div class="dock-tabs" role="tablist">
+          <button class="dock-tab" role="tab">Openings</button>
+          <button class="dock-tab" role="tab">Living</button>
+          <button class="dock-tab" role="tab" aria-selected="true">Kitchen</button>
+          <button class="dock-tab" role="tab">Bath</button>
+        </div>
+        <div class="dock-row" role="tabpanel">
+          <button class="dock-item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="4" y="2" width="10" height="14" rx="1" stroke="currentColor" stroke-width="1.3"/><line x1="4" y1="7" x2="14" y2="7" stroke="currentColor" stroke-width="1" opacity=".7"/><line x1="12" y1="4.5" x2="12" y2="6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg><span>Fridge</span></button>
+          <button class="dock-item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="3" width="14" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/><circle cx="6" cy="7.5" r="1.8" stroke="currentColor" stroke-width=".9"/><circle cx="12" cy="7.5" r="1.8" stroke="currentColor" stroke-width=".9"/><circle cx="6" cy="12.5" r="1.8" stroke="currentColor" stroke-width=".9"/><circle cx="12" cy="12.5" r="1.8" stroke="currentColor" stroke-width=".9"/></svg><span>Stove</span></button>
+          <button class="dock-item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3" y="5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="4.5" y="6.5" width="9" height="6" rx=".8" stroke="currentColor" stroke-width=".8" fill="currentColor" fill-opacity=".08"/><circle cx="9" cy="5.5" r="1" fill="currentColor"/></svg><span>Sink</span></button>
+          <button class="dock-item is-new" style="position:relative"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1.5" y="6" width="15" height="6" rx="1" stroke="currentColor" stroke-width="1.3"/><line x1="1.5" y1="8.2" x2="16.5" y2="8.2" stroke="currentColor" stroke-width=".8" opacity=".6"/><line x1="6.5" y1="6" x2="6.5" y2="12" stroke="currentColor" stroke-width=".7" opacity=".45"/><line x1="11.5" y1="6" x2="11.5" y2="12" stroke="currentColor" stroke-width=".7" opacity=".45"/></svg><span>Counter</span></button>
+          <button class="dock-item is-new" style="position:relative"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3" y="4.5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="5" y="6.5" width="8" height="5" rx=".6" stroke="currentColor" stroke-width=".8" fill="currentColor" fill-opacity=".07"/><line x1="9" y1="4.5" x2="9" y2="6.5" stroke="currentColor" stroke-width=".7" opacity=".5"/><line x1="9" y1="11.5" x2="9" y2="13.5" stroke="currentColor" stroke-width=".7" opacity=".5"/></svg><span>Island</span></button>
+          <button class="dock-item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="2" width="14" height="14" rx="1" stroke="currentColor" stroke-width="1.3"/><circle cx="9" cy="10" r="4" stroke="currentColor" stroke-width="1.1"/><rect x="6" y="3" width="3.5" height="2" rx=".5" stroke="currentColor" stroke-width=".8" fill="currentColor" fill-opacity=".1"/></svg><span>Washer</span></button>
+        </div>
+      </div>
+      <p class="dock-note"><b>Counter</b> is a wide-but-shallow run (a base cabinet + top);
+      <b>Island</b> is a free-standing block. Both slot into the existing Kitchen tab, drag
+      onto the canvas like every other symbol, and seat flush to walls (counter) or float
+      (island) via the LLD 26 snapping already in place.</p>
+    </section>
+
+    <!-- ── Counter presets ── -->
+    <section class="card col-4">
+      <h2>Counter presets</h2>
+      <div class="sub">selected symbol · pick a real run length</div>
+      <div class="preset-head">
+        <span class="type">Counter</span>
+        <span class="dims">0.61 m deep · edits both axes</span>
+      </div>
+      <div class="presets">
+        <button class="preset"><span class="pname"><span class="pico">▭</span>Landing 24″</span><span class="pdim">0.61 × 0.61 m</span></button>
+        <button class="preset" aria-pressed="true"><span class="pname"><span class="pico">▭</span>Prep run 36″</span><span class="pdim">0.91 × 0.61 m</span></button>
+        <button class="preset"><span class="pname"><span class="pico">▭</span>Galley 48″</span><span class="pdim">1.22 × 0.61 m</span></button>
+        <button class="preset"><span class="pname"><span class="pico">▭</span>Run 72″</span><span class="pdim">1.83 × 0.61 m</span></button>
+        <button class="preset"><span class="pname"><span class="pico">▭</span>Wall 96″</span><span class="pdim">2.44 × 0.61 m</span></button>
+      </div>
+      <div class="chips">
+        <span class="chip">width <b>0.30–3.05 m</b></span>
+        <span class="chip">depth <b>0.60–0.76 m</b></span>
+      </div>
+      <div class="callout"><b>Why these:</b> base cabinetry runs in 3-inch modules on a
+      standard 24″ (0.61 m) countertop depth. Deep bound reaches 30″ for an overhang / eat-at
+      lip. Width floor 0.30 m = a single filler; the 0.91 m preset is the NKBA continuous
+      prep-run minimum.</div>
+    </section>
+
+    <!-- ── Island presets ── -->
+    <section class="card col-3" style="grid-column:span 3">
+      <h2>Island presets</h2>
+      <div class="sub">free-standing block</div>
+      <div class="preset-head">
+        <span class="type">Island</span>
+        <span class="dims">both axes</span>
+      </div>
+      <div class="presets">
+        <button class="preset"><span class="pname"><span class="pico">◻</span>Cart 36×24</span><span class="pdim">0.91 × 0.61 m</span></button>
+        <button class="preset" aria-pressed="true"><span class="pname"><span class="pico">◻</span>Standard 48×30</span><span class="pdim">1.22 × 0.76 m</span></button>
+        <button class="preset"><span class="pname"><span class="pico">◻</span>Large 72×36</span><span class="pdim">1.83 × 0.91 m</span></button>
+        <button class="preset"><span class="pname"><span class="pico">◻</span>Galley 96×42</span><span class="pdim">2.44 × 1.07 m</span></button>
+      </div>
+      <div class="chips">
+        <span class="chip">width <b>0.61–3.05 m</b></span>
+        <span class="chip">depth <b>0.61–1.22 m</b></span>
+      </div>
+      <div class="callout"><b>Why these:</b> an island needs ≥0.91 m walkway on every side,
+      so its depth bound is deeper than a wall counter. Presets track common island footprints
+      from big-box kitchen planners.</div>
+    </section>
+
+    <!-- ── Canvas scene ── -->
+    <section class="card col-8">
+      <h2>On-canvas: glyphs &amp; landing zones</h2>
+      <div class="sub">L-run counter + island · clearance overlay on the selected counter</div>
+      <div class="stage">
+        <span>Fridge</span></button>
+          <button class="dock-item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="3" width="14" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/><circle cx="6" cy="7.5" r="1.8" stroke="currentColor" stroke-width=".9"/><circle cx="12" cy="7.5" r="1.8" stroke="currentColor" stroke-width=".9"/><circle cx="6" cy="12.5" r="1.8" stroke="currentColor" stroke-width=".9"/><circle cx="12" cy="12.5" r="1.8" stroke="currentColor" stroke-width=".9"/></svg><span>Stove</span></button>
+          <button class="dock-item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3" y="5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="4.5" y="6.5" width="9" height="6" rx=".8" stroke="currentColor" stroke-width=".8" fill="currentColor" fill-opacity=".08"/><circle cx="9" cy="5.5" r="1" fill="currentColor"/></svg><span>Sink</span></button>
+          <button class="dock-item is-new" style="position:relative"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1.5" y="6" width="15" height="6" rx="1" stroke="currentColor" stroke-width="1.3"/><line x1="1.5" y1="8.2" x2="16.5" y2="8.2" stroke="currentColor" stroke-width=".8" opacity=".6"/><line x1="6.5" y1="6" x2="6.5" y2="12" stroke="currentColor" stroke-width=".7" opacity=".45"/><line x1="11.5" y1="6" x2="11.5" y2="12" stroke="currentColor" stroke-width=".7" opacity=".45"/></svg><span>Counter</span></button>
+          <button class="dock-item is-new" style="position:relative"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3" y="4.5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="5" y="6.5" width="8" height="5" rx=".6" stroke="currentColor" stroke-width=".8" fill="currentColor" fill-opacity=".07"/><line x1="9" y1="4.5" x2="9" y2="6.5" stroke="currentColor" stroke-width=".7" opacity=".5"/><line x1="9" y1="11.5" x2="9" y2="13.5" stroke="currentColor" stroke-width=".7" opacity=".5"/></svg><span>Island</span></button>
+          <button class="dock-item"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="2" width="14" height="14" rx="1" stroke="currentColor" stroke-width="1.3"/><circle cx="9" cy="10" r="4" stroke="currentColor" stroke-width="1.1"/><rect x="6" y="3" width="3.5" height="2" rx=".5" stroke="currentColor" stroke-width=".8" fill="currentColor" fill-opacity=".1"/></svg><span>Washer</span></button>
+        </div>
+      </div>
+      <p class="dock-note"><b>Counter</b> is a wide-but-shallow run (a base cabinet + top);
+      <b>Island</b> is a free-standing block. Both slot into the existing Kitchen tab, drag
+      onto the canvas like every other symbol, and seat flush to walls (counter) or float
+      (island) via the LLD 26 snapping already in place.</p>
+    </section>
+
+    <!-- ── Counter presets ── -->
+    <section class="card col-4">
+      <h2>Counter presets</h2>
+      <div class="sub">selected symbol · pick a real run length</div>
+      <div class="preset-head">
+        <span class="type">Counter</span>
+        <span class="dims">0.61 m deep · edits both axes</span>
+      </div>
+      <div class="presets">
+        <button class="preset"><span class="pname"><span class="pico">▭</span>Landing 24″</span><span class="pdim">0.61 × 0.61 m</span></button>
+        <button class="preset" aria-pressed="true"><span class="pname"><span class="pico">▭</span>Prep run 36″</span><span class="pdim">0.91 × 0.61 m</span></button>
+        <button class="preset"><span class="pname"><span class="pico">▭</span>Galley 48″</span><span class="pdim">1.22 × 0.61 m</span></button>
+        <button class="preset"><span class="pname"><span class="pico">▭</span>Run 72″</span><span class="pdim">1.83 × 0.61 m</span></button>
+        <button class="preset"><span class="pname"><span class="pico">▭</span>Wall 96″</span><span class="pdim">2.44 × 0.61 m</span></button>
+      </div>
+      <div class="chips">
+        <span class="chip">width <b>0.30–3.05 m</b></span>
+        <span class="chip">depth <b>0.60–0.76 m</b></span>
+      </div>
+      <div class="callout"><b>Why these:</b> base cabinetry runs in 3-inch modules on a
+      standard 24″ (0.61 m) countertop depth. Deep bound reaches 30″ for an overhang / eat-at
+      lip. Width floor 0.30 m = a single filler; the 0.91 m preset is the NKBA continuous
+      prep-run minimum.</div>
+    </section>
+
+    <!-- ── Island presets ── -->
+    <section class="card col-3" style="grid-column:span 3">
+      <h2>Island presets</h2>
+      <div class="sub">free-standing block</div>
+      <div class="preset-head">
+        <span class="type">Island</span>
+        <span class="dims">both axes</span>
+      </div>
+      <div class="presets">
+        <button class="preset"><span class="pname"><span class="pico">◻</span>Cart 36×24</span><span class="pdim">0.91 × 0.61 m</span></button>
+        <button class="preset" aria-pressed="true"><span class="pname"><span class="pico">◻</span>Standard 48×30</span><span class="pdim">1.22 × 0.76 m</span></button>
+        <button class="preset"><span class="pname"><span class="pico">◻</span>Large 72×36</span><span class="pdim">1.83 × 0.91 m</span></button>
+        <button class="preset"><span class="pname"><span class="pico">◻</span>Galley 96×42</span><span class="pdim">2.44 × 1.07 m</span></button>
+      </div>
+      <div class="chips">
+        <span class="chip">width <b>0.61–3.05 m</b></span>
+        <span class="chip">depth <b>0.61–1.22 m</b></span>
+      </div>
+      <div class="callout"><b>Why these:</b> an island needs ≥0.91 m walkway on every side,
+      so its depth bound is deeper than a wall counter. Presets track common island footprints
+      from big-box kitchen planners.</div>
+    </section>
+
+    <!-- ── Canvas scene ── -->
+    <section class="card col-8">
+      <h2>On-canvas: glyphs &amp; landing zones</h2>
+      <div class="sub">L-run counter + island · clearance overlay on the selected counter</div>
+      <div class="stage">
+        <svg viewBox="0 0 640 400" role="img" aria-label="Kitchen plan with counter, island, and landing-zone clearance annotations">
+          <defs>
+            <pattern id="fine" width="20" height="20" patternUnits="userSpaceOnUse">
+              <path d="M20 0H0V20" fill="none" stroke="rgba(201,168,76,0.06)" stroke-width="1"/>
+            </pattern>
+            <pattern id="major" width="100" height="100" patternUnits="userSpaceOnUse">
+              <path d="M100 0H0V100" fill="none" stroke="rgba(201,168,76,0.14)" stroke-width="1"/>
+            </pattern>
+          </defs>
+          <rect x="0" y="0" width="640" height="400" fill="url(#fine)"/>
+          <rect x="0" y="0" width="640" height="400" fill="url(#major)"/>
+
+          <!-- Room walls -->
+          <rect x="60" y="50" width="520" height="300" fill="none" stroke="#8f8a78" stroke-width="6" opacity="0.55"/>
+
+          <!-- Fridge (top-left) -->
+          <g>
+            <rect x="72" y="62" width="60" height="66" fill="var(--sym-fill)" stroke="var(--sym-stroke)" stroke-width="1.5"/>
+            <line x1="72" y1="82" x2="132" y2="82" stroke="var(--sym-stroke)" stroke-width="0.8" opacity="0.6"/>
+            <line x1="126" y1="90" x2="126" y2="102" stroke="var(--gold)" stroke-width="1.4" stroke-linecap="round"/>
+            <text x="102" y="122" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="var(--muted)">FRIDGE</text>
+          </g>
+
+          <!-- Counter run along top wall (NEW) — selected -->
+          <g>
+            <rect x="150" y="62" width="230" height="46" fill="rgba(201,168,76,0.06)" stroke="var(--gold)" stroke-width="2" stroke-dasharray="5 3"/>
+            <rect x="150" y="62" width="230" height="46" fill="none" stroke="var(--sym-stroke)" stroke-width="1.5" opacity="0.4"/>
+            <line x1="150" y1="80" x2="380" y2="80" stroke="var(--sym-stroke)" stroke-width="0.7" opacity="0.5"/>
+            <text x="265" y="92" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="var(--gold)">COUNTER · prep run</text>
+          </g>
+
+          <!-- Stove built into counter line -->
+          <g>
+            <rect x="398" y="62" width="60" height="56" fill="var(--sym-fill)" stroke="var(--sym-stroke)" stroke-width="1.5"/>
+            <circle cx="414" cy="80" r="6" fill="none" stroke="var(--sym-stroke)" stroke-width="0.9" opacity="0.7"/>
+            <circle cx="442" cy="80" r="6" fill="none" stroke="var(--sym-stroke)" stroke-width="0.9" opacity="0.7"/>
+            <circle cx="414" cy="100" r="6" fill="none" stroke="var(--sym-stroke)" stroke-width="0.9" opacity="0.7"/>
+            <circle cx="442" cy="100" r="6" fill="none" stroke="var(--sym-stroke)" stroke-width="0.9" opacity="0.7"/>
+            <text x="428" y="130" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="var(--muted)">STOVE</text>
+          </g>
+
+          <!-- Island (NEW) center -->
+          <g>
+            <rect x="235" y="200" width="170" height="90" fill="var(--sym-fill)" stroke="var(--sym-stroke)" stroke-width="1.5"/>
+            <rect x="250" y="215" width="140" height="60" fill="none" stroke="var(--sym-stroke)" stroke-width="0.8" opacity="0.45"/>
+            <text x="320" y="248" text-anchor="middle" font-family="var(--font-mono)" font-size="9" fill="var(--muted)">ISLAND</text>
+          </g>
+
+          <!-- Sink in counter (landing pair) -->
+          <g>
+            <rect x="150" y="290" width="80" height="46" fill="var(--sym-fill)" stroke="var(--sym-stroke)" stroke-width="1.5"/>
+            <rect x="160" y="298" width="60" height="30" fill="none" stroke="var(--sym-stroke)" stroke-width="0.8" opacity="0.5"/>
+            <circle cx="190" cy="294" r="2" fill="var(--sym-stroke)"/>
+            <text x="190" y="330" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="var(--muted)">SINK</text>
+          </g>
+
+          <!-- ── Clearance leaders (landing zones) ── -->
+          <!-- Fridge handle-side landing (ok, green) -->
+          <g stroke="var(--ok)" fill="var(--ok)">
+            <line x1="132" y1="95" x2="150" y2="95" stroke-width="2" stroke-dasharray="4 3"/>
+            <text x="141" y="52" text-anchor="middle" font-family="var(--font-mono)" font-size="8">0.40 m</text>
+          </g>
+          <!-- Stove right landing (tight, amber) -->
+          <g stroke="var(--tight)" fill="var(--tight)">
+            <line x1="458" y1="90" x2="474" y2="90" stroke-width="2" stroke-dasharray="4 3"/>
+            <text x="466" y="52" text-anchor="middle" font-family="var(--font-mono)" font-size="8">0.32 m</text>
+          </g>
+          <!-- Counter <-> island walkway (ok) -->
+          <g stroke="var(--ok)" fill="var(--ok)">
+            <line x1="320" y1="108" x2="320" y2="200" stroke-width="2" stroke-dasharray="4 3"/>
+            <text x="356" y="158" text-anchor="middle" font-family="var(--font-mono)" font-size="8">1.05 m walkway</text>
+          </g>
+          <!-- Island <-> sink counter (bad, red) -->
+          <g stroke="var(--bad)" fill="var(--bad)">
+            <line x1="230" y1="300" x2="235" y2="300" stroke-width="2.5"/>
+            <line x1="232" y1="292" x2="232" y2="308" stroke-width="2"/>
+            <text x="200" y="360" text-anchor="middle" font-family="var(--font-mono)" font-size="8">0.05 m · too tight</text>
+          </g>
+        </svg>
+      </div>
+      <div class="legend">
+        <span class="k-ok"><span class="swatch"></span>≥ landing min (ok)</span>
+        <span class="k-tight"><span class="swatch"></span>below min (tight)</span>
+        <span class="k-bad"><span class="swatch"></span>blocked / overlap (bad)</span>
+      </div>
+    </section>
+
+    <!-- ── Landing rules ── -->
+    <section class="card col-4">
+      <h2>Landing-zone rules</h2>
+      <div class="sub">what a future check_layout can now evaluate</div>
+      <div class="presets" style="gap:0.55rem">
+        <div class="preset" style="cursor:default"><span class="pname"><span class="pico k-ok">●</span>Fridge handle side</span><span class="pdim">≥ 0.38 m</span></div>
+        <div class="preset" style="cursor:default"><span class="pname"><span class="pico k-tight">●</span>Stove each side</span><span class="pdim">0.30–0.61 m</span></div>
+        <div class="preset" style="cursor:default"><span class="pname"><span class="pico k-tight">●</span>Sink each side</span><span class="pdim">0.30–0.61 m</span></div>
+        <div class="preset" style="cursor:default"><span class="pname"><span class="pico k-ok">●</span>Continuous prep run</span><span class="pdim">≥ 0.91 m</span></div>
+        <div class="preset" style="cursor:default"><span class="pname"><span class="pico k-ok">●</span>Island walkway</span><span class="pdim">≥ 0.91 m</span></div>
+      </div>
+      <div class="callout"><b>The unlock:</b> today the skill can only advise in prose because
+      no counter geometry exists. With a <code>counter</code> footprint on the canvas, the
+      existing <code>clearance.js</code> AABB gap math (already used for "does it fit?")
+      measures each landing zone directly — no new geometry engine needed, just two catalog
+      entries feeding the same pipeline.</div>
+    </section>
+
+  </div><!-- /.grid -->
+
+  <footer class="note">Mockup · LLD 94 · counter/countertop + island catalog types · throwaway design artifact</footer>
+</div><!-- /.wrap -->
+
+<script>
+  // Preset picker: single-select within each .presets group (buttons only)
+  document.querySelectorAll('.presets').forEach(group => {
+    group.addEventListener('click', e => {
+      const btn = e.target.closest('button.preset');
+      if (!btn) return;
+      group.querySelectorAll('button.preset').forEach(b => b.setAttribute('aria-pressed', 'false'));
+      btn.setAttribute('aria-pressed', 'true');
+    });
+  });
+
+  // Dock tabs: illustrative active-state toggle
+  document.querySelectorAll('.dock-tabs').forEach(strip => {
+    strip.addEventListener('click', e => {
+      const tab = e.target.closest('.dock-tab');
+      if (!tab) return;
+      strip.querySelectorAll('.dock-tab').forEach(t => t.removeAttribute('aria-selected'));
+      tab.setAttribute('aria-selected', 'true');
+    });
+  });
+</script>
+</body>
+</html>
+
