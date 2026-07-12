@@ -105,16 +105,20 @@ export function activate() {
   _active = true;
   _pendingA = null;
   _cursorPt = null;
+  _selectedMeasurementId = null; // entering measure mode starts fresh — no stale selection
   _updateRail();
 }
 
 /**
  * Leave measure mode. Cancels any in-progress placement without committing.
+ * Also clears any stale measurement selection so it does not persist into
+ * Wall or Select mode (mirrors onDrawModeEnter / roomOnDrawModeEnter semantics).
  */
 export function deactivate() {
   _active = false;
   _pendingA = null;
   _cursorPt = null;
+  _selectedMeasurementId = null; // prevent stale selection surviving tool switches
   _updateRail();
 }
 
@@ -360,8 +364,7 @@ function _screenSegFoot(px, py, ax, ay, bx, by) {
   t = Math.max(0, Math.min(1, t));
   const footSx = ax + t * abx;
   const footSy = ay + t * aby;
-  // Back-project foot to world using linear interpolation in world space
-  // (avoids a screenToWorld call; equivalent since projection is linear)
+  // Back-project the screen-space foot point to world coordinates.
   const worldFoot = screenToWorld(footSx, footSy);
   return { sx: footSx, sy: footSy, wx: worldFoot.x, wy: worldFoot.y };
 }

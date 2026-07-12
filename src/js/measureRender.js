@@ -28,6 +28,10 @@ const STROKE_SELECTED = 2.5;
 const TICK_HALF = 4; // px half-length for perpendicular end-ticks
 const NODE_R    = 3; // px radius of endpoint node dots
 
+// Snap glyph metrics (screen-constant, mirrors wallRender)
+const GLYPH_SIZE = 10;   // half-size for diamond / radius for ring
+const GLYPH_SW   = 1.5;  // glyph stroke width
+
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
 let _gMeasure      = null;
@@ -86,6 +90,8 @@ export function render() {
   if (draft) {
     _drawMeasurement(_gMeasure, draft.a, draft.b, color, STROKE_NORMAL, false, true);
     _appendChip(draft.a, draft.b, true);
+    // Snap glyph at the pending B endpoint so the user sees what it will lock to
+    _drawSnapGlyph(_gMeasure, draft.b, draft.snapType, color);
   }
 }
 
@@ -211,4 +217,71 @@ function _makeLine(x1, y1, x2, y2) {
   line.setAttribute("x2", String(x2));
   line.setAttribute("y2", String(y2));
   return line;
+}
+
+/**
+ * Draw a snap-type indicator glyph at the world point `wp`.
+ * Mirrors wallRender._renderSnapGlyph but uses teal (the measure tool color).
+ * @param {SVGGElement} parent
+ * @param {{x:number,y:number}} wp  world point for the glyph
+ * @param {"point"|"grid"|"free"} snapType
+ * @param {string} color            teal color string
+ */
+function _drawSnapGlyph(parent, wp, snapType, color) {
+  const s = worldToScreen(wp.x, wp.y);
+  const sx = s.x;
+  const sy = s.y;
+
+  if (snapType === "grid") {
+    // Teal diamond + center dot
+    const d = GLYPH_SIZE;
+    const diamond = document.createElementNS(NS, "polygon");
+    diamond.setAttribute("points", `${sx},${sy - d} ${sx + d},${sy} ${sx},${sy + d} ${sx - d},${sy}`);
+    diamond.setAttribute("fill", "none");
+    diamond.setAttribute("stroke", color);
+    diamond.setAttribute("stroke-width", String(GLYPH_SW));
+    parent.appendChild(diamond);
+
+    const dot = document.createElementNS(NS, "circle");
+    dot.setAttribute("cx", String(sx));
+    dot.setAttribute("cy", String(sy));
+    dot.setAttribute("r", "2");
+    dot.setAttribute("fill", color);
+    parent.appendChild(dot);
+
+  } else if (snapType === "point") {
+    // Teal pulsing ring + inner dot (snapped to wall vertex / symbol corner or center)
+    const ring = document.createElementNS(NS, "circle");
+    ring.setAttribute("cx", String(sx));
+    ring.setAttribute("cy", String(sy));
+    ring.setAttribute("r", String(GLYPH_SIZE));
+    ring.setAttribute("fill", "none");
+    ring.setAttribute("stroke", color);
+    ring.setAttribute("stroke-width", String(GLYPH_SW));
+    ring.setAttribute("class", "snap-pulse");
+    parent.appendChild(ring);
+
+    const dot = document.createElementNS(NS, "circle");
+    dot.setAttribute("cx", String(sx));
+    dot.setAttribute("cy", String(sy));
+    dot.setAttribute("r", "3");
+    dot.setAttribute("fill", color);
+    parent.appendChild(dot);
+
+  } else {
+    // "free" — muted crosshair
+    const arm = GLYPH_SIZE;
+    const opacity = "0.45";
+    const hLine = _makeLine(sx - arm, sy, sx + arm, sy);
+    hLine.setAttribute("stroke", color);
+    hLine.setAttribute("stroke-width", String(GLYPH_SW));
+    hLine.setAttribute("opacity", opacity);
+    parent.appendChild(hLine);
+
+    const vLine = _makeLine(sx, sy - arm, sx, sy + arm);
+    vLine.setAttribute("stroke", color);
+    vLine.setAttribute("stroke-width", String(GLYPH_SW));
+    vLine.setAttribute("opacity", opacity);
+    parent.appendChild(vLine);
+  }
 }
