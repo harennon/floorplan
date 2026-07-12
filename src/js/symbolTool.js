@@ -1024,7 +1024,8 @@ function _populateSwatchStrip(sym) {
   if (!_swatchStrip) return;
 
   const cat = CATALOG[sym.type];
-  const category = cat ? cat.category : "neutral";
+  // Rugs are floor coverings — map to the floor swatch group (LLD 107 Edge Case 9)
+  const category = sym.type === "rug" ? "floor" : (cat ? cat.category : "neutral");
   const groups = swatchGroupsForCategory(category);
 
   // Hide strip for openings

@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import * as session from "../src/session.js";
 import * as tools from "../src/tools.js";
 import { buildClearanceReport } from "../src/feedback.js";
-import { aabb, getSymbol, wallsModel, symbolsModel, pointInRoom } from "../src/core.js";
+import { aabb, getSymbol, wallsModel, symbolsModel, pointInRoom, CATALOG } from "../src/core.js";
 
 function world() {
   return { rooms: wallsModel.rooms, symbols: symbolsModel.symbols };
@@ -281,4 +281,56 @@ test("diagonal pair flagged diagonal:true", () => {
   const r = report(0.60, a);
   const g = r.items[0].gaps.find((x) => x.kind === "symbol");
   assert.equal(g.diagonal, true);
+});
+
+// ─── LLD 107: rug floorLayer tests ────────────────────────────────────────────
+
+test("LLD 107: catalog includes rug with floorLayer:true", () => {
+  assert.ok("rug" in CATALOG, "CATALOG.rug missing");
+  assert.equal(CATALOG.rug.floorLayer, true);
+  assert.equal(CATALOG.rug.category, "living");
+});
+
+test("LLD 107: place_symbol({type:'rug'}) succeeds", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const result = tools.tool_place_symbol({ type: "rug", x: 5, y: 5 });
+  assert.equal(result.ok, true, `place_symbol rug failed: ${result.reason}`);
+  assert.ok(result.id, "should return an id");
+});
+
+test("LLD 107: check_clearance onlyId=rug returns no items (rug is not a subject)", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const rugResult = tools.tool_place_symbol({ type: "rug", x: 6, y: 6 });
+  assert.equal(rugResult.ok, true);
+  const r = report(0.60, rugResult.id);
+  assert.equal(r.items.length, 0, "rug must not appear as a clearance subject");
+});
+
+test("LLD 107: full check_clearance does NOT list rug as a subject even when centroid is outside room", () => {
+  session.newPlan();
+  // Small room; rug placed far outside — centroid outside every closed room.
+  // Without the floorLayer guard this would produce a containment BAD violation.
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  tools.tool_place_symbol({ type: "rug", x: 20, y: 20 }); // outside room
+  const r = report(0.60);
+  const rugItem = r.items.find((i) => i.label === "Rug");
+  assert.equal(rugItem, undefined, "rug must not appear in any clearance report subject list");
+});
+
+test("LLD 107: furniture clearance is unaffected by an overlapping rug", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const sofaId = tools.tool_place_symbol({ type: "sofa", x: 4, y: 6 }).id;
+  // Report without rug
+  const r1 = report(0.60, sofaId);
+  // Add rug directly on top of the sofa
+  tools.tool_place_symbol({ type: "rug", x: 4, y: 6 });
+  // Report with rug
+  const r2 = report(0.60, sofaId);
+  // The rug should not contribute any clearance entries for the sofa
+  const rugEntry = r2.items[0]?.gaps.find((g) => g.kind === "symbol" && g.label === "Rug");
+  assert.equal(rugEntry, undefined, "rug must not appear as a neighbour in sofa clearance");
+  assert.equal(r1.items.length, r2.items.length, "rug presence must not change the number of sofa report items");
 });
