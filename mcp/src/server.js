@@ -238,8 +238,13 @@ export function buildServer() {
       content: {
         type: "text",
         text: `Design a ${dims} room with ${furniture}, keeping ${walkwayCm} cm walkways. ` +
-          `First call set_brief, then add_room at the exact dims, then place each piece, ` +
-          `then poll check_brief and apply each violation's suggestedMove until satisfied.`,
+          `First call set_brief, then add_room at the exact dims, then place each piece. ` +
+          `Then poll check_brief and check_clearance and fix only REAL violations — ` +
+          `overlaps, containment, boxed-in pieces, and walkway deficits on traffic paths. ` +
+          `Do NOT spread a seating or work group apart just to clear a sub-walkway gap ` +
+          `between its own members. ` +
+          `For layout quality (focal point, a real conversation/work group, TV distance, ` +
+          `symmetry), follow the floorplan-interior-design skill.`,
       },
     }],
   }));
