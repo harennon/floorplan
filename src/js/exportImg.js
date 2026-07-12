@@ -148,8 +148,41 @@ export function buildExportSvg() {
     body += `<polyline points="${ptsStr}" fill="none" stroke="${p.draft}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 4"/>\n`;
   }
 
-  // ── Symbols ─────────────────────────────────────────────────────────────────
+  // ── Rugs (floor layer — painted before furniture so furniture draws on top) ──
   for (const sym of symbolsModel.symbols) {
+    if (!CATALOG[sym.type]?.floorLayer) continue;
+    const cs = corners(sym);
+    const ptsStr = cs.map(c => `${wx(c.x)},${wy(c.y)}`).join(" ");
+    // Dashed edge, low-alpha fill; no type label (floor surface, not a boxed object)
+    const rugFill = sym.color || `rgba(120,100,70,0.18)`;
+    body += `<polygon points="${ptsStr}" fill="${rugFill}" stroke="${p.symStroke}" stroke-width="1.2" stroke-dasharray="5 3" stroke-linejoin="round"/>\n`;
+    // Subtle cross-hatch lines at low opacity — three evenly spaced diagonals
+    const cx = wx(sym.x), cy = wy(sym.y);
+    const sw = sym.w * EXPORT_PX_PER_M;
+    const sh = sym.h * EXPORT_PX_PER_M;
+    const rot = sym.rot;
+    const hatchSpacing = Math.max(10, Math.min(sw, sh) * 0.12);
+    const clipId = `rug-exp-${sym.id}`;
+    body += `<defs><clipPath id="${clipId}"><polygon points="${ptsStr}"/></clipPath></defs>\n`;
+    body += `<g clip-path="url(#${clipId})" opacity="0.10">\n`;
+    const radR = (rot * Math.PI) / 180;
+    const cosR = Math.cos(radR), sinR = Math.sin(radR);
+    const lp = (lx, ly) => ({
+      x: cx + lx * cosR - ly * sinR,
+      y: cy + lx * sinR + ly * cosR,
+    });
+    const maxExt = sw + sh;
+    for (let d = -maxExt; d < maxExt; d += hatchSpacing) {
+      const a = lp(d - sh, -sh);
+      const b = lp(d + sh,  sh);
+      body += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${p.symStroke}" stroke-width="0.6"/>\n`;
+    }
+    body += `</g>\n`;
+  }
+
+  // ── Symbols (furniture — above rugs) ────────────────────────────────────────
+  for (const sym of symbolsModel.symbols) {
+    if (CATALOG[sym.type]?.floorLayer) continue; // already painted above
     const cs = corners(sym);
     const ptsStr = cs.map(c => `${wx(c.x)},${wy(c.y)}`).join(" ");
     body += `<polygon points="${ptsStr}" fill="${sym.color || p.symFill}" stroke="${p.symStroke}" stroke-width="1.5" stroke-linejoin="round"/>\n`;

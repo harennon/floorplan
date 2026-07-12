@@ -9362,7 +9362,7 @@ function _makeDockDOM() {
   // Item types per category (matching CATALOG)
   const itemsByCategory = {
     openings: ["door", "window"],
-    living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf", "armchair", "coffee-table", "dining-table-round"],
+    living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf", "armchair", "coffee-table", "dining-table-round", "rug"],
     kitchen:  ["fridge", "stove", "sink", "washer"],
     bedroom:  ["bed", "wardrobe", "nightstand", "dresser", "cabinet"],
     bath:     ["toilet", "bathtub"],
@@ -10902,6 +10902,7 @@ function makeRenderRig61(opts = {}) {
   const gSnap     = document.createElementNS(NS_SVG_61, "g");
   const labels    = document.createElement("div");
   const dimLabels = document.createElement("div");
+  const gRugs     = document.createElementNS(NS_SVG_61, "g");
   const gSymbols  = document.createElementNS(NS_SVG_61, "g");
   const gOverlay  = document.createElementNS(NS_SVG_61, "g");
 
@@ -10913,13 +10914,13 @@ function makeRenderRig61(opts = {}) {
   );
 
   initSymbolRender(
-    gSymbols, gOverlay, dimLabels,
+    gRugs, gSymbols, gOverlay, dimLabels,
     opts.getSelectedId      || (() => null),
     opts.getPlacementGhost  || (() => null),
     opts.getEditingDim      || (() => null)
   );
 
-  return { gWorld, gDraft, gSnap, labels, dimLabels, gSymbols, gOverlay };
+  return { gWorld, gDraft, gSnap, labels, dimLabels, gRugs, gSymbols, gOverlay };
 }
 
 // ─── Tests: LLD 61 — exportImg.buildExportSvg (structural) ───────────────────
@@ -16246,14 +16247,16 @@ describe("LLD 97 — symbolRender: fill uses sym.color when set", () => {
     addSymbol(s);
 
     const NS97 = "http://www.w3.org/2000/svg";
+    const gRug97a = document.createElementNS(NS97, "g");
     const gSym = document.createElementNS(NS97, "g");
     const gOvl = document.createElementNS(NS97, "g");
     const dimDiv = document.createElement("div");
+    document.body.appendChild(gRug97a);
     document.body.appendChild(gSym);
     document.body.appendChild(gOvl);
     document.body.appendChild(dimDiv);
 
-    initSymbolRender(gSym, gOvl, dimDiv, () => null, () => null, () => null);
+    initSymbolRender(gRug97a, gSym, gOvl, dimDiv, () => null, () => null, () => null);
     symbolRenderRender();
 
     const polys = gSym.querySelectorAll("polygon");
@@ -16263,6 +16266,7 @@ describe("LLD 97 — symbolRender: fill uses sym.color when set", () => {
       throw new Error(`Expected fill='#2c4a6e', got ${fill}`);
     }
 
+    document.body.removeChild(gRug97a);
     document.body.removeChild(gSym);
     document.body.removeChild(gOvl);
     document.body.removeChild(dimDiv);
@@ -16276,14 +16280,16 @@ describe("LLD 97 — symbolRender: fill uses sym.color when set", () => {
     addSymbol(s);
 
     const NS97 = "http://www.w3.org/2000/svg";
+    const gRug97b = document.createElementNS(NS97, "g");
     const gSym = document.createElementNS(NS97, "g");
     const gOvl = document.createElementNS(NS97, "g");
     const dimDiv = document.createElement("div");
+    document.body.appendChild(gRug97b);
     document.body.appendChild(gSym);
     document.body.appendChild(gOvl);
     document.body.appendChild(dimDiv);
 
-    initSymbolRender(gSym, gOvl, dimDiv, () => null, () => null, () => null);
+    initSymbolRender(gRug97b, gSym, gOvl, dimDiv, () => null, () => null, () => null);
     symbolRenderRender();
 
     const polys = gSym.querySelectorAll("polygon");
@@ -16294,6 +16300,7 @@ describe("LLD 97 — symbolRender: fill uses sym.color when set", () => {
       throw new Error(`Expected fill='${p.symFill}' (theme symFill), got '${fill}'`);
     }
 
+    document.body.removeChild(gRug97b);
     document.body.removeChild(gSym);
     document.body.removeChild(gOvl);
     document.body.removeChild(dimDiv);
@@ -16362,6 +16369,244 @@ describe("LLD 97 — backward compat: old compact hash (no 'k' key) decodes clea
     if (!v) throw new Error("validatePlan should accept old compact-decoded plan");
     if ("color" in v.walls.rooms[0]) throw new Error("Old room should not have color key");
     if ("color" in v.symbols.symbols[0]) throw new Error("Old symbol should not have color key");
+  });
+});
+
+// ─── Tests: LLD 107 — rug catalog entry and floorLayer flag ───────────────────
+
+describe("LLD 107 — CATALOG.rug entry and floorLayer flag", () => {
+  it("CATALOG.rug exists", () => {
+    if (!("rug" in CATALOG)) throw new Error("CATALOG.rug is missing");
+  });
+
+  it("CATALOG.rug.floorLayer is true", () => {
+    expect(CATALOG.rug.floorLayer).toBe(true);
+  });
+
+  it("CATALOG.rug.category is 'living'", () => {
+    expect(CATALOG.rug.category).toBe("living");
+  });
+
+  it("CATALOG.rug default w/h are within per-axis bounds", () => {
+    const { w, h, min_w, max_w, min_h, max_h } = CATALOG.rug;
+    if (w < min_w || w > max_w) throw new Error(`rug: w=${w} not in [${min_w},${max_w}]`);
+    if (h < min_h || h > max_h) throw new Error(`rug: h=${h} not in [${min_h},${max_h}]`);
+  });
+
+  it("all rug presets lie within per-axis bounds", () => {
+    const { min_w, max_w, min_h, max_h, presets } = CATALOG.rug;
+    for (const p of presets) {
+      if (p.w < min_w - 1e-9 || p.w > max_w + 1e-9)
+        throw new Error(`rug preset "${p.name}": w=${p.w} not in [${min_w},${max_w}]`);
+      if (p.h < min_h - 1e-9 || p.h > max_h + 1e-9)
+        throw new Error(`rug preset "${p.name}": h=${p.h} not in [${min_h},${max_h}]`);
+    }
+  });
+
+  it("CATALOG.rug has 4 presets (Runner, 5x8, 8x10, 9x12)", () => {
+    expect(CATALOG.rug.presets.length).toBe(4);
+  });
+
+  it("CATALOG.rug has a non-empty label", () => {
+    if (!CATALOG.rug.label || CATALOG.rug.label.trim() === "")
+      throw new Error("rug label is empty");
+  });
+});
+
+describe("LLD 107 — createSymbol('rug') returns valid Sym with catalog defaults", () => {
+  it("createSymbol('rug') returns correct type and catalog default w/h", () => {
+    resetSymbolModel();
+    const s = createSymbol("rug", 2, 3);
+    expect(s.type).toBe("rug");
+    expect(s.x).toBeCloseTo(2, 9);
+    expect(s.y).toBeCloseTo(3, 9);
+    expect(s.w).toBeCloseTo(CATALOG.rug.w, 9);
+    expect(s.h).toBeCloseTo(CATALOG.rug.h, 9);
+    expect(s.rot).toBe(0);
+    if (typeof s.id !== "string" || !s.id.startsWith("s"))
+      throw new Error(`id should start with 's', got ${s.id}`);
+  });
+
+  it("resizeSymbol clamps rug width to per-axis bounds", () => {
+    resetSymbolModel();
+    const s = createSymbol("rug", 0, 0);
+    resizeSymbol(s, "w", 0.01); // below min_w
+    expect(s.w).toBeCloseTo(CATALOG.rug.min_w, 9);
+    resizeSymbol(s, "w", 99);   // above max_w
+    expect(s.w).toBeCloseTo(CATALOG.rug.max_w, 9);
+  });
+
+  it("applying a rug preset produces exact preset w/h via resizeSymbol", () => {
+    resetSymbolModel();
+    const s = createSymbol("rug", 0, 0);
+    const preset = CATALOG.rug.presets[0]; // Runner 2.5×8
+    resizeSymbol(s, "w", preset.w);
+    resizeSymbol(s, "h", preset.h);
+    expect(s.w).toBeCloseTo(preset.w, 9);
+    expect(s.h).toBeCloseTo(preset.h, 9);
+  });
+});
+
+describe("LLD 107 — computeClearances: rug subject guard", () => {
+  it("computeClearances returns [] when subject is a rug", () => {
+    resetSymbolModel();
+    resetClearance();
+    const rug = mkSym("r1", "rug", 5, 5, 2.44, 3.05);
+    const world = { rooms: [], symbols: [rug] };
+    const result = computeClearances(rug, world);
+    expect(result.length).toBe(0);
+  });
+});
+
+describe("LLD 107 — computeClearances: rug neighbour guard", () => {
+  it("a rug overlapping a sofa produces no rug-derived clearance entry", () => {
+    resetSymbolModel();
+    resetClearance();
+    const sofa = mkSym("s1", "sofa", 5, 5, 2.0, 0.9);
+    const rug  = mkSym("r1", "rug",  5, 5, 2.44, 3.05); // same center — overlaps sofa
+
+    const worldWithRug    = { rooms: [], symbols: [sofa, rug] };
+    const worldWithoutRug = { rooms: [], symbols: [sofa] };
+
+    const resultWith    = computeClearances(sofa, worldWithRug);
+    const resultWithout = computeClearances(sofa, worldWithoutRug);
+
+    // The rug should never appear as a neighbour in the result
+    const rugEntry = resultWith.find((c) => c.neighbourId === "r1");
+    if (rugEntry) throw new Error("rug appeared as a clearance neighbour");
+
+    // The results should be identical (rug has no effect)
+    expect(resultWith.length).toBe(resultWithout.length);
+  });
+
+  it("no bad status is produced from a rug overlapping a sofa", () => {
+    resetSymbolModel();
+    resetClearance();
+    const sofa = mkSym("s1", "sofa", 5, 5, 2.0, 0.9);
+    const rug  = mkSym("r1", "rug",  5, 5, 2.44, 3.05);
+    const world = { rooms: [], symbols: [sofa, rug] };
+    const result = computeClearances(sofa, world);
+    const hasBadFromRug = result.some((c) => c.neighbourId === "r1" && c.status === "bad");
+    expect(hasBadFromRug).toBe(false);
+  });
+});
+
+describe("LLD 107 — pickSymbol: rug de-prioritisation", () => {
+  it("returns the furniture (not the rug) when both are hit at the same point", () => {
+    resetSymbolModel();
+    const rug   = createSymbol("rug",  0, 0); // center 0,0
+    const chair = createSymbol("chair", 0, 0); // same center, on top
+    addSymbol(rug);
+    addSymbol(chair);
+    const hit = pickSymbol(0, 0);
+    if (hit === null) throw new Error("Expected a hit");
+    expect(hit.id).toBe(chair.id);
+  });
+
+  it("returns the rug when only the rug is hit (exposed border region)", () => {
+    resetSymbolModel();
+    // Rug 2.44 wide; a point at x=1.1 is inside the rug (half=1.22 > 1.1) but
+    // outside the small chair (0.5 wide; half=0.25 < 1.1)
+    const rug   = createSymbol("rug",  0, 0);   // half-w = 1.22
+    const chair = createSymbol("chair", 0, 0);  // half-w = 0.25
+    addSymbol(rug);
+    addSymbol(chair);
+    const hit = pickSymbol(1.1, 0);
+    if (hit === null) throw new Error("Expected a hit (the rug border)");
+    expect(hit.id).toBe(rug.id);
+  });
+
+  it("returns null when nothing is hit", () => {
+    resetSymbolModel();
+    const rug = createSymbol("rug", 0, 0);
+    addSymbol(rug);
+    const hit = pickSymbol(50, 50);
+    if (hit !== null) throw new Error("Expected null");
+  });
+});
+
+describe("LLD 107 — hydrate round-trip: plan containing a rug", () => {
+  it("hydrate preserves a rug symbol and re-syncs counter", () => {
+    resetSymbolModel();
+    const rugData = { id: "s5", type: "rug", x: 3, y: 4, w: 2.44, h: 3.05, rot: 0 };
+    hydrateSymbols({ symbols: [rugData] });
+    expect(symbolModel.symbols.length).toBe(1);
+    expect(symbolModel.symbols[0].type).toBe("rug");
+    expect(symbolModel.symbols[0].id).toBe("s5");
+    // Next id must be > 5
+    const next = createSymbol("chair", 0, 0);
+    const nextNum = parseInt(next.id.replace("s", ""), 10);
+    if (nextNum <= 5) throw new Error(`New id ${next.id} is not > s5`);
+  });
+});
+
+// ─── Tests: LLD 107 — rug render routing ──────────────────────────────────────
+
+describe("LLD 107 — symbolRender: rug routes to #rugs, not #symbols", () => {
+  it("a rug symbol appears in #rugs group, not in #symbols", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("rug", 3, 3));
+    symbolRenderRender();
+    // #rugs should have children; #symbols should be empty (no non-rug symbols added)
+    if (rig.gRugs.children.length === 0) throw new Error("rug produced no elements in #rugs");
+    const rugPolysInSymbols = rig.gSymbols.querySelectorAll("polygon");
+    if (rugPolysInSymbols.length > 0)
+      throw new Error("rug polygon appeared in #symbols — should be in #rugs");
+  });
+
+  it("rug in #rugs has a dashed-edge polygon (stroke-dasharray present)", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("rug", 3, 3));
+    symbolRenderRender();
+    const polys = rig.gRugs.querySelectorAll("polygon");
+    if (polys.length === 0) throw new Error("No polygon in #rugs for rug");
+    const firstPoly = polys[0];
+    const dashArray = firstPoly.getAttribute("stroke-dasharray");
+    if (!dashArray || dashArray.trim() === "")
+      throw new Error("Rug polygon has no stroke-dasharray (should be dashed)");
+  });
+
+  it("rug in #rugs has NO type label/text element (no glyph)", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("rug", 3, 3));
+    symbolRenderRender();
+    const texts = rig.gRugs.querySelectorAll("text");
+    if (texts.length > 0) throw new Error("Rug group contains text elements (should have none)");
+  });
+
+  it("a non-rug symbol with a rug present: rug in #rugs, furniture in #symbols", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rig = makeRenderRig61();
+    addSymbol(createSymbol("rug",  3, 3));
+    addSymbol(createSymbol("sofa", 3, 3));
+    symbolRenderRender();
+    if (rig.gRugs.children.length === 0) throw new Error("No rug in #rugs");
+    const sofaPolys = rig.gSymbols.querySelectorAll("polygon");
+    if (sofaPolys.length === 0) throw new Error("Sofa not in #symbols");
+  });
+
+  it("selected rug: selection box + rotate handle appear in #overlay (first-class parity)", () => {
+    resetAll();
+    setUnit("m");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const rug = createSymbol("rug", 3, 3);
+    addSymbol(rug);
+    const rig = makeRenderRig61({ getSelectedId: () => rug.id });
+    symbolRenderRender();
+    // Selection overlay should have children (selection box + rotate handle)
+    if (rig.gOverlay.children.length === 0)
+      throw new Error("No overlay elements for selected rug (selection box/handle missing)");
   });
 });
 

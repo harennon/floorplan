@@ -360,7 +360,8 @@ export function buildClearanceReport(world, thresholdM, onlyId, aabbOf, getSymbo
   const effThr = effectiveThreshold();
 
   const subjects = world.symbols.filter((s) => {
-    if (CATALOG[s.type]?.openings) return false; // openings are not subjects
+    if (CATALOG[s.type]?.openings) return false;   // openings are not subjects
+    if (CATALOG[s.type]?.floorLayer) return false; // floor layers are not subjects (LLD 107)
     if (onlyId !== undefined) return s.id === onlyId;
     return true;
   });

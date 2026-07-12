@@ -246,6 +246,7 @@ function _rayHitV(ox, oy, x1, y1, x2, y2) {
 export function computeClearances(sym, world) {
   if (!sym || !enabled) return [];
   if (CATALOG[sym.type]?.openings) return [];
+  if (CATALOG[sym.type]?.floorLayer) return [];
 
   const box = aabb(sym);
   const cx = (box.l + box.r) / 2;
@@ -422,6 +423,7 @@ export function computeClearances(sym, world) {
   for (const other of world.symbols) {
     if (other.id === sym.id) continue;
     if (CATALOG[other.type]?.openings) continue;
+    if (CATALOG[other.type]?.floorLayer) continue;
 
     const ob = aabb(other);
     const cat = CATALOG[other.type];
