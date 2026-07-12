@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Per-room preview + opening fidelity · floorplan mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+  rel="stylesheet"
+/>
+<style>
+/* Design tokens lifted from src/index.html + the foundation preview mockup
+   (warm blueprint, dark default). Kept identical so this reads as the same app. */
+:root {
+  --bg:         #14140f;
+  --bg-deep:    #100f0b;
+  --ink:        #ece7d6;
+  --muted:      #8f8a78;
+  --gold:       #c9a84c;
+  --gold-soft:  rgba(201, 168, 76, 0.55);
+  --grid-fine:  rgba(201, 168, 76, 0.055);
+  --grid-major: rgba(201, 168, 76, 0.14);
+  --panel:      rgba(20, 20, 15, 0.72);
+  --hairline:   rgba(201, 168, 76, 0.18);
+  --font-ui:      "DM Sans", system-ui, sans-serif;
+  --font-mono:    "DM Mono", "Courier New", monospace;
+  --font-display: "Libre Baskerville", Georgia, serif;
+  --wall-body:     rgba(201,168,76,0.30);
+  --wall-line:     #d9be6e;
+  --room-fill:     rgba(201,168,76,0.07);
+  --room-fill-hi:  rgba(201,168,76,0.16);
+  --sym-fill:      rgba(201,168,76,0.12);
+  --sym-stroke:    #d9be6e;
+  --accent-rgb:    201,168,76;
+  /* Preview face tints — three shades per box (top brightest → right darkest) */
+  --iso-wall-top:   rgba(201,168,76,0.22);
+  --iso-wall-left:  rgba(201,168,76,0.14);
+  --iso-wall-right: rgba(201,168,76,0.07);
+  --iso-wall-edge:  #d9be6e;
+  --iso-floor:      rgba(201,168,76,0.05);
+  /* Opening reveal (recessed jamb) — darker than any wall face so a cut reads
+     as depth, not a missing polygon. */
+  --iso-reveal:     rgba(16,15,11,0.62);
+  --iso-reveal-edge:rgba(201,168,76,0.42);
+}
+html[data-theme="light"] {
+  --bg:         #f3ecda;
+  --bg-deep:    #e7dcc2;
+  --ink:        #3a3020;
+  --muted:      #8a7c60;
+  --gold:       #a9812a;
+  --gold-soft:  rgba(169, 129, 42, 0.5);
+  --grid-fine:  rgba(120, 96, 50, 0.07);
+  --grid-major: rgba(120, 96, 50, 0.16);
+  --panel:      rgba(248, 242, 228, 0.82);
+  --hairline:   rgba(120, 96, 50, 0.22);
+  --wall-body:     rgba(107,88,54,0.30);
+  --wall-line:     #6b5836;
+  --room-fill:     rgba(107,88,54,0.07);
+  --room-fill-hi:  rgba(107,88,54,0.17);
+  --sym-fill:      rgba(107,88,54,0.12);
+  --sym-stroke:    #6b5836;
+  --accent-rgb:    107,88,54;
+  --iso-wall-top:   rgba(107,88,54,0.24);
+  --iso-wall-left:  rgba(107,88,54,0.15);
+  --iso-wall-right: rgba(107,88,54,0.07);
+  --iso-wall-edge:  #6b5836;
+  --iso-floor:      rgba(107,88,54,0.06);
+  --iso-reveal:     rgba(231,220,194,0.66);
+  --iso-reveal-edge:rgba(107,88,54,0.45);
+}
+
+/* ── Base / stage ─────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+.app { position: relative; width: 100vw; height: 100vh; }
+.stage {
+  position: absolute; inset: 0;
+  background: radial-gradient(120% 120% at 50% 0%, var(--bg) 0%, var(--bg-deep) 100%);
+}
+.stage svg { display: block; width: 100%; height: 100%; }
+
+.grid-bg {
+  position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    linear-gradient(var(--grid-fine) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+    linear-gradient(var(--grid-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+  background-size: 28px 28px, 28px 28px, 140px 140px, 140px 140px;
+}
+.grid-bg.iso-dim { opacity: 0.25; transition: opacity .35s ease; }
+
+/* ── Brand ────────────────────────────────────────────────────────────── */
+.brand { position: absolute; top: 1.1rem; left: 1.3rem; pointer-events: none; }
+.brand-name {
+  font-family: var(--font-display); font-size: 1.15rem; letter-spacing: .01em;
+  color: var(--gold);
+}
+.brand-sub {
+  font-family: var(--font-mono); font-size: .62rem; letter-spacing: .22em;
+  text-transform: uppercase; color: var(--muted); margin-top: .1rem;
+}
+
+/* ── Tool rail (left-center) ───────────────────────────────────────────── */
+.tool-rail {
+  position: absolute; left: 1.1rem; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: .35rem;
+  padding: .45rem; border-radius: 14px;
+  background: var(--panel); border: 1px solid var(--hairline);
+  backdrop-filter: blur(8px); box-shadow: 0 8px 30px rgba(0,0,0,.35); z-index: 6;
+}
+.tool-rail button {
+  width: 40px; height: 40px; display: flex; align-items: center;
+  justify-content: center; position: relative;
+  border: 1px solid transparent; border-radius: 10px;
+  background: transparent; color: var(--ink); cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.tool-rail button:hover { background: rgba(var(--accent-rgb), .10); }
+.tool-rail button[aria-pressed="true"] {
+  background: rgba(var(--accent-rgb), .16); border-color: var(--gold); color: var(--gold);
+}
+.tool-rail .tool-key-hint {
+  position: absolute; bottom: 2px; right: 4px;
+  font-family: var(--font-mono); font-size: .5rem; color: var(--muted);
+}
+.tool-rail-sep { height: 1px; background: var(--hairline); margin: .2rem .3rem; }
+.tool-rail button.preview-toggle[aria-pressed="true"] {
+  background: var(--gold); color: var(--bg-deep); border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .25);
+}
+
+/* ── Actions cluster (top-right) ───────────────────────────────────────── */
+.actions-cluster {
+  position: absolute; top: 1.1rem; right: 1.3rem;
+  display: flex; align-items: center; gap: .5rem; z-index: 6;
+}
+.actions-cluster button {
+  height: 32px; padding: 0 .7rem; display: inline-flex; align-items: center;
+  gap: .35rem; border-radius: 9px; cursor: pointer;
+  font-family: var(--font-mono); font-size: .68rem; letter-spacing: .04em;
+  background: var(--panel); border: 1px solid var(--hairline); color: var(--ink);
+  backdrop-filter: blur(8px); transition: border-color .15s, color .15s;
+}
+.actions-cluster button:hover { border-color: var(--gold); color: var(--gold); }
+
+/* ── Preview mode banner (top-center) ─────────────────────────────────── */
+.preview-banner {
+  position: absolute; top: 1.1rem; left: 50%; transform: translateX(-50%);
+  display: none; align-items: center; gap: .55rem;
+  padding: .4rem .5rem .4rem .85rem; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--gold);
+  backdrop-filter: blur(8px); box-shadow: 0 6px 24px rgba(0,0,0,.3);
+  z-index: 7; animation: bannerIn .35s ease;
+}
+body.preview-on .preview-banner { display: flex; }
+.preview-banner .dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--gold);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb),.2);
+}
+.preview-banner .txt {
+  font-family: var(--font-mono); font-size: .66rem; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--gold);
+}
+.preview-banner .sub { color: var(--muted); text-transform: none; letter-spacing: .02em; }
+.preview-banner .exit {
+  height: 26px; padding: 0 .7rem; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--hairline); background: rgba(var(--accent-rgb),.10);
+  color: var(--ink); font-family: var(--font-mono); font-size: .62rem;
+  letter-spacing: .06em; transition: background .15s;
+}
+.preview-banner .exit:hover { background: rgba(var(--accent-rgb),.2); }
+@keyframes bannerIn { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ── Scope switcher (top-center, under the banner) ─────────────────────
+   The per-room control. A segmented pill: "Whole plan" + one chip per room.
+   Whole-plan preview from the foundation increment stays the default/left-most. */
+.scope-switch {
+  position: absolute; top: 3.5rem; left: 50%; transform: translateX(-50%);
+  display: none; align-items: center; gap: .25rem;
+  padding: .3rem; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--hairline);
+  backdrop-filter: blur(8px); box-shadow: 0 6px 20px rgba(0,0,0,.28);
+  z-index: 7; max-width: min(88vw, 640px); overflow-x: auto;
+}
+body.preview-on .scope-switch { display: flex; }
+.scope-switch .scope-label {
+  font-family: var(--font-mono); font-size: .56rem; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--muted); padding: 0 .5rem 0 .35rem;
+  white-space: nowrap;
+}
+.scope-switch button {
+  height: 28px; padding: 0 .8rem; border-radius: 999px; cursor: pointer;
+  white-space: nowrap; border: 1px solid transparent; background: transparent;
+  color: var(--ink); font-family: var(--font-ui); font-size: .74rem;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.scope-switch button:hover { background: rgba(var(--accent-rgb),.10); }
+.scope-switch button[aria-pressed="true"] {
+  background: var(--gold); color: var(--bg-deep); border-color: var(--gold);
+  font-weight: 700;
+}
+.scope-switch button .rm-dim {
+  font-family: var(--font-mono); font-size: .6rem; opacity: .7; margin-left: .35rem;
+}
+
+/* ── Preview legend + camera controls (bottom-right) ──────────────────── */
+.iso-legend {
+  position: absolute; right: 1.3rem; bottom: 1.2rem; display: none;
+  flex-direction: column; gap: .5rem; z-index: 6;
+  padding: .7rem .8rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--hairline);
+  backdrop-filter: blur(8px); min-width: 190px;
+}
+body.preview-on .iso-legend { display: flex; }
+.iso-legend h4 {
+  margin: 0; font-family: var(--font-mono); font-size: .6rem; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--muted);
+}
+.iso-legend .row { display: flex; align-items: center; gap: .5rem; font-size: .72rem; }
+.iso-legend .swatch { width: 16px; height: 16px; border-radius: 3px; border: 1px solid var(--iso-wall-edge); flex: none; }
+.iso-legend .swatch.walls { background: var(--iso-wall-left); }
+.iso-legend .swatch.furn  { background: rgba(127,208,200,.22); border-color: #7fd0c8; }
+.iso-legend .swatch.opening {
+  background: var(--iso-reveal); border-color: var(--iso-reveal-edge);
+}
+.iso-cam { display: flex; gap: .3rem; margin-top: .1rem; }
+.iso-cam button {
+  flex: 1; height: 28px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--hairline); background: transparent; color: var(--ink);
+  font-family: var(--font-mono); font-size: .62rem; transition: background .15s, border-color .15s;
+}
+.iso-cam button:hover { background: rgba(var(--accent-rgb),.1); border-color: var(--gold); }
+.iso-cam button[aria-pressed="true"] { background: rgba(var(--accent-rgb),.16); border-color: var(--gold); color: var(--gold); }
+
+/* ── Empty state (previewing a room / plan with no walls) ─────────────── */
+.iso-empty {
+  position: absolute; inset: 0; display: none;
+  align-items: center; justify-content: center; z-index: 5; pointer-events: none;
+}
+body.preview-on.preview-empty .iso-empty { display: flex; }
+.iso-empty .card {
+  max-width: 320px; text-align: center; padding: 1.6rem 1.8rem;
+  border-radius: 14px; background: var(--panel); border: 1px dashed var(--hairline);
+  backdrop-filter: blur(8px);
+}
+.iso-empty .card svg { color: var(--gold-soft); margin-bottom: .6rem; }
+.iso-empty .card h3 {
+  margin: 0 0 .35rem; font-family: var(--font-display); font-size: 1rem; color: var(--ink);
+}
+.iso-empty .card p {
+  margin: 0; font-size: .8rem; line-height: 1.45; color: var(--muted);
+}
+
+/* Fade/scale transition between 2D editor and 2.5D preview */
+#editor-layer, #preview-layer { transition: opacity .4s ease; }
+#preview-layer { opacity: 0; pointer-events: none; }
+body.preview-on #editor-layer { opacity: 0; pointer-events: none; }
+body.preview-on #preview-layer { opacity: 1; pointer-events: auto; }
+/* When the scoped room is empty, hide the preview SVG so the empty card owns the stage */
+body.preview-empty #preview-layer { opacity: 0; }
+
+/* Room hover affordance in the 2D editor when preview tool is armed but off:
+   rooms get a subtle "clickable to isolate" cursor cue via the info hint. */
+.scope-hint {
+  position: absolute; bottom: 1.2rem; left: 50%; transform: translateX(-50%);
+  display: none; padding: .4rem .8rem; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--hairline);
+  backdrop-filter: blur(8px); font-family: var(--font-mono); font-size: .62rem;
+  letter-spacing: .04em; color: var(--muted); z-index: 6;
+}
+body.preview-on .scope-hint { display: block; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="grid-bg" id="gridBg"></div>
+
+  <div class="stage" id="stage">
+    <svg id="editor-layer" viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+    <svg id="preview-layer" viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+  </div>
+
+  <!-- Brand -->
+  <div class="brand">
+    <div class="brand-name">floorplan</div>
+    <div class="brand-sub">warm blueprint</div>
+  </div>
+
+  <!-- Tool rail -->
+  <nav class="tool-rail" aria-label="Tools">
+    <button id="tool-select" aria-label="Select (V)" aria-pressed="false">
+      <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 2 L4 13 L7 10 L9 14 L11 13 L9 9 L13 9 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+      <span class="tool-key-hint">V</span>
+    </button>
+    <button id="tool-wall" aria-label="Draw wall (W)" aria-pressed="true">
+      <svg width="16" height="16" viewBox="0 0 16 16"><polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/></svg>
+      <span class="tool-key-hint">W</span>
+    </button>
+    <button id="tool-measure" aria-label="Measure (M)" aria-pressed="false">
+      <svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 8 H14 M2 5 V11 M14 5 V11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>
+      <span class="tool-key-hint">M</span>
+    </button>
+    <div class="tool-rail-sep" aria-hidden="true"></div>
+    <button id="tool-preview" class="preview-toggle" aria-label="3D preview (P)" aria-pressed="false" title="Toggle 2.5D preview (P)">
+      <svg width="17" height="17" viewBox="0 0 16 16">
+        <path d="M8 1.5 L14 5 L8 8.5 L2 5 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
+        <path d="M2 5 L2 11 L8 14.5 L14 11 L14 5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
+        <path d="M8 8.5 L8 14.5" stroke="currentColor" stroke-width="1.1" fill="none"/>
+      </svg>
+      <span class="tool-key-hint">P</span>
+    </button>
+  </nav>
+
+  <!-- Preview mode banner -->
+  <div class="preview-banner" role="status">
+    <span class="dot" aria-hidden="true"></span>
+    <span class="txt">Preview <span class="sub">— view-only, edit in 2D</span></span>
+    <button class="exit" id="exitPreview">Exit ✕</button>
+  </div>
+
+  <!-- Per-room scope switcher (populated by JS) -->
+  <div class="scope-switch" id="scopeSwitch" role="group" aria-label="Preview scope">
+    <span class="scope-label">Scope</span>
+  </div>
+
+  <!-- Actions cluster -->
+  <div class="actions-cluster">
+    <button id="btn-theme">☀ Theme</button>
+    <button id="btn-share">Share</button>
+    <button id="btn-export">Export</button>
+  </div>
+
+  <!-- Preview legend + camera controls -->
+  <aside class="iso-legend" aria-label="Preview legend">
+    <h4>2.5D Preview</h4>
+    <div class="row"><span class="swatch walls"></span> Walls · ceiling 2.4m</div>
+    <div class="row"><span class="swatch opening"></span> Door / window openings</div>
+    <div class="row"><span class="swatch furn"></span> Furniture · catalog height</div>
+    <div class="iso-cam" role="group" aria-label="Camera angle">
+      <button data-cam="NE" aria-pressed="true">NE</button>
+      <button data-cam="NW">NW</button>
+      <button data-cam="SE">SE</button>
+      <button data-cam="SW">SW</button>
+    </div>
+  </aside>
+
+  <!-- Scope hint (bottom-center) -->
+  <div class="scope-hint" id="scopeHint">Tip · click a room in the switcher to isolate it · P exits</div>
+
+  <!-- Empty state -->
+  <div class="iso-empty">
+    <div class="card">
+      <svg width="46" height="46" viewBox="0 0 24 24" fill="none">
+        <path d="M3 20 L12 4 L21 20 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-dasharray="3 3"/>
+        <path d="M8 20 L8 14 L16 14 L16 20" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+      </svg>
+      <h3 id="emptyTitle">Nothing to preview yet</h3>
+      <p id="emptyBody">This room has no walls. Draw an enclosed room in 2D, then flip back to preview to see it in 2.5D.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs) => {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+};
+const cssv = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+/* ── Sample plan (world metres) ─────────────────────────────────────────
+   Two committed rooms so per-room scoping is demonstrable: a bedroom and an
+   L-shaped living/kitchen. Each room carries an id (mirrors walls.Room.id). */
+const CEILING_H = 2.4;
+
+/* NEW catalog height fields this LLD adds. For furniture: a single `h3d` extrude
+   height. For openings: sill (bottom of gap) + head (top of gap) from floor —
+   the cut band. Door: sill 0, head 2.03. Window: sill 0.9, head 2.1. */
+const HEIGHTS = {
+  bed: 0.55, wardrobe: 2.00, nightstand: 0.50, sofa: 0.90, "coffee-table": 0.42,
+  tv: 0.55, desk: 0.74, chair: 0.85, bookshelf: 1.80, fridge: 1.70,
+  stove: 0.90, sink: 0.90, table: 0.75,
+};
+const OPENINGS = {
+  door:   { sill: 0.00, head: 2.03 },
+  window: { sill: 0.90, head: 2.10 },
+};
+
+const rooms = [
+  { id: "w0", name: "Bedroom", closed: true,
+    verts: [ {x:0,y:0}, {x:3.6,y:0}, {x:3.6,y:3.4}, {x:0,y:3.4} ] },
+  { id: "w1", name: "Living / Kitchen", closed: true,
+    verts: [ {x:3.6,y:0}, {x:8.4,y:0}, {x:8.4,y:5.4}, {x:5.4,y:5.4}, {x:5.4,y:3.4}, {x:3.6,y:3.4} ] },
+];
+
+/* Symbols. Openings (door/window) sit ON a wall centerline; furniture inside.
+   Each symbol tagged with roomId so per-room scoping can filter both walls and
+   contents (mirrors a point-in-room test the real code will run). */
+const symbols = [
+  // Bedroom (w0)
+  { type:"door",       roomId:"w0", x:3.6, y:1.7, w:0.81, h:0.12, rot:90 },
+  { type:"window",     roomId:"w0", x:1.8, y:0.0, w:1.22, h:0.12, rot:0 },
+  { type:"bed",        roomId:"w0", x:1.5, y:1.1, w:1.52, h:2.03, rot:0 },
+  { type:"nightstand", roomId:"w0", x:2.9, y:0.6, w:0.45, h:0.40, rot:0 },
+  { type:"wardrobe",   roomId:"w0", x:2.7, y:3.0, w:1.50, h:0.58, rot:180 },
+  // Living / Kitchen (w1)
+  { type:"window",     roomId:"w1", x:8.4, y:2.4, w:1.52, h:0.12, rot:90 },
+  { type:"window",     roomId:"w1", x:6.6, y:0.0, w:1.83, h:0.12, rot:0 },
+  { type:"door",       roomId:"w1", x:8.4, y:4.6, w:0.91, h:0.12, rot:90 },
+  { type:"sofa",       roomId:"w1", x:7.4, y:1.2, w:2.10, h:0.95, rot:180 },
+  { type:"coffee-table",roomId:"w1", x:7.4, y:2.5, w:1.10, h:0.55, rot:0 },
+  { type:"tv",         roomId:"w1", x:7.4, y:3.9, w:1.40, h:0.40, rot:0 },
+  { type:"fridge",     roomId:"w1", x:4.1, y:0.6, w:0.76, h:0.81, rot:0 },
+  { type:"stove",      roomId:"w1", x:5.0, y:0.55, w:0.76, h:0.71, rot:0 },
+  { type:"sink",       roomId:"w1", x:4.2, y:2.8, w:0.76, h:0.51, rot:270 },
+];
+
+const OPENING_TYPES = new Set(["door","window"]);
+
+/* Rotated footprint corners (TL,TR,BR,BL) — mirrors symbols.corners() */
+function corners(s) {
+  const r = s.rot * Math.PI/180, c = Math.cos(r), sn = Math.sin(r);
+  const hw = s.w/2, hh = s.h/2;
+  const pt = (lx,ly) => ({ x: s.x + lx*c - ly*sn, y: s.y + lx*sn + ly*c });
+  return [ pt(-hw,-hh), pt(hw,-hh), pt(hw,hh), pt(-hw,hh) ];
+}
+
+/* ── Scope state ────────────────────────────────────────────────────────
+   scope = "all" (whole plan, foundation default) or a room id ("w0"…). */
+let scope = "all";
+function scopedRooms()   { return scope === "all" ? rooms : rooms.filter(r => r.id === scope); }
+function scopedSymbols() { return scope === "all" ? symbols : symbols.filter(s => s.roomId === scope); }
+
+/* ── 2D EDITOR renderer (top-down) — the "preview OFF" state ───────────── */
+const PPM_2D = 74, OX_2D = 210, OY_2D = 150;
+const w2s = (x,y) => ({ x: OX_2D + x*PPM_2D, y: OY_2D + y*PPM_2D });
+
+function render2D() {
+  const svg = document.getElementById("editor-layer");
+  svg.innerHTML = "";
+  const roomFill = cssv("--room-fill"), wallBody = cssv("--wall-body"),
+        wallLine = cssv("--wall-line"), symFill = cssv("--sym-fill"),
+        symStroke = cssv("--sym-stroke");
+  for (const room of rooms) {
+    const pts = room.verts.map(v => { const s = w2s(v.x,v.y); return `${s.x},${s.y}`; }).join(" ");
+    svg.appendChild(el("polygon", { points: pts, fill: roomFill, stroke: "none" }));
+    svg.appendChild(el("polygon", { points: pts, fill: "none", stroke: wallBody,
+      "stroke-width": Math.max(6, 0.12*PPM_2D), "stroke-linejoin": "round" }));
+    svg.appendChild(el("polygon", { points: pts, fill: "none", stroke: wallLine,
+      "stroke-width": 1.6, "stroke-linejoin": "round" }));
+  }
+  for (const s of symbols) {
+    const pts = corners(s).map(c => { const p = w2s(c.x,c.y); return `${p.x},${p.y}`; }).join(" ");
+    const isOpen = OPENING_TYPES.has(s.type);
+    svg.appendChild(el("polygon", { points: pts,
+      fill: isOpen ? "none" : symFill, stroke: symStroke,
+      "stroke-width": isOpen ? 2 : 1.4, "stroke-linejoin": "round",
+      "stroke-dasharray": isOpen ? "4 3" : "" }));
+  }
+}
+
+/* ── 2.5D ISOMETRIC renderer ────────────────────────────────────────────
+   Pure axonometric arithmetic — no WebGL/three.js (guard respected). The
+   camera centers + frames on the CURRENT SCOPE's bounds, so isolating a room
+   fills the stage rather than sitting in a plan-sized corner. */
+const ISO = { ox: 500, oy: 360, elev: 0.5 };
+let camAz = 0;
+const CAM_AZ = { NE: 0, NW: Math.PI/2, SE: -Math.PI/2, SW: Math.PI };
+let _center = { x: 4.2, y: 2.7 };   // recomputed per scope
+let _ppm = 60, _zscale = 60;        // recomputed per scope (auto-fit)
+
+function project(x, y, z) {
+  const dx = x - _center.x, dy = y - _center.y;
+  const ca = Math.cos(camAz), sa = Math.sin(camAz);
+  const rx = dx*ca - dy*sa;
+  const ry = dx*sa + dy*ca;
+  const sx = ISO.ox + (rx - ry) * _ppm * 0.86;
+  const sy = ISO.oy + (rx + ry) * _ppm * ISO.elev - z * _zscale;
+  return { x: sx, y: sy };
+}
+function depthKey(x, y) {
+  const dx = x-_center.x, dy = y-_center.y;
+  const ca = Math.cos(camAz), sa = Math.sin(camAz);
+  return (dx*ca - dy*sa) + (dx*sa + dy*ca);
+}
+
+/* Auto-fit: center on scoped-room bounds and pick a ppm so the extruded volume
+   fits the viewBox with margin. Framing/orientation polish (acceptance crit). */
+function fitScope() {
+  const rs = scopedRooms();
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for (const r of rs) for (const v of r.verts) {
+    minX=Math.min(minX,v.x); minY=Math.min(minY,v.y);
+    maxX=Math.max(maxX,v.x); maxY=Math.max(maxY,v.y);
+  }
+  if (!isFinite(minX)) { _center={x:0,y:0}; _ppm=60; _zscale=60; return; }
+  _center = { x:(minX+maxX)/2, y:(minY+maxY)/2 };
+  const span = Math.max(maxX-minX, maxY-minY, 1) + 1;   // +1m padding
+  _ppm = Math.max(34, Math.min(96, 620 / span));         // clamp for sanity
+  _zscale = _ppm;
+}
+
+/* Simple solid box extrude (furniture). */
+function extrudeBox(footprint, z0, z1, opts) {
+  const g = el("g", {});
+  const top = footprint.map(p => project(p.x, p.y, z1));
+  const bot = footprint.map(p => project(p.x, p.y, z0));
+  const faces = [];
+  for (let i = 0; i < footprint.length; i++) {
+    const j = (i+1) % footprint.length;
+    const quad = [ bot[i], bot[j], top[j], top[i] ];
+    const edx = top[j].x - top[i].x;
+    const shade = edx >= 0 ? opts.right : opts.left;
+    const midDepth = (depthKey(footprint[i].x, footprint[i].y) + depthKey(footprint[j].x, footprint[j].y))/2;
+    faces.push({ quad, shade, midDepth });
+  }
+  faces.sort((a,b) => a.midDepth - b.midDepth);
+  for (const f of faces) g.appendChild(el("polygon", {
+    points: f.quad.map(p=>`${p.x},${p.y}`).join(" "),
+    fill: f.shade, stroke: opts.edge, "stroke-width": opts.sw,
+    "stroke-linejoin": "round", "stroke-opacity": 0.55 }));
+  g.appendChild(el("polygon", { points: top.map(p=>`${p.x},${p.y}`).join(" "),
+    fill: opts.top, stroke: opts.edge, "stroke-width": opts.sw, "stroke-linejoin": "round" }));
+  return g;
+}
+
+/* Rectangular footprint for a wall segment a→b of given thickness (metres). */
+function wallSegFoot(a, b, thick) {
+  const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy)||1;
+  const nx=-dy/len*thick/2, ny=dx/len*thick/2;
+  return [ {x:a.x+nx,y:a.y+ny}, {x:b.x+nx,y:b.y+ny}, {x:b.x-nx,y:b.y-ny}, {x:a.x-nx,y:a.y-ny} ];
+}
+
+/* Return openings that lie on the wall segment a→b (within tolerance), each with
+   its parametric span [t0,t1] along the segment and its sill/head band. This is
+   the paired data→renderer contract: opening height fields drive the cut band. */
+function openingsOnSeg(a, b, list) {
+  const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy)||1;
+  const ux=dx/len, uy=dy/len;
+  const out=[];
+  for (const s of list) {
+    if (!OPENING_TYPES.has(s.type)) continue;
+    const rel = ((s.x-a.x)*ux + (s.y-a.y)*uy);      // projection onto segment
+    const perp = Math.abs((s.x-a.x)*(-uy) + (s.y-a.y)*ux);
+    if (perp > 0.25) continue;                       // not on this wall
+    if (rel < -0.1 || rel > len+0.1) continue;
+    const half = s.w/2;
+    const t0 = Math.max(0, rel-half)/len, t1 = Math.min(len, rel+half)/len;
+    const band = OPENINGS[s.type];
+    out.push({ t0, t1, sill: band.sill, head: band.head, kind: s.type });
+  }
+  return out;
+}
+
+/* Extrude ONE wall segment as a face with opening cutouts. Rather than a solid
+   0..ceiling quad, we tile the face into vertical panels:
+   - between openings: a full-height panel (0..ceiling)
+   - over an opening: a lintel (head..ceiling) and, for windows, a sill apron
+     (0..sill); the gap band (sill..head) is a recessed dark reveal, so the wall
+     reads as a wall-with-hole at the correct vertical position. */
+function extrudeWallSeg(a, b, thick, openings, g) {
+  const lerp = (t) => ({ x: a.x + (b.x-a.x)*t, y: a.y + (b.y-a.y)*t });
+  // Build the list of solid spans (full height) split by openings along t.
+  const spans = openings.slice().sort((o,p)=>o.t0-p.t0);
+  const quad3d = (pA, pB, z0, z1, shade, sw=1.2) => {
+    const p = [ project(pA.x,pA.y,z0), project(pB.x,pB.y,z0),
+                project(pB.x,pB.y,z1), project(pA.x,pA.y,z1) ];
+    g.appendChild(el("polygon", { points: p.map(q=>`${q.x},${q.y}`).join(" "),
+      fill: shade, stroke: cssv("--iso-wall-edge"), "stroke-width": sw,
+      "stroke-linejoin":"round", "stroke-opacity":0.5 }));
+  };
+  const edx = project(b.x,b.y,0).x - project(a.x,a.y,0).x;
+  const faceShade = edx >= 0 ? cssv("--iso-wall-right") : cssv("--iso-wall-left");
+
+  let t = 0;
+  for (const o of spans) {
+    if (o.t0 > t) quad3d(lerp(t), lerp(o.t0), 0, CEILING_H, faceShade);  // solid pier
+    const gA = lerp(o.t0), gB = lerp(o.t1);
+    // recessed reveal in the gap band (darker → reads as depth into the wall)
+    quad3d(gA, gB, o.sill, o.head, cssv("--iso-reveal"), 1.0);
+    // lintel above the head
+    if (o.head < CEILING_H) quad3d(gA, gB, o.head, CEILING_H, faceShade);
+    // sill apron below (windows only; doors have sill 0)
+    if (o.sill > 0) quad3d(gA, gB, 0, o.sill, faceShade);
+    // crisp opening outline so the hole edge is legible
+    const band = [ project(gA.x,gA.y,o.sill), project(gB.x,gB.y,o.sill),
+                   project(gB.x,gB.y,o.head), project(gA.x,gA.y,o.head) ];
+    g.appendChild(el("polygon", { points: band.map(q=>`${q.x},${q.y}`).join(" "),
+      fill:"none", stroke: cssv("--iso-reveal-edge"), "stroke-width":1.3,
+      "stroke-linejoin":"round" }));
+    t = o.t1;
+  }
+  if (t < 1) quad3d(lerp(t), lerp(1), 0, CEILING_H, faceShade);          // trailing pier
+}
+
+function renderPreview() {
+  const svg = document.getElementById("preview-layer");
+  svg.innerHTML = "";
+  fitScope();
+
+  const rs = scopedRooms(), ss = scopedSymbols();
+  const furnOpts = {
+    top: "rgba(127,208,200,.30)", left: "rgba(127,208,200,.20)",
+    right: "rgba(127,208,200,.11)", edge: "#7fd0c8", sw: 1.1,
+  };
+
+  // 1) Floor slab per scoped room
+  for (const room of rs) {
+    const floor = room.verts.map(v => project(v.x, v.y, 0));
+    svg.appendChild(el("polygon", { points: floor.map(p=>`${p.x},${p.y}`).join(" "),
+      fill: cssv("--iso-floor"), stroke: cssv("--iso-wall-edge"),
+      "stroke-width":1, "stroke-opacity":.5 }));
+  }
+
+  // 2) Painter-sorted draw list of walls (with openings) + furniture boxes.
+  const drawList = [];
+  for (const room of rs) {
+    const n = room.verts.length;
+    const edgeCount = room.closed ? n : n-1;
+    for (let i = 0; i < edgeCount; i++) {
+      const a = room.verts[i], b = room.verts[(i+1)%n];
+      const ops = openingsOnSeg(a, b, ss);
+      drawList.push({ depth: depthKey((a.x+b.x)/2,(a.y+b.y)/2), kind:"wall", a, b, ops });
+    }
+  }
+  for (const s of ss) {
+    if (OPENING_TYPES.has(s.type)) continue;              // openings are cuts, not boxes
+    const h = HEIGHTS[s.type] || 0.5;
+    drawList.push({ depth: depthKey(s.x, s.y), kind:"furn", z: h, foot: corners(s) });
+  }
+  drawList.sort((a,b) => a.depth - b.depth);
+  for (const item of drawList) {
+    if (item.kind === "wall") {
+      const g = el("g", {});
+      extrudeWallSeg(item.a, item.b, 0.12, item.ops, g);
+      svg.appendChild(g);
+    } else {
+      svg.appendChild(extrudeBox(item.foot, 0, item.z, furnOpts));
+    }
+  }
+}
+
+/* ── Scope switcher build + wiring ─────────────────────────────────────── */
+const scopeSwitch = document.getElementById("scopeSwitch");
+function roomArea(r) {   // shoelace, for the tiny chip subtitle
+  let a=0; const v=r.verts;
+  for (let i=0;i<v.length;i++){ const j=(i+1)%v.length; a += v[i].x*v[j].y - v[j].x*v[i].y; }
+  return Math.abs(a)/2;
+}
+function buildScopeSwitch() {
+  scopeSwitch.querySelectorAll("button").forEach(b => b.remove());
+  const mk = (id, label, dim) => {
+    const b = document.createElement("button");
+    b.dataset.scope = id;
+    b.setAttribute("aria-pressed", String(scope === id));
+    b.innerHTML = label + (dim ? `<span class="rm-dim">${dim}</span>` : "");
+    b.addEventListener("click", () => setScope(id));
+    scopeSwitch.appendChild(b);
+  };
+  mk("all", "Whole plan", `${rooms.length} rooms`);
+  for (const r of rooms) mk(r.id, r.name, `${roomArea(r).toFixed(1)} m²`);
+}
+
+function refreshScopePressed() {
+  scopeSwitch.querySelectorAll("button").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.scope === scope)));
+}
+
+function updateEmptyState() {
+  const empty = scopedRooms().every(r => !r.closed || r.verts.length < 3)
+             || scopedRooms().length === 0;
+  document.body.classList.toggle("preview-empty", empty);
+  if (empty) {
+    const r = rooms.find(x => x.id === scope);
+    document.getElementById("emptyTitle").textContent =
+      scope === "all" ? "Nothing to preview yet" : `${r ? r.name : "Room"} has no walls`;
+    document.getElementById("emptyBody").textContent =
+      scope === "all"
+        ? "Draw an enclosed room in 2D, then flip back to preview to see it in 2.5D."
+        : "This room isn't a closed shape yet. Close its walls in 2D to preview its volume.";
+  }
+}
+
+function setScope(id) {
+  scope = id;
+  refreshScopePressed();
+  updateEmptyState();
+  renderPreview();
+  // Banner subtitle reflects scope
+  const r = rooms.find(x => x.id === id);
+  document.querySelector(".preview-banner .sub").textContent =
+    id === "all" ? "— whole plan, view-only" : `— ${r ? r.name : "room"}, view-only`;
+}
+
+/* ── Preview toggle / camera / theme / keyboard ───────────────────────── */
+const btnPreview = document.getElementById("tool-preview");
+const gridBg = document.getElementById("gridBg");
+
+function setPreview(on) {
+  document.body.classList.toggle("preview-on", on);
+  btnPreview.setAttribute("aria-pressed", String(on));
+  gridBg.classList.toggle("iso-dim", on);
+  if (on) { updateEmptyState(); renderPreview(); }
+  else document.body.classList.remove("preview-empty");
+}
+btnPreview.addEventListener("click", () => setPreview(!document.body.classList.contains("preview-on")));
+document.getElementById("exitPreview").addEventListener("click", () => setPreview(false));
+
+document.querySelectorAll(".iso-cam button").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".iso-cam button").forEach(x => x.setAttribute("aria-pressed","false"));
+    b.setAttribute("aria-pressed","true");
+    camAz = CAM_AZ[b.dataset.cam] || 0;
+    renderPreview();
+  });
+});
+
+window.addEventListener("keydown", (e) => {
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+  if (e.key === "p" || e.key === "P") setPreview(!document.body.classList.contains("preview-on"));
+  if (e.key === "Escape" && document.body.classList.contains("preview-on")) setPreview(false);
+  // Bracket keys cycle scope while previewing (nice-to-have; renderer-driven)
+  if (document.body.classList.contains("preview-on") && (e.key === "[" || e.key === "]")) {
+    const ids = ["all", ...rooms.map(r=>r.id)];
+    let i = ids.indexOf(scope);
+    i = e.key === "]" ? (i+1)%ids.length : (i-1+ids.length)%ids.length;
+    setScope(ids[i]);
+  }
+});
+
+document.getElementById("btn-theme").addEventListener("click", () => {
+  const light = document.documentElement.getAttribute("data-theme") === "light";
+  document.documentElement.setAttribute("data-theme", light ? "dark" : "light");
+  render2D();
+  if (document.body.classList.contains("preview-on")) renderPreview();
+});
+
+["tool-select","tool-wall","tool-measure"].forEach(id => {
+  document.getElementById(id).addEventListener("click", () => {
+    ["tool-select","tool-wall","tool-measure"].forEach(x =>
+      document.getElementById(x).setAttribute("aria-pressed","false"));
+    document.getElementById(id).setAttribute("aria-pressed","true");
+  });
+});
+
+/* Initial paint. Auto-open preview so reviewers land on the new feature. */
+render2D();
+buildScopeSwitch();
+setPreview(true);
+setScope("all");
+</script>
+</body>
+</html>
