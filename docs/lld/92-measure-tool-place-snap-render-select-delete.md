@@ -57,10 +57,30 @@ wallTool's rail/HUD/keyboard logic, `measureTool` owns its own boolean mode
   the select-dispatcher hooks continue to work while measuring is layered on top.
 - Activating Wall or Select (rail/`W`/`V`) deactivates measure mode first
   (`measureTool.deactivate()` — cancels any in-progress measurement without committing).
-- Rationale: measure mode is a *placement overlay* over the select tool. During
-  placement, `measureTool` consumes pointer taps; when idle, taps fall through to the
-  select dispatcher so a user in Measure mode can still pan. This avoids invasive edits
-  to wallTool and matches the "layered controller" pattern already used by symbolTool.
+- Rationale: measure mode is a *placement overlay* over the select tool. While measure
+  mode is active, **every single-pointer tap is a placement tap** (idle tap → place A;
+  second tap → commit B). A measure-mode tap is NEVER a selection tap — selection and
+  deletion of a committed measurement are reachable **only in Select mode** (see the
+  explicit decision below). A *drag* gesture (not a tap) still falls through to the
+  interactions pan machinery so a user can pan while in Measure mode. This avoids
+  invasive edits to wallTool and matches the "layered controller" pattern already used by
+  symbolTool.
+
+#### Decision: tapping in Measure mode never selects (idle tap always places)
+
+The reviewer flagged an ambiguity: does an idle tap in Measure mode start a new
+placement, or route to the select dispatcher (allowing a just-drawn measurement to be
+tapped and deleted without switching tools)? **Resolved: an idle tap always places A.**
+`onMeasureDown` has no select-hit branch and never inspects `_selectedMeasurementId`.
+Consequences, stated for the implementer and the CX:
+
+- To select or delete a measurement, the user switches to **Select mode** (`V` / rail).
+  Deleting a measurement you just drew is a two-step gesture: switch to Select, tap the
+  line, press Delete. This keeps the Measure tool a pure placement tool and avoids a
+  dead-zone where taps near an existing line would fail to start a new measurement.
+- The select dispatcher's measurement branch (below) therefore only runs when the active
+  tool is Select (`!measureTool.isActive()`), which is exactly how the interactions
+  routing already gates draw vs. select.
 
 ### Placement pipeline (reusing snap infra)
 
@@ -72,8 +92,12 @@ precedence order (closest wins by screen-pixel distance, tolerance `SNAP_PT_PX =
    center (`sym.x, sym.y`); reuse `symbols.corners` + `aabb`.
 2. **Wall vertex** — `walls.closestEndpoint(sx, sy, allVertices(), null, SNAP_PT_PX)`.
 3. **Wall edge** — nearest point on any `walls.wallSegments()` segment within tolerance
-   (perpendicular projection; reuse the segment-distance math already in
-   `pointNearRoomWall`, applied per segment to also get the foot point).
+   (perpendicular projection). NOTE: `pointNearRoomWall` (walls.js ~407–427) returns a
+   **boolean** and computes its foot point `(cx,cy)` internally without returning it, so it
+   cannot be called to obtain the projection. The implementer must **re-derive** the
+   point-to-segment projection (clamp the parametric `t` to `[0,1]`, evaluate the foot
+   point) in `_resolvePoint` — the math is the same, but it is reimplemented, not reused
+   via that function.
 4. **Grid** — `resolveSnap(sx, sy, {chain:[], rooms:[], altHeld, step})` collapses to
    grid/free; equivalently `gridSnap(raw, step)` when snapping on.
 5. **Free** — raw `screenToWorld`, when Alt held OR `snapStep()` is null OR
@@ -120,6 +144,28 @@ onDown: symbol? → "symbol"
   tolerance; on hit sets `_selectedMeasurementId`, clears symbol+room selection (mutex,
   via injected clearers), returns true. No drag — measurements are not movable this
   phase, so `onSelectMove`/`onSelectUp` are no-ops (up still fires nothing to commit).
+
+#### Mutex must be wired both ways (reviewer GAP)
+
+Injecting `setClearOtherSelections` only makes the mutex work in the
+measurement-selected direction. The **reverse direction must also be wired in
+`main.js`** so selecting a symbol/room or tapping empty clears a stale measurement
+highlight. Concretely, three existing dispatcher branches gain a
+`measureTool.clearSelection()` call:
+
+- **Symbol-pick branch** (main.js ~224): after a symbol is selected, call
+  `measureTool.clearSelection()`.
+- **Room-pick branch**: after a room is selected, call `measureTool.clearSelection()`.
+- **`onTapEmpty`** (main.js ~245): the dispatcher's empty-tap path already clears symbol +
+  room selection; it must also call `measureTool.clearSelection()` (equivalently
+  `measureTool.onTapEmpty()`).
+
+Without these three calls the "and vice-versa" mutex asserted in Test Requirements is not
+actually enforced: a previously selected measurement would remain highlighted after
+picking a symbol/room or tapping empty. `clearSelection()` itself does not render; the
+enclosing dispatcher action already schedules a render, so the stale highlight clears on
+that same frame. (`onTapEmpty()` renders on its own since empty-tap may otherwise not
+trigger a redraw.)
 - Deletion is owned by `main.js`'s existing global `Delete`/`Backspace` handler. Extend
   the guard: if `measureTool.hasSelection()` (and no symbol selection), consume the event
   and call `measureTool.deleteSelected()`, which removes from the model + commits +
@@ -132,9 +178,11 @@ onDown: symbol? → "symbol"
 ### History: extend the snapshot to include measurements
 
 **Required change.** `history.js._capture()` / `_apply()` currently snapshot only
-`walls` + `symbols`. Measurement add/delete would therefore NOT be captured and
-undo/redo would silently drop them (and worse, an unrelated undo would not restore a
-deleted measurement). Extend both:
+`walls` + `symbols`; `_apply()` never touches measurements. Consequences without the fix:
+(a) measurement add/delete would NOT be captured, so undo/redo silently drops or fails to
+restore them; and (b) an unrelated undo (e.g. undoing a symbol move) would restore walls +
+symbols but leave the measurements array untouched/unmanaged (it does not corrupt existing
+measurements — it simply falls outside history). Extend both:
 
 - `_capture()` adds `measurements: JSON.parse(JSON.stringify(measurementsModel.measurements))`.
 - `_apply()` calls `hydrateMeasurements({ measurements: cloned.measurements })`.
@@ -289,7 +337,12 @@ export function render()
 - Rail/keyboard: `#tool-measure` click → `measureActivate()`; `M` key → `measureActivate()`;
   `W`/`V`/Wall/Select clicks → `measureDeactivate()` before their existing handlers.
 - Extend the select dispatcher (`setSelectHooks`) with the measurement branch (lowest
-  priority) and route move/up when `_activeSelectOwner === "measurement"`.
+  priority) and route move/up when `_activeSelectOwner === "measurement"`. Wire the
+  **reverse mutex**: the existing symbol-pick branch (~224), the room-pick branch, and the
+  dispatcher's `onTapEmpty` (~245) each also call `measureTool.clearSelection()` (empty-tap
+  uses `measureTool.onTapEmpty()`), so picking a symbol/room or tapping empty drops a stale
+  measurement highlight. Gate the whole measurement branch on `!measureTool.isActive()` so
+  it only runs in Select mode.
 - Extend interactions: measure mode needs its own down/move routing. Add a small
   `setMeasureHooks({ isActive, onDown, onMove, onLeave })` injection to interactions.js
   analogous to `setDrawHooks` — when `isActive()` and single-pointer, tap → `onDown`,
@@ -338,8 +391,10 @@ Add `measurements` to `_capture()` and `hydrateMeasurements(...)` to `_apply()` 
    (ready for the next measurement — tool stays active).
 
 ### State flow — select + delete
-1. In Select mode (or Measure mode when idle), dispatcher tries symbol → room →
-   measurement. Measurement hit → `_selectedMeasurementId` set, other selections cleared.
+1. In Select mode **only** (measurement branch is skipped while `measureTool.isActive()`),
+   the dispatcher tries symbol → room → measurement. Measurement hit →
+   `_selectedMeasurementId` set, symbol + room selection cleared (mutex). A tap in Measure
+   mode never reaches this path — it is always a placement tap (see Approach decision).
 2. `Delete`/`Backspace` (main.js) → `deleteSelected()` → `measurements.remove(id)` →
    `_selectedMeasurementId = null` → `history.commit()` → `scheduleRender()` (autosave).
 
@@ -404,6 +459,12 @@ Add `measurements` to `_capture()` and `hydrateMeasurements(...)` to `_apply()` 
     acceptable (same behavior as clearance chips). No clamping required this phase.
 13. **Touch placement offset** — reuse `effectiveDrawPoint` (interactions.js) so the
     committed point matches the loupe-offset finger position, consistent with wall drawing.
+14. **Pan starting on a measurement line (Select mode)** — because `onSelectDown` returns
+    true on any hit within the ~15px strip and `onSelectMove`/`onSelectUp` are no-ops, a
+    drag that *begins* inside that thin strip is consumed (pan suppressed) but does nothing
+    visible. **Intended behavior** this phase: the strip is narrow (`SNAP_PT_PX = 15`), so
+    the user just starts the pan a few pixels away. Making the line drag-pannable is
+    deferred; documented here so it is not treated as a bug.
 
 ## Dependencies
 
@@ -425,7 +486,7 @@ Add `measurements` to `_capture()` and `hydrateMeasurements(...)` to `_apply()` 
 ### Changes this LLD makes to existing files
 - `measurements.js`: add `add`/`remove`/`getById`/`length`/`nearestMeasurement`.
 - `history.js`: extend `_capture()`/`_apply()` with `measurements` (REQUIRED — otherwise
-  add/delete are not undoable and unrelated undos corrupt measurements).
+  add/delete are not undoable and unrelated undos leave measurements outside history).
 - `main.js`: init + wire the new modules; extend select dispatcher, Delete/Escape
   handlers, rail/keyboard; register the render hook.
 - `interactions.js`: add `setMeasureHooks` + route single-pointer taps/moves when measure
@@ -470,8 +531,9 @@ code and `node --test` in `mcp/` for pure model code. Keep existing tests green.
 - A snapshot captures `measurements`; `_apply` restores them.
 - Add-then-undo removes the measurement; redo restores it.
 - Delete-then-undo restores; redo removes.
-- An undo of an UNRELATED op (e.g. a symbol move) does not drop existing measurements
-  (regression guarding the pre-fix bug).
+- An undo of an UNRELATED op (e.g. a symbol move) preserves existing measurements (before
+  the fix, `_apply` would not restore the measurements array at all; after the fix the
+  snapshot round-trips them).
 
 ### Integration / interaction (browser harness)
 - Two clicks in measure mode create one measurement with the expected endpoints; a third
