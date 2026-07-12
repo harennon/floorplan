@@ -105,7 +105,16 @@ injected `history.commit()` exactly once; the dirty-check no-ops a cancelled/no-
 
 `measureRender.render()` is a full idempotent redraw registered via `onRender`. It draws into a
 dedicated SVG group and appends distance chips to the shared `.dim-labels` layer (append-only,
-same contract as `symbolRender`). Because it reads `unit` at draw time via `fmtLen`, the existing
+same contract as `symbolRender`). **Measure chips must NOT carry the `.dim-chip` class.** `dimEntry.js`
+(lines 62–71) binds a global delegated `click` listener and pointer-isolation
+(`stopPropagation` on pointerdown/pointerup/pointercancel) to **every** `.dim-chip` inside
+`.dim-labels`; a measure chip carrying that class would (a) have its pointer events swallowed,
+turning the label into a dead zone that blocks measurement selection and A/B placement while the
+cursor is over it, and (b) fire `beginEdit(null, NaN)` on click. To avoid this, measure chips use a
+distinct class **`.measure-chip`** that borrows `.dim-chip` typography via CSS (see Frontend Design)
+but is **not** matched by `dimEntry`'s `.dim-chip` selector, and additionally set
+`pointer-events:none` so they never intercept placement/selection taps. Because it reads `unit` at
+draw time via `fmtLen`, the existing
 `onUnitChange(scheduleRender)` wiring in `main.js` makes labels react live to the unit toggle with
 no extra code. A new SVG group `#measures` is added to `index.html` between `#symbols` and
 `#symbol-overlay` (below the symbol selection overlay, above walls). The in-progress rubber-band
@@ -146,9 +155,12 @@ export function init(refs);                 // { stage, btnMeasure, snapTag }
 export function setHistoryCommit(fn);       // inject history.commit (no cycle)
 export function setToolBridge(fns);         // { setTool, isMeasureMode } from wallTool
 
-// Mode-aware pointer hooks injected into interactions.js (parallel to draw/select hooks)
-export function onMeasureDown(sx, sy);      // place A or commit B; returns void
-export function onMeasureMove(sx, sy);      // update rubber-band preview + snap-tag
+// Mode-aware pointer hooks injected into interactions.js (parallel to draw/select hooks).
+// NOTE: A/B are committed on tap-RELEASE, after interactions.js has discriminated tap vs pan —
+// NOT on raw pointerdown. This mirrors draw-mode's onClick firing at _onPointerEnd, so a
+// pan-attempt (down + drag beyond threshold) never drops a point.
+export function onMeasureTap(sx, sy);       // place A or commit B (called on tap-release only)
+export function onMeasureMove(sx, sy);      // update rubber-band preview + snap-tag (hover/drag-move)
 export function onMeasureLeave();           // clear hover preview
 
 // Selection integration (called by the main.js Select dispatcher)
@@ -180,9 +192,13 @@ export function setMeasureHooks(h);
 ```
 
 In `_onPointerDown`/`_onPointerMove`/`_onPointerEnd`, gate on `_measureHooks.isMeasureMode()` before
-the draw-mode branch. A measure-mode single-pointer down that does not exceed the drag threshold is
-a **tap** → `onMeasureDown`; exceeding the threshold starts a pan (does not place a point). Plain
-hover (buttons===0) → `onMeasureMove` to drive the rubber-band. Mirrors the wall draw-pending logic.
+the draw-mode branch. **Point placement happens on pointer-UP (`_onPointerEnd`), not on pointerdown**
+— exactly mirroring how draw-mode fires its `onClick` at `_onPointerEnd`. A measure-mode
+single-pointer down starts a pending gesture; on release, if the pointer never exceeded the drag
+threshold it is a **tap** → `onMeasureTap(sx, sy)` (place A or commit B); if it exceeded the
+threshold it was a **pan** and no point is placed. This tap/pan discrimination on release is what
+prevents every pan-attempt from dropping a point. Plain hover (buttons===0) and drag-move →
+`onMeasureMove` to drive the rubber-band. Mirrors the wall draw-pending logic.
 
 ### `measureRender.js` (new)
 
@@ -220,12 +236,16 @@ the baseline via `historyReset()` (unchanged).
 
 1. Enter Measure mode (rail button / shortcut) → `_draft = null`, wall + symbol + room selections
    cleared.
-2. First tap → `resolveEndpointSnap` → `_draft = { a: snapped, cursor: snapped, snapType }`.
+2. First tap (pointer-up classified as a tap → `onMeasureTap`) → `resolveEndpointSnap` →
+   `_draft = { a: snapped, cursor: snapped, snapType }`.
 3. Hover/move → update `_draft.cursor` + snapType; `measureRender` draws rubber-band A→cursor.
-4. Second tap → `b = resolveEndpointSnap`. If `dist(a,b) < MIN_LEN_M` → discard (no commit),
-   keep `_draft = null` (Edge Case 4). Else `addMeasurement(createMeasurement(a,b))`,
+4. Second tap (`onMeasureTap`) → `b = resolveEndpointSnap`. If `dist(a,b) < MIN_LEN_M` → discard
+   (no commit), keep `_draft = null` (Edge Case 2). Else `addMeasurement(createMeasurement(a,b))`,
    `history.commit()`, `_draft = null`, `scheduleRender()`.
 5. Escape at step 3 → `_draft = null`, no commit, `scheduleRender()`.
+
+Both taps commit on pointer-**up** after tap/pan discrimination; a down-then-drag beyond the drag
+threshold pans the canvas and places nothing.
 
 ## Edge Cases
 
@@ -233,9 +253,14 @@ the baseline via `historyReset()` (unchanged).
    `measureTool` keydown; must run before `main.js` global Escape (which handles symbol deselect).
    Guard order: if `isMeasureMode() && _draft` → cancel + `stopPropagation` so main.js does not also
    act. If measure mode but no draft, Escape is a no-op (does not exit the tool).
-2. **Zero-/tiny-length measurement** — second point within `MIN_LEN_M` (reuse `MIN_SEG_M` = wall
-   min-seg, or a dedicated small constant) of A → discard, no commit, draft stays cleared. Prevents
-   degenerate labels and accidental double-tap zero-length lines.
+2. **Zero-/tiny-length measurement** — discard the second point (no commit, draft stays cleared)
+   when A and B are closer than a **screen-px threshold**, not a fixed world length. Rationale:
+   the goal is to reject *accidental* tiny measurements (double-tap, jitter), and at high zoom a
+   double-tap a few screen px apart is a valid-but-tiny world segment that a world-length constant
+   like `MIN_SEG_M` (1e-4 m ≈ 0.1 mm) would let through. **Threshold: `MIN_LEN_PX = 8` screen px**,
+   converted to world at commit time as `MIN_LEN_M = MIN_LEN_PX / pxPerM()`; discard when
+   `dist(a,b) < MIN_LEN_M`. 8 px is comfortably below `MIN_HIT_PX` (12 fine / 44 coarse) so a
+   deliberate short drag still commits, while a near-in-place double-tap is rejected at any zoom.
 3. **Snap toggle OFF** — only grid is suppressed; Alt still forces raw; when snap is off, vertex/
    corner/edge snaps are also suppressed (raw placement) to match `symbolTool` behavior where the
    whole align/grid stack is gated by `prefsGridSnap()`. Wall-vertex snapping being gated is a
@@ -272,7 +297,8 @@ Must exist before implementation (all present on `main`):
   `_activeSelectOwner`). This LLD extends the dispatcher to a third owner `"measure"` and wires the
   mutex so `symClearSelection` / `roomClearSelection` / `measureClearSelection` stay exclusive.
 - **`walls.js`**: `resolveSnap`, `gridSnap`, `closestEndpoint`, `allVertices`, `wallSegments`,
-  `pointNearRoomWall`, `WALL_M`, `MIN_SEG_M`.
+  `pointNearRoomWall`, `WALL_M`. (Tiny-length rejection uses a local `MIN_LEN_PX`, not `MIN_SEG_M` —
+  see Edge Case 2.)
 - **`symbols.js`**: `model`, `corners`, `aabb`.
 - **`grid.js`** `snapStep`, `onSnapModeChange`; **`prefs.js`** `gridSnap` (persistent toggle).
 - **`units.js`** `fmtLen`, `unitLabel`, `onChange`.
@@ -303,8 +329,12 @@ Decision: proceed with recommendations.
   measurement lines and wall dim chips, for visual consistency), `stroke-width` ~1.5, round caps.
   End ticks: short perpendicular serifs (~6 screen px) at A and B. Distance label: a `.dim-labels`
   HTML chip centered at the segment midpoint, offset perpendicular to the line so it does not sit
-  on top of the stroke; text = `fmtLen(dist) + " " + unitLabel()`. Chip reuses the `.dim-chip`
-  class for typographic consistency (but is non-editable in this phase — no click-to-edit).
+  on top of the stroke; text = `fmtLen(dist) + " " + unitLabel()`. Chip uses a **new `.measure-chip`
+  class** (NOT `.dim-chip`) for typographic consistency; add a CSS rule `.measure-chip { /* same
+  font/size/padding as .dim-chip */ pointer-events:none; }` (either a shared selector list or a
+  copy of the `.dim-chip` typography tokens). It is non-editable in this phase — no click-to-edit —
+  and the distinct class + `pointer-events:none` keep it out of `dimEntry`'s global `.dim-chip`
+  delegation so it never swallows placement/selection pointer events (see Rendering).
 - **Rubber-band preview.** Dashed line (`stroke-dasharray "5 3"`, `palette().dim` at ~0.7 opacity)
   from A to the current snapped cursor, with a live distance chip. Endpoint snap indicator: a small
   filled dot at the snapped point colored by snap type (reuse palette tokens: `snapPoint` for
@@ -348,7 +378,8 @@ Decision: proceed with recommendations.
 - Two taps create one measurement with the expected endpoints (snapped); rubber-band draft exists
   after first tap and clears after second.
 - Escape after first tap creates nothing.
-- Tiny second tap (< MIN_LEN_M) creates nothing.
+- Tiny second tap (< MIN_LEN_PX / pxPerM() at the current zoom) creates nothing; a short but
+  supra-threshold drag does create one (assert at two different zoom levels).
 - Select mode: tap on a measurement line selects it (shows selected state); Delete removes it and
   is undoable/redoable; symbol/room selection unaffected by measure selection and vice-versa
   (mutex).
