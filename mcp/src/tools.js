@@ -352,6 +352,9 @@ export function tool_place_symbol(args) {
   const isDiscrete = !!(CATALOG[type].discrete && CATALOG[type].presets);
 
   const sym = createSymbol(type, x, y);
+  // Capture catalog defaults before any resize (used for the snapped baseline below).
+  const defaultW = sym.w;
+  const defaultH = sym.h;
   let clamped = false;
   let hIgnored = false;
 
@@ -402,11 +405,10 @@ export function tool_place_symbol(args) {
   };
   if (isDiscrete) {
     // Compute what the dims would have been after clamp only (no snap).
-    // Use the last-applied axis's clamped value; mimic the sequential call order.
-    let clampedW = sym.w;
-    let clampedH = sym.h;
-    if (w !== undefined) clampedW = clampDim(type, "w", w);
-    if (h !== undefined && !isOpening) clampedH = clampDim(type, "h", h);
+    // For specified axes use clampDim(requested); for unspecified axes use the
+    // catalog default captured before any resize (mirrors the resize_symbol path).
+    const clampedW = w !== undefined ? clampDim(type, "w", w) : defaultW;
+    const clampedH = (h !== undefined && !isOpening) ? clampDim(type, "h", h) : defaultH;
     result.snapped = sym.w !== clampedW || sym.h !== clampedH;
   }
   return result;
