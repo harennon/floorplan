@@ -1363,8 +1363,8 @@
       .symbol-inspector {
         position: fixed;
         display: none; /* hidden by default; .visible adds display:flex */
-        align-items: center;
-        gap: 0.2rem;
+        flex-direction: column;
+        gap: 0;
         background: var(--panel);
         border: 1px solid var(--hairline);
         border-radius: 8px;
@@ -1376,6 +1376,11 @@
       }
       .symbol-inspector.visible {
         display: flex;
+      }
+      .insp-row {
+        display: flex;
+        align-items: center;
+        gap: 0.2rem;
       }
       .insp-btn {
         background: transparent;
@@ -1407,6 +1412,48 @@
         height: 1.4rem;
         background: var(--hairline);
         flex-shrink: 0;
+      }
+      .insp-presets {
+        display: none; /* shown by JS when type has presets */
+        flex-direction: row;
+        align-items: center;
+        gap: 0.2rem;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        margin-top: 0.25rem;
+        padding-top: 0.2rem;
+        border-top: 1px solid var(--hairline);
+        /* scrollbar hidden for clean look */
+        scrollbar-width: none;
+      }
+      .insp-presets::-webkit-scrollbar { display: none; }
+      .insp-presets.has-presets { display: flex; }
+      .insp-chip {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        padding: 0.15rem 0.4rem;
+        border-radius: 5px;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+        min-height: 1.4rem;
+        transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .insp-chip:hover {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+      }
+      .insp-chip--active,
+      .insp-chip[aria-pressed="true"] {
+        color: var(--gold);
+        background: rgba(201,168,76,0.12);
+        border-color: var(--gold-soft);
+      }
+      @media (pointer: coarse) {
+        .insp-chip { min-height: 1.9rem; padding: 0.2rem 0.5rem; }
       }
 
       /* ── Swatch strip (LLD 97) ───────────────────────────────────────────────── */
@@ -1492,6 +1539,7 @@
       @media (prefers-reduced-motion: reduce) {
         .dock-item,
         .insp-btn,
+        .insp-chip,
         .dim-chip,
         .measure-row,
         .measure-toggle { transition: none; }
@@ -2309,6 +2357,8 @@
             </svg>
           </button>
         </div>
+        <!-- Preset chips row — populated by symbolTool.js; hidden when type has no presets -->
+        <div class="insp-presets" id="insp-presets" role="group" aria-label="Size presets"></div>
         <!-- Swatch strip (LLD 97): populated by symbolTool.js; hidden for openings -->
         <div class="swatch-strip" id="sym-swatch-strip" role="group" aria-label="Furniture color" hidden></div>
       </div>

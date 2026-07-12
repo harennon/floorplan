@@ -612,6 +612,101 @@ test("LLD 88: place_symbol dining-table-round with differing w/h ends with w===h
   assert.equal(placed.w, placed.h, `w (${placed.w}) and h (${placed.h}) must be equal`);
 });
 
+// ── LLD 95: place_symbol preset param ────────────────────────────────────────
+
+test("LLD 95: place_symbol with preset:'Queen' places bed at 1.52×2.03 m", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const placed = tools.tool_place_symbol({ type: "bed", x: 6, y: 6, preset: "Queen" });
+  assert.equal(placed.ok, true);
+  assert.ok(Math.abs(placed.w - 1.52) < 1e-9, `w expected 1.52, got ${placed.w}`);
+  assert.ok(Math.abs(placed.h - 2.03) < 1e-9, `h expected 2.03, got ${placed.h}`);
+  assert.equal(placed.presetApplied, "Queen");
+});
+
+test("LLD 95: place_symbol unknown preset name → ok:false with valid names listed, nothing placed", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const countBefore = symbolsModel.symbols.length;
+  const r = tools.tool_place_symbol({ type: "bed", x: 6, y: 6, preset: "Emperor" });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /unknown preset/);
+  assert.match(r.reason, /Queen/); // valid names listed
+  assert.equal(symbolsModel.symbols.length, countBefore);
+});
+
+test("LLD 95: place_symbol preset on type with no presets → ok:false, nothing placed", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const countBefore = symbolsModel.symbols.length;
+  const r = tools.tool_place_symbol({ type: "chair", x: 5, y: 5, preset: "Armchair" });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /unknown preset/);
+  assert.equal(symbolsModel.symbols.length, countBefore);
+});
+
+test("LLD 95: explicit w overrides preset per-axis (sofa preset:'3-seat', w:2.4 → w===2.4, h===0.95)", () => {
+  // Use a non-discrete (free-resize) type: for discrete types (bed/fridge/stove/washer)
+  // LLD 99 hard-snaps both axes to a standard preset pair, so per-axis override cannot
+  // hold there. sofa resizes freely, so the explicit w survives while the preset's h stays.
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const placed = tools.tool_place_symbol({ type: "sofa", x: 6, y: 6, preset: "3-seat", w: 2.4 });
+  assert.equal(placed.ok, true);
+  assert.ok(Math.abs(placed.w - 2.4) < 1e-9, `w expected 2.4, got ${placed.w}`);
+  assert.ok(Math.abs(placed.h - 0.95) < 1e-9, `h expected 0.95, got ${placed.h}`);
+});
+
+test("LLD 95: preset on opening resolves width, then on-wall guard still fires for off-wall position", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  // Place door at room center — off-wall, should be rejected even with a valid preset
+  const r = tools.tool_place_symbol({ type: "door", x: 2, y: 2, preset: "Standard 32\"" });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /must sit on a wall/);
+  assert.equal(symbolsModel.symbols.length, 0);
+});
+
+test("LLD 95: preset on opening with on-wall position → accepted, width resolved", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 4, h: 4 } });
+  // Place door on top wall centerline
+  const r = tools.tool_place_symbol({ type: "door", x: 2, y: 0, preset: "Standard 32\"" });
+  assert.equal(r.ok, true);
+  assert.ok(Math.abs(r.w - 0.81) < 1e-9, `w expected 0.81 (Standard 32"), got ${r.w}`);
+  assert.equal(r.presetApplied, "Standard 32\"");
+});
+
+test("LLD 95: place_symbol without preset behaves exactly as before (regression)", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const placed = tools.tool_place_symbol({ type: "bed", x: 6, y: 6 });
+  assert.equal(placed.ok, true);
+  assert.equal(placed.w, CATALOG.bed.w);
+  assert.equal(placed.h, CATALOG.bed.h);
+  assert.equal(placed.presetApplied, undefined);
+});
+
+test("LLD 95: preset with circular type (dining-table-round) sets w===h", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const placed = tools.tool_place_symbol({ type: "dining-table-round", x: 6, y: 6, preset: "Seats 4" });
+  assert.equal(placed.ok, true);
+  assert.ok(Math.abs(placed.w - 1.00) < 1e-9, `w expected 1.00, got ${placed.w}`);
+  assert.ok(Math.abs(placed.h - 1.00) < 1e-9, `h expected 1.00, got ${placed.h}`);
+  assert.equal(placed.presetApplied, "Seats 4");
+});
+
+test("LLD 95: preset is non-string → ok:false with clear reason, nothing placed", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const countBefore = symbolsModel.symbols.length;
+  const r = tools.tool_place_symbol({ type: "bed", x: 6, y: 6, preset: 42 });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /preset must be a string/);
+  assert.equal(symbolsModel.symbols.length, countBefore);
+});
+
 // ── LLD 99: discrete furniture snap ──────────────────────────────────────────
 
 test("LLD 99: tool_resize_symbol on a bed with between-size width snaps to a mattress preset and returns snapped:true clamped:false", () => {

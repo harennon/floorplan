@@ -154,7 +154,10 @@ export function buildServer() {
   }, (args) => asResult(tools.tool_resize_room(args)));
 
   server.registerTool("place_symbol", {
-    description: "Place a furniture/opening symbol at center (x,y). Optional w,h,rot; dims are clamped to the catalog range." + FRAME,
+    description: "Place a furniture/opening symbol at center (x,y). Optional w,h,rot; dims are clamped to the catalog range. " +
+      "Optional preset:'<name>' resolves to the named real-product size from the catalog (e.g. preset:'Queen' on a bed). " +
+      "Explicit w/h args override the preset per-axis. " +
+      "On success with a preset, result includes presetApplied:'<name>'." + FRAME,
     inputSchema: {
       type: z.string(),
       x: z.number(),
@@ -162,6 +165,7 @@ export function buildServer() {
       w: z.number().optional(),
       h: z.number().optional(),
       rot: z.number().optional(),
+      preset: z.string().optional(),
     },
   }, (args) => asResult(tools.tool_place_symbol(args)));
 
