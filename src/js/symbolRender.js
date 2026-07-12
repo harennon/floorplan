@@ -661,6 +661,118 @@ function _renderInterior(parent, sym, cs, p) {
     }
     return;
   }
+
+  if (sym.type === "patio-table") {
+    // Inscribed circle for round tabletop + small center circle (umbrella hole)
+    const r = Math.min(sw, sh) / 2 * 0.82;
+    const outer = document.createElementNS(NS, "circle");
+    outer.setAttribute("cx", String(sc.x));
+    outer.setAttribute("cy", String(sc.y));
+    outer.setAttribute("r", String(r));
+    outer.setAttribute("fill", `rgba(${rgb},0.08)`);
+    outer.setAttribute("stroke", p.symStroke);
+    outer.setAttribute("stroke-width", "0.8");
+    outer.setAttribute("opacity", "0.7");
+    parent.appendChild(outer);
+    // Center umbrella-hole dot
+    const holeR = Math.max(1.5, Math.min(sw, sh) * 0.04);
+    const hole = document.createElementNS(NS, "circle");
+    hole.setAttribute("cx", String(sc.x));
+    hole.setAttribute("cy", String(sc.y));
+    hole.setAttribute("r", String(holeR));
+    hole.setAttribute("fill", "none");
+    hole.setAttribute("stroke", p.symStroke);
+    hole.setAttribute("stroke-width", "0.8");
+    hole.setAttribute("opacity", "0.6");
+    parent.appendChild(hole);
+    return;
+  }
+
+  if (sym.type === "patio-chair") {
+    // Back strip across the top ~22% depth (like armchair), no side armrests
+    const bw = sw * 0.9;
+    const bh = sh * 0.22;
+    const b0 = lp(-bw / 2, -sh / 2 + 2);
+    const b1 = lp( bw / 2, -sh / 2 + 2);
+    const b2 = lp( bw / 2, -sh / 2 + 2 + bh);
+    const b3 = lp(-bw / 2, -sh / 2 + 2 + bh);
+    const backPts = [b0, b1, b2, b3].map(v => `${v.x},${v.y}`).join(" ");
+    const back = document.createElementNS(NS, "polygon");
+    back.setAttribute("points", backPts);
+    back.setAttribute("fill", `rgba(${rgb},0.15)`);
+    back.setAttribute("stroke", p.symStroke);
+    back.setAttribute("stroke-width", "0.8");
+    parent.appendChild(back);
+    return;
+  }
+
+  if (sym.type === "parasol") {
+    // Outer inscribed circle (canopy) + 8 radial rib lines from center to rim + small center pole dot
+    const r = Math.min(sw, sh) / 2 * 0.90;
+    const outer = document.createElementNS(NS, "circle");
+    outer.setAttribute("cx", String(sc.x));
+    outer.setAttribute("cy", String(sc.y));
+    outer.setAttribute("r", String(r));
+    outer.setAttribute("fill", `rgba(${rgb},0.08)`);
+    outer.setAttribute("stroke", p.symStroke);
+    outer.setAttribute("stroke-width", "0.9");
+    outer.setAttribute("opacity", "0.7");
+    parent.appendChild(outer);
+    // 8 radial ribs from center to rim
+    const nRibs = 8;
+    for (let i = 0; i < nRibs; i++) {
+      const angle = (i / nRibs) * 2 * Math.PI;
+      const rx = Math.sin(angle) * r;
+      const ry = -Math.cos(angle) * r;
+      const rimPt = lp(rx, ry);
+      const rib = _makeLine(sc.x, sc.y, rimPt.x, rimPt.y);
+      rib.setAttribute("stroke", p.symStroke);
+      rib.setAttribute("stroke-width", "0.6");
+      rib.setAttribute("opacity", "0.5");
+      parent.appendChild(rib);
+    }
+    // Center pole dot
+    const poleR = Math.max(1.5, Math.min(sw, sh) * 0.03);
+    const pole = document.createElementNS(NS, "circle");
+    pole.setAttribute("cx", String(sc.x));
+    pole.setAttribute("cy", String(sc.y));
+    pole.setAttribute("r", String(poleR));
+    pole.setAttribute("fill", p.symStroke);
+    pole.setAttribute("opacity", "0.8");
+    parent.appendChild(pole);
+    return;
+  }
+
+  if (sym.type === "planter") {
+    // Inset polygon rim + center circle (plant)
+    const inset = 0.13;
+    const iw = sw * (1 - 2 * inset);
+    const ih = sh * (1 - 2 * inset);
+    const i0 = lp(-iw / 2, -ih / 2);
+    const i1 = lp( iw / 2, -ih / 2);
+    const i2 = lp( iw / 2,  ih / 2);
+    const i3 = lp(-iw / 2,  ih / 2);
+    const rimPts = [i0, i1, i2, i3].map(v => `${v.x},${v.y}`).join(" ");
+    const rim = document.createElementNS(NS, "polygon");
+    rim.setAttribute("points", rimPts);
+    rim.setAttribute("fill", `rgba(${rgb},0.08)`);
+    rim.setAttribute("stroke", p.symStroke);
+    rim.setAttribute("stroke-width", "0.8");
+    rim.setAttribute("opacity", "0.7");
+    parent.appendChild(rim);
+    // Center plant circle (foliage)
+    const plantR = Math.max(2, Math.min(iw, ih) / 2 * 0.55);
+    const plant = document.createElementNS(NS, "circle");
+    plant.setAttribute("cx", String(sc.x));
+    plant.setAttribute("cy", String(sc.y));
+    plant.setAttribute("r", String(plantR));
+    plant.setAttribute("fill", `rgba(${rgb},0.12)`);
+    plant.setAttribute("stroke", p.symStroke);
+    plant.setAttribute("stroke-width", "0.7");
+    plant.setAttribute("opacity", "0.6");
+    parent.appendChild(plant);
+    return;
+  }
 }
 
 // ── Private: selection box ────────────────────────────────────────────────────

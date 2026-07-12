@@ -1827,8 +1827,8 @@ const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshel
                      "nightstand", "dresser", "cabinet"];
 
 describe("LLD-45 — catalog integrity: all new types present and valid", () => {
-  it("every new type exists in CATALOG with a valid category (updated by LLD-50)", () => {
-    const VALID_CATS = new Set(["openings", "living", "kitchen", "bedroom", "bath"]);
+  it("every new type exists in CATALOG with a valid category (updated by LLD-50/LLD-76)", () => {
+    const VALID_CATS = new Set(["openings", "living", "kitchen", "bedroom", "bath", "outdoor"]);
     for (const t of LLD45_TYPES) {
       if (!(t in CATALOG)) throw new Error(`${t} missing from CATALOG`);
       if (!VALID_CATS.has(CATALOG[t].category)) throw new Error(`${t} has invalid category:'${CATALOG[t].category}'`);
@@ -2894,6 +2894,17 @@ import {
 } from "../src/js/plan.js";
 
 import {
+  model as measurementsModel,
+  hydrate as hydrateMeasurements,
+  newId as newMeasurementId,
+  add as addMeasurement,
+  remove as removeMeasurement,
+  getById as getMeasurementById,
+  length as measurementLength,
+  nearestMeasurement,
+} from "../src/js/measurements.js";
+
+import {
   STORAGE_KEY, init as initStore, loadLocal, saveNow, clearLocal, getState,
 } from "../src/js/store.js";
 
@@ -2928,6 +2939,7 @@ function resetAll() {
   model.rooms.length = 0;
   model.chain.length = 0;
   symbolModel.symbols.length = 0;
+  measurementsModel.measurements.length = 0;
   setUnit("ft");
   view.zoom = 1; view.panX = 0; view.panY = 0;
 }
@@ -9050,8 +9062,8 @@ import { initDockTabs, setActiveCategory } from "../src/js/dockTabs.js";
 
 // ─── LLD-50 — catalog taxonomy integrity ─────────────────────────────────────
 
-describe("LLD-50 — catalog: every entry has a valid 5-value category", () => {
-  const VALID_CATS = new Set(["openings", "living", "kitchen", "bedroom", "bath"]);
+describe("LLD-50 — catalog: every entry has a valid category", () => {
+  const VALID_CATS = new Set(["openings", "living", "kitchen", "bedroom", "bath", "outdoor"]);
 
   it("no entry retains the old 'furniture' category", () => {
     for (const [type, entry] of Object.entries(CATALOG)) {
@@ -9061,7 +9073,7 @@ describe("LLD-50 — catalog: every entry has a valid 5-value category", () => {
     }
   });
 
-  it("every category value is one of the 5 valid values", () => {
+  it("every category value is one of the valid values", () => {
     for (const [type, entry] of Object.entries(CATALOG)) {
       if (!VALID_CATS.has(entry.category)) {
         throw new Error(`${type} has invalid category:"${entry.category}"`);
@@ -9186,8 +9198,8 @@ function _makeDockDOM() {
   tablist.setAttribute("role", "tablist");
   tablist.className = "dock-tabs";
 
-  const categories = ["openings", "living", "kitchen", "bedroom", "bath"];
-  const tabLabels  = { openings: "Openings", living: "Living", kitchen: "Kitchen", bedroom: "Bedroom", bath: "Bath" };
+  const categories = ["openings", "living", "kitchen", "bedroom", "bath", "outdoor"];
+  const tabLabels  = { openings: "Openings", living: "Living", kitchen: "Kitchen", bedroom: "Bedroom", bath: "Bath", outdoor: "Outdoor" };
   // Item types per category (matching CATALOG)
   const itemsByCategory = {
     openings: ["door", "window"],
@@ -9195,6 +9207,7 @@ function _makeDockDOM() {
     kitchen:  ["fridge", "stove", "sink", "washer"],
     bedroom:  ["bed", "wardrobe", "nightstand", "dresser", "cabinet"],
     bath:     ["toilet", "bathtub"],
+    outdoor:  ["patio-table", "patio-chair", "parasol", "planter"],
   };
 
   for (let i = 0; i < categories.length; i++) {
@@ -9239,18 +9252,18 @@ function _removeDockDOM(dock) {
 }
 
 describe("LLD-50 — dock tabs: structure integrity", () => {
-  it("dock has exactly 5 tabs (one per category)", () => {
+  it("dock has exactly 6 tabs (one per category)", () => {
     const dock = _makeDockDOM();
     const tabs = dock.querySelectorAll("[role='tab'][data-category]");
     _removeDockDOM(dock);
-    expect(tabs.length).toBe(5);
+    expect(tabs.length).toBe(6);
   });
 
-  it("dock has exactly 5 tabpanel rows (one per category)", () => {
+  it("dock has exactly 6 tabpanel rows (one per category)", () => {
     const dock = _makeDockDOM();
     const rows = dock.querySelectorAll("[role='tabpanel'][data-category]");
     _removeDockDOM(dock);
-    expect(rows.length).toBe(5);
+    expect(rows.length).toBe(6);
   });
 
   it("union of all dock-item[data-type] equals the catalog keys", () => {
@@ -9310,7 +9323,7 @@ describe("LLD-50 — dock tabs: initial state after initDockTabs", () => {
 });
 
 describe("LLD-50 — dock tabs: setActiveCategory", () => {
-  it("setActiveCategory('kitchen') shows only kitchen row, hides other four", () => {
+  it("setActiveCategory('kitchen') shows only kitchen row, hides other five", () => {
     const dock = _makeDockDOM();
     initDockTabs(dock);
     setActiveCategory(dock, "kitchen");
@@ -9321,8 +9334,8 @@ describe("LLD-50 — dock tabs: setActiveCategory", () => {
     if (visibleRows.length !== 1 || visibleRows[0].dataset.category !== "kitchen") {
       throw new Error(`Expected only kitchen row visible, got: ${visibleRows.map(r => r.dataset.category).join(", ")}`);
     }
-    if (hiddenRows.length !== 4) {
-      throw new Error(`Expected 4 hidden rows, got ${hiddenRows.length}`);
+    if (hiddenRows.length !== 5) {
+      throw new Error(`Expected 5 hidden rows, got ${hiddenRows.length}`);
     }
   });
 
@@ -9338,10 +9351,10 @@ describe("LLD-50 — dock tabs: setActiveCategory", () => {
     }
   });
 
-  it("setActiveCategory cycles through all 5 categories correctly", () => {
+  it("setActiveCategory cycles through all 6 categories correctly", () => {
     const dock = _makeDockDOM();
     initDockTabs(dock);
-    for (const cat of ["openings", "living", "kitchen", "bedroom", "bath"]) {
+    for (const cat of ["openings", "living", "kitchen", "bedroom", "bath", "outdoor"]) {
       setActiveCategory(dock, cat);
       const rows = Array.from(dock.querySelectorAll("[role='tabpanel']"));
       const visible = rows.filter(r => !r.hasAttribute("hidden"));
@@ -9995,6 +10008,7 @@ const EXPECTED_ACTIONS = new Set([
   "Rotate 90° CCW",
   "Draw wall",
   "Select",
+  "Measure tool",
   "Zoom in",
   "Zoom out",
   "Reset zoom",
@@ -12649,6 +12663,271 @@ describe("LLD 63 — selection mutex (room ↔ symbol, the HIGH fix)", () => {
 });
 
 
+// ─── LLD 76: Outdoor/patio category ──────────────────────────────────────────
+
+const LLD76_TYPES = ["patio-table", "patio-chair", "parasol", "planter"];
+
+describe("LLD 76 — catalog integrity: patio-table, patio-chair, parasol, planter", () => {
+  it("all four types exist in CATALOG", () => {
+    for (const t of LLD76_TYPES) {
+      if (!(t in CATALOG)) throw new Error(`${t} missing from CATALOG`);
+    }
+  });
+
+  it("all four have category 'outdoor'", () => {
+    for (const t of LLD76_TYPES) {
+      if (CATALOG[t].category !== "outdoor") {
+        throw new Error(`${t}.category should be 'outdoor', got '${CATALOG[t].category}'`);
+      }
+    }
+  });
+
+  it("all four have non-empty label", () => {
+    for (const t of LLD76_TYPES) {
+      const label = CATALOG[t].label;
+      if (!label || label.trim() === "") throw new Error(`${t} has empty label`);
+    }
+  });
+
+  it("all four have finite w, h, per-axis bounds", () => {
+    for (const t of LLD76_TYPES) {
+      const cat = CATALOG[t];
+      for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
+        if (!isFinite(cat[key])) throw new Error(`${t}.${key} is not finite: ${cat[key]}`);
+      }
+    }
+  });
+
+  it("min_w <= w <= max_w and min_h <= h <= max_h for all four", () => {
+    for (const t of LLD76_TYPES) {
+      const { w, h, min_w, max_w, min_h, max_h } = CATALOG[t];
+      if (w < min_w || w > max_w) throw new Error(`${t}: w=${w} not in [${min_w},${max_w}]`);
+      if (h < min_h || h > max_h) throw new Error(`${t}: h=${h} not in [${min_h},${max_h}]`);
+    }
+  });
+
+  it("every named preset lies within its per-axis bounds", () => {
+    for (const t of LLD76_TYPES) {
+      const { min_w, max_w, min_h, max_h, presets } = CATALOG[t];
+      for (const p of presets || []) {
+        if (p.w < min_w || p.w > max_w) throw new Error(`${t} preset ${p.name}: w=${p.w} not in [${min_w},${max_w}]`);
+        if (p.h < min_h || p.h > max_h) throw new Error(`${t} preset ${p.name}: h=${p.h} not in [${min_h},${max_h}]`);
+      }
+    }
+  });
+
+  it("none of the four has openings:true", () => {
+    for (const t of LLD76_TYPES) {
+      if (CATALOG[t].openings) throw new Error(`${t} unexpectedly has openings:true`);
+    }
+  });
+
+  it("spot-check: CATALOG['patio-table'].category === 'outdoor'", () => {
+    expect(CATALOG["patio-table"].category).toBe("outdoor");
+  });
+
+  it("spot-check: CATALOG['patio-chair'].category === 'outdoor'", () => {
+    expect(CATALOG["patio-chair"].category).toBe("outdoor");
+  });
+
+  it("spot-check: CATALOG['parasol'].category === 'outdoor'", () => {
+    expect(CATALOG["parasol"].category).toBe("outdoor");
+  });
+
+  it("spot-check: CATALOG['planter'].category === 'outdoor'", () => {
+    expect(CATALOG["planter"].category).toBe("outdoor");
+  });
+});
+
+describe("LLD 76 — createSymbol: new types return correct Sym", () => {
+  it("createSymbol returns correct type, catalog defaults, rot:0, and string id", () => {
+    resetSymbolModel();
+    for (const t of LLD76_TYPES) {
+      const s = createSymbol(t, 1, 2);
+      if (s.type !== t) throw new Error(`${t}: type mismatch`);
+      if (Math.abs(s.w - CATALOG[t].w) > 1e-9) throw new Error(`${t}: w mismatch`);
+      if (Math.abs(s.h - CATALOG[t].h) > 1e-9) throw new Error(`${t}: h mismatch`);
+      if (s.rot !== 0) throw new Error(`${t}: rot should be 0`);
+      if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(`${t}: invalid id ${s.id}`);
+    }
+  });
+});
+
+describe("LLD 76 — clampDim: new types clamp per-axis at min and max", () => {
+  it("patio-table: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG["patio-table"];
+    expect(clampDim("patio-table", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
+  });
+
+  it("patio-table: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG["patio-table"];
+    expect(clampDim("patio-table", "w", max_w + 1)).toBeCloseTo(max_w, 9);
+  });
+
+  it("patio-table: depth below min_h clamps to min_h", () => {
+    const { min_h } = CATALOG["patio-table"];
+    expect(clampDim("patio-table", "h", min_h - 0.1)).toBeCloseTo(min_h, 9);
+  });
+
+  it("patio-table: depth above max_h clamps to max_h", () => {
+    const { max_h } = CATALOG["patio-table"];
+    expect(clampDim("patio-table", "h", max_h + 1)).toBeCloseTo(max_h, 9);
+  });
+
+  it("parasol: width below min_w clamps to min_w", () => {
+    const { min_w } = CATALOG["parasol"];
+    expect(clampDim("parasol", "w", min_w - 0.1)).toBeCloseTo(min_w, 9);
+  });
+
+  it("parasol: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG["parasol"];
+    expect(clampDim("parasol", "w", max_w + 1)).toBeCloseTo(max_w, 9);
+  });
+
+  it("planter: depth below min_h clamps to min_h", () => {
+    const { min_h } = CATALOG["planter"];
+    expect(clampDim("planter", "h", min_h - 0.1)).toBeCloseTo(min_h, 9);
+  });
+
+  it("planter: width above max_w clamps to max_w", () => {
+    const { max_w } = CATALOG["planter"];
+    expect(clampDim("planter", "w", max_w + 1)).toBeCloseTo(max_w, 9);
+  });
+});
+
+describe("LLD 76 — resizeSymbol: new types clamp on huge/tiny inputs", () => {
+  it("patio-table w huge clamps to max_w, returns changed=true", () => {
+    const s = createSymbol("patio-table", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG["patio-table"].max_w, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("patio-table h tiny clamps to min_h, returns changed=true", () => {
+    const s = createSymbol("patio-table", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG["patio-table"].min_h, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("parasol w huge clamps to max_w, returns changed=true", () => {
+    const s = createSymbol("parasol", 0, 0);
+    const changed = resizeSymbol(s, "w", 999);
+    expect(s.w).toBeCloseTo(CATALOG["parasol"].max_w, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("planter h tiny clamps to min_h, returns changed=true", () => {
+    const s = createSymbol("planter", 0, 0);
+    const changed = resizeSymbol(s, "h", 0.001);
+    expect(s.h).toBeCloseTo(CATALOG["planter"].min_h, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("in-range value unchanged, returns changed=false", () => {
+    const s = createSymbol("parasol", 0, 0);
+    const orig = s.w;
+    const changed = resizeSymbol(s, "w", orig);
+    expect(changed).toBe(false);
+    expect(s.w).toBeCloseTo(orig, 9);
+  });
+});
+
+describe("LLD 76 — dock: outdoor row contains all four outdoor types", () => {
+  it("outdoor row has 4 dock-item buttons: patio-table, patio-chair, parasol, planter", () => {
+    const dock = _makeDockDOM();
+    const outdoorRow = dock.querySelector("[role='tabpanel'][data-category='outdoor']");
+    if (!outdoorRow) { _removeDockDOM(dock); throw new Error("No outdoor tabpanel row found"); }
+    const items = Array.from(outdoorRow.querySelectorAll(".dock-item[data-type]"));
+    const types = items.map(b => b.dataset.type);
+    _removeDockDOM(dock);
+    if (types.length !== 4) throw new Error(`Expected 4 outdoor items, got ${types.length}: ${types.join(", ")}`);
+    for (const t of LLD76_TYPES) {
+      if (!types.includes(t)) throw new Error(`Missing type '${t}' in outdoor row`);
+    }
+  });
+
+  it("each outdoor button has a descriptive aria-label", () => {
+    const dock = _makeDockDOM();
+    const outdoorRow = dock.querySelector("[role='tabpanel'][data-category='outdoor']");
+    if (!outdoorRow) { _removeDockDOM(dock); throw new Error("No outdoor tabpanel row found"); }
+    for (const t of LLD76_TYPES) {
+      const btn = outdoorRow.querySelector(`[data-type="${t}"]`);
+      if (!btn) { _removeDockDOM(dock); throw new Error(`No button for ${t} in outdoor row`); }
+      const label = btn.getAttribute("aria-label");
+      if (!label || label.trim() === "") {
+        _removeDockDOM(dock);
+        throw new Error(`${t} button missing aria-label`);
+      }
+    }
+    _removeDockDOM(dock);
+  });
+
+  it("setActiveCategory('outdoor') shows only outdoor row, hides other five", () => {
+    const dock = _makeDockDOM();
+    initDockTabs(dock);
+    setActiveCategory(dock, "outdoor");
+    const rows = Array.from(dock.querySelectorAll("[role='tabpanel']"));
+    const visibleRows = rows.filter(r => !r.hasAttribute("hidden"));
+    const hiddenRows  = rows.filter(r =>  r.hasAttribute("hidden"));
+    _removeDockDOM(dock);
+    if (visibleRows.length !== 1 || visibleRows[0].dataset.category !== "outdoor") {
+      throw new Error(`Expected only outdoor row visible, got: ${visibleRows.map(r => r.dataset.category).join(", ")}`);
+    }
+    if (hiddenRows.length !== 5) {
+      throw new Error(`Expected 5 hidden rows, got ${hiddenRows.length}`);
+    }
+  });
+
+  it("setActiveCategory('outdoor') sets aria-selected='true' only on outdoor tab", () => {
+    const dock = _makeDockDOM();
+    initDockTabs(dock);
+    setActiveCategory(dock, "outdoor");
+    const tabs = Array.from(dock.querySelectorAll("[role='tab']"));
+    const selectedTabs = tabs.filter(t => t.getAttribute("aria-selected") === "true");
+    _removeDockDOM(dock);
+    if (selectedTabs.length !== 1 || selectedTabs[0].dataset.category !== "outdoor") {
+      throw new Error(`Expected outdoor tab selected only, got: ${selectedTabs.map(t => t.dataset.category).join(", ")}`);
+    }
+  });
+});
+
+describe("LLD 76 — round-trip: outdoor types survive serialize→validate", () => {
+  it("plan with all four outdoor types passes validatePlan", () => {
+    resetSymbolModel();
+    for (const t of LLD76_TYPES) addSymbol(createSymbol(t, 1, 1));
+    const plan = buildPlan();
+    const v = validatePlan(JSON.parse(JSON.stringify(plan)));
+    if (!v) throw new Error("validatePlan rejected plan with LLD-76 types");
+    resetSymbolModel();
+  });
+
+  it("parasol survives serializePlan → JSON.parse → validatePlan with type intact", () => {
+    resetSymbolModel();
+    const s = createSymbol("parasol", 3, 4);
+    addSymbol(s);
+    const json = serializePlan(buildPlan());
+    const v = validatePlan(JSON.parse(json));
+    if (!v) throw new Error("validatePlan rejected re-parsed plan with parasol");
+    if (v.symbols.symbols[0].type !== "parasol") {
+      throw new Error("parasol type lost after round-trip");
+    }
+    resetSymbolModel();
+  });
+
+  it("plan with outdoor types serializes and re-validates (all 4 new types)", () => {
+    resetSymbolModel();
+    for (const t of LLD76_TYPES) addSymbol(createSymbol(t, 0, 0));
+    const json = serializePlan(buildPlan());
+    const v = validatePlan(JSON.parse(json));
+    if (!v) throw new Error("validatePlan rejected plan after serialize of all outdoor types");
+    if (v.symbols.symbols.length !== LLD76_TYPES.length) {
+      throw new Error(`Expected ${LLD76_TYPES.length} symbols, got ${v.symbols.symbols.length}`);
+    }
+    resetSymbolModel();
+  });
+});
+
 // ─── Tests: LLD 77 — compact codec (buildCompact / parseCompact / 'c' share) ───
 
 // Frozen fixture hashes for backward-compat testing.
@@ -13639,6 +13918,1363 @@ describe("LLD 82 — blur relatedTarget guard: tab between fields preserves valu
     rig.cleanup();
     resetModel();
     setUnit("ft");
+  });
+});
+
+// ─── Tests: LLD 81 — measurements.js unit tests ──────────────────────────────
+
+describe("LLD 81 — measurements.js: hydrate replaces in place + counter re-sync", () => {
+  it("hydrate replaces measurements array IN PLACE (same array identity)", () => {
+    const origRef = measurementsModel.measurements;
+    hydrateMeasurements({ measurements: [
+      { id: "m3", a: { x: 0, y: 0 }, b: { x: 1, y: 1 } },
+    ] });
+    if (measurementsModel.measurements !== origRef) throw new Error("measurements array identity changed");
+    if (measurementsModel.measurements.length !== 1) throw new Error(`Expected 1 measurement, got ${measurementsModel.measurements.length}`);
+    if (measurementsModel.measurements[0].id !== "m3") throw new Error("Wrong measurement id");
+    hydrateMeasurements({ measurements: [] }); // cleanup
+  });
+
+  it("hydrate re-syncs counter: next newMeasurementId() does not collide with max loaded id", () => {
+    hydrateMeasurements({ measurements: [
+      { id: "m5", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+      { id: "m2", a: { x: 2, y: 0 }, b: { x: 3, y: 0 } },
+    ] });
+    const id = newMeasurementId();
+    const num = parseInt(id.replace("m", ""), 10);
+    if (num <= 5) throw new Error(`newId() ${id} collides — must be > m5 (max loaded)`);
+    hydrateMeasurements({ measurements: [] }); // cleanup
+  });
+
+  it("hydrate with empty array clears existing measurements", () => {
+    hydrateMeasurements({ measurements: [
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+    ] });
+    hydrateMeasurements({ measurements: [] });
+    if (measurementsModel.measurements.length !== 0) throw new Error("Expected empty after hydrate([])");
+  });
+});
+
+// ─── Tests: LLD 81 — plan.js measurements integration ────────────────────────
+
+describe("LLD 81 — plan.js: buildPlan includes measurements (deep clone)", () => {
+  it("buildPlan snapshots measurements as a deep-cloned array", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
+    const p = buildPlan();
+    if (!Array.isArray(p.measurements)) throw new Error("measurements not an array in buildPlan output");
+    if (p.measurements.length !== 1) throw new Error("Expected 1 measurement");
+    if (p.measurements[0].id !== "m0") throw new Error("Wrong measurement id");
+    // Mutating model after snapshot must not affect the snapshot
+    measurementsModel.measurements[0].a.x = 999;
+    if (p.measurements[0].a.x === 999) throw new Error("buildPlan did not deep-clone measurements");
+    resetAll();
+  });
+
+  it("buildPlan on empty model includes measurements: []", () => {
+    resetAll();
+    const p = buildPlan();
+    if (!Array.isArray(p.measurements)) throw new Error("Missing measurements key");
+    if (p.measurements.length !== 0) throw new Error("Expected []");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: validatePlan measurements acceptance", () => {
+  it("accepts a plan with valid measurements", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } }];
+    const v = validatePlan(p);
+    if (!v) throw new Error("validatePlan rejected a plan with valid measurements");
+    if (v.measurements.length !== 1) throw new Error("measurements not preserved in validated plan");
+    if (v.measurements[0].id !== "m0") throw new Error("measurement id not preserved");
+    resetAll();
+  });
+
+  it("BACKWARD COMPAT: accepts a plan with NO measurements key (normalises to [])", () => {
+    resetAll();
+    const p = buildPlan();
+    delete p.measurements; // simulate old saved plan
+    const v = validatePlan(p);
+    if (v === null) throw new Error("validatePlan MUST NOT return null for missing measurements — backward compat broken");
+    if (!Array.isArray(v.measurements)) throw new Error("measurements must be normalised to an array");
+    if (v.measurements.length !== 0) throw new Error("measurements must be normalised to []");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: validatePlan measurements rejections", () => {
+  function shouldRejectMeas(plan, label) {
+    let result;
+    try { result = validatePlan(plan); } catch (e) { throw new Error(`threw instead of null: ${e}`); }
+    if (result !== null) throw new Error(`Expected null for: ${label}`);
+  }
+
+  it("rejects measurements not an array (object)", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = {};
+    shouldRejectMeas(p, "measurements={}");
+    resetAll();
+  });
+
+  it("rejects measurements not an array (string)", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = "notanarray";
+    shouldRejectMeas(p, "measurements=string");
+    resetAll();
+  });
+
+  it("rejects entry that is not an object", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = ["notanobject"];
+    shouldRejectMeas(p, "entry=string");
+    resetAll();
+  });
+
+  it("rejects entry with non-string id", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: 42, a: { x: 0, y: 0 }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "id=number");
+    resetAll();
+  });
+
+  it("rejects entry missing 'a'", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "missing a");
+    resetAll();
+  });
+
+  it("rejects entry missing 'b'", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 } }];
+    shouldRejectMeas(p, "missing b");
+    resetAll();
+  });
+
+  it("rejects entry with non-finite a.x", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: NaN, y: 0 }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "a.x=NaN");
+    resetAll();
+  });
+
+  it("rejects entry with Infinity a.y", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: Infinity }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "a.y=Infinity");
+    resetAll();
+  });
+
+  it("rejects entry with non-finite b.x", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 }, b: { x: NaN, y: 0 } }];
+    shouldRejectMeas(p, "b.x=NaN");
+    resetAll();
+  });
+
+  it("rejects entry with missing b.y", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: 0, y: 0 }, b: { x: 1 } }];
+    shouldRejectMeas(p, "b.y missing");
+    resetAll();
+  });
+
+  it("rejects entry with string coord", () => {
+    resetAll();
+    const p = buildPlan();
+    p.measurements = [{ id: "m0", a: { x: "0", y: 0 }, b: { x: 1, y: 0 } }];
+    shouldRejectMeas(p, "a.x=string");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: round-trip applyPlan(validatePlan(buildPlan())) with measurements", () => {
+  it("measurements are lossless through the localStorage round-trip path", () => {
+    resetAll();
+    measurementsModel.measurements.push(
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } },
+      { id: "m1", a: { x: 1.5, y: 2 }, b: { x: -0.5, y: -1 } }
+    );
+    const snapshot = buildPlan();
+    const validated = validatePlan(JSON.parse(JSON.stringify(snapshot)));
+    if (!validated) throw new Error("validatePlan rejected a good snapshot with measurements");
+    applyPlan(validated);
+    if (measurementsModel.measurements.length !== 2) throw new Error("measurement count changed after round-trip");
+    if (JSON.stringify(measurementsModel.measurements) !== JSON.stringify(snapshot.measurements)) {
+      throw new Error("measurements differ after applyPlan round-trip");
+    }
+    resetAll();
+  });
+});
+
+describe("LLD 81 — plan.js: serializePlan includes measurements in fixed key order", () => {
+  it("serializePlan output contains measurements key", () => {
+    resetAll();
+    const p = buildPlan();
+    const s = serializePlan(p);
+    const parsed = JSON.parse(s);
+    if (!("measurements" in parsed)) throw new Error("measurements key missing from serializePlan output");
+    resetAll();
+  });
+
+  it("two plans differing only in measurements produce different serialized strings", () => {
+    resetAll();
+    const p1 = buildPlan();
+    const s1 = serializePlan(p1);
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 0 } });
+    const p2 = buildPlan();
+    const s2 = serializePlan(p2);
+    if (s1 === s2) throw new Error("plans with different measurements must produce different serialized strings");
+    resetAll();
+  });
+
+  it("JSON export/import round-trip: validatePlan(JSON.parse(serializePlan(buildPlan()))) preserves measurements", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 5, y: 6 } });
+    const p = buildPlan();
+    const reparsed = validatePlan(JSON.parse(serializePlan(p)));
+    if (!reparsed) throw new Error("validatePlan rejected re-parsed plan");
+    if (reparsed.measurements.length !== 1) throw new Error("measurement lost in JSON export round-trip");
+    if (reparsed.measurements[0].a.x !== 1) throw new Error("measurement a.x wrong after round-trip");
+    if (reparsed.measurements[0].b.y !== 6) throw new Error("measurement b.y wrong after round-trip");
+    resetAll();
+  });
+});
+
+// ─── Tests: LLD 81 — compact codec measurements ───────────────────────────────
+
+describe("LLD 81 — compact codec: buildCompact emits 'm' key", () => {
+  it("buildCompact on empty plan yields m:[]", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    if (!Array.isArray(compact.m)) throw new Error("compact.m must be an array");
+    if (compact.m.length !== 0) throw new Error("compact.m must be [] for empty measurements");
+    resetAll();
+  });
+
+  it("buildCompact encodes measurements as 4-number tuples [ax,ay,bx,by]", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 3, y: 4 } });
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    if (compact.m.length !== 1) throw new Error("Expected 1 measurement tuple");
+    const [ax, ay, bx, by] = compact.m[0];
+    if (ax !== 1 || ay !== 2 || bx !== 3 || by !== 4) throw new Error(`Wrong tuple: ${JSON.stringify(compact.m[0])}`);
+    resetAll();
+  });
+
+  it("compact codec round-trip: geometry preserved (coords on snap multiples)", () => {
+    resetAll();
+    setUnit("m");
+    measurementsModel.measurements.push(
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } },
+      { id: "m1", a: { x: 1, y: 0.5 }, b: { x: 2, y: 0.5 } }
+    );
+    const p = buildPlan();
+    const restored = validatePlan(parseCompact(buildCompact(p)));
+    if (!restored) throw new Error("validatePlan rejected parseCompact output with measurements");
+    if (restored.measurements.length !== 2) throw new Error("measurement count mismatch in compact round-trip");
+    if (restored.measurements[0].a.x !== 0) throw new Error("m[0].a.x wrong");
+    if (restored.measurements[0].b.x !== 3) throw new Error("m[0].b.x wrong");
+    if (restored.measurements[1].a.y !== 0.5) throw new Error("m[1].a.y wrong");
+    resetAll();
+  });
+
+  it("compact codec: mm-rounding on sub-mm endpoint (1.23456 → 1.235)", () => {
+    resetAll();
+    setUnit("m");
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1.23456, y: 0 }, b: { x: 0, y: 0 } });
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    const expected_ax = Math.round(1.23456 * 1000) / 1000; // 1.235
+    if (compact.m[0][0] !== expected_ax) throw new Error(`Expected mm-rounded ${expected_ax}, got ${compact.m[0][0]}`);
+    const restored = validatePlan(parseCompact(compact));
+    if (!restored) throw new Error("validatePlan rejected");
+    if (restored.measurements[0].a.x !== expected_ax) throw new Error("rounded value not preserved in round-trip");
+    resetAll();
+  });
+});
+
+describe("LLD 81 — compact codec: parseCompact absence tolerance (BACKWARD COMPAT)", () => {
+  it("HARD: parseCompact with no 'm' key yields measurements:[] (old 'c' links still work)", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    delete compact.m; // simulate old pre-LLD-81 compact payload
+    const restored = parseCompact(compact);
+    if (!restored) throw new Error("parseCompact returned null for compact without 'm' key");
+    if (!Array.isArray(restored.measurements)) throw new Error("measurements must be an array");
+    if (restored.measurements.length !== 0) throw new Error("measurements must be [] when 'm' absent");
+    resetAll();
+  });
+
+  it("parseCompact returns null for malformed tuple: arity < 4", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    compact.m = [[1, 2, 3]]; // arity 3 instead of 4
+    const result = parseCompact(compact);
+    if (result !== null) throw new Error("Expected null for arity-3 tuple");
+    resetAll();
+  });
+
+  it("parseCompact returns null for non-finite number in tuple", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    compact.m = [[1, 2, NaN, 4]];
+    const result = parseCompact(compact);
+    if (result !== null) throw new Error("Expected null for NaN in tuple");
+    resetAll();
+  });
+
+  it("parseCompact returns null for non-finite Infinity in tuple", () => {
+    resetAll();
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    compact.m = [[1, 2, 3, Infinity]];
+    const result = parseCompact(compact);
+    if (result !== null) throw new Error("Expected null for Infinity in tuple");
+    resetAll();
+  });
+
+  it("HARD: frozen legacy 'd' fixture still decodes to measurements:[]", async () => {
+    const result = await decodeHashToPlan(FIXTURE_D_HASH);
+    if (!result) throw new Error("legacy 'd' fixture failed to decode");
+    if (!Array.isArray(result.measurements)) throw new Error("measurements must be an array");
+    if (result.measurements.length !== 0) throw new Error("legacy 'd' fixture must decode to measurements:[]");
+  });
+
+  it("HARD: frozen legacy 'u' fixture still decodes to measurements:[]", async () => {
+    const result = await decodeHashToPlan(FIXTURE_U_HASH);
+    if (!result) throw new Error("legacy 'u' fixture failed to decode");
+    if (!Array.isArray(result.measurements)) throw new Error("measurements must be an array");
+    if (result.measurements.length !== 0) throw new Error("legacy 'u' fixture must decode to measurements:[]");
+  });
+});
+
+describe("LLD 81 — compact codec: share hash round-trip with measurements", () => {
+  it("encode/decode share hash preserves measurement geometry", async () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } });
+    const p = buildPlan();
+    const hash = await encodePlanToHash(p);
+    const decoded = await decodeHashToPlan(hash);
+    if (!decoded) throw new Error("decodeHashToPlan returned null for plan with measurements");
+    if (decoded.measurements.length !== 1) throw new Error("measurement count mismatch after share round-trip");
+    if (decoded.measurements[0].a.x !== 0) throw new Error("measurement a.x wrong after share round-trip");
+    if (decoded.measurements[0].b.x !== 3) throw new Error("measurement b.x wrong after share round-trip");
+    if (decoded.measurements[0].b.y !== 4) throw new Error("measurement b.y wrong after share round-trip");
+    resetAll();
+  });
+});
+
+// ─── Tests: LLD 81 — backward-compat: old JSON plan without measurements ──────
+
+describe("LLD 81 — backward-compat: old JSON plan without measurements key validates", () => {
+  it("HARD: a frozen legacy JSON plan with no measurements key loads and normalises to []", () => {
+    // This is the pre-LLD-81 plan format — no measurements field at all
+    const legacyPlan = {
+      schema: 1,
+      app: "floorplan",
+      walls: { rooms: [{ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] }], chain: [] },
+      symbols: { symbols: [] },
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "ft",
+    };
+    if ("measurements" in legacyPlan) throw new Error("fixture must not have measurements key");
+    const v = validatePlan(legacyPlan);
+    if (v === null) throw new Error("validatePlan MUST NOT return null for missing measurements — backward-compat broken");
+    if (!Array.isArray(v.measurements)) throw new Error("measurements must be normalised to array");
+    if (v.measurements.length !== 0) throw new Error("measurements must be []");
+  });
+});
+
+// ─── Tests: LLD 81 — exportImg measurements ──────────────────────────────────
+
+describe("LLD 81 — exportImg.contentBounds includes measurement endpoints", () => {
+  it("measurement extending beyond walls expands bounds (Edge Case 7)", () => {
+    resetAll();
+    // A room occupying [0,3]x[0,4]
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    // A measurement extending way beyond the room
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 10, y: 12 } });
+    const b = contentBounds();
+    if (!b) throw new Error("Expected non-null bounds");
+    if (b.maxX < 10) throw new Error(`maxX ${b.maxX} should be >= 10 (measurement endpoint)`);
+    if (b.maxY < 12) throw new Error(`maxY ${b.maxY} should be >= 12 (measurement endpoint)`);
+    resetAll();
+  });
+
+  it("measurement-only plan (no rooms/symbols) produces non-null bounds", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 1, y: 2 }, b: { x: 5, y: 6 } });
+    const b = contentBounds();
+    if (b === null) throw new Error("Expected non-null bounds for measurement-only plan");
+    if (b.minX !== 1 || b.minY !== 2 || b.maxX !== 5 || b.maxY !== 6) {
+      throw new Error(`Wrong bounds: ${JSON.stringify(b)}`);
+    }
+    resetAll();
+  });
+});
+
+describe("LLD 81 — exportImg.buildExportSvg includes measurement lines + labels", () => {
+  it("SVG contains a <line> and <text> for each measurement", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }, { x: 0, y: 4 }] });
+    measurementsModel.measurements.push(
+      { id: "m0", a: { x: 0, y: 0 }, b: { x: 3, y: 4 } },
+      { id: "m1", a: { x: 1, y: 0 }, b: { x: 2, y: 0 } }
+    );
+    const svg = buildExportSvg();
+    // Count <line> elements (wall lines + measurement lines)
+    const lineMatches = svg.match(/<line /g) || [];
+    if (lineMatches.length < 2) throw new Error(`Expected at least 2 <line> elements, got ${lineMatches.length}`);
+    // Count <text> elements — room edges + measurements
+    const textMatches = svg.match(/<text /g) || [];
+    // 4 room-edge labels + 2 measurement labels = at least 6
+    if (textMatches.length < 6) throw new Error(`Expected at least 6 <text> elements, got ${textMatches.length}`);
+    resetAll();
+  });
+
+  it("measurement-only SVG (no rooms): non-null output with line and label", () => {
+    resetAll();
+    setUnit("m");
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 0 }, b: { x: 5, y: 0 } });
+    const svg = buildExportSvg();
+    if (!svg.includes("<line ")) throw new Error("No <line> in measurement-only SVG");
+    if (!svg.includes("<text ")) throw new Error("No <text> in measurement-only SVG");
+    // The label should contain a numeric distance (5.00 m)
+    if (!svg.includes("5.00")) throw new Error("Distance label missing in measurement-only SVG");
+    resetAll();
+  });
+
+  it("plan with measurements but no rooms produces valid SVG (non-null bounds)", () => {
+    resetAll();
+    measurementsModel.measurements.push({ id: "m0", a: { x: 2, y: 3 }, b: { x: 7, y: 8 } });
+    const svg = buildExportSvg();
+    if (!svg.startsWith("<?xml")) throw new Error("SVG does not start with XML declaration");
+    if (!svg.includes("<svg")) throw new Error("SVG missing <svg> element");
+    resetAll();
+  });
+});
+
+// ─── Tests: LLD 81 — no NaN/Infinity from measurements round-trip ─────────────
+
+describe("LLD 81 — safety: no NaN/Infinity from validated measurements", () => {
+  it("validatePlan never lets NaN/Infinity through to measurements", () => {
+    resetAll();
+    const p = buildPlan();
+    // These entries are invalid and must be rejected (null) — not NaN allowed through
+    const badPlans = [
+      { ...p, measurements: [{ id: "m0", a: { x: NaN, y: 0 }, b: { x: 1, y: 0 } }] },
+      { ...p, measurements: [{ id: "m0", a: { x: 0, y: Infinity }, b: { x: 1, y: 0 } }] },
+    ];
+    for (const bad of badPlans) {
+      const v = validatePlan(bad);
+      if (v !== null) throw new Error("validatePlan should reject NaN/Infinity endpoint");
+    }
+    resetAll();
+  });
+});
+
+// ─── Tests: LLD 88 — dining-table-round circularity enforcement ───────────────
+
+describe("LLD 88 — dining-table-round: circular flag in catalog", () => {
+  it("CATALOG['dining-table-round'] has circular:true", () => {
+    if (!CATALOG["dining-table-round"].circular) throw new Error("circular flag missing or falsy");
+  });
+
+  it("sofa does NOT have circular flag (regression: flag must not leak)", () => {
+    if (CATALOG["sofa"].circular) throw new Error("sofa should not have circular:true");
+  });
+
+  it("table does NOT have circular flag (regression)", () => {
+    if (CATALOG["table"].circular) throw new Error("table should not have circular:true");
+  });
+});
+
+describe("LLD 88 — resizeSymbol: circular type mirrors both axes", () => {
+  it("dim:'w' sets both w and h to the clamped value", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0); // w=h=1.20
+    resizeSymbol(s, "w", 1.50);
+    expect(s.w).toBeCloseTo(1.50, 9);
+    expect(s.h).toBeCloseTo(1.50, 9);
+  });
+
+  it("dim:'h' sets both w and h to the clamped value", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0);
+    resizeSymbol(s, "h", 1.00);
+    expect(s.w).toBeCloseTo(1.00, 9);
+    expect(s.h).toBeCloseTo(1.00, 9);
+  });
+
+  it("out-of-range value clamps both axes to the same bound (above max)", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0);
+    resizeSymbol(s, "w", 99);
+    expect(s.w).toBeCloseTo(CATALOG["dining-table-round"].max_w, 9);
+    expect(s.h).toBeCloseTo(CATALOG["dining-table-round"].max_w, 9);
+  });
+
+  it("out-of-range value clamps both axes to the same bound (below min)", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0);
+    resizeSymbol(s, "h", 0.001);
+    expect(s.w).toBeCloseTo(CATALOG["dining-table-round"].min_h, 9);
+    expect(s.h).toBeCloseTo(CATALOG["dining-table-round"].min_h, 9);
+  });
+
+  it("lockAspect:true on circular type yields same mirrored result (no double-scale)", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0);
+    resizeSymbol(s, "w", 1.25, true);
+    expect(s.w).toBeCloseTo(1.25, 9);
+    expect(s.h).toBeCloseTo(1.25, 9);
+  });
+
+  it("returns changed:true when value actually changes", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0); // w=h=1.20
+    const changed = resizeSymbol(s, "w", 1.40);
+    expect(changed).toBe(true);
+  });
+
+  it("returns changed:false when both axes already equal the clamped value", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0); // w=h=1.20
+    const changed = resizeSymbol(s, "w", 1.20); // same value
+    expect(changed).toBe(false);
+  });
+
+  it("non-circular type (sofa) still resizes only the requested axis (regression)", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 0, 0); // w=2.00, h=0.90
+    const origH = s.h;
+    resizeSymbol(s, "w", 1.80);
+    expect(s.w).toBeCloseTo(1.80, 9);
+    // h must be unchanged — circular branch must not leak to sofa
+    expect(s.h).toBeCloseTo(origH, 9);
+  });
+});
+
+// ─── Tests: LLD 92 — measurements.js CRUD + geometry ─────────────────────────
+
+/** Reset measurements model to clean state. */
+function resetMeasurementsModel() {
+  hydrateMeasurements({ measurements: [] });
+}
+
+describe("LLD 92 — measurements.js: add()", () => {
+  it("appends a {id,a,b} entry and returns it", () => {
+    resetMeasurementsModel();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 });
+    expect(measurementsModel.measurements.length).toBe(1);
+    expect(m.a.x).toBe(0);
+    expect(m.b.x).toBe(3);
+    resetMeasurementsModel();
+  });
+
+  it("mints a monotonic m<n> id", () => {
+    resetMeasurementsModel();
+    const m1 = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    const m2 = addMeasurement({ x: 0, y: 0 }, { x: 2, y: 0 });
+    const n1 = parseInt(m1.id.replace("m", ""), 10);
+    const n2 = parseInt(m2.id.replace("m", ""), 10);
+    if (n2 <= n1) throw new Error(`id ${m2.id} is not greater than ${m1.id}`);
+    resetMeasurementsModel();
+  });
+
+  it("stores a deep copy of the endpoints (input mutation does not corrupt model)", () => {
+    resetMeasurementsModel();
+    const a = { x: 1, y: 2 };
+    const b = { x: 5, y: 6 };
+    addMeasurement(a, b);
+    a.x = 999;
+    expect(measurementsModel.measurements[0].a.x).toBe(1);
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: remove()", () => {
+  it("removes existing measurement and returns true", () => {
+    resetMeasurementsModel();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 1 });
+    const ok = removeMeasurement(m.id);
+    expect(ok).toBe(true);
+    expect(measurementsModel.measurements.length).toBe(0);
+    resetMeasurementsModel();
+  });
+
+  it("no-op on missing id and returns false", () => {
+    resetMeasurementsModel();
+    const ok = removeMeasurement("m999");
+    expect(ok).toBe(false);
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: getById()", () => {
+  it("returns the measurement for a known id", () => {
+    resetMeasurementsModel();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    const found = getMeasurementById(m.id);
+    if (!found) throw new Error("getById returned null for known id");
+    expect(found.id).toBe(m.id);
+    resetMeasurementsModel();
+  });
+
+  it("returns null for unknown id", () => {
+    resetMeasurementsModel();
+    const found = getMeasurementById("m9999");
+    if (found !== null) throw new Error("Expected null for unknown id");
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: length()", () => {
+  it("returns Euclidean distance in metres (3-4-5 triangle)", () => {
+    const m = { a: { x: 0, y: 0 }, b: { x: 3, y: 4 } };
+    expect(measurementLength(m)).toBeCloseTo(5, 9);
+  });
+
+  it("returns 0 for coincident endpoints", () => {
+    const m = { a: { x: 2, y: 3 }, b: { x: 2, y: 3 } };
+    expect(measurementLength(m)).toBeCloseTo(0, 9);
+  });
+
+  it("axis-aligned: 5m horizontal segment", () => {
+    const m = { a: { x: 1, y: 3 }, b: { x: 6, y: 3 } };
+    expect(measurementLength(m)).toBeCloseTo(5, 9);
+  });
+});
+
+describe("LLD 92 — measurements.js: nearestMeasurement()", () => {
+  // Set view to identity for predictable screen coords
+  function _setupView() {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+  }
+
+  it("returns null on empty model", () => {
+    resetMeasurementsModel();
+    _setupView();
+    const r = nearestMeasurement(100, 100, 15);
+    if (r !== null) throw new Error("Expected null on empty model");
+    resetMeasurementsModel();
+  });
+
+  it("hits a segment at its midpoint within tolerance", () => {
+    resetMeasurementsModel();
+    _setupView();
+    // Segment from (10,10) to (50,10) world metres → screen (400,400)...(2000,400)
+    // At zoom=1, BASE=40: screen = world*40
+    addMeasurement({ x: 10, y: 10 }, { x: 50, y: 10 });
+    // Midpoint world=(30,10), screen=(1200,400). Query at (1200,400).
+    const r = nearestMeasurement(1200, 400, 15);
+    if (!r) throw new Error("Expected a hit at midpoint");
+    resetMeasurementsModel();
+  });
+
+  it("misses when query is beyond tolerance", () => {
+    resetMeasurementsModel();
+    _setupView();
+    addMeasurement({ x: 10, y: 10 }, { x: 50, y: 10 });
+    // Midpoint screen=(1200,400). Query 20px away (beyond 15px tolerance).
+    const r = nearestMeasurement(1200, 420, 15);
+    if (r !== null) throw new Error("Expected null when beyond tolerance");
+    resetMeasurementsModel();
+  });
+
+  it("hits near an endpoint", () => {
+    resetMeasurementsModel();
+    _setupView();
+    addMeasurement({ x: 5, y: 5 }, { x: 10, y: 5 });
+    // Endpoint A world=(5,5), screen=(200,200). Query at (202,200) — 2px away.
+    const r = nearestMeasurement(202, 200, 15);
+    if (!r) throw new Error("Expected a hit near endpoint A");
+    resetMeasurementsModel();
+  });
+
+  it("last-match wins on overlapping lines (topmost draw order)", () => {
+    resetMeasurementsModel();
+    _setupView();
+    const m1 = addMeasurement({ x: 5, y: 5 }, { x: 15, y: 5 });
+    const m2 = addMeasurement({ x: 5, y: 5 }, { x: 15, y: 5 }); // exact overlap
+    // Query at midpoint: both segments overlap; last one wins
+    const r = nearestMeasurement(400, 200, 15);
+    if (!r) throw new Error("Expected a hit");
+    if (r.id !== m2.id) throw new Error(`Expected last match ${m2.id}, got ${r.id}`);
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: hydrate counter regression", () => {
+  it("hydrate re-syncs counter past m<n> — regression guard", () => {
+    hydrateMeasurements({ measurements: [
+      { id: "m99", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+    ] });
+    const next = newMeasurementId();
+    const n = parseInt(next.replace("m", ""), 10);
+    if (n <= 99) throw new Error(`newId() ${next} would collide with m99`);
+    hydrateMeasurements({ measurements: [] });
+  });
+});
+
+// ─── Tests: LLD 92 — history.js measurements extension ───────────────────────
+
+/** Reset geometry + history for history+measurement tests. */
+function resetForHistoryMeasurements() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  hydrateWalls({ rooms: [], chain: [] });
+  hydrateSymbols({ symbols: [] });
+  hydrateMeasurements({ measurements: [] });
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  resetHistory();
+}
+
+describe("LLD 92 — history.js: measurements captured in snapshot", () => {
+  it("snapshot captures measurements; apply restores them", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    addMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 });
+    historyCommit();
+    // Now undo: model should go back to empty measurements
+    historyUndo();
+    expect(measurementsModel.measurements.length).toBe(0);
+    // Redo: measurement should come back
+    historyRedo();
+    expect(measurementsModel.measurements.length).toBe(1);
+    resetForHistoryMeasurements();
+  });
+
+  it("add-then-undo removes the measurement", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    addMeasurement({ x: 1, y: 0 }, { x: 5, y: 0 });
+    historyCommit();
+    historyUndo();
+    expect(measurementsModel.measurements.length).toBe(0);
+    resetForHistoryMeasurements();
+  });
+
+  it("delete-then-undo restores the measurement", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 2, y: 2 });
+    historyCommit(); // commit add
+    removeMeasurement(m.id);
+    historyCommit(); // commit remove
+    historyUndo();   // undo remove → measurement should be back
+    expect(measurementsModel.measurements.length).toBe(1);
+    resetForHistoryMeasurements();
+  });
+
+  it("undo of unrelated op (symbol add) preserves existing measurements", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    // Add a measurement and commit
+    addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    historyCommit();
+    // Now do an unrelated op: add a symbol
+    symbolModel.symbols.push({ id: "s0", type: "sofa", x: 5, y: 5, w: 2, h: 1, rot: 0 });
+    historyCommit();
+    // Undo the symbol add
+    historyUndo();
+    // Measurement must still be present
+    expect(measurementsModel.measurements.length).toBe(1);
+    resetForHistoryMeasurements();
+  });
+});
+
+// ─── Import LLD 92 — measureTool + measureRender ──────────────────────────────
+
+import {
+  _resolvePoint as resolvePoint,
+  init as measureToolInit,
+  onMeasureDown, onMeasureMove, onMeasureLeave,
+  getDraft, getSelectedMeasurementId,
+  onSelectDown, clearSelection, hasSelection, deleteSelected,
+  activate as measureActivate, deactivate as measureDeactivate, isActive as measureIsActive,
+  setHistoryCommit as measureToolSetHistoryCommit,
+  setClearOtherSelections as measureSetClearOtherSelections,
+} from "../src/js/measureTool.js";
+
+import {
+  init as initMeasureRender,
+  render as measureRender,
+} from "../src/js/measureRender.js";
+
+// ─── LLD 92 — measureTool init helper ─────────────────────────────────────────
+
+/**
+ * Call measureToolInit with lightweight stub DOM elements.
+ * This registers the keydown/keyup/blur listeners on window (needed for Alt/Escape).
+ * Multiple calls are safe (listeners accumulate but are idempotent in effect).
+ */
+function measureToolInitStubs() {
+  const mkBtn = () => {
+    const b = document.createElement("button");
+    b.setAttribute("aria-pressed", "false");
+    return b;
+  };
+  const mkSpan = () => document.createElement("span");
+  const mkDiv  = () => document.createElement("div");
+  measureToolInit({
+    stage:      mkDiv(),
+    btnMeasure: mkBtn(),
+    btnSelect:  mkBtn(),
+    btnWall:    mkBtn(),
+    snapTag:    mkSpan(),
+  });
+}
+
+// Register listeners once so all subsequent keyboard tests work.
+measureToolInitStubs();
+
+// ─── LLD 92 — measureTool._resolvePoint snapping ─────────────────────────────
+
+/**
+ * Reset all geometry models plus view to identity for _resolvePoint tests.
+ * At zoom=1, panX=0, panY=0: worldToScreen(wx,wy) = {x:wx*40, y:wy*40}
+ * Sets snap mode to a fixed step=1 for predictable grid rounding.
+ */
+function resetForResolvePoint() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  hydrateMeasurements({ measurements: [] });
+  setGridSnap(true);
+  setSnapMode(0.25); // fixed step=0.25m for predictable grid rounding in tests
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  // Note: caller must restore snapMode to "auto" if desired. resetForResolvePoint
+  // is called both at start and end of each test; the last test's cleanup restores "auto"
+  // via the explicit call below in each test that's final or via a dedicated cleanup.
+}
+
+describe("LLD 92 — measureTool._resolvePoint: wall vertex snap", () => {
+  it("snaps to wall vertex within SNAP_PT_PX", () => {
+    resetForResolvePoint();
+    // Vertex at world (5, 5) → screen (200, 200) at zoom=1
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 5, y: 5 }] });
+    // Query at screen (205, 200) → 5px from vertex
+    const pt = resolvePoint(205, 200);
+    expect(pt.x).toBeCloseTo(5, 9);
+    expect(pt.y).toBeCloseTo(5, 9);
+    resetForResolvePoint();
+  });
+
+  it("does NOT snap to vertex beyond SNAP_PT_PX — falls to grid (non-integer vertex)", () => {
+    resetForResolvePoint();
+    // Non-integer vertex at world (1.7, 1.0) → screen (68, 40)
+    // Query at screen (85, 40) → dist = 17px > 15px → beyond tolerance
+    // Falls to grid (step=0.25): world (85/40, 40/40) = (2.125, 1.0)
+    //   x: Math.round(2.125/0.25)*0.25 = Math.round(8.5)*0.25 = 9*0.25 = 2.25
+    //   y: Math.round(1.0/0.25)*0.25  = 4*0.25 = 1.0
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 1.7, y: 1.0 }] });
+    const pt = resolvePoint(85, 40);
+    // Should NOT be the vertex (1.7, 1.0)
+    if (Math.abs(pt.x - 1.7) < 0.001 && Math.abs(pt.y - 1.0) < 0.001) {
+      throw new Error("Snapped to vertex that was beyond SNAP_PT_PX tolerance");
+    }
+    expect(pt.x).toBeCloseTo(2.25, 9);
+    expect(pt.y).toBeCloseTo(1.0, 9);
+    resetForResolvePoint();
+  });
+});
+
+describe("LLD 92 — measureTool._resolvePoint: wall edge foot-point snap", () => {
+  it("snaps to perpendicular foot-point on a horizontal wall edge", () => {
+    resetForResolvePoint();
+    // Horizontal segment from world (0,0) to (10,0) → screen (0,0)…(400,0)
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 0, y: 0 }, { x: 10, y: 0 }] });
+    // Query at screen (200, 8) — 8px above the line at its midpoint.
+    // Foot-point: (5, 0). Screen dist = 8px < 15px → snaps to foot.
+    const pt = resolvePoint(200, 8);
+    expect(pt.x).toBeCloseTo(5, 5);
+    expect(pt.y).toBeCloseTo(0, 5);
+    resetForResolvePoint();
+  });
+
+  it("snaps to clamped endpoint when foot falls beyond segment end", () => {
+    resetForResolvePoint();
+    // Segment from world (0,0) to (5,0) → screen (0,0)…(200,0)
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }] });
+    // Query at screen (205, 5): foot projects beyond end, clamps to (200,0) in screen.
+    // Screen dist = sqrt(5²+5²) ≈ 7.1px < 15px → snaps to clamped foot = world (5, 0).
+    const pt = resolvePoint(205, 5);
+    expect(pt.x).toBeCloseTo(5, 4);
+    expect(pt.y).toBeCloseTo(0, 4);
+    resetForResolvePoint();
+  });
+});
+
+describe("LLD 92 — measureTool._resolvePoint: symbol corner and center snap", () => {
+  it("snaps to symbol corner within SNAP_PT_PX", () => {
+    resetForResolvePoint();
+    // Chair: w=h=0.5 at world (5,5). TL corner at (4.75, 4.75) → screen (190, 190).
+    const s = createSymbol("chair", 5, 5);
+    addSymbol(s);
+    // Query at screen (192, 190) → 2px from TL corner.
+    const pt = resolvePoint(192, 190);
+    expect(pt.x).toBeCloseTo(4.75, 5);
+    expect(pt.y).toBeCloseTo(4.75, 5);
+    resetForResolvePoint();
+  });
+
+  it("snaps to symbol AABB center within SNAP_PT_PX", () => {
+    resetForResolvePoint();
+    // Chair at world (5, 5): center at (5, 5) → screen (200, 200).
+    const s = createSymbol("chair", 5, 5);
+    addSymbol(s);
+    // Query at screen (203, 200) → 3px from center.
+    const pt = resolvePoint(203, 200);
+    expect(pt.x).toBeCloseTo(5, 5);
+    expect(pt.y).toBeCloseTo(5, 5);
+    resetForResolvePoint();
+  });
+});
+
+describe("LLD 92 — measureTool._resolvePoint: grid fallback", () => {
+  it("falls to grid when no nearby target and snap is on (step=0.25)", () => {
+    resetForResolvePoint();
+    // No walls, no symbols. Query at screen (62, 52) → world (1.55, 1.3)
+    // gridSnap(step=0.25):
+    //   x: Math.round(1.55/0.25)*0.25 = Math.round(6.2)*0.25 = 6*0.25 = 1.5
+    //   y: Math.round(1.3/0.25)*0.25  = Math.round(5.2)*0.25 = 5*0.25 = 1.25
+    const pt = resolvePoint(62, 52);
+    expect(pt.x).toBeCloseTo(1.5, 9);
+    expect(pt.y).toBeCloseTo(1.25, 9);
+    resetForResolvePoint();
+  });
+
+  it("falls to free (raw world) when persistent snap toggle is off", () => {
+    resetForResolvePoint();
+    setGridSnap(false);
+    // No walls, no symbols. Query at screen (62, 52) → world (1.55, 1.3) — no rounding applied.
+    const pt = resolvePoint(62, 52);
+    expect(pt.x).toBeCloseTo(62 / 40, 4); // 1.55
+    expect(pt.y).toBeCloseTo(52 / 40, 4); // 1.3
+    setGridSnap(true); // restore
+    resetForResolvePoint();
+  });
+});
+
+describe("LLD 92 — measureTool._resolvePoint: Alt=free override", () => {
+  it("Alt held → returns raw world point even when vertex is within snap tolerance", () => {
+    resetForResolvePoint();
+    // Non-integer vertex at world (5.3, 0) → screen (212, 0).
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 5.3, y: 0 }] });
+    // Query at screen (215, 0) — dist = 3px < 15px, would normally snap to (5.3, 0).
+    // Without Alt: resolvePoint should snap.
+    const ptSnapped = resolvePoint(215, 0);
+    expect(ptSnapped.x).toBeCloseTo(5.3, 9); // confirms snapping is working
+
+    // With Alt: set _altHeld via keyboard event (registered by measureToolInitStubs())
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "AltLeft", bubbles: true }));
+    const ptFree = resolvePoint(215, 0);
+    // Alt forces raw world: 215/40 = 5.375, NOT 5.3
+    if (Math.abs(ptFree.x - 5.3) < 0.001) {
+      throw new Error("Alt should suppress snap but vertex coord returned");
+    }
+    expect(ptFree.x).toBeCloseTo(215 / 40, 4);
+
+    window.dispatchEvent(new KeyboardEvent("keyup", { code: "AltLeft", bubbles: true }));
+    resetForResolvePoint();
+  });
+});
+
+describe("LLD 92 — measureTool._resolvePoint: snap-toggle-off keeps object/vertex/edge snap (Edge Case 8)", () => {
+  it("persistent grid-snap toggle off still snaps to wall vertex", () => {
+    resetForResolvePoint();
+    setGridSnap(false);
+    // Vertex at world (5,5) → screen (200,200).
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 5, y: 5 }] });
+    // Query 5px away — should still snap to vertex.
+    const pt = resolvePoint(205, 200);
+    expect(pt.x).toBeCloseTo(5, 9);
+    expect(pt.y).toBeCloseTo(5, 9);
+    setGridSnap(true);
+    resetForResolvePoint();
+  });
+});
+
+// ─── LLD 92 — measureTool interaction tests ───────────────────────────────────
+
+/**
+ * Reset measureTool state for interaction tests.
+ */
+function resetMeasureTool() {
+  hydrateMeasurements({ measurements: [] });
+  measureDeactivate();
+  clearSelection();
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+}
+
+describe("LLD 92 — measureTool: two-click create", () => {
+  it("first click sets pendingA (getDraft non-null); second click commits measurement", () => {
+    resetMeasureTool();
+    measureActivate();
+    // First click at screen (0,0) → world (0,0)
+    onMeasureDown(0, 0);
+    const draft = getDraft();
+    if (draft === null) throw new Error("getDraft() should be non-null after first click");
+    expect(measurementsModel.measurements.length).toBe(0); // nothing committed yet
+    // Second click at a different location: screen (200,0) → world (5,0)
+    onMeasureDown(200, 0);
+    const draft2 = getDraft();
+    if (draft2 !== null) throw new Error("getDraft() should be null after commit");
+    expect(measurementsModel.measurements.length).toBe(1);
+    resetMeasureTool();
+  });
+
+  it("third click starts a new measurement (tool stays active after commit)", () => {
+    resetMeasureTool();
+    measureActivate();
+    onMeasureDown(0, 0);
+    onMeasureDown(200, 0); // commit first
+    expect(measurementsModel.measurements.length).toBe(1);
+    // Third click: starts pendingA for second measurement
+    onMeasureDown(80, 0);
+    const draft = getDraft();
+    if (draft === null) throw new Error("getDraft() should be non-null — tool starts next measurement");
+    expect(measurementsModel.measurements.length).toBe(1); // still just 1 committed
+    resetMeasureTool();
+  });
+
+  it("draft present after first click and cleared after Escape", () => {
+    resetMeasureTool();
+    measureActivate();
+    onMeasureDown(0, 0);
+    if (getDraft() === null) throw new Error("Draft should exist after first click");
+    // Escape is handled by measureTool's own keydown listener (registered by measureToolInitStubs)
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    if (getDraft() !== null) throw new Error("Draft should be cleared after Escape");
+    expect(measurementsModel.measurements.length).toBe(0);
+    resetMeasureTool();
+  });
+
+  it("zero-length second click does not commit and preserves pendingA", () => {
+    resetMeasureTool();
+    measureActivate();
+    onMeasureDown(0, 0); // A
+    onMeasureDown(0, 0); // B at same point → reject (zero-length)
+    if (getDraft() === null) throw new Error("Draft should persist after zero-length rejection");
+    expect(measurementsModel.measurements.length).toBe(0);
+    resetMeasureTool();
+  });
+});
+
+describe("LLD 92 — measureTool: select dispatcher + mutex", () => {
+  it("onSelectDown hits a measurement and returns true; sets selection id", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Horizontal measurement at world y=5 → screen y=200; midpoint world (5,5) → screen (200,200)
+    const m = addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    const hit = onSelectDown(200, 200);
+    expect(hit).toBe(true);
+    expect(getSelectedMeasurementId()).toBe(m.id);
+    resetMeasureTool();
+  });
+
+  it("onSelectDown misses beyond tolerance and returns false", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    // Line at screen y=200; query at screen (200, 220) → 20px away > 15px tolerance
+    const hit = onSelectDown(200, 220);
+    expect(hit).toBe(false);
+    if (getSelectedMeasurementId() !== null) throw new Error("No selection expected on miss");
+    resetMeasureTool();
+  });
+
+  it("clearSelection() removes the selection (mutex reverse direction)", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const m = addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    onSelectDown(200, 200);
+    if (!hasSelection()) throw new Error("Expected selection after onSelectDown");
+    clearSelection();
+    if (hasSelection()) throw new Error("Expected no selection after clearSelection()");
+    resetMeasureTool();
+  });
+
+  it("selecting a measurement calls setClearOtherSelections (mutex forward direction)", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    let cleared = false;
+    measureSetClearOtherSelections(() => { cleared = true; });
+    const m = addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    onSelectDown(200, 200);
+    if (!cleared) throw new Error("clearOtherSelections should be called when measurement selected");
+    measureSetClearOtherSelections(() => {}); // restore no-op
+    resetMeasureTool();
+  });
+});
+
+describe("LLD 92 — measureTool: Delete removes measurement and triggers historyCommit", () => {
+  it("deleteSelected() removes the measurement, calls commit, and clears selection", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    let committed = 0;
+    measureToolSetHistoryCommit(() => { committed++; });
+    const m = addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    onSelectDown(200, 200); // select
+    if (!hasSelection()) throw new Error("Expected selection");
+    deleteSelected();
+    expect(measurementsModel.measurements.length).toBe(0);
+    if (committed === 0) throw new Error("historyCommit not called after deleteSelected");
+    if (hasSelection()) throw new Error("Selection should be cleared after deleteSelected");
+    measureToolSetHistoryCommit(null);
+    resetMeasureTool();
+  });
+});
+
+describe("LLD 92 — measureTool: dangling-id guard (undo removes selected measurement)", () => {
+  it("getSelectedMeasurementId() returns null when the selected id is no longer in model", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Create and select m2
+    const m1 = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 }); // separate measurement
+    const m2 = addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    onSelectDown(200, 200); // selects m2
+    if (getSelectedMeasurementId() !== m2.id) throw new Error("Expected m2 selected");
+    // Simulate undo removing m2 (hydrate with only m1)
+    hydrateMeasurements({ measurements: [{ id: m1.id, a: { x: m1.a.x, y: m1.a.y }, b: { x: m1.b.x, y: m1.b.y } }] });
+    // Dangling guard: must return null
+    if (getSelectedMeasurementId() !== null) {
+      throw new Error("Dangling id guard failed: getSelectedMeasurementId should return null when id removed from model");
+    }
+    resetMeasureTool();
+  });
+});
+
+// ─── LLD 92 — measureRender tests ─────────────────────────────────────────────
+
+const NS_SVG_92 = "http://www.w3.org/2000/svg";
+
+/**
+ * Build a minimal DOM rig for measureRender tests.
+ * Each test creates its own rig (isolated DOM). cleanup() removes it.
+ */
+function makeMeasureRenderRig(opts = {}) {
+  const svg = document.createElementNS(NS_SVG_92, "svg");
+  const gMeasure = document.createElementNS(NS_SVG_92, "g");
+  gMeasure.id = "measure";
+  svg.appendChild(gMeasure);
+  const overlay = document.createElement("div");
+  overlay.className = "dim-labels";
+  document.body.appendChild(svg);
+  document.body.appendChild(overlay);
+
+  initMeasureRender(
+    gMeasure,
+    overlay,
+    opts.getMeasurements || (() => measurementsModel.measurements),
+    opts.getDraft        || (() => null),
+    opts.getSelectedId   || (() => null),
+  );
+
+  return {
+    gMeasure,
+    overlay,
+    cleanup() {
+      document.body.removeChild(svg);
+      document.body.removeChild(overlay);
+    },
+  };
+}
+
+describe("LLD 92 — measureRender: committed measurement produces line + ticks + nodes + chip", () => {
+  it("renders main line + two perpendicular ticks + two endpoint nodes + one .measure-chip", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    addMeasurement({ x: 0, y: 0 }, { x: 5, y: 0 });
+    const rig = makeMeasureRenderRig();
+    measureRender();
+
+    // 1 main line + 2 tick lines = 3 total; plus 2 node circles
+    const lines = rig.gMeasure.querySelectorAll("line");
+    if (lines.length < 3) throw new Error(`Expected ≥3 <line> elements (1 main + 2 ticks), got ${lines.length}`);
+    const circles = rig.gMeasure.querySelectorAll("circle");
+    if (circles.length < 2) throw new Error(`Expected ≥2 endpoint node circles, got ${circles.length}`);
+
+    // One .measure-chip in overlay
+    const chips = rig.overlay.querySelectorAll(".measure-chip");
+    if (chips.length !== 1) throw new Error(`Expected 1 .measure-chip, got ${chips.length}`);
+
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+
+  it("chip text equals fmtLen(len) + ' ' + unitLabel()", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    addMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 }); // 5m 3-4-5 triangle
+    const rig = makeMeasureRenderRig();
+    measureRender();
+    const chip = rig.overlay.querySelector(".measure-chip");
+    if (!chip) throw new Error("No .measure-chip found");
+    const expected = fmtLen(5) + " " + unitLabel();
+    if (chip.textContent !== expected) {
+      throw new Error(`Chip text "${chip.textContent}" != expected "${expected}"`);
+    }
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+
+  it("chip text changes after unit toggle (reactive to unit, not stored coords)", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    addMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 }); // 5m
+    const rig = makeMeasureRenderRig();
+
+    measureRender();
+    const textBeforeToggle = (rig.overlay.querySelector(".measure-chip") || {}).textContent || "";
+
+    setUnit("ft");
+    measureRender();
+    const textAfterToggle = (rig.overlay.querySelector(".measure-chip") || {}).textContent || "";
+
+    if (textBeforeToggle === textAfterToggle) {
+      throw new Error("Chip text should change after unit toggle m→ft");
+    }
+    if (!textAfterToggle.includes("ft")) {
+      throw new Error(`Expected 'ft' in chip text after toggle, got: "${textAfterToggle}"`);
+    }
+
+    setUnit("ft"); // restore (already ft)
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+});
+
+describe("LLD 92 — measureRender: does NOT remove non-measure chips (.clr-chip, .dim-chip)", () => {
+  it("clears only .measure-chip nodes; leaves .clr-chip and .dim-chip intact", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    const rig = makeMeasureRenderRig();
+
+    // Pre-seed overlay with foreign chips
+    const clrChip = document.createElement("div");
+    clrChip.className = "clr-chip";
+    clrChip.textContent = "ok";
+    rig.overlay.appendChild(clrChip);
+    const dimChip = document.createElement("div");
+    dimChip.className = "dim-chip";
+    dimChip.textContent = "3.0 m";
+    rig.overlay.appendChild(dimChip);
+
+    addMeasurement({ x: 0, y: 0 }, { x: 5, y: 0 });
+    measureRender();
+
+    if (!rig.overlay.querySelector(".clr-chip")) throw new Error(".clr-chip was wrongly removed by measureRender");
+    if (!rig.overlay.querySelector(".dim-chip")) throw new Error(".dim-chip was wrongly removed by measureRender");
+    if (!rig.overlay.querySelector(".measure-chip")) throw new Error(".measure-chip missing after render");
+
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+});
+
+describe("LLD 92 — measureRender: selected measurement uses thicker stroke", () => {
+  it("selected measurement main line has higher stroke-width than unselected", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 5, y: 0 });
+
+    let selectedId = null;
+    const rig = makeMeasureRenderRig({ getSelectedId: () => selectedId });
+
+    // Render unselected
+    measureRender();
+    const unselectedStroke = parseFloat(
+      (rig.gMeasure.querySelector("line") || {}).getAttribute("stroke-width") || "0"
+    );
+
+    // Render selected
+    selectedId = m.id;
+    measureRender();
+    const selectedStroke = parseFloat(
+      (rig.gMeasure.querySelector("line") || {}).getAttribute("stroke-width") || "0"
+    );
+
+    if (selectedStroke <= unselectedStroke) {
+      throw new Error(`Selected stroke (${selectedStroke}) should be > unselected (${unselectedStroke})`);
+    }
+
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+});
+
+describe("LLD 92 — measureRender: draft renders as dashed line + .measure-chip--draft", () => {
+  it("draft measurement has stroke-dasharray on its line and a .measure-chip--draft chip", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    const draft = { a: { x: 0, y: 0 }, b: { x: 3, y: 4 }, snapType: "grid" };
+    const rig = makeMeasureRenderRig({ getDraft: () => draft });
+
+    measureRender();
+
+    const lines = Array.from(rig.gMeasure.querySelectorAll("line"));
+    const hasDash = lines.some(l => l.getAttribute("stroke-dasharray"));
+    if (!hasDash) throw new Error("Draft main line should have stroke-dasharray attribute");
+
+    const draftChip = rig.overlay.querySelector(".measure-chip--draft");
+    if (!draftChip) throw new Error("Expected .measure-chip--draft in overlay for in-progress draft");
+
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+});
+
+describe("LLD 92 — measureRender: idempotent — double render does not duplicate elements", () => {
+  it("calling render() twice yields the same element count as once", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    addMeasurement({ x: 0, y: 0 }, { x: 5, y: 0 });
+    const rig = makeMeasureRenderRig();
+
+    measureRender();
+    const countFirst = rig.gMeasure.childElementCount;
+    measureRender();
+    const countSecond = rig.gMeasure.childElementCount;
+    if (countFirst !== countSecond) {
+      throw new Error(`Element count changed on second render: ${countFirst} → ${countSecond} (not idempotent)`);
+    }
+
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
   });
 });
 

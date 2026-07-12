@@ -312,6 +312,59 @@ test("Gap B: no walls → opening rejected", () => {
   assert.equal(symbolsModel.symbols.length, 0);
 });
 
+// ── LLD 76: outdoor / patio types ────────────────────────────────────────────
+
+test("LLD 76: place_symbol({type:'parasol'}) returns ok:true with clamped dims", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "parasol", x: 5, y: 5 });
+  assert.equal(p.ok, true);
+  assert.equal(p.type, "parasol");
+  assert.equal(p.w, CATALOG.parasol.w);
+  assert.equal(p.h, CATALOG.parasol.h);
+});
+
+test("LLD 76: place_symbol({type:'parasol'}) out-of-range w clamps and reports clamped:true", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "parasol", x: 5, y: 5, w: 99 });
+  assert.equal(p.ok, true);
+  assert.equal(p.clamped, true);
+  assert.equal(p.w, CATALOG.parasol.max_w);
+});
+
+test("LLD 76: place_symbol({type:'patio-table'}) returns ok:true at default dims", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "patio-table", x: 3, y: 3 });
+  assert.equal(p.ok, true);
+  assert.equal(p.type, "patio-table");
+  assert.equal(p.w, CATALOG["patio-table"].w);
+});
+
+test("LLD 76: place_symbol({type:'patio-chair'}) returns ok:true", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "patio-chair", x: 4, y: 4 });
+  assert.equal(p.ok, true);
+  assert.equal(p.type, "patio-chair");
+});
+
+test("LLD 76: place_symbol({type:'planter'}) returns ok:true", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "planter", x: 2, y: 2 });
+  assert.equal(p.ok, true);
+  assert.equal(p.type, "planter");
+});
+
+test("LLD 76: bogus type still returns ok:false (rejection unaffected)", () => {
+  session.newPlan();
+  const p = tools.tool_place_symbol({ type: "patio-bench", x: 1, y: 1 });
+  assert.equal(p.ok, false);
+  assert.equal(p.reason, "unknown symbol type");
+});
+
 // ── resize_room (LLD 78) ─────────────────────────────────────────────────────
 
 test("resize_room: resizes a rectangle to exact w×h non-destructively", () => {
@@ -532,4 +585,29 @@ test("check_brief: no-room-drawn message references add_room (not resize_room)",
   assert.match(msg, /add_room/);
   // Must not suggest resize_room when there is nothing to resize.
   assert.doesNotMatch(msg, /resize_room/);
+});
+
+// ── LLD 88: dining-table-round circularity enforcement (MCP integration) ─────
+
+test("LLD 88: resize_symbol dim:'h' on dining-table-round returns w===h and changed:true", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const placed = tools.tool_place_symbol({ type: "dining-table-round", x: 6, y: 6 });
+  assert.equal(placed.ok, true);
+  // Default is w=h=1.20; resize h to a different value — both axes must mirror.
+  const rz = tools.tool_resize_symbol({ id: placed.id, dim: "h", metres: 1.50 });
+  assert.equal(rz.ok, true);
+  assert.equal(rz.changed, true);
+  assert.ok(Math.abs(rz.w - 1.50) < 1e-9, `w expected 1.50, got ${rz.w}`);
+  assert.ok(Math.abs(rz.h - 1.50) < 1e-9, `h expected 1.50, got ${rz.h}`);
+  assert.equal(rz.w, rz.h);
+});
+
+test("LLD 88: place_symbol dining-table-round with differing w/h ends with w===h (last axis wins, Edge Case 5)", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  // Provide both w and h — the last-applied axis (h) wins due to sequential resizeSymbol calls.
+  const placed = tools.tool_place_symbol({ type: "dining-table-round", x: 6, y: 6, w: 1.00, h: 1.50 });
+  assert.equal(placed.ok, true);
+  assert.equal(placed.w, placed.h, `w (${placed.w}) and h (${placed.h}) must be equal`);
 });

@@ -7,6 +7,7 @@
 
 import { model as wallsModel, hydrate as hydrateWalls } from "./walls.js";
 import { model as symbolsModel, hydrate as hydrateSymbols, CATALOG } from "./symbols.js";
+import { model as measurementsModel, hydrate as hydrateMeasurements } from "./measurements.js";
 import { view, setView } from "./view.js";
 import { unit, setUnit } from "./units.js";
 
@@ -66,7 +67,14 @@ export function buildCompact(plan) {
     return compact;
   });
 
-  return { v: COMPACT_VERSION, u: plan.unit, r, k, s };
+  const m = plan.measurements.map((me) => [
+    _mmRound(me.a.x),
+    _mmRound(me.a.y),
+    _mmRound(me.b.x),
+    _mmRound(me.b.y),
+  ]);
+
+  return { v: COMPACT_VERSION, u: plan.unit, r, k, s, m };
 }
 
 /**
@@ -137,11 +145,24 @@ export function parseCompact(compact) {
     });
     if (symbols.some((s) => s === null)) return null;
 
+    // measurements: tolerate absence for old payloads (pre-LLD-81 'c' links have no 'm')
+    const rawM = Array.isArray(compact.m) ? compact.m : [];
+    const measurements = [];
+    for (let i = 0; i < rawM.length; i++) {
+      const t = rawM[i];
+      if (!Array.isArray(t) || t.length < 4) return null;
+      const [ax, ay, bx, by] = t;
+      if (!Number.isFinite(ax) || !Number.isFinite(ay) ||
+          !Number.isFinite(bx) || !Number.isFinite(by)) return null;
+      measurements.push({ id: `m${i}`, a: { x: ax, y: ay }, b: { x: bx, y: by } });
+    }
+
     return {
       schema: PLAN_SCHEMA,
       app: APP_TAG,
       walls: { rooms, chain },
       symbols: { symbols },
+      measurements,
       view: { zoom: 1, panX: 0, panY: 0 },
       unit: compact.u,
     };
@@ -165,6 +186,7 @@ export function buildPlan() {
     symbols: {
       symbols: JSON.parse(JSON.stringify(symbolsModel.symbols)),
     },
+    measurements: JSON.parse(JSON.stringify(measurementsModel.measurements)),
     view: {
       zoom: view.zoom,
       panX: view.panX,
@@ -235,6 +257,16 @@ export function validatePlan(raw) {
     // unit
     if (!VALID_UNITS.includes(raw.unit)) return null;
 
+    // measurements — OPTIONAL-ADDITIVE: absent → normalise to [], present → validate
+    const rawMeas = raw.measurements === undefined ? [] : raw.measurements;
+    if (!Array.isArray(rawMeas)) return null;
+    for (const entry of rawMeas) {
+      if (!entry || typeof entry !== "object") return null;
+      if (typeof entry.id !== "string") return null;
+      if (!_isValidVertex(entry.a)) return null;
+      if (!_isValidVertex(entry.b)) return null;
+    }
+
     // Return a clean copy (normalised)
     return {
       schema: raw.schema,
@@ -246,6 +278,7 @@ export function validatePlan(raw) {
       symbols: {
         symbols: JSON.parse(JSON.stringify(raw.symbols.symbols)),
       },
+      measurements: JSON.parse(JSON.stringify(rawMeas)),
       view: {
         zoom: raw.view.zoom,
         panX: raw.view.panX,
@@ -267,6 +300,7 @@ export function validatePlan(raw) {
 export function applyPlan(plan) {
   hydrateWalls(plan.walls);
   hydrateSymbols(plan.symbols);
+  hydrateMeasurements({ measurements: plan.measurements });
   setView(plan.view);
   setUnit(plan.unit);
 }
@@ -293,6 +327,7 @@ export function serializePlan(plan) {
     app: plan.app,
     walls: plan.walls,
     symbols: plan.symbols,
+    measurements: plan.measurements,
     view: plan.view,
     unit: plan.unit,
   });

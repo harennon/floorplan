@@ -70,6 +70,15 @@ export {
   DEFAULT_THRESHOLD,
 } from "../../src/js/clearance.js";
 
+export {
+  model as measurementsModel,
+  hydrate as hydrateMeasurements,
+  add as addMeasurement,
+  remove as removeMeasurement,
+  getById as getMeasurementById,
+  length as measurementLength,
+} from "../../src/js/measurements.js";
+
 // Live-binding read of the effective (post-clamp) threshold. A named import of
 // `threshold` is a live binding, but re-reading via a namespace import is the
 // clearest way to always see the value setThreshold() actually applied (M1).
