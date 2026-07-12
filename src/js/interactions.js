@@ -171,17 +171,21 @@ function _onPointerDown(e) {
   if (_pointers.size === 2) {
     // Second finger: cancel any in-flight single-pointer gesture, seed pinch.
 
+    // Capture before clearing so both branches can test the flag.
+    const wasPending = _drawPending;
+
     // Cancel in-flight draw gesture.
-    if (_drawPending && _drawHooks) {
+    if (wasPending && _drawHooks) {
       _drawHooks.onLeave();
     }
-    _drawPending = false;
 
     // Cancel in-flight measure gesture tap (keep _pendingA — per spec Edge Case 4,
     // pinch cancels the current tap only, not the whole placement).
-    if (_drawPending && _measureHooks) {
+    if (wasPending && _measureHooks) {
       _measureHooks.onLeave();
     }
+
+    _drawPending = false;
 
     // Cancel in-flight select-move/rotate: finalize at pre-pinch position.
     if (_selectConsumed && _selectHooks) {
