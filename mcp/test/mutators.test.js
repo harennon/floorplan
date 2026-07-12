@@ -645,13 +645,16 @@ test("LLD 95: place_symbol preset on type with no presets → ok:false, nothing 
   assert.equal(symbolsModel.symbols.length, countBefore);
 });
 
-test("LLD 95: explicit w overrides preset per-axis (preset:'Queen', w:1.6 → w===1.6, h===2.03)", () => {
+test("LLD 95: explicit w overrides preset per-axis (sofa preset:'3-seat', w:2.4 → w===2.4, h===0.95)", () => {
+  // Use a non-discrete (free-resize) type: for discrete types (bed/fridge/stove/washer)
+  // LLD 99 hard-snaps both axes to a standard preset pair, so per-axis override cannot
+  // hold there. sofa resizes freely, so the explicit w survives while the preset's h stays.
   session.newPlan();
   tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
-  const placed = tools.tool_place_symbol({ type: "bed", x: 6, y: 6, preset: "Queen", w: 1.6 });
+  const placed = tools.tool_place_symbol({ type: "sofa", x: 6, y: 6, preset: "3-seat", w: 2.4 });
   assert.equal(placed.ok, true);
-  assert.ok(Math.abs(placed.w - 1.6) < 1e-9, `w expected 1.6, got ${placed.w}`);
-  assert.ok(Math.abs(placed.h - 2.03) < 1e-9, `h expected 2.03, got ${placed.h}`);
+  assert.ok(Math.abs(placed.w - 2.4) < 1e-9, `w expected 2.4, got ${placed.w}`);
+  assert.ok(Math.abs(placed.h - 0.95) < 1e-9, `h expected 0.95, got ${placed.h}`);
 });
 
 test("LLD 95: preset on opening resolves width, then on-wall guard still fires for off-wall position", () => {
@@ -702,4 +705,70 @@ test("LLD 95: preset is non-string → ok:false with clear reason, nothing place
   assert.equal(r.ok, false);
   assert.match(r.reason, /preset must be a string/);
   assert.equal(symbolsModel.symbols.length, countBefore);
+});
+
+// ── LLD 99: discrete furniture snap ──────────────────────────────────────────
+
+test("LLD 99: tool_resize_symbol on a bed with between-size width snaps to a mattress preset and returns snapped:true clamped:false", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  // Place a default Queen bed (1.52 × 2.03).
+  const placed = tools.tool_place_symbol({ type: "bed", x: 6, y: 6 });
+  assert.equal(placed.ok, true);
+  assert.ok(Math.abs(placed.w - 1.52) < 1e-9, `default Queen w expected 1.52, got ${placed.w}`);
+  assert.ok(Math.abs(placed.h - 2.03) < 1e-9, `default Queen h expected 2.03, got ${placed.h}`);
+
+  // Resize width to 1.20 m (between Full 1.37 and Twin 0.97).
+  // Candidate (1.20, 2.03) snaps to Full (1.37, 1.91) under the raw metric (LLD step 2).
+  const rz = tools.tool_resize_symbol({ id: placed.id, dim: "w", metres: 1.20 });
+  assert.equal(rz.ok, true);
+  assert.ok(Math.abs(rz.w - 1.37) < 1e-9, `w expected 1.37 (Full), got ${rz.w}`);
+  assert.ok(Math.abs(rz.h - 1.91) < 1e-9, `h expected 1.91 (Full), got ${rz.h}`);
+  assert.equal(rz.clamped, false, "1.20 is within bed's [min_w,max_w], so clamped must be false");
+  assert.equal(rz.snapped, true, "snap changed the dims, so snapped must be true");
+
+  // Result must equal a bed preset exactly.
+  const preset = CATALOG.bed.presets.find((p) => Math.abs(p.w - rz.w) < 1e-9 && Math.abs(p.h - rz.h) < 1e-9);
+  assert.ok(preset, `result (${rz.w}, ${rz.h}) must equal a bed catalog preset`);
+});
+
+test("LLD 99: tool_place_symbol on a discrete appliance with between-rung width snaps to a standard size", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  // Fridge width 0.70 is between 30\" (0.76) and 24\" compact (0.61).
+  const placed = tools.tool_place_symbol({ type: "fridge", x: 3, y: 3, w: 0.70 });
+  assert.equal(placed.ok, true);
+  // 0.70 is in [min_w,max_w] = [0.55, 0.91] so not clamped; candidate (0.70, 0.81).
+  // Distance to 24\" (0.61,0.81): (0.09)²=0.0081, distance to 30\" (0.76,0.81): (0.06)²=0.0036. Snaps to 30\".
+  assert.ok(Math.abs(placed.w - 0.76) < 1e-9, `expected 30\" fridge (0.76), got ${placed.w}`);
+  const preset = CATALOG.fridge.presets.find((p) => Math.abs(p.w - placed.w) < 1e-9 && Math.abs(p.h - placed.h) < 1e-9);
+  assert.ok(preset, `fridge result (${placed.w}, ${placed.h}) must match a catalog preset`);
+  assert.equal(placed.snapped, true);
+});
+
+test("LLD 99: tool_resize_symbol on a non-discrete type (sofa) still returns the clamped, un-snapped value", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const placed = tools.tool_place_symbol({ type: "sofa", x: 6, y: 6 });
+  assert.equal(placed.ok, true);
+  // Resize to 2.30 m (in-range for sofa, between loveseat 1.65 and 3-seat 2.10 presets).
+  const rz = tools.tool_resize_symbol({ id: placed.id, dim: "w", metres: 2.30 });
+  assert.equal(rz.ok, true);
+  // Must stay at exactly 2.30 (no snap).
+  assert.ok(Math.abs(rz.w - 2.30) < 1e-9, `sofa w expected 2.30 (un-snapped), got ${rz.w}`);
+  // snapped field must not be present (or falsy) for non-discrete types.
+  assert.ok(!rz.snapped, "non-discrete type must not have snapped:true");
+});
+
+test("LLD 99: tool_resize_symbol on an already-preset-aligned bed returns snapped:false (no change from snap)", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const placed = tools.tool_place_symbol({ type: "bed", x: 6, y: 6 });
+  // Resize width to exactly Queen 1.52 (already a preset).
+  const rz = tools.tool_resize_symbol({ id: placed.id, dim: "w", metres: 1.52 });
+  assert.equal(rz.ok, true);
+  assert.ok(Math.abs(rz.w - 1.52) < 1e-9);
+  assert.ok(Math.abs(rz.h - 2.03) < 1e-9);
+  // Snap did not change anything beyond clamp, so snapped must be false.
+  assert.equal(rz.snapped, false);
 });

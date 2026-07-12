@@ -28,6 +28,7 @@ import {
   rotateSymbol,
   resizeSymbol,
   clampDim,
+  snapToPreset,
   removeSymbol,
   duplicateSymbol,
   getSymbol,
@@ -348,7 +349,10 @@ export function tool_resize_room(args) {
  * place_symbol: { type, x, y, w?, h?, rot?, preset? }. Dims routed through clampDim.
  * Optional preset:"<name>" resolves to {w,h} from CATALOG[type].presets by exact name.
  * Explicit w/h args override the preset per-axis.
- * Returns { ok, id, type, w, h, rot, clamped, hIgnored, presetApplied?, clearance } or { ok:false }.
+ * Returns { ok, id, type, w, h, rot, clamped, hIgnored, presetApplied?, snapped?, clearance }
+ * or { ok:false }.
+ * For discrete types (bed, fridge, stove, washer), snapped:boolean is included —
+ * true when the discrete snap (not clamp) changed the final w/h from the clamped request.
  */
 export function tool_place_symbol(args) {
   const { type, x, y, w, h, rot, preset } = args || {};
@@ -384,8 +388,12 @@ export function tool_place_symbol(args) {
   }
 
   const isOpening = !!CATALOG[type].openings;
+  const isDiscrete = !!(CATALOG[type].discrete && CATALOG[type].presets);
 
   const sym = createSymbol(type, x, y);
+  // Capture catalog defaults before any resize (used for the snapped baseline below).
+  const defaultW = sym.w;
+  const defaultH = sym.h;
   let clamped = false;
   let hIgnored = false;
 
@@ -425,6 +433,10 @@ export function tool_place_symbol(args) {
   }
 
   addSymbol(sym);
+
+  // For discrete types, compute snapped: true when snap (not clamp) changed the dims.
+  // The requested dims after clamp are what resizeSymbol would have produced without snap;
+  // compare that against the actual snapped result.
   const result = {
     ok: true,
     id: sym.id,
@@ -437,6 +449,18 @@ export function tool_place_symbol(args) {
     clearance: singleClearance(sym.id),
   };
   if (presetApplied !== undefined) result.presetApplied = presetApplied;
+  if (isDiscrete) {
+    // Compute what the dims would have been after clamp only (no snap).
+    // Per axis the requested dim is: explicit arg → preset dim → catalog default.
+    // For specified axes use clampDim(requested); unspecified axes fall back to the
+    // preset dim (if a preset was applied) else the catalog default captured before
+    // any resize (mirrors the resize_symbol path).
+    const reqW = w !== undefined ? w : (presetW !== undefined ? presetW : undefined);
+    const reqH = h !== undefined ? h : (presetH !== undefined ? presetH : undefined);
+    const clampedW = reqW !== undefined ? clampDim(type, "w", reqW) : defaultW;
+    const clampedH = (reqH !== undefined && !isOpening) ? clampDim(type, "h", reqH) : defaultH;
+    result.snapped = sym.w !== clampedW || sym.h !== clampedH;
+  }
   return result;
 }
 
@@ -473,6 +497,8 @@ export function tool_move_symbol(args) {
 
 /**
  * resize_symbol: { id, dim:"w"|"h", metres, lockAspect? }. Clamped; reports change.
+ * For discrete types (bed, fridge, stove, washer), also reports snapped:boolean —
+ * true when the discrete snap (not clamp) changed the final w/h from the clamped request.
  */
 export function tool_resize_symbol(args) {
   const { id, dim, metres, lockAspect } = args || {};
@@ -485,9 +511,25 @@ export function tool_resize_symbol(args) {
   if (isOpening && dim === "h") {
     return { ok: true, changed: false, hIgnored: true, w: sym.w, h: sym.h, clearance: singleClearance(id) };
   }
-  const clamped = clampDim(sym.type, dim, metres) !== metres;
+  const isDiscrete = !!(CATALOG[sym.type].discrete && CATALOG[sym.type].presets);
+  const clampedValue = clampDim(sym.type, dim, metres);
+  const clamped = clampedValue !== metres;
+
+  // For discrete types, capture the clamped-only dims (what resizeSymbol would have
+  // produced without snap) to compute the snapped flag after the call.
+  const preW = sym.w;
+  const preH = sym.h;
   const changed = resizeSymbol(sym, dim, metres, !!lockAspect);
-  return { ok: true, changed, clamped, w: sym.w, h: sym.h, clearance: singleClearance(id) };
+
+  const result = { ok: true, changed, clamped, w: sym.w, h: sym.h, clearance: singleClearance(id) };
+  if (isDiscrete) {
+    // snapped: true when the discrete snap changed dims beyond what clamp alone would give.
+    // The clamped-only result for this axis would be clampedValue; the other axis is unchanged.
+    const clampOnlyW = dim === "w" ? clampedValue : preW;
+    const clampOnlyH = dim === "h" ? clampedValue : preH;
+    result.snapped = sym.w !== clampOnlyW || sym.h !== clampOnlyH;
+  }
+  return result;
 }
 
 /** rotate_symbol: { id, deg }. Normalised to [0,360). */

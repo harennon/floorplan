@@ -107,7 +107,7 @@ export function buildExportSvg() {
 
     // Fill (closed rooms only)
     if (room.closed && pts.length >= 3) {
-      body += `<polygon points="${ptsStr}" fill="${p.roomFill}" stroke="none"/>\n`;
+      body += `<polygon points="${ptsStr}" fill="${room.color || p.roomFill}" stroke="none"/>\n`;
     }
 
     // Wall body
@@ -152,7 +152,7 @@ export function buildExportSvg() {
   for (const sym of symbolsModel.symbols) {
     const cs = corners(sym);
     const ptsStr = cs.map(c => `${wx(c.x)},${wy(c.y)}`).join(" ");
-    body += `<polygon points="${ptsStr}" fill="${p.symFill}" stroke="${p.symStroke}" stroke-width="1.5" stroke-linejoin="round"/>\n`;
+    body += `<polygon points="${ptsStr}" fill="${sym.color || p.symFill}" stroke="${p.symStroke}" stroke-width="1.5" stroke-linejoin="round"/>\n`;
 
     // Type label at center
     const label = CATALOG[sym.type]?.label || sym.type;

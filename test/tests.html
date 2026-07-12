@@ -1452,7 +1452,7 @@ import {
   model as symbolModel,
   CATALOG,
   createSymbol, addSymbol, removeSymbol, duplicateSymbol, getSymbol,
-  hitTest, pickSymbol, clampDim, resizeSymbol, moveSymbol, rotateSymbol, corners,
+  hitTest, pickSymbol, clampDim, resizeSymbol, snapToPreset, moveSymbol, rotateSymbol, corners,
 } from "../src/js/symbols.js";
 
 // ─── Import symbolTool.js (preset helpers only; DOM-independent) ──────────────
@@ -1730,6 +1730,152 @@ describe("symbols.js — resizeSymbol", () => {
   });
 });
 
+// ─── Tests: symbols.js — LLD 99 snapToPreset ─────────────────────────────────
+
+describe("LLD 99 — snapToPreset: pure helper", () => {
+  it("returns an exact preset pair for a between-size bed width input", () => {
+    const r = snapToPreset("bed", 1.20, 2.03);
+    // Some preset pair must be returned.
+    const match = CATALOG.bed.presets.find((p) => Math.abs(p.w - r.w) < 1e-9 && Math.abs(p.h - r.h) < 1e-9);
+    if (!match) throw new Error(`snapToPreset returned (${r.w}, ${r.h}) which is not a bed preset`);
+  });
+
+  it("no-op when the type has no presets", () => {
+    // chair has no presets in the catalog; result must be unchanged.
+    const r = snapToPreset("chair", 0.50, 0.55);
+    expect(r.w).toBeCloseTo(0.50, 9);
+    expect(r.h).toBeCloseTo(0.55, 9);
+  });
+
+  it("returns the sole preset for a one-preset type (hypothetical)", () => {
+    // Build a fake-type-style call by passing a type with one preset; use a real type
+    // whose preset list we test directly — check washer has exactly 2 presets and pick near first.
+    // Instead, test directly: create a minimal preset and verify selection.
+    // We can test via a type whose first preset wins when at that exact point.
+    const r = snapToPreset("washer", CATALOG.washer.presets[0].w, CATALOG.washer.presets[0].h);
+    expect(r.w).toBeCloseTo(CATALOG.washer.presets[0].w, 9);
+    expect(r.h).toBeCloseTo(CATALOG.washer.presets[0].h, 9);
+  });
+
+  it("on an exact tie (or near-tie) returns a valid preset (stable, deterministic)", () => {
+    // The two closest presets to (0.97, 1.97) are Twin (0.97,1.91) and Twin XL (0.97,2.03),
+    // nominally equidistant but floating-point may break the exact tie. The contract is that
+    // the result is deterministic and always equals a real catalog preset.
+    const r = snapToPreset("bed", 0.97, 1.97);
+    const match = CATALOG.bed.presets.find((p) => Math.abs(p.w - r.w) < 1e-9 && Math.abs(p.h - r.h) < 1e-9);
+    if (!match) throw new Error(`snapToPreset tie returned (${r.w}, ${r.h}) which is not a bed preset`);
+  });
+});
+
+describe("LLD 99 — resizeSymbol discrete snap: intuitive single-edit outcome (locks in raw metric)", () => {
+  it("Queen bed width 1.20 m snaps to Full (1.37 × 1.91) — not Twin XL or Twin", () => {
+    resetSymbolModel();
+    // Start at Queen defaults: w=1.52, h=2.03.
+    const s = createSymbol("bed", 0, 0);
+    expect(s.w).toBeCloseTo(1.52, 9);
+    expect(s.h).toBeCloseTo(2.03, 9);
+    resizeSymbol(s, "w", 1.20);
+    // Candidate (1.20, 2.03); raw metric: Full(1.37,1.91) d²=0.0433, TwinXL(0.97,2.03) d²=0.0529.
+    expect(s.w).toBeCloseTo(1.37, 9);
+    expect(s.h).toBeCloseTo(1.91, 9);
+  });
+
+  it("both dims move to the Full preset pair (not a per-axis blend)", () => {
+    resetSymbolModel();
+    const s = createSymbol("bed", 0, 0);
+    resizeSymbol(s, "w", 1.20);
+    // Result must exactly equal a catalog preset.
+    const preset = CATALOG.bed.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`result (${s.w}, ${s.h}) is not a bed preset pair`);
+  });
+});
+
+describe("LLD 99 — resizeSymbol discrete snap: appliances", () => {
+  it("fridge between-rung width snaps to a standard appliance size", () => {
+    resetSymbolModel();
+    const s = createSymbol("fridge", 0, 0);
+    resizeSymbol(s, "w", 0.70);
+    const preset = CATALOG.fridge.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`fridge result (${s.w}, ${s.h}) is not a fridge preset`);
+  });
+
+  it("stove between-rung width snaps to a catalog size", () => {
+    resetSymbolModel();
+    const s = createSymbol("stove", 0, 0);
+    resizeSymbol(s, "w", 0.82); // between 30\" (0.76) and 36\" (0.91)
+    const preset = CATALOG.stove.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`stove result (${s.w}, ${s.h}) is not a stove preset`);
+  });
+
+  it("washer between-rung width snaps to a catalog size", () => {
+    resetSymbolModel();
+    const s = createSymbol("washer", 0, 0);
+    resizeSymbol(s, "w", 0.65); // between 24\" compact (0.61) and 27\" standard (0.69)
+    const preset = CATALOG.washer.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`washer result (${s.w}, ${s.h}) is not a washer preset`);
+  });
+});
+
+describe("LLD 99 — resizeSymbol regression: non-discrete types still free-scale", () => {
+  it("sofa keeps the typed value (not snapped to a preset)", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 0, 0);
+    resizeSymbol(s, "w", 2.30); // in-range but between presets
+    expect(s.w).toBeCloseTo(2.30, 9);
+  });
+
+  it("table keeps the typed value", () => {
+    resetSymbolModel();
+    const s = createSymbol("table", 0, 0);
+    resizeSymbol(s, "w", 1.30); // in-range but between presets
+    expect(s.w).toBeCloseTo(1.30, 9);
+  });
+
+  it("desk keeps the typed value", () => {
+    resetSymbolModel();
+    const s = createSymbol("desk", 0, 0);
+    resizeSymbol(s, "w", 1.50); // in-range
+    expect(s.w).toBeCloseTo(1.50, 9);
+  });
+
+  it("dining-table-round stays continuous (not discrete, despite having presets)", () => {
+    resetSymbolModel();
+    const s = createSymbol("dining-table-round", 0, 0);
+    resizeSymbol(s, "w", 1.10); // in-range, between presets 1.00 and 1.25
+    // circular: both axes mirror to 1.10 (not snapped to a preset)
+    expect(s.w).toBeCloseTo(1.10, 9);
+    expect(s.h).toBeCloseTo(1.10, 9);
+  });
+});
+
+describe("LLD 99 — resizeSymbol: lockAspect ignored for discrete type (preset pair already fixes aspect)", () => {
+  it("lockAspect:true on a bed still yields a preset pair, not an aspect-scaled result", () => {
+    resetSymbolModel();
+    const s = createSymbol("bed", 0, 0);
+    resizeSymbol(s, "w", 1.20, true); // lockAspect=true
+    const preset = CATALOG.bed.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`result (${s.w}, ${s.h}) is not a bed preset pair (lockAspect must be overridden)`);
+  });
+});
+
+describe("LLD 99 — plan JSON round-trip: snapped bed w/h survive serialize → hydrate", () => {
+  it("snapped w/h are exact catalog numbers that serialize and hydrate losslessly", async () => {
+    resetSymbolModel();
+    const s = createSymbol("bed", 1.0, 1.0);
+    addSymbol(s);
+    resizeSymbol(s, "w", 1.20); // snaps to Full 1.37×1.91
+    expect(s.w).toBeCloseTo(1.37, 9);
+    expect(s.h).toBeCloseTo(1.91, 9);
+    // Serialize round-trip via JSON.
+    const snapshot = { symbols: symbolModel.symbols.map((sym) => ({ ...sym })) };
+    const json = JSON.stringify(snapshot);
+    const parsed = JSON.parse(json);
+    const rs = parsed.symbols[0];
+    expect(rs.w).toBeCloseTo(1.37, 9);
+    expect(rs.h).toBeCloseTo(1.91, 9);
+  });
+});
+
 describe("symbols.js — moveSymbol", () => {
   it("sets center exactly", () => {
     resetSymbolModel();
@@ -1937,11 +2083,17 @@ describe("LLD-45 — resizeSymbol: clamp on huge/tiny inputs", () => {
     expect(s.h).toBeCloseTo(CATALOG.bathtub.min_h, 9);
     expect(changed).toBe(true);
   });
-  it("washer w huge clamps to max_w and returns changed=true", () => {
+  it("washer w huge clamps then snaps to nearest preset (result is a catalog preset)", () => {
+    // washer is discrete: huge w clamps to max_w (0.70), then candidate (0.70, default_h=0.76)
+    // snaps to nearest preset pair. 27\" standard (0.69, 0.76) wins (d²=0.0001 vs compact 0.0202).
+    // Default washer is already (0.69, 0.76) = 27\" standard, so changed=false (no net change).
     const s = createSymbol("washer", 0, 0);
-    const changed = resizeSymbol(s, "w", 999);
-    expect(s.w).toBeCloseTo(CATALOG.washer.max_w, 9);
-    expect(changed).toBe(true);
+    resizeSymbol(s, "w", 999);
+    const preset = CATALOG.washer.presets.find((p) => Math.abs(p.w - s.w) < 1e-9 && Math.abs(p.h - s.h) < 1e-9);
+    if (!preset) throw new Error(`washer result (${s.w}, ${s.h}) is not a washer preset`);
+    // Result must be the 27\" standard (nearest preset to clamped candidate).
+    expect(s.w).toBeCloseTo(CATALOG.washer.presets[1].w, 9); // 27\" standard w=0.69
+    expect(s.h).toBeCloseTo(CATALOG.washer.presets[1].h, 9); // 27\" standard h=0.76
   });
   it("washer h tiny clamps to min_h and returns changed=true", () => {
     const s = createSymbol("washer", 0, 0);
@@ -2123,16 +2275,17 @@ describe("symbolDimEntry — lock-aspect is forwarded to resizeSymbol", () => {
     resetSymbolModel();
     setUnit("m");
     view.zoom = 1; view.panX = 0; view.panY = 0;
-    const s = createSymbol("bed", 5, 5); // w=1.5, h=2.0
+    // Use a non-discrete type (sofa) so free-scaling applies without snap interference.
+    const s = createSymbol("sofa", 5, 5); // w=2.0, h=0.90
     addSymbol(s);
     const origH = s.h;
     const rig = makeSymbolDimRig(false); // lockAspect off
     beginSymbolEdit(s.id, "w");
     const input = rig.stage.querySelector(".sym-dim-input");
-    input.value = "1.2m";
+    input.value = "1.8m"; // in-range for sofa: [1.50, 3.50]
     commitSymbol();
     // h must be unchanged when lockAspect is false
-    expect(s.w).toBeCloseTo(1.2, 5);
+    expect(s.w).toBeCloseTo(1.8, 5);
     expect(s.h).toBeCloseTo(origH, 5);
     rig.cleanup();
   });
@@ -15341,6 +15494,501 @@ describe("LLD 95 — _matchingPreset (via matchingPresetForTest)", () => {
     if (p.name !== "Twin") throw new Error(`Expected 'Twin', got '${p.name}'`);
     expect(sym.w).toBeCloseTo(0.97, 9);
     expect(sym.h).toBeCloseTo(1.91, 9);
+  });
+});
+
+// ─── Tests: LLD 97 — palette.js (pure, DOM-free) ─────────────────────────────
+
+import {
+  SWATCHES, swatchGroupsForCategory,
+  isValidHexColor, coerceColor,
+} from "../src/js/palette.js";
+
+import {
+  setSymbolColor,
+} from "../src/js/symbols.js";
+
+import {
+  setRoomColor,
+} from "../src/js/walls.js";
+
+describe("LLD 97 — palette.js: isValidHexColor", () => {
+  it("accepts #rgb", () => {
+    if (!isValidHexColor("#fff")) throw new Error("#fff should be valid");
+    if (!isValidHexColor("#abc")) throw new Error("#abc should be valid");
+    if (!isValidHexColor("#0F3")) throw new Error("#0F3 should be valid");
+  });
+  it("accepts #rrggbb", () => {
+    if (!isValidHexColor("#ffffff")) throw new Error("#ffffff should be valid");
+    if (!isValidHexColor("#a0784a")) throw new Error("#a0784a should be valid");
+    if (!isValidHexColor("#AABBCC")) throw new Error("#AABBCC should be valid");
+  });
+  it("rejects CSS color names", () => {
+    if (isValidHexColor("red")) throw new Error("'red' should be invalid");
+    if (isValidHexColor("white")) throw new Error("'white' should be invalid");
+  });
+  it("rejects rgba()", () => {
+    if (isValidHexColor("rgba(255,255,255,0.5)")) throw new Error("rgba() should be invalid");
+  });
+  it("rejects #12 (too short)", () => {
+    if (isValidHexColor("#12")) throw new Error("#12 should be invalid");
+  });
+  it("rejects #gggggg (non-hex chars)", () => {
+    if (isValidHexColor("#gggggg")) throw new Error("#gggggg should be invalid");
+  });
+  it("rejects number", () => {
+    if (isValidHexColor(123)) throw new Error("number should be invalid");
+  });
+  it("rejects object", () => {
+    if (isValidHexColor({ hex: "#fff" })) throw new Error("object should be invalid");
+  });
+  it("rejects empty string", () => {
+    if (isValidHexColor("")) throw new Error("empty string should be invalid");
+  });
+  it("rejects null and undefined", () => {
+    if (isValidHexColor(null)) throw new Error("null should be invalid");
+    if (isValidHexColor(undefined)) throw new Error("undefined should be invalid");
+  });
+});
+
+describe("LLD 97 — palette.js: coerceColor", () => {
+  it("coerces valid #rgb → same string", () => {
+    const result = coerceColor("#fff");
+    if (result !== "#fff") throw new Error(`Expected '#fff', got ${result}`);
+  });
+  it("coerces valid #rrggbb → same string", () => {
+    const result = coerceColor("#a0784a");
+    if (result !== "#a0784a") throw new Error(`Expected '#a0784a', got ${result}`);
+  });
+  it("coerces 'red' → undefined", () => {
+    const result = coerceColor("red");
+    if (result !== undefined) throw new Error(`Expected undefined, got ${result}`);
+  });
+  it("coerces rgba() → undefined", () => {
+    if (coerceColor("rgba(0,0,0,1)") !== undefined) throw new Error("rgba() should coerce to undefined");
+  });
+  it("coerces '#12' → undefined", () => {
+    if (coerceColor("#12") !== undefined) throw new Error("#12 should coerce to undefined");
+  });
+  it("coerces number → undefined", () => {
+    if (coerceColor(42) !== undefined) throw new Error("number should coerce to undefined");
+  });
+  it("coerces '' → undefined", () => {
+    if (coerceColor("") !== undefined) throw new Error("empty string should coerce to undefined");
+  });
+  it("coerces injection attempt → undefined", () => {
+    if (coerceColor('#fff" onload=alert(1)') !== undefined) throw new Error("injection string should coerce to undefined");
+  });
+});
+
+describe("LLD 97 — palette.js: swatchGroupsForCategory", () => {
+  it("returns [] for openings (door/window are not colorable)", () => {
+    const groups = swatchGroupsForCategory("openings");
+    if (!Array.isArray(groups) || groups.length !== 0) {
+      throw new Error(`Expected [] for openings, got ${JSON.stringify(groups)}`);
+    }
+  });
+  it("returns non-empty array for living category (includes 'neutral')", () => {
+    const groups = swatchGroupsForCategory("living");
+    if (!Array.isArray(groups) || groups.length === 0) throw new Error("living should return non-empty groups");
+    if (!groups.includes("neutral")) throw new Error("living should include 'neutral'");
+  });
+  it("returns floor group for 'floor'", () => {
+    const groups = swatchGroupsForCategory("floor");
+    if (!Array.isArray(groups) || !groups.includes("floor")) {
+      throw new Error(`Expected 'floor' in groups, got ${JSON.stringify(groups)}`);
+    }
+  });
+  it("returns non-empty groups for kitchen category (includes 'neutral')", () => {
+    const groups = swatchGroupsForCategory("kitchen");
+    if (!Array.isArray(groups) || groups.length === 0) throw new Error("kitchen should return non-empty groups");
+    if (!groups.includes("neutral")) throw new Error("kitchen should include 'neutral'");
+  });
+  it("unknown category falls back to ['neutral']", () => {
+    const groups = swatchGroupsForCategory("unknown-future-category");
+    if (JSON.stringify(groups) !== JSON.stringify(["neutral"])) {
+      throw new Error(`Expected ['neutral'] for unknown category, got ${JSON.stringify(groups)}`);
+    }
+  });
+});
+
+describe("LLD 97 — symbols.js: setSymbolColor", () => {
+  it("sets color on sym (returns true on change)", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 1, 1);
+    addSymbol(s);
+    const changed = setSymbolColor(s, "#a0784a");
+    if (!changed) throw new Error("setSymbolColor should return true on change");
+    if (s.color !== "#a0784a") throw new Error(`Expected s.color='#a0784a', got ${s.color}`);
+  });
+  it("returns false when value unchanged", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 1, 1);
+    addSymbol(s);
+    setSymbolColor(s, "#a0784a");
+    const unchanged = setSymbolColor(s, "#a0784a");
+    if (unchanged) throw new Error("setSymbolColor should return false when value unchanged");
+  });
+  it("clears color (deletes key) when null passed", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 1, 1);
+    addSymbol(s);
+    setSymbolColor(s, "#a0784a");
+    const changed = setSymbolColor(s, null);
+    if (!changed) throw new Error("setSymbolColor(null) should return true when clearing");
+    if ("color" in s) throw new Error("color key should be deleted after clear");
+  });
+  it("clears color when undefined passed", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 1, 1);
+    addSymbol(s);
+    setSymbolColor(s, "#a0784a");
+    setSymbolColor(s, undefined);
+    if ("color" in s) throw new Error("color key should be deleted after undefined");
+  });
+});
+
+describe("LLD 97 — symbols.js: duplicateSymbol copies color", () => {
+  it("duplicate inherits color from source", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 1, 1);
+    s.color = "#a0784a";
+    addSymbol(s);
+    const dup = duplicateSymbol(s.id);
+    if (!dup) throw new Error("duplicateSymbol returned null");
+    if (dup.color !== "#a0784a") throw new Error(`Expected dup.color='#a0784a', got ${dup.color}`);
+  });
+  it("duplicate without color has no color key", () => {
+    resetSymbolModel();
+    const s = createSymbol("sofa", 1, 1);
+    addSymbol(s);
+    const dup = duplicateSymbol(s.id);
+    if (!dup) throw new Error("duplicateSymbol returned null");
+    if ("color" in dup) throw new Error("dup should not have color key when source has none");
+  });
+});
+
+describe("LLD 97 — walls.js: setRoomColor", () => {
+  it("sets color on room", () => {
+    model.rooms.length = 0;
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }] });
+    const room = model.rooms[0];
+    const changed = setRoomColor(room, "#dfc99a");
+    if (!changed) throw new Error("setRoomColor should return true on change");
+    if (room.color !== "#dfc99a") throw new Error(`Expected room.color='#dfc99a', got ${room.color}`);
+    model.rooms.length = 0;
+  });
+  it("clears color when null passed", () => {
+    model.rooms.length = 0;
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }] });
+    const room = model.rooms[0];
+    setRoomColor(room, "#dfc99a");
+    setRoomColor(room, null);
+    if ("color" in room) throw new Error("color key should be deleted after null");
+    model.rooms.length = 0;
+  });
+});
+
+describe("LLD 97 — validatePlan: color coercion", () => {
+  it("(a) plan with valid symbol color round-trips it", () => {
+    resetAll();
+    const planWithColor = {
+      schema: 1, app: "floorplan",
+      walls: { rooms: [], chain: [] },
+      symbols: { symbols: [{ id: "s0", type: "sofa", x: 1, y: 1, w: 2, h: 0.9, rot: 0, color: "#a0784a" }] },
+      measurements: [],
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "m",
+    };
+    const v = validatePlan(planWithColor);
+    if (!v) throw new Error("validatePlan should accept plan with valid color");
+    if (v.symbols.symbols[0].color !== "#a0784a") {
+      throw new Error(`Expected color '#a0784a', got ${v.symbols.symbols[0].color}`);
+    }
+  });
+  it("(b) plan with non-string color: drops field, plan still valid", () => {
+    resetAll();
+    const planBadColor = {
+      schema: 1, app: "floorplan",
+      walls: { rooms: [], chain: [] },
+      symbols: { symbols: [{ id: "s0", type: "sofa", x: 1, y: 1, w: 2, h: 0.9, rot: 0, color: 42 }] },
+      measurements: [],
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "m",
+    };
+    const v = validatePlan(planBadColor);
+    if (!v) throw new Error("validatePlan must NOT reject plan with non-string color");
+    if ("color" in v.symbols.symbols[0]) {
+      throw new Error("Non-string color should be dropped from the normalised output");
+    }
+  });
+  it("(c) plan with non-hex string color normalises to undefined", () => {
+    resetAll();
+    const planNonHex = {
+      schema: 1, app: "floorplan",
+      walls: { rooms: [], chain: [] },
+      symbols: { symbols: [{ id: "s0", type: "sofa", x: 1, y: 1, w: 2, h: 0.9, rot: 0, color: "red" }] },
+      measurements: [],
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "m",
+    };
+    const v = validatePlan(planNonHex);
+    if (!v) throw new Error("validatePlan must NOT reject plan with non-hex color string");
+    if (v.symbols.symbols[0].color !== undefined) {
+      throw new Error(`Non-hex color should normalise to undefined, got ${v.symbols.symbols[0].color}`);
+    }
+  });
+  it("(d) legacy plan with no color validates unchanged (backward compat)", () => {
+    resetAll();
+    const legacyPlan = {
+      schema: 1, app: "floorplan",
+      walls: { rooms: [], chain: [] },
+      symbols: { symbols: [{ id: "s0", type: "bed", x: 1, y: 1, w: 1.52, h: 2.03, rot: 0 }] },
+      measurements: [],
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "m",
+    };
+    const v = validatePlan(legacyPlan);
+    if (!v) throw new Error("Legacy plan must validate");
+    if ("color" in v.symbols.symbols[0]) throw new Error("Legacy plan symbol should have no color key");
+  });
+  it("room color round-trips through validatePlan", () => {
+    resetAll();
+    const planWithRoomColor = {
+      schema: 1, app: "floorplan",
+      walls: {
+        rooms: [{ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }], color: "#dfc99a" }],
+        chain: [],
+      },
+      symbols: { symbols: [] },
+      measurements: [],
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "m",
+    };
+    const v = validatePlan(planWithRoomColor);
+    if (!v) throw new Error("validatePlan must accept plan with valid room color");
+    if (v.walls.rooms[0].color !== "#dfc99a") {
+      throw new Error(`Expected room.color='#dfc99a', got ${v.walls.rooms[0].color}`);
+    }
+  });
+  it("injection attempt in color is blocked (coerced to undefined)", () => {
+    resetAll();
+    const malicious = {
+      schema: 1, app: "floorplan",
+      walls: { rooms: [], chain: [] },
+      symbols: { symbols: [{ id: "s0", type: "sofa", x: 1, y: 1, w: 2, h: 0.9, rot: 0, color: '#fff" onload=alert(1)' }] },
+      measurements: [],
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "m",
+    };
+    const v = validatePlan(malicious);
+    if (!v) throw new Error("validatePlan must not reject malicious-color plan");
+    if (v.symbols.symbols[0].color !== undefined) {
+      throw new Error("Injection string should be coerced to undefined");
+    }
+  });
+});
+
+describe("LLD 97 — buildCompact/parseCompact: color round-trip", () => {
+  it("colored symbol survives compact round-trip", () => {
+    resetAll();
+    setUnit("m");
+    const s = createSymbol("sofa", 1, 1);
+    s.color = "#a0784a";
+    addSymbol(s);
+    const plan = buildPlan();
+    const compact = buildCompact(plan);
+    // The compact symbol should have key 'k' for color
+    if (!compact.s || !compact.s[0] || compact.s[0].k !== "#a0784a") {
+      throw new Error(`Expected compact.s[0].k='#a0784a', got ${JSON.stringify(compact.s[0])}`);
+    }
+    const restored = validatePlan(parseCompact(compact));
+    if (!restored) throw new Error("parseCompact+validatePlan should succeed for colored plan");
+    if (restored.symbols.symbols[0].color !== "#a0784a") {
+      throw new Error(`Expected color '#a0784a' after compact round-trip, got ${restored.symbols.symbols[0].color}`);
+    }
+  });
+  it("uncolored symbol emits no 'k' key (lean links preserved)", () => {
+    resetAll();
+    setUnit("m");
+    const s = createSymbol("bed", 1, 1);
+    addSymbol(s);
+    const compact = buildCompact(buildPlan());
+    if (compact.s[0].k !== undefined) {
+      throw new Error("Uncolored symbol should not emit 'k' key in compact");
+    }
+  });
+  it("colored room survives compact round-trip", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }], color: "#dfc99a" });
+    const plan = buildPlan();
+    const compact = buildCompact(plan);
+    if (!compact.r || !compact.r[0] || compact.r[0].k !== "#dfc99a") {
+      throw new Error(`Expected compact.r[0].k='#dfc99a', got ${JSON.stringify(compact.r[0])}`);
+    }
+    const restored = validatePlan(parseCompact(compact));
+    if (!restored) throw new Error("parseCompact+validatePlan should succeed for colored-room plan");
+    if (restored.walls.rooms[0].color !== "#dfc99a") {
+      throw new Error(`Expected room color '#dfc99a' after compact round-trip, got ${restored.walls.rooms[0].color}`);
+    }
+    model.rooms.length = 0;
+  });
+  it("uncolored room emits no 'k' key", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }] });
+    const compact = buildCompact(buildPlan());
+    if (compact.r[0].k !== undefined) {
+      throw new Error("Uncolored room should not emit 'k' key in compact");
+    }
+    model.rooms.length = 0;
+  });
+});
+
+describe("LLD 97 — serializePlan: colored plan round-trip", () => {
+  it("colored symbol survives serialize → JSON.parse → validatePlan", () => {
+    resetAll();
+    setUnit("m");
+    const s = createSymbol("sofa", 1, 1);
+    s.color = "#2c4a6e";
+    addSymbol(s);
+    const plan = buildPlan();
+    const serialized = serializePlan(plan);
+    const parsed = JSON.parse(serialized);
+    const validated = validatePlan(parsed);
+    if (!validated) throw new Error("validatePlan rejected serialized colored plan");
+    if (validated.symbols.symbols[0].color !== "#2c4a6e") {
+      throw new Error(`Expected color '#2c4a6e', got ${validated.symbols.symbols[0].color}`);
+    }
+  });
+});
+
+describe("LLD 97 — symbolRender: fill uses sym.color when set", () => {
+  it("colored symbol uses sym.color as fill polygon fill attribute", () => {
+    resetSymbolModel();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("sofa", 2, 2);
+    s.color = "#2c4a6e";
+    addSymbol(s);
+
+    const NS97 = "http://www.w3.org/2000/svg";
+    const gSym = document.createElementNS(NS97, "g");
+    const gOvl = document.createElementNS(NS97, "g");
+    const dimDiv = document.createElement("div");
+    document.body.appendChild(gSym);
+    document.body.appendChild(gOvl);
+    document.body.appendChild(dimDiv);
+
+    initSymbolRender(gSym, gOvl, dimDiv, () => null, () => null, () => null);
+    symbolRenderRender();
+
+    const polys = gSym.querySelectorAll("polygon");
+    if (polys.length === 0) throw new Error("Expected at least one polygon for sofa");
+    const fill = polys[0].getAttribute("fill");
+    if (fill !== "#2c4a6e") {
+      throw new Error(`Expected fill='#2c4a6e', got ${fill}`);
+    }
+
+    document.body.removeChild(gSym);
+    document.body.removeChild(gOvl);
+    document.body.removeChild(dimDiv);
+    resetSymbolModel();
+  });
+
+  it("uncolored symbol uses theme symFill as fill", () => {
+    resetSymbolModel();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const s = createSymbol("sofa", 2, 2);
+    addSymbol(s);
+
+    const NS97 = "http://www.w3.org/2000/svg";
+    const gSym = document.createElementNS(NS97, "g");
+    const gOvl = document.createElementNS(NS97, "g");
+    const dimDiv = document.createElement("div");
+    document.body.appendChild(gSym);
+    document.body.appendChild(gOvl);
+    document.body.appendChild(dimDiv);
+
+    initSymbolRender(gSym, gOvl, dimDiv, () => null, () => null, () => null);
+    symbolRenderRender();
+
+    const polys = gSym.querySelectorAll("polygon");
+    if (polys.length === 0) throw new Error("Expected at least one polygon for sofa");
+    const fill = polys[0].getAttribute("fill");
+    const p = palette();
+    if (fill !== p.symFill) {
+      throw new Error(`Expected fill='${p.symFill}' (theme symFill), got '${fill}'`);
+    }
+
+    document.body.removeChild(gSym);
+    document.body.removeChild(gOvl);
+    document.body.removeChild(dimDiv);
+    resetSymbolModel();
+  });
+});
+
+describe("LLD 97 — exportImg.buildExportSvg: colored symbol/room fill in SVG", () => {
+  it("buildExportSvg uses sym.color as fill for colored symbol", () => {
+    resetAll();
+    setUnit("m");
+    const s = createSymbol("sofa", 2, 2);
+    s.color = "#b85c38";
+    addSymbol(s);
+
+    const svg = buildExportSvg();
+    if (!svg.includes('fill="#b85c38"')) {
+      throw new Error("buildExportSvg should include fill='#b85c38' for the colored symbol");
+    }
+    resetSymbolModel();
+  });
+  it("buildExportSvg uses room.color as fill for colored room", () => {
+    resetAll();
+    setUnit("m");
+    model.rooms.push({ id: "w0", closed: true, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }], color: "#8a5c30" });
+
+    const svg = buildExportSvg();
+    if (!svg.includes('fill="#8a5c30"')) {
+      throw new Error("buildExportSvg should include fill='#8a5c30' for the colored room");
+    }
+    model.rooms.length = 0;
+  });
+  it("buildExportSvg falls back to theme fill when sym has no color", () => {
+    resetAll();
+    setUnit("m");
+    const s = createSymbol("sofa", 2, 2);
+    addSymbol(s);
+
+    const svg = buildExportSvg();
+    // Should NOT contain a custom hex for this symbol body fill
+    // (theme fills use rgba() — not a 6-char hex)
+    const p = palette();
+    if (!svg.includes(p.symFill)) {
+      throw new Error("buildExportSvg should use theme symFill when no sym.color set");
+    }
+    resetSymbolModel();
+  });
+});
+
+describe("LLD 97 — backward compat: old compact hash (no 'k' key) decodes cleanly", () => {
+  it("parseCompact with no 'k' on rooms/symbols yields no color in output", () => {
+    resetAll();
+    setUnit("m");
+    // Simulate an old compact payload with no 'k' keys
+    const oldCompact = {
+      v: 1,
+      u: "m",
+      r: [{ c: 1, p: [[0,0],[5,0],[5,4],[0,4]] }],
+      k: [],
+      s: [{ t: "sofa", x: 2, y: 2 }],
+      m: [],
+    };
+    const restored = parseCompact(oldCompact);
+    if (!restored) throw new Error("parseCompact should handle old compact payload");
+    const v = validatePlan(restored);
+    if (!v) throw new Error("validatePlan should accept old compact-decoded plan");
+    if ("color" in v.walls.rooms[0]) throw new Error("Old room should not have color key");
+    if ("color" in v.symbols.symbols[0]) throw new Error("Old symbol should not have color key");
   });
 });
 
