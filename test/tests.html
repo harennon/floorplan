@@ -14011,6 +14011,233 @@ describe("measurements.js — pickMeasurement", () => {
   });
 });
 
+// ─── Tests: LLD 93 — resolveEndpointSnap (snap resolution) ───────────────────
+
+import {
+  resolveEndpointSnapForTest,
+} from "../src/js/measureTool.js";
+
+// Helper: reset all relevant models and view to a clean state
+function resetSnapEnv() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  hydrateWalls({ rooms: [], chain: [] });
+  hydrateSymbols({ symbols: [] });
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  setGridSnap(true);
+  setSnapMode("auto"); // default step ~0.1m
+}
+
+describe("LLD 93 — resolveEndpointSnap: Alt → free (bypasses all snap)", () => {
+  it("returns type:'free' and raw world coords when altHeld=true, snap on, vertex nearby", () => {
+    resetSnapEnv();
+    // Place a wall vertex at (0,0) world → screen (panX, panY) = (0,0) so worldToScreen(0,0) = (0,0)
+    // BASE_PX_PER_M=40, so world (0,0) = screen (0,0)
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    hydrateWalls({ rooms: model.rooms, chain: model.chain });
+    // Screen (4,4) = world (0.1, 0.1) at zoom=1 (well within snap radius)
+    const r = resolveEndpointSnapForTest(4, 4, true);
+    expect(r.type).toBe("free");
+    // Raw world: (4/40, 4/40) = (0.1, 0.1)
+    expect(r.x).toBeCloseTo(0.1, 9);
+    expect(r.y).toBeCloseTo(0.1, 9);
+  });
+});
+
+describe("LLD 93 — resolveEndpointSnap: snap toggle OFF → free", () => {
+  it("returns type:'free' and raw world coords when snap toggle is off, vertex nearby", () => {
+    resetSnapEnv();
+    setGridSnap(false);
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] });
+    hydrateWalls({ rooms: model.rooms, chain: model.chain });
+    // Screen (2, 2) = world (0.05, 0.05) — very close to vertex (0,0)
+    const r = resolveEndpointSnapForTest(2, 2, false);
+    expect(r.type).toBe("free");
+    expect(r.x).toBeCloseTo(0.05, 9);
+    expect(r.y).toBeCloseTo(0.05, 9);
+    setGridSnap(true); // restore
+  });
+});
+
+describe("LLD 93 — resolveEndpointSnap: wall vertex snap", () => {
+  it("snaps to wall vertex within SNAP_PT_PX", () => {
+    resetSnapEnv();
+    // Vertex at world (1, 2)
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 1, y: 2 }, { x: 4, y: 2 }] });
+    hydrateWalls({ rooms: model.rooms, chain: model.chain });
+    // world (1,2) → screen (1*40, 2*40) = (40, 80) at zoom=1 pan=0
+    // Place screen pointer 3px away from that vertex → should snap
+    const r = resolveEndpointSnapForTest(43, 83, false);
+    // snap type should be "vertex" and coords should be (1, 2)
+    expect(r.type).toBe("vertex");
+    expect(r.x).toBeCloseTo(1, 9);
+    expect(r.y).toBeCloseTo(2, 9);
+  });
+
+  it("does NOT snap to wall vertex beyond SNAP_PT_PX", () => {
+    resetSnapEnv();
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 1, y: 2 }, { x: 4, y: 2 }] });
+    hydrateWalls({ rooms: model.rooms, chain: model.chain });
+    // world (1,2) → screen (40, 80). Place pointer 100px away
+    const r = resolveEndpointSnapForTest(140, 80, false);
+    expect(r.type !== "vertex").toBe(true);
+  });
+});
+
+describe("LLD 93 — resolveEndpointSnap: object corner snap wins over grid", () => {
+  it("snaps to object corner within radius (type:corner)", () => {
+    resetSnapEnv();
+    // Add a symbol at (2, 2) with default sofa size (2.0 x 0.9)
+    // corners are at roughly (1, 1.55), (3, 1.55), (3, 2.45), (1, 2.45)
+    const s = createSymbol("sofa", 2, 2); // rot=0
+    addSymbol(s);
+    hydrateSymbols({ symbols: symbolModel.symbols });
+    // Get one of its actual corners
+    const c = corners(s)[0]; // first corner
+    const cs = worldToScreen(c.x, c.y);
+    // Place pointer 3px from corner screen pos
+    const r = resolveEndpointSnapForTest(cs.x + 2, cs.y + 2, false);
+    // Should snap to corner (type "corner"), not vertex or grid
+    expect(r.type).toBe("corner");
+    expect(r.x).toBeCloseTo(c.x, 6);
+    expect(r.y).toBeCloseTo(c.y, 6);
+  });
+});
+
+describe("LLD 93 — resolveEndpointSnap: grid snap fallback", () => {
+  it("snaps to grid when no vertex/object in range (type:grid)", () => {
+    resetSnapEnv();
+    // No walls or symbols. Use step=0.25m (a valid SNAP_PRESETS value).
+    setSnapMode(0.25);
+    // world (0.74, 0.74) → Math.round(0.74/0.25)*0.25 = Math.round(2.96)*0.25 = 3*0.25 = 0.75
+    // screen (0.74*40, 0.74*40) = (29.6, 29.6)
+    const r = resolveEndpointSnapForTest(29.6, 29.6, false);
+    expect(r.type).toBe("grid");
+    expect(r.x).toBeCloseTo(0.75, 6);
+    expect(r.y).toBeCloseTo(0.75, 6);
+    setSnapMode("auto"); // restore
+  });
+
+  it("returns type:'free' when snap step is null (snap mode off)", () => {
+    resetSnapEnv();
+    setSnapMode("off");
+    const r = resolveEndpointSnapForTest(50, 50, false);
+    // snap toggle is still on, but step is null — falls through to free
+    expect(r.type).toBe("free");
+    setSnapMode("auto"); // restore
+  });
+});
+
+// ─── Tests: LLD 93 — history integration with measurements ───────────────────
+
+/** Reset all state for history+measurement tests */
+function resetForHistoryMeasure() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  hydrateWalls({ rooms: [], chain: [] });
+  hydrateSymbols({ symbols: [] });
+  hydrateMeasurements({ measurements: [] });
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  resetHistory();
+}
+
+describe("LLD 93 — history: snapshot includes measurements", () => {
+  it("addMeasurement + commit → canUndo() is true", () => {
+    resetForHistoryMeasure();
+    initHistory();
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 });
+    addMeasurement(m);
+    historyCommit();
+    expect(canUndo()).toBe(true);
+  });
+
+  it("addMeasurement + commit → undo restores empty measurement set", () => {
+    resetForHistoryMeasure();
+    initHistory();
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 });
+    addMeasurement(m);
+    historyCommit();
+    expect(measurementsModel.measurements.length).toBe(1);
+    historyUndo();
+    expect(measurementsModel.measurements.length).toBe(0);
+  });
+
+  it("addMeasurement + commit + undo + redo re-adds the measurement", () => {
+    resetForHistoryMeasure();
+    initHistory();
+    const m = createMeasurement({ x: 1, y: 0 }, { x: 4, y: 0 });
+    addMeasurement(m);
+    historyCommit();
+    historyUndo();
+    expect(measurementsModel.measurements.length).toBe(0);
+    historyRedo();
+    expect(measurementsModel.measurements.length).toBe(1);
+    expect(measurementsModel.measurements[0].a.x).toBeCloseTo(1, 9);
+    expect(measurementsModel.measurements[0].b.x).toBeCloseTo(4, 9);
+  });
+
+  it("removeMeasurement + commit → undo restores the measurement", () => {
+    resetForHistoryMeasure();
+    initHistory();
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 2, y: 0 });
+    addMeasurement(m);
+    historyCommit(); // commit add
+    removeMeasurement(m.id);
+    historyCommit(); // commit delete
+    expect(measurementsModel.measurements.length).toBe(0);
+    historyUndo(); // undo delete → measurement restored
+    expect(measurementsModel.measurements.length).toBe(1);
+    expect(measurementsModel.measurements[0].a.x).toBeCloseTo(0, 9);
+  });
+
+  it("dirty-check: commit with unchanged measurements is a no-op", () => {
+    resetForHistoryMeasure();
+    initHistory();
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    addMeasurement(m);
+    historyCommit();
+    const depthBefore = historyDepth();
+    historyCommit(); // geometry unchanged
+    expect(historyDepth()).toBe(depthBefore);
+  });
+});
+
+// ─── Tests: LLD 93 — unit toggle re-formats measurement labels ────────────────
+
+describe("LLD 93 — unit toggle: fmtLen + unitLabel reflect current unit", () => {
+  it("1 metre formats as '1.00 m' in metric", () => {
+    setUnit("m");
+    const text = `${fmtLen(1)} ${unitLabel()}`;
+    // Should start with "1.00" and end with "m"
+    if (!text.startsWith("1.00") || !text.includes("m")) {
+      throw new Error(`Expected '1.00 m'-like, got '${text}'`);
+    }
+  });
+
+  it("1 metre formats in feet/inches when unit is ft", () => {
+    setUnit("ft");
+    const text = `${fmtLen(1)} ${unitLabel()}`;
+    // 1m ≈ 3.28084ft; text should NOT start with 1.00 (it's in feet now)
+    if (text.startsWith("1.00 m")) {
+      throw new Error(`Expected feet label, got '${text}'`);
+    }
+    setUnit("m"); // restore
+  });
+
+  it("switching units changes fmtLen output for the same world distance", () => {
+    setUnit("m");
+    const metricText = fmtLen(3.048); // exactly 10 ft
+    setUnit("ft");
+    const imperialText = fmtLen(3.048);
+    if (metricText === imperialText) {
+      throw new Error(`fmtLen must produce different text for different units: both gave '${metricText}'`);
+    }
+    setUnit("m"); // restore
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 

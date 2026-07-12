@@ -12,12 +12,12 @@ import { init as initTheme, toggleTheme, getTheme, onThemeChange } from "./theme
 import { init as initHud } from "./hud.js";
 import { init as initInteractions, setDrawHooks, setSelectHooks, setMeasureHooks, zoomInStep, zoomOutStep, zoomReset } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
-import { init as initWallTool, isDrawMode, isMeasureMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit } from "./wallTool.js";
+import { init as initWallTool, isDrawMode, isMeasureMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit, setOnMeasureModeLeave as wallSetOnMeasureModeLeave } from "./wallTool.js";
 import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from "./measure.js";
 import { init as initDimEntry, reposition as dimReposition, getEditingEdge, setHistoryCommit as dimSetHistoryCommit } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
 import { init as initSymbolDimEntry, reposition as symbolDimReposition, getEditingDim, setHistoryCommit as symDimSetHistoryCommit } from "./symbolDimEntry.js";
-import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, repositionFlushGuide, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast, nudgeSelected, rotateSelected, flushNudge, clearSelection as symClearSelection, setClearRoomSelection as symSetClearRoomSelection } from "./symbolTool.js";
+import { init as initSymbolTool, getSelectedId, getPlacementGhost, onSelectDown, onSelectMove, onSelectUp, onTapEmpty, onDrawModeEnter, getLockAspect, repositionInspector, repositionFlushGuide, hasSelection, deleteSelected, duplicateSelected, setHistoryAndToast, nudgeSelected, rotateSelected, flushNudge, clearSelection as symClearSelection, setClearRoomSelection as symSetClearRoomSelection, setClearMeasureSelection as symSetClearMeasureSelection } from "./symbolTool.js";
 import {
   init as initRoomTool,
   onSelectDown as roomOnSelectDown,
@@ -42,6 +42,7 @@ import {
   hasSelection as measureHasSelection,
   deleteSelected as measureDeleteSelected,
   onDrawModeEnter as measureOnDrawModeEnter,
+  discardDraft as measureDiscardDraft,
   getSelectedId as measureGetSelectedId,
   getDraft as measureGetDraft,
 } from "./measureTool.js";
@@ -179,6 +180,10 @@ document.addEventListener("DOMContentLoaded", () => {
   // measureTool — two-click placement, snap, selection
   initMeasureTool({ stage, btnMeasure, snapTag: snapTagEl });
   measureSetToolBridge({ setTool, isMeasureMode });
+  // LLD 93 Edge Case 7: when wallTool switches away from measure mode (V key,
+  // Select rail button) it calls this so the in-progress draft is discarded and
+  // the rubber-band preview disappears immediately.
+  wallSetOnMeasureModeLeave(measureDiscardDraft);
 
   // measureRender — dimension line + chips, registered on onRender after wallRender
   initMeasureRender(gMeasures, dimLabelsEl, measureGetSelectedId, measureGetDraft);
@@ -297,6 +302,10 @@ document.addEventListener("DOMContentLoaded", () => {
   // measureTool mutex: selecting a measurement clears symbol + room
   measureSetClearSymbolSelection(symClearSelection);
   measureSetClearRoomSelection(roomClearSelection);
+  // symbolTool mutex: selecting a symbol (incl. dock drag-drop and duplicateSelected,
+  // which bypass the dispatcher via selectSymbol) clears any live measure selection.
+  // LLD 93 Edge Case 5: the measure↔symbol mutex must hold on these bypass paths.
+  symSetClearMeasureSelection(measureClearSelection);
 
   // When switching to draw mode, clear symbol, room, and measure selection
   document.getElementById("tool-wall")?.addEventListener("click", () => {

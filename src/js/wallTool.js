@@ -28,6 +28,19 @@ export function setHistoryCommit(fn) {
   _historyCommit = fn;
 }
 
+// Injected from main.js: called when leaving measure mode (any tool switch away
+// from "measure"). Allows measureTool to discard an open draft (LLD 93 Edge Case 7).
+let _onMeasureModeLeave = null;
+
+/**
+ * Inject a callback that fires when the active tool switches away from "measure".
+ * measureTool registers this to discard any open placement draft.
+ * @param {()=>void} fn
+ */
+export function setOnMeasureModeLeave(fn) {
+  _onMeasureModeLeave = fn;
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 /** @type {"wall"|"select"|"measure"} */
@@ -133,6 +146,10 @@ export function setTool(t) {
     finishChain();
     // Commit to history (dirty-check handles <2-vert discard)
     if (_historyCommit) _historyCommit();
+  }
+  // LLD 93 Edge Case 7: leaving measure mode discards any open placement draft.
+  if (_tool === "measure" && t !== "measure") {
+    if (_onMeasureModeLeave) _onMeasureModeLeave();
   }
   _tool = t;
   _snap = null;

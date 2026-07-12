@@ -58,10 +58,10 @@ export function setHistoryAndToast(history, showToast) {
 // (the selection mutex) WITHOUT importing roomTool — mirrors the toast/history
 // injection pattern, and covers selection paths that bypass the main.js
 // dispatcher (dock drag-drop placement calls selectSymbol directly).
-let _clearRoomSelection = null;
-export function setClearRoomSelection(fn) {
-  _clearRoomSelection = fn;
-}
+let _clearRoomSelection    = null;
+let _clearMeasureSelection = null;
+export function setClearRoomSelection(fn)    { _clearRoomSelection    = fn; }
+export function setClearMeasureSelection(fn) { _clearMeasureSelection = fn; }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -346,11 +346,14 @@ export function onDrawModeEnter() {
  * Select a symbol by id (e.g. after placement).
  */
 export function selectSymbol(id) {
-  // Selection mutex: a symbol selection clears any room selection. This lives in
-  // selectSymbol (not just the dispatcher) so dock drag-drop placement — which
-  // calls selectSymbol directly, bypassing the dispatcher — also upholds the
-  // "≤1 of {room, symbol} selected" invariant.
-  if (_clearRoomSelection) _clearRoomSelection();
+  // Selection mutex: a symbol selection clears any room or measure selection.
+  // This lives in selectSymbol (not just the dispatcher) so dock drag-drop
+  // placement and duplicateSelected — which call selectSymbol directly,
+  // bypassing the dispatcher — also uphold the "≤1 selected" invariant.
+  // LLD 93 Edge Case 5 / Dependencies: the measure↔symbol mutex must hold on
+  // these bypass paths too.
+  if (_clearRoomSelection)    _clearRoomSelection();
+  if (_clearMeasureSelection) _clearMeasureSelection();
   _selectedId = id;
   const sym = getSymbol(id);
   if (sym) _showInspector(sym);

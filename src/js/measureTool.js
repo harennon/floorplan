@@ -220,6 +220,19 @@ export function onDrawModeEnter() {
   _draft = null;
 }
 
+/**
+ * Discard any open placement draft without clearing selection.
+ * Called by wallTool.setTool when leaving measure mode (LLD 93 Edge Case 7).
+ * Ensures the rubber-band preview is removed when the user switches to Select
+ * via V key or the Select rail button — paths that bypass onDrawModeEnter.
+ */
+export function discardDraft() {
+  if (_draft !== null) {
+    _draft = null;
+    scheduleRender();
+  }
+}
+
 /** Get the currently selected measurement id. */
 export function getSelectedId() {
   return _selectedId;
@@ -327,6 +340,25 @@ export function resolveEndpointSnap(sx, sy, altHeld) {
 
   // 8. Free
   return { x: raw.x, y: raw.y, type: "free" };
+}
+
+/**
+ * Thin test wrapper around resolveEndpointSnap.
+ *
+ * Allows unit tests to call the resolver with injected view state
+ * (zoom/pan) and model state, since resolveEndpointSnap reads the live
+ * prefs/view/model globals. Tests set up those globals directly (same pattern
+ * as other tests.html unit tests) and call this.
+ *
+ * This is the measureTool analogue of symbolTool.resolvePlacementForTest.
+ *
+ * @param {number} sx
+ * @param {number} sy
+ * @param {boolean} altHeld
+ * @returns {{ x:number, y:number, type:string }}
+ */
+export function resolveEndpointSnapForTest(sx, sy, altHeld) {
+  return resolveEndpointSnap(sx, sy, altHeld);
 }
 
 /**
