@@ -54,6 +54,24 @@ export function setSelectHooks(h) {
   _selectHooks = h;
 }
 
+// ─── Measure hooks (injected by main.js; no static measureTool import) ────────
+
+/**
+ * @type {{ isMeasureMode:()=>boolean,
+ *          onTap:(sx:number,sy:number)=>void,
+ *          onMove:(sx:number,sy:number)=>void,
+ *          onLeave:()=>void } | null}
+ */
+let _measureHooks = null;
+
+/**
+ * Inject measure-mode hooks. Called once by main.js after measureTool is initialised.
+ * Point placement fires on tap-RELEASE (pointer-up after no drag), matching draw-mode.
+ */
+export function setMeasureHooks(h) {
+  _measureHooks = h;
+}
+
 // DRAG_THRESHOLD is now per-gesture (touch=10, mouse/pen=6); see dragThreshold() in pointerEnv.js.
 
 // ─── Transient state ────────────────────────────────────────────────────────
@@ -68,6 +86,11 @@ let _hintDismissed = false;
 let _drawPending = false;
 let _drawDownX = 0;
 let _drawDownY = 0;
+
+/** Pending measure-mode tap state (mirrors draw-pending logic). */
+let _measurePending = false;
+let _measureDownX = 0;
+let _measureDownY = 0;
 
 /**
  * pointerType of the primary pointer that started the current gesture.
@@ -156,6 +179,13 @@ function _onPointerDown(e) {
     }
     _drawPending = false;
 
+    // Cancel in-flight measure gesture: call onLeave (clears hover) but preserve _draft.
+    // Per LLD EC 4: a pinch does not lose point A — only the hover preview is cleared.
+    if (_measurePending && _measureHooks) {
+      _measureHooks.onLeave();
+    }
+    _measurePending = false;
+
     // Cancel in-flight select-move/rotate: finalize at pre-pinch position.
     if (_selectConsumed && _selectHooks) {
       _selectHooks.onUp(_lastX, _lastY);
@@ -173,6 +203,19 @@ function _onPointerDown(e) {
     // Record the pointer type for this gesture so we can select threshold/loupe.
     _downPointerType = e.pointerType || "mouse";
     _gestureCancelled = false;
+
+    // Measure mode: record down position; tap fires on release.
+    if (_measureHooks && _measureHooks.isMeasureMode() && !_spaceHeld) {
+      _measurePending = true;
+      _measureDownX = e.clientX;
+      _measureDownY = e.clientY;
+      _dragging = false;
+      _drawPending = false;
+      _lastX = e.clientX;
+      _lastY = e.clientY;
+      _updateCursor();
+      return;
+    }
 
     // Draw mode: record down position; defer pan start until drag threshold exceeded.
     if (_drawHooks && _drawHooks.isDrawMode() && !_spaceHeld) {
@@ -235,6 +278,31 @@ function _onPointerMove(e) {
     return;
   }
 
+  // Measure-mode: plain hover (no button) → update rubber-band preview.
+  if (_measureHooks && _measureHooks.isMeasureMode() && e.buttons === 0) {
+    _measureHooks.onMove(e.clientX, e.clientY);
+    return;
+  }
+
+  // Measure-mode with button down: check for drag threshold.
+  if (_measurePending && _measureHooks && _measureHooks.isMeasureMode()) {
+    const dx = e.clientX - _measureDownX;
+    const dy = e.clientY - _measureDownY;
+    const threshold = dragThreshold(_downPointerType);
+    if (Math.sqrt(dx * dx + dy * dy) > threshold) {
+      // Crossed threshold → cancel pending tap, start panning.
+      _measurePending = false;
+      _dragging = true;
+      _lastX = e.clientX;
+      _lastY = e.clientY;
+      if (_measureHooks) _measureHooks.onLeave();
+    } else {
+      // Still within threshold; update rubber-band preview.
+      _measureHooks.onMove(e.clientX, e.clientY);
+    }
+    _updateCursor();
+  }
+
   // Draw-mode: plain hover (no button) → update snap preview.
   if (_drawHooks && _drawHooks.isDrawMode() && e.buttons === 0) {
     const hp = effectiveDrawPoint(e.pointerType, e.clientX, e.clientY);
@@ -281,6 +349,8 @@ function _onPointerMove(e) {
 }
 
 function _onPointerLeave() {
+  if (_measureHooks) _measureHooks.onLeave();
+  _measurePending = false;
   if (_drawHooks) _drawHooks.onLeave();
   _drawPending = false;
 }
@@ -302,10 +372,16 @@ function _onPointerEnd(e) {
       _gestureCancelled = false;
       _downPointerType = "mouse";
       _drawPending = false;
+      _measurePending = false;
       _dragging = false;
       _selectConsumed = false;
       _updateCursor();
       return;
+    }
+
+    // Measure mode tap: pending tap → place point A or commit B.
+    if (_measurePending && _measureHooks && _measureHooks.isMeasureMode()) {
+      _measureHooks.onTap(e.clientX, e.clientY);
     }
 
     // Draw mode tap: pending click → commit vertex at loupe-offset point.
@@ -318,7 +394,8 @@ function _onPointerEnd(e) {
     if (_selectConsumed && _selectHooks) {
       _selectHooks.onUp(e.clientX, e.clientY);
       _selectConsumed = false;
-    } else if (!_drawPending && !(_drawHooks && _drawHooks.isDrawMode()) && _selectHooks) {
+    } else if (!_drawPending && !_measurePending && !(_drawHooks && _drawHooks.isDrawMode())
+               && !(_measureHooks && _measureHooks.isMeasureMode()) && _selectHooks) {
       // Was panning (not consumed by select hooks): if pointer didn't exceed threshold,
       // it's a tap on empty canvas
       const dx = e.clientX - _selectDownX;
@@ -331,12 +408,14 @@ function _onPointerEnd(e) {
     }
 
     _drawPending = false;
+    _measurePending = false;
     _dragging = false;
     _downPointerType = "mouse";
 
     // If it was a cancel / leave, clear snap preview.
     if (e.type === "pointercancel" || e.type === "pointerleave") {
       if (_drawHooks) _drawHooks.onLeave();
+      if (_measureHooks) _measureHooks.onLeave();
     }
   }
 

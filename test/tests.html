@@ -138,6 +138,8 @@ import {
   moveRoom, isRectangle, rescaleRectEdge, RIGHT_ANGLE_COS_TOL, pointNearRoomWall,
 } from "../src/js/walls.js";
 
+// LLD 93 mutators (createMeasurement etc.) are imported below with the plan.js block
+
 // ─── Tests: view.js ───────────────────────────────────────────────────────────
 
 describe("view.js — pxPerM", () => {
@@ -2896,6 +2898,7 @@ import {
   model as measurementsModel,
   hydrate as hydrateMeasurements,
   newId as newMeasurementId,
+  createMeasurement, addMeasurement, removeMeasurement, pickMeasurement,
 } from "../src/js/measurements.js";
 
 import {
@@ -10002,6 +10005,7 @@ const EXPECTED_ACTIONS = new Set([
   "Rotate 90° CCW",
   "Draw wall",
   "Select",
+  "Measure (Esc to cancel)",  // LLD 93
   "Zoom in",
   "Zoom out",
   "Reset zoom",
@@ -13878,6 +13882,132 @@ describe("LLD 88 — resizeSymbol: circular type mirrors both axes", () => {
     expect(s.w).toBeCloseTo(1.80, 9);
     // h must be unchanged — circular branch must not leak to sofa
     expect(s.h).toBeCloseTo(origH, 9);
+  });
+});
+
+// ─── Tests: measurements.js mutators (LLD 93) ────────────────────────────────
+
+function resetMeasurementsModel() {
+  hydrateMeasurements({ measurements: [] });
+}
+
+describe("measurements.js — createMeasurement", () => {
+  it("mints a unique id and does not mutate model", () => {
+    resetMeasurementsModel();
+    const m1 = createMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    const m2 = createMeasurement({ x: 0, y: 0 }, { x: 2, y: 0 });
+    expect(m1.id).toBe(m1.id); // stable
+    expect(m1.id === m2.id).toBe(false); // unique
+    expect(measurementsModel.measurements.length).toBe(0); // not added
+  });
+
+  it("stores the correct a and b world coords", () => {
+    const m = createMeasurement({ x: 3, y: 4 }, { x: 7, y: 8 });
+    expect(m.a.x).toBe(3);
+    expect(m.a.y).toBe(4);
+    expect(m.b.x).toBe(7);
+    expect(m.b.y).toBe(8);
+  });
+});
+
+describe("measurements.js — addMeasurement / removeMeasurement", () => {
+  it("addMeasurement appends to model", () => {
+    resetMeasurementsModel();
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    addMeasurement(m);
+    expect(measurementsModel.measurements.length).toBe(1);
+    expect(measurementsModel.measurements[0].id).toBe(m.id);
+  });
+
+  it("removeMeasurement returns true and removes by id", () => {
+    resetMeasurementsModel();
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    addMeasurement(m);
+    const result = removeMeasurement(m.id);
+    expect(result).toBe(true);
+    expect(measurementsModel.measurements.length).toBe(0);
+  });
+
+  it("removeMeasurement returns false when id absent", () => {
+    resetMeasurementsModel();
+    expect(removeMeasurement("not-a-real-id")).toBe(false);
+  });
+
+  it("id counter never collides after hydrate", () => {
+    resetMeasurementsModel();
+    // Hydrate with a high id counter
+    hydrateMeasurements({ measurements: [
+      { id: "m99", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+    ]});
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 2, y: 0 });
+    // New id should be m100 or higher, not collide with m99
+    expect(m.id).toBe("m100");
+  });
+});
+
+describe("measurements.js — pickMeasurement", () => {
+  it("returns null when no measurements", () => {
+    resetMeasurementsModel();
+    expect(pickMeasurement(0, 0, 1)).toBe(null);
+  });
+
+  it("returns the measurement whose segment passes within tolerance", () => {
+    resetMeasurementsModel();
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 4, y: 0 });
+    addMeasurement(m);
+    // Point directly on the segment
+    const hit = pickMeasurement(2, 0, 0.01);
+    expect(hit).toBe(null === hit ? null : hit); // guard
+    expect(hit !== null).toBe(true);
+    expect(hit.id).toBe(m.id);
+  });
+
+  it("returns null when out of tolerance", () => {
+    resetMeasurementsModel();
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 4, y: 0 });
+    addMeasurement(m);
+    // Point far from segment
+    const hit = pickMeasurement(2, 5, 0.01);
+    expect(hit).toBe(null);
+  });
+
+  it("last match wins on overlapping candidates (topmost draw order)", () => {
+    resetMeasurementsModel();
+    const m1 = createMeasurement({ x: 0, y: 0 }, { x: 4, y: 0 });
+    const m2 = createMeasurement({ x: 0, y: 0 }, { x: 4, y: 0 }); // same segment
+    addMeasurement(m1);
+    addMeasurement(m2);
+    const hit = pickMeasurement(2, 0, 0.01);
+    expect(hit !== null).toBe(true);
+    expect(hit.id).toBe(m2.id); // last wins
+  });
+
+  it("point-to-segment distance correct for endpoint", () => {
+    resetMeasurementsModel();
+    // Horizontal segment from (0,0) to (4,0)
+    // Point at (5, 0) is 1 unit past the endpoint B
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 4, y: 0 });
+    addMeasurement(m);
+    // Tolerance 1.0: (5,0) is dist=1 from endpoint B — should hit
+    const hitYes = pickMeasurement(5, 0, 1.0);
+    expect(hitYes !== null).toBe(true);
+    // Tolerance 0.5: miss
+    const hitNo = pickMeasurement(5, 0, 0.5);
+    expect(hitNo).toBe(null);
+  });
+
+  it("point-to-segment distance correct for interior projection", () => {
+    resetMeasurementsModel();
+    // Diagonal segment from (0,0) to (4,4)
+    // The closest point on the segment to (3, 1) is the foot of the perpendicular
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 4, y: 4 });
+    addMeasurement(m);
+    // Foot of perpendicular from (3,1) to line y=x: foot is at (2,2)
+    // dist = sqrt((3-2)^2 + (1-2)^2) = sqrt(2) ≈ 1.414
+    const hitYes = pickMeasurement(3, 1, 1.5);
+    expect(hitYes !== null).toBe(true);
+    const hitNo = pickMeasurement(3, 1, 1.0);
+    expect(hitNo).toBe(null);
   });
 });
 

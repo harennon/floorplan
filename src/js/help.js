@@ -35,6 +35,7 @@ export const SHORTCUTS = [
   // Tools
   { group: "Tools",   action: "Draw wall",                  mac: "W",          other: "W" },
   { group: "Tools",   action: "Select",                     mac: "V",          other: "V" },
+  { group: "Tools",   action: "Measure (Esc to cancel)",    mac: "M",          other: "M" },
   // View
   { group: "View",    action: "Zoom in",                    mac: "+ / =",      other: "+ / =" },
   { group: "View",    action: "Zoom out",                   mac: "− / _",      other: "− / _" },

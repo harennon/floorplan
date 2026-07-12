@@ -9,14 +9,16 @@
  * Exports: init, reset, commit, undo, redo, canUndo, canRedo, depth, onChange
  */
 
-import { model as wallsModel,   hydrate as hydrateWalls   } from "./walls.js";
-import { model as symbolsModel, hydrate as hydrateSymbols } from "./symbols.js";
+import { model as wallsModel,        hydrate as hydrateWalls        } from "./walls.js";
+import { model as symbolsModel,      hydrate as hydrateSymbols      } from "./symbols.js";
+import { model as measurementsModel, hydrate as hydrateMeasurements } from "./measurements.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /**
  * @typedef {{ rooms: import("./walls.js").Room[],
- *             symbols: import("./symbols.js").Sym[] }} GeomSnapshot
+ *             symbols: import("./symbols.js").Sym[],
+ *             measurements: import("./measurements.js").Measurement[] }} GeomSnapshot
  */
 
 // ── Internal state ────────────────────────────────────────────────────────────
@@ -37,15 +39,17 @@ const _listeners = [];
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /**
- * Deep-clone rooms + symbols into a snapshot.
+ * Deep-clone rooms + symbols + measurements into a snapshot.
  * Intentionally excludes model.chain so undo/redo never disturbs the live
- * in-progress polyline (Edge Case 1).
+ * in-progress polyline (Edge Case 1). Measurements are fixed world coords
+ * so they are safe to snapshot without any special exclusion.
  * @returns {GeomSnapshot}
  */
 function _capture() {
   return {
-    rooms:   JSON.parse(JSON.stringify(wallsModel.rooms)),
-    symbols: JSON.parse(JSON.stringify(symbolsModel.symbols)),
+    rooms:        JSON.parse(JSON.stringify(wallsModel.rooms)),
+    symbols:      JSON.parse(JSON.stringify(symbolsModel.symbols)),
+    measurements: JSON.parse(JSON.stringify(measurementsModel.measurements)),
   };
 }
 
@@ -68,6 +72,7 @@ function _apply(snap) {
   // Preserve the live in-progress chain (Edge Case 1)
   hydrateWalls({ rooms: cloned.rooms, chain: [...wallsModel.chain] });
   hydrateSymbols({ symbols: cloned.symbols });
+  hydrateMeasurements({ measurements: cloned.measurements || [] });
   // history NEVER calls render(); the main.js caller triggers scheduleRender()
 }
 

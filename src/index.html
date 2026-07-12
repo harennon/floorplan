@@ -683,6 +683,30 @@
         .dim-chip { font-size: 0.6rem; padding: 0.08rem 0.28rem; }
       }
 
+      /* ── Measure distance chips (NOT .dim-chip — never editable) ─────────── */
+      .measure-chip {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        padding: 0.1rem 0.35rem;
+        border-radius: 3px;
+        white-space: nowrap;
+        pointer-events: none; /* never intercept placement/selection taps */
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        line-height: 1.4;
+        user-select: none;
+      }
+      .measure-chip--draft {
+        opacity: 0.75;
+        border-style: dashed;
+      }
+      @media (max-width: 640px) {
+        .measure-chip { font-size: 0.6rem; padding: 0.08rem 0.28rem; }
+      }
+
       /* ── Inline dimension input ───────────────────────────────────────────── */
       .dim-input {
         position: absolute;
@@ -1893,6 +1917,8 @@
           <g id="symbols"></g>
           <!-- Clearance leaders, ticks, and bands (above symbols, below selection overlay) -->
           <g id="clearance"></g>
+          <!-- Measurement dimension lines and end ticks (below selection overlay) -->
+          <g id="measures"></g>
           <!-- Symbol selection overlay, handles, ghost -->
           <g id="symbol-overlay"></g>
         </svg>
@@ -1921,6 +1947,15 @@
             <polyline points="2,13 2,8 6,4 10,8 14,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
           </svg>
           <span class="tool-key-hint">W</span>
+        </button>
+        <button id="tool-measure" aria-label="Measure tool (M)" aria-pressed="false">
+          <!-- Dimension line with end ticks — caliper feel -->
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <line x1="2" y1="5" x2="2" y2="11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <line x1="14" y1="5" x2="14" y2="11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          <span class="tool-key-hint">M</span>
         </button>
         <div class="tool-rail-sep" aria-hidden="true"></div>
         <button id="tool-undo" aria-label="Undo last point (Backspace)" disabled>
