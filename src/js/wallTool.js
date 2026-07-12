@@ -41,6 +41,19 @@ export function setMeasureCancel(fn) {
   _measureCancel = fn;
 }
 
+// measureTool.clearSelection is injected to avoid circular imports.
+// Called by setTool on any tool switch so a committed-measurement selection is
+// cleared whenever the user leaves the tool that had it selected.
+let _measureClearSelection = null;
+
+/**
+ * Inject measureTool.clearSelection. Called from main.js after measureTool is initialised.
+ * @param {()=>void} fn
+ */
+export function setMeasureClearSelection(fn) {
+  _measureClearSelection = fn;
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 /** @type {"wall"|"select"|"measure"} */
@@ -151,6 +164,12 @@ export function setTool(t) {
     // Discard any pending measurement point A when leaving measure mode
     if (_measureCancel) _measureCancel();
   }
+  // Clear any committed-measurement selection on every tool switch (LLD 91 State Model).
+  // Runs unconditionally so a measurement selected in Select mode is dropped when the
+  // user switches to Wall or Measure (the global Delete handler checks selection
+  // regardless of active tool, so keeping a stale selection across a tool switch
+  // would allow unexpected deletes).
+  if (_measureClearSelection) _measureClearSelection();
   _tool = t;
   _snap = null;
   loupe.hide();

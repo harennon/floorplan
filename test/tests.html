@@ -13902,6 +13902,7 @@ import {
 
 import {
   isMeasureMode, setTool as wallToolSetTool, setMeasureCancel as wallToolSetMeasureCancel,
+  setMeasureClearSelection as wallToolSetMeasureClearSelection,
 } from "../src/js/wallTool.js";
 
 // Initialise measureTool module once (registers Alt key listeners)
@@ -14599,6 +14600,50 @@ describe("LLD 91 — tool-switch invokes cancel (Edge Case 4 / setMeasureCancel 
     );
     if (measurementsModel.measurements.length !== 0) throw new Error(
       "No measurement created on tool switch"
+    );
+  });
+});
+
+// ─── Tool-switch clears measure selection (LLD 91 State Model) ────────────────
+
+describe("LLD 91 — tool-switch clears committed measure selection", () => {
+  it("switching from Select to Wall clears a committed measure selection", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // Wire the selection-clear injection (mirrors what main.js does)
+    wallToolSetMeasureClearSelection(measureToolClearSelection);
+    wallToolSetMeasureCancel(measureToolCancel);
+
+    // Create a measurement and select it
+    measurementsModel.measurements.push({ id: "m0", a: { x: 0, y: 5 }, b: { x: 10, y: 5 } });
+    wallToolSetTool("select");
+    measureToolSelectDown(200, 200); // selects m0
+    if (!measureToolHasSelection()) throw new Error("Precondition: measurement should be selected");
+
+    // Switch to Wall mode — selection must be cleared
+    wallToolSetTool("wall");
+    if (measureToolHasSelection()) throw new Error(
+      "Measure selection must be cleared when switching to Wall mode"
+    );
+  });
+
+  it("switching from Select to Measure clears a committed measure selection", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    wallToolSetMeasureClearSelection(measureToolClearSelection);
+    wallToolSetMeasureCancel(measureToolCancel);
+
+    measurementsModel.measurements.push({ id: "m1", a: { x: 0, y: 5 }, b: { x: 10, y: 5 } });
+    wallToolSetTool("select");
+    measureToolSelectDown(200, 200);
+    if (!measureToolHasSelection()) throw new Error("Precondition: measurement should be selected");
+
+    // Switch to Measure mode
+    wallToolSetTool("measure");
+    if (measureToolHasSelection()) throw new Error(
+      "Measure selection must be cleared when switching to Measure mode"
     );
   });
 });

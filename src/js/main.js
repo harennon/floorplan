@@ -12,7 +12,7 @@ import { init as initTheme, toggleTheme, getTheme, onThemeChange } from "./theme
 import { init as initHud } from "./hud.js";
 import { init as initInteractions, setDrawHooks, setSelectHooks, zoomInStep, zoomOutStep, zoomReset } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
-import { init as initWallTool, isDrawMode, isMeasureMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit, setMeasureCancel as wallSetMeasureCancel } from "./wallTool.js";
+import { init as initWallTool, isDrawMode, isMeasureMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit, setMeasureCancel as wallSetMeasureCancel, setMeasureClearSelection as wallSetMeasureClearSelection } from "./wallTool.js";
 import {
   init as initMeasureTool,
   onHover as measureHover,
@@ -301,6 +301,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Wire tool-switch cancel: switching away from measure mode discards pending A.
   wallSetMeasureCancel(measureCancel);
+  // Wire tool-switch selection clear: any tool switch drops a committed-measurement
+  // selection so the global Delete handler cannot fire on a stale selection (LLD 91).
+  wallSetMeasureClearSelection(measureClearSelection);
 
   // When switching to draw mode, clear both symbol and room selection
   document.getElementById("tool-wall")?.addEventListener("click", () => {

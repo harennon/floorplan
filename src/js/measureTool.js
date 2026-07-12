@@ -364,7 +364,7 @@ export function deleteSelected() {
   // Scoped undo toast: capture the depth after commit
   if (_showToastFn && _historyUndo && _historyDepth) {
     const depthAtDelete = _historyDepth();
-    _showToastFn("Measurement deleted", {
+    _showToastFn("Deleted", {
       label: "Undo",
       onClick: () => {
         // Only undo if we're at the same depth (scoped one-tap undo)
