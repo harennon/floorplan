@@ -1416,6 +1416,7 @@
         gap: 0.25rem;
         flex-wrap: nowrap;
         padding: 0.1rem 0;
+        overflow-x: auto;
       }
       .swatch-strip[hidden] {
         display: none;
@@ -1430,6 +1431,10 @@
         padding: 0;
         outline: none;
         transition: border-color 0.12s, box-shadow 0.12s;
+      }
+      .swatch:focus-visible {
+        outline: 2px solid var(--gold);
+        outline-offset: 2px;
       }
       .swatch:hover {
         border-color: var(--ink);

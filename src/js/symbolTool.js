@@ -195,6 +195,12 @@ export function init(refs) {
 
   // NOTE (LLD-21): _onKeyDown (Delete/Backspace) is NOT registered here.
   // Symbol delete via keyboard is now owned solely by the main.js global handler.
+
+  // Swatch strip keyboard navigation — registered once on the persistent element (LLD 97).
+  if (_swatchStrip) {
+    _swatchStrip.addEventListener("keydown", _onSwatchKeydown);
+  }
+
   // Alt held for free snap
   window.addEventListener("keydown", _onAltDown);
   window.addEventListener("keyup",   _onAltUp);
@@ -950,8 +956,6 @@ function _populateSwatchStrip(sym) {
     }
   }
 
-  // Keyboard: arrow keys move focus within the strip (roving tabindex)
-  _swatchStrip.addEventListener("keydown", _onSwatchKeydown, { once: true });
 }
 
 /**

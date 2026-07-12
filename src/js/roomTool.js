@@ -21,7 +21,7 @@
  */
 
 import { screenToWorld, worldToScreen, pxPerM } from "./view.js";
-import { model as wallsModel, moveRoom, gridSnap, pointNearRoomWall, WALL_M, setRoomColor, roomCentroids } from "./walls.js";
+import { model as wallsModel, moveRoom, gridSnap, pointNearRoomWall, WALL_M, setRoomColor } from "./walls.js";
 import { pointInRoom } from "./clearance.js";
 import { model as symbolsModel, getSymbol, moveSymbol, CATALOG } from "./symbols.js";
 import { gridSnap as prefsGridSnap } from "./prefs.js";
@@ -67,6 +67,11 @@ export function init(refs) {
   _stage           = refs.stage;
   _roomInspector   = refs.roomInspector  || null;
   _roomSwatchStrip = refs.roomSwatchStrip || null;
+
+  // Room swatch strip keyboard navigation — registered once on the persistent element (LLD 97).
+  if (_roomSwatchStrip) {
+    _roomSwatchStrip.addEventListener("keydown", _onRoomSwatchKeydown);
+  }
 
   // Alt held for free snap (mirrors symbolTool; not an editing shortcut)
   window.addEventListener("keydown", _onAltDown);
@@ -360,18 +365,6 @@ function _populateRoomSwatchStrip(room) {
     }
   }
 
-  // Keyboard arrow navigation
-  _roomSwatchStrip.addEventListener("keydown", (e) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    const btns = Array.from(_roomSwatchStrip.querySelectorAll(".swatch"));
-    const idx = btns.indexOf(document.activeElement);
-    if (idx === -1) return;
-    e.preventDefault();
-    const next = e.key === "ArrowRight"
-      ? btns[Math.min(idx + 1, btns.length - 1)]
-      : btns[Math.max(idx - 1, 0)];
-    next.focus();
-  }, { once: true });
 }
 
 function _makeRoomSwatchButton(hex, name) {
@@ -382,4 +375,21 @@ function _makeRoomSwatchButton(hex, name) {
   btn.setAttribute("type", "button");
   if (hex) btn.style.background = hex;
   return btn;
+}
+
+/**
+ * Arrow-key navigation within the room swatch strip (roving tabindex, LLD 97).
+ * Registered once on the persistent _roomSwatchStrip element in init().
+ * @param {KeyboardEvent} e
+ */
+function _onRoomSwatchKeydown(e) {
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  const btns = Array.from(_roomSwatchStrip.querySelectorAll(".swatch"));
+  const idx = btns.indexOf(document.activeElement);
+  if (idx === -1) return;
+  e.preventDefault();
+  const next = e.key === "ArrowRight"
+    ? btns[Math.min(idx + 1, btns.length - 1)]
+    : btns[Math.max(idx - 1, 0)];
+  next.focus();
 }
