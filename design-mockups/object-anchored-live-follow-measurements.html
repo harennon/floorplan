@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Object-Anchored Measurements — Live Follow (mockup)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:         #12120d;
+    --bg-deep:    #0d0d09;
+    --ink:        #e8e2cf;
+    --muted:      #9a917a;
+    --gold:       #c9a84c;
+    --panel:      rgba(20, 20, 15, 0.72);
+    --hairline:   rgba(201, 168, 76, 0.18);
+    --font-ui:    "DM Sans", system-ui, sans-serif;
+    --font-mono:  "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+    --snap-teal:  #7fd0c8;
+    --snap-point: #e0b64f;
+    --sym-stroke: #d9be6e;
+    --sym-fill:   rgba(201,168,76,0.12);
+    --sym-sel-fill: rgba(201,168,76,0.18);
+    --grid-fine:  rgba(201, 168, 76, 0.055);
+    --grid-major: rgba(201, 168, 76, 0.14);
+    --anchor:     #7fd0c8;
+    --error:      #e57373;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg-deep);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+    padding: 2rem clamp(1rem, 4vw, 3rem) 4rem;
+  }
+
+  /* ── Page header ─────────────────────────────────────────── */
+  header.page { max-width: 1180px; margin: 0 auto 2rem; }
+  header.page .kicker {
+    font-family: var(--font-mono);
+    font-size: 0.7rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--snap-teal); margin: 0 0 0.6rem;
+  }
+  header.page h1 {
+    font-family: var(--font-display);
+    font-weight: 400; font-size: clamp(1.6rem, 3.5vw, 2.5rem);
+    margin: 0 0 0.6rem; line-height: 1.15;
+  }
+  header.page p.lede {
+    max-width: 62ch; color: var(--muted); line-height: 1.6;
+    margin: 0; font-size: 0.95rem;
+  }
+
+  .grid-wrap {
+    max-width: 1180px; margin: 0 auto;
+    display: grid; gap: 1.6rem;
+    grid-template-columns: repeat(2, 1fr);
+  }
+  @media (max-width: 860px) { .grid-wrap { grid-template-columns: 1fr; } }
+
+  /* ── Panel (one stage demo) ──────────────────────────────── */
+  .panel {
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    background: var(--bg);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .panel--wide { grid-column: 1 / -1; }
+  .panel .cap {
+    display: flex; align-items: baseline; gap: 0.6rem;
+    padding: 0.85rem 1rem 0.6rem;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .panel .cap .n {
+    font-family: var(--font-mono); font-size: 0.68rem;
+    color: var(--gold); border: 1px solid var(--hairline);
+    border-radius: 4px; padding: 0.05rem 0.4rem;
+  }
+  .panel .cap h2 {
+    font-size: 0.95rem; font-weight: 600; margin: 0; letter-spacing: 0.01em;
+  }
+  .panel .cap .sub { color: var(--muted); font-size: 0.8rem; margin-left: auto; }
+  .panel .body { padding: 0.5rem; }
+  .panel .note {
+    padding: 0.6rem 1rem 0.95rem; color: var(--muted);
+    font-size: 0.82rem; line-height: 1.55;
+  }
+  .panel .note b { color: var(--ink); font-weight: 600; }
+  .panel .note code {
+    font-family: var(--font-mono); font-size: 0.76rem;
+    color: var(--snap-teal); background: rgba(127,208,200,0.08);
+    padding: 0.02rem 0.28rem; border-radius: 3px;
+  }
+
+  /* ── SVG stage ───────────────────────────────────────────── */
+  .stage {
+    position: relative;
+    width: 100%; aspect-ratio: 4 / 3;
+    background:
+      linear-gradient(0deg, rgba(0,0,0,0.15), rgba(0,0,0,0.15)),
+      var(--bg);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* grid */
+  .grid-fine  { stroke: var(--grid-fine);  stroke-width: 1; }
+  .grid-major { stroke: var(--grid-major); stroke-width: 1; }
+
+  /* furniture symbol */
+  .sym-box { fill: var(--sym-fill); stroke: var(--sym-stroke); stroke-width: 1.5; }
+  .sym-box.sel { fill: var(--sym-sel-fill); stroke: var(--gold); stroke-width: 2; }
+  .sym-label {
+    font-family: var(--font-mono); font-size: 11px; fill: var(--muted);
+    text-anchor: middle; dominant-baseline: middle;
+  }
+  .sym-handle { fill: var(--bg); stroke: var(--gold); stroke-width: 1.5; }
+  .sym-rot-handle { fill: var(--gold); }
+
+  /* measurement line */
+  .m-line { stroke: var(--snap-teal); stroke-width: 1.75; stroke-linecap: round; opacity: 0.85; }
+  .m-line.sel { stroke-width: 2.5; opacity: 1; }
+  .m-line.ghost { stroke-dasharray: 5 4; opacity: 0.5; }
+  .m-tick { stroke: var(--snap-teal); stroke-width: 1.75; stroke-linecap: round; }
+
+  /* endpoint glyphs */
+  .ep-fixed { fill: var(--snap-teal); opacity: 0.9; }          /* plain dot */
+  .ep-anchor-ring { fill: none; stroke: var(--snap-teal); stroke-width: 1.6; }
+  .ep-anchor-dot  { fill: var(--snap-teal); }
+  .ep-anchor-tie  { stroke: var(--snap-teal); stroke-width: 1.2; opacity: 0.7; stroke-dasharray: 2 2; }
+
+  /* live-follow pulse for anchored ring */
+  @keyframes anchor-pulse { 0%,100% { r: 6; opacity: 1; } 50% { r: 8; opacity: 0.55; } }
+  .pulse { animation: anchor-pulse 1.4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+  /* snap-candidate glyph shown during placement over an object */
+  .cand-ring { fill: none; stroke: var(--snap-teal); stroke-width: 1.5; }
+  @keyframes cand-pulse { 0%,100% { r: 10; opacity: 1; } 50% { r: 14; opacity: 0.5; } }
+  .cand-ring.pulse2 { animation: cand-pulse 1.2s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .cand-ring.pulse2 { animation: none; } }
+  .cand-edge { stroke: var(--snap-teal); stroke-width: 2; opacity: 0.55; }
+
+  /* HTML overlay chips */
+  .overlay { position: absolute; inset: 0; pointer-events: none; }
+  .measure-chip {
+    position: absolute; transform: translate(-50%, -50%);
+    font-family: var(--font-mono); font-size: 0.62rem;
+    padding: 0.08rem 0.3rem; border-radius: 3px; white-space: nowrap;
+    background: var(--panel); border: 1px solid rgba(127,208,200,0.35);
+    color: var(--snap-teal); line-height: 1.4;
+  }
+  .measure-chip.anchored { border-color: var(--snap-teal); }
+  .measure-chip.anchored::before {
+    content: "⚭"; margin-right: 0.28rem; opacity: 0.9; font-size: 0.7rem;
+  }
+  .measure-chip.draft { opacity: 0.7; }
+
+  /* placement hint tag near cursor */
+  .hint-tag {
+    position: absolute; transform: translate(12px, 12px);
+    font-family: var(--font-mono); font-size: 0.58rem;
+    padding: 0.14rem 0.4rem; border-radius: 4px;
+    background: rgba(127,208,200,0.14); border: 1px solid rgba(127,208,200,0.4);
+    color: var(--snap-teal); white-space: nowrap;
+  }
+  .hint-tag kbd {
+    font-family: var(--font-mono); background: rgba(232,226,207,0.12);
+    border: 1px solid var(--hairline); border-radius: 3px;
+    padding: 0 0.22rem; margin: 0 0.15rem; color: var(--ink); font-size: 0.55rem;
+  }
+  .cursor-dot { position: absolute; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--snap-teal); transform: translate(-50%,-50%); }
+
+  /* toast (delete/detach) */
+  .toast {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 0.7rem;
+    background: var(--panel); border: 1px solid var(--hairline);
+    border-radius: 8px; padding: 0.5rem 0.7rem 0.5rem 0.85rem;
+    font-size: 0.78rem; color: var(--ink);
+    backdrop-filter: blur(6px);
+  }
+  .toast .toast-action-btn {
+    font-family: var(--font-ui); font-size: 0.75rem; font-weight: 600;
+    color: var(--gold); background: transparent;
+    border: 1px solid var(--hairline); border-radius: 5px;
+    padding: 0.2rem 0.55rem; cursor: pointer;
+  }
+  .toast .toast-action-btn:hover { background: rgba(201,168,76,0.1); }
+
+  /* legend */
+  .legend {
+    max-width: 1180px; margin: 1.6rem auto 0;
+    border: 1px solid var(--hairline); border-radius: 10px;
+    background: var(--bg); padding: 1.1rem 1.3rem;
+  }
+  .legend h3 { margin: 0 0 0.9rem; font-size: 0.95rem; font-weight: 600; }
+  .legend .rows { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.7rem 2rem; }
+  @media (max-width: 640px) { .legend .rows { grid-template-columns: 1fr; } }
+  .legend .row { display: flex; align-items: center; gap: 0.7rem; font-size: 0.83rem; color: var(--muted); }
+  .legend .row b { color: var(--ink); font-weight: 600; }
+  .legend .swatch { flex: 0 0 34px; height: 24px; }
+
+  /* decision callout */
+  .decisions { max-width: 1180px; margin: 1.6rem auto 0; }
+  .decisions .card {
+    border: 1px solid var(--hairline); border-left: 3px solid var(--snap-teal);
+    border-radius: 8px; background: var(--bg); padding: 0.9rem 1.1rem;
+    margin-bottom: 0.8rem;
+  }
+  .decisions .card h4 {
+    margin: 0 0 0.4rem; font-size: 0.88rem; font-weight: 600;
+    font-family: var(--font-mono); color: var(--snap-teal);
+  }
+  .decisions .card p { margin: 0; color: var(--muted); font-size: 0.85rem; line-height: 1.55; }
+  .decisions .card p .opt { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+<header class="page">
+  <p class="kicker">Measure tool · Phase 3 · Issue #93</p>
+  <h1>Object-anchored measurements that live-follow</h1>
+  <p class="lede">
+    A measurement endpoint can bind to a furniture object instead of a fixed spot on the
+    canvas. When you move, rotate, or resize that object, the anchored endpoint — and its
+    distance label — follow it live, the way a real CAD dimension does. This mockup shows
+    the placement affordance, the anchored-endpoint glyph, live-follow before/after, and
+    the delete / duplicate behaviours. No new chrome: everything reuses the teal measure
+    language already shipped in #92.
+  </p>
+</header>
+
+<div class="grid-wrap">
+
+  <section class="panel">
+    <div class="cap"><span class="n">A</span><h2>Placement — snap onto an object</h2>
+      <span class="sub">measure tool active</span></div>
+    <div class="body"><div class="stage" id="stgA"></div></div>
+    <p class="note">
+      Second click is being dragged over the sofa's corner. The teal snap ring appears
+      (the existing <code>snapType:"point"</code> glyph). A hint tag says the endpoint will
+      <b>anchor</b> to this object. <b>Proposed default:</b> snapping onto an object records
+      an <b>anchored</b> endpoint; hold <kbd>Alt</kbd> to drop a plain fixed point instead.
+    </p>
+  </section>
+
+  <section class="panel">
+    <div class="cap"><span class="n">B</span><h2>Anchored vs. fixed — at rest</h2>
+      <span class="sub">committed</span></div>
+    <div class="body"><div class="stage" id="stgB"></div></div>
+    <p class="note">
+      Two committed measurements. The <b>anchored</b> endpoint (on the sofa) draws a hollow
+      teal ring; the <b>fixed</b> endpoint draws the plain filled dot. The chip carries a
+      small <code>⚭</code> link mark so an anchored dimension is legible at a glance.
+    </p>
+  </section>
+
+  <section class="panel panel--wide">
+    <div class="cap"><span class="n">C</span><h2>Live-follow — move / rotate / resize</h2>
+      <span class="sub">before → after, same measurement</span></div>
+    <div class="body"><div class="stage" id="stgC"></div></div>
+    <p class="note">
+      The sofa was dragged right and rotated. The anchored endpoint stays welded to the
+      sofa's near corner; the line re-aims and the label recomputes live
+      (<code>2.85 m → 1.40 m</code>). The fixed endpoint on the wall never moved. Resolution
+      happens at render time from <code>corners()</code> / <code>aabb</code>, so no stored
+      coordinate goes stale.
+    </p>
+  </section>
+
+  <section class="panel">
+    <div class="cap"><span class="n">D</span><h2>Delete the anchored object</h2>
+      <span class="sub">detach + undo</span></div>
+    <div class="body"><div class="stage" id="stgD"></div></div>
+    <p class="note">
+      <b>Proposed behaviour:</b> deleting an object <b>converts</b> its anchored endpoints to
+      fixed coordinates (frozen at last-known position) rather than deleting the measurement —
+      less destructive, one undo restores both. Toast confirms and offers <b>Undo</b>.
+    </p>
+  </section>
+
+  <section class="panel">
+    <div class="cap"><span class="n">E</span><h2>Duplicate the anchored object</h2>
+      <span class="sub">copy does not inherit</span></div>
+    <div class="body"><div class="stage" id="stgE"></div></div>
+    <p class="note">
+      <b>Proposed behaviour:</b> the duplicate is a plain copy — it does <b>not</b> inherit the
+      original's measurement anchor. The original keeps its live dimension (teal ring); the
+      copy carries none. Prevents a silent, surprising second dimension appearing on the copy.
+    </p>
+  </section>
+
+</div>
+
+<div class="legend">
+  <h3>Endpoint glyph language</h3>
+  <div class="rows">
+    <div class="row">
+      <svg class="swatch" viewBox="0 0 34 24"><line x1="4" y1="12" x2="30" y2="12" stroke="#7fd0c8" stroke-width="1.75"/><circle cx="4" cy="12" r="3" fill="#7fd0c8"/><circle cx="30" cy="12" r="3" fill="#7fd0c8"/></svg>
+      <span><b>Fixed endpoint</b> — filled teal dot (unchanged from #92).</span>
+    </div>
+    <div class="row">
+      <svg class="swatch" viewBox="0 0 34 24"><line x1="4" y1="12" x2="30" y2="12" stroke="#7fd0c8" stroke-width="1.75"/><circle cx="4" cy="12" r="3" fill="#7fd0c8"/><circle cx="30" cy="12" r="6" fill="none" stroke="#7fd0c8" stroke-width="1.6"/><circle cx="30" cy="12" r="2" fill="#7fd0c8"/></svg>
+      <span><b>Anchored endpoint</b> — hollow ring + dot, welded to an object.</span>
+    </div>
+    <div class="row">
+      <svg class="swatch" viewBox="0 0 34 24"><circle cx="17" cy="12" r="9" fill="none" stroke="#7fd0c8" stroke-width="1.5"/><circle cx="17" cy="12" r="3" fill="#7fd0c8"/></svg>
+      <span><b>Snap candidate</b> — pulsing ring while placing over an object.</span>
+    </div>
+    <div class="row">
+      <svg class="swatch" viewBox="0 0 34 24"><rect x="8" y="6" width="18" height="12" rx="1.5" fill="rgba(127,208,200,0.12)" stroke="#7fd0c8" stroke-width="1"/><text x="17" y="15" font-family="DM Mono, monospace" font-size="8" fill="#7fd0c8" text-anchor="middle">⚭ 1.4m</text></svg>
+      <span><b>Anchored chip</b> — carries a <code style="font-size:0.72rem">⚭</code> link mark.</span>
+    </div>
+  </div>
+</div>
+
+<div class="decisions">
+  <div class="card">
+    <h4>Decision 1 · Placement default</h4>
+    <p><span class="opt">Option A (recommended):</span> snapping an endpoint onto an object
+    anchors it by default; <span class="opt">Alt</span> drops a plain fixed point.
+    <span class="opt">Option B:</span> snap stays fixed by default; a modifier
+    (<span class="opt">Shift</span>) opts in to anchoring. A favours the "does my couch fit"
+    intent (you usually measure <em>to</em> the couch); B is more conservative.</p>
+  </div>
+  <div class="card">
+    <h4>Decision 2 · On object delete</h4>
+    <p><span class="opt">Option A (recommended):</span> convert anchored endpoints to fixed
+    coordinates (freeze in place) — non-destructive, keeps the number you were reading.
+    <span class="opt">Option B:</span> delete every dependent measurement. Both must be a
+    single undo. A loses no work; B matches strict CAD semantics.</p>
+  </div>
+  <div class="card">
+    <h4>Decision 3 · Anchor descriptor granularity</h4>
+    <p><span class="opt">Option A (recommended):</span> anchor to a <span class="opt">corner
+    index</span> or <span class="opt">center</span> (matches the snap points the tool already
+    resolves). <span class="opt">Option B:</span> add <span class="opt">nearest-edge</span>
+    (foot-point) anchoring too — more expressive but the resolved point slides along the edge
+    as the object resizes, which can surprise. Recommend shipping A first, B deferrable.</p>
+  </div>
+</div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+// viewBox units: use a 400x300 logical space, scaled to fit the stage.
+const VW = 400, VH = 300;
+
+function el(tag, attrs) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+}
+
+function makeSvg(host) {
+  const svg = el("svg", { viewBox: `0 0 ${VW} ${VH}`, preserveAspectRatio: "xMidYMid meet" });
+  host.appendChild(svg);
+  const overlay = document.createElement("div");
+  overlay.className = "overlay";
+  host.appendChild(overlay);
+  return { svg, overlay };
+}
+
+// Convert logical viewBox coords to overlay % for HTML chips.
+function pctLeft(x) { return (x / VW) * 100 + "%"; }
+function pctTop(y)  { return (y / VH) * 100 + "%"; }
+
+function drawGrid(svg) {
+  const step = 25;
+  for (let x = 0; x <= VW; x += step) {
+    svg.appendChild(el("line", { x1: x, y1: 0, x2: x, y2: VH,
+      class: x % 100 === 0 ? "grid-major" : "grid-fine" }));
+  }
+  for (let y = 0; y <= VH; y += step) {
+    svg.appendChild(el("line", { x1: 0, y1: y, x2: VW, y2: y,
+      class: y % 100 === 0 ? "grid-major" : "grid-fine" }));
+  }
+}
+
+// Rotated-rect corners, order TL,TR,BR,BL. cx,cy center; w,h size; rot deg CW.
+function corners(s) {
+  const rad = s.rot * Math.PI / 180, c = Math.cos(rad), sn = Math.sin(rad);
+  const hw = s.w / 2, hh = s.h / 2;
+  const pt = (lx, ly) => ({ x: s.cx + lx * c - ly * sn, y: s.cy + lx * sn + ly * c });
+  return [pt(-hw, -hh), pt(hw, -hh), pt(hw, hh), pt(-hw, hh)];
+}
+
+function drawSymbol(svg, s, opts = {}) {
+  const cs = corners(s);
+  const pts = cs.map(p => `${p.x},${p.y}`).join(" ");
+  svg.appendChild(el("polygon", { points: pts, class: "sym-box" + (opts.sel ? " sel" : "") }));
+  const t = el("text", { x: s.cx, y: s.cy, class: "sym-label",
+    transform: `rotate(${s.rot} ${s.cx} ${s.cy})` });
+  t.textContent = s.label || "Sofa";
+  svg.appendChild(t);
+  if (opts.sel) {
+    // resize handles at corners + a rotate handle above TL/TR midpoint
+    for (const p of cs) svg.appendChild(el("rect", { x: p.x - 3, y: p.y - 3, width: 6, height: 6, class: "sym-handle" }));
+    const midTop = { x: (cs[0].x + cs[1].x) / 2, y: (cs[0].y + cs[1].y) / 2 };
+    svg.appendChild(el("circle", { cx: midTop.x, cy: midTop.y - 14, r: 3.5, class: "sym-rot-handle" }));
+    svg.appendChild(el("line", { x1: midTop.x, y1: midTop.y, x2: midTop.x, y2: midTop.y - 11,
+      stroke: "var(--gold)", "stroke-width": 1 }));
+  }
+  return cs;
+}
+
+// Draw a measurement line with per-endpoint glyph kinds ("fixed"|"anchor") + chip.
+function drawMeasurement(svg, overlay, a, b, opts = {}) {
+  const line = el("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+    class: "m-line" + (opts.sel ? " sel" : "") + (opts.ghost ? " ghost" : "") });
+  svg.appendChild(line);
+  drawTick(svg, a, b); drawTick(svg, b, a);
+  drawEndpoint(svg, a, opts.aKind || "fixed");
+  drawEndpoint(svg, b, opts.bKind || "fixed");
+  if (opts.label) {
+    const chip = document.createElement("div");
+    chip.className = "measure-chip" + (opts.anchoredChip ? " anchored" : "") + (opts.ghost ? " draft" : "");
+    chip.textContent = opts.label;
+    chip.style.left = pctLeft((a.x + b.x) / 2);
+    chip.style.top  = pctTop((a.y + b.y) / 2);
+    overlay.appendChild(chip);
+  }
+  return line;
+}
+
+function drawTick(svg, at, toward) {
+  const dx = toward.x - at.x, dy = toward.y - at.y;
+  const len = Math.hypot(dx, dy); if (len < 1) return;
+  const px = -dy / len, py = dx / len, H = 4;
+  svg.appendChild(el("line", { x1: at.x - px * H, y1: at.y - py * H,
+    x2: at.x + px * H, y2: at.y + py * H, class: "m-tick" }));
+}
+
+function drawEndpoint(svg, p, kind) {
+  if (kind === "anchor") {
+    svg.appendChild(el("circle", { cx: p.x, cy: p.y, r: 6, class: "ep-anchor-ring pulse" }));
+    svg.appendChild(el("circle", { cx: p.x, cy: p.y, r: 2, class: "ep-anchor-dot" }));
+  } else {
+    svg.appendChild(el("circle", { cx: p.x, cy: p.y, r: 3, class: "ep-fixed" }));
+  }
+}
+
+// ── Panel A: placement snapping onto object ──────────────────
+function buildA(host) {
+  const { svg, overlay } = makeSvg(host);
+  drawGrid(svg);
+  const sofa = { cx: 250, cy: 150, w: 130, h: 60, rot: 0, label: "Sofa" };
+  const cs = drawSymbol(svg, sofa);
+  // Anchor point being targeted = sofa TL corner.
+  const target = cs[0];
+  const start = { x: 70, y: 220 };
+  // draft (rubber-band) line to the candidate
+  drawMeasurement(svg, overlay, start, target, {
+    ghost: true, aKind: "fixed", bKind: "fixed",
+    label: "2.85 m", anchoredChip: false,
+  });
+  // snap-candidate pulsing ring over the corner
+  svg.appendChild(el("circle", { cx: target.x, cy: target.y, r: 10, class: "cand-ring pulse2" }));
+  svg.appendChild(el("circle", { cx: target.x, cy: target.y, r: 3, fill: "var(--snap-teal)" }));
+  // cursor + hint tag
+  const dot = document.createElement("div");
+  dot.className = "cursor-dot";
+  dot.style.left = pctLeft(target.x); dot.style.top = pctTop(target.y);
+  overlay.appendChild(dot);
+  const hint = document.createElement("div");
+  hint.className = "hint-tag";
+  hint.innerHTML = "will anchor to Sofa · <kbd>Alt</kbd> = fixed";
+  hint.style.left = pctLeft(target.x); hint.style.top = pctTop(target.y);
+  overlay.appendChild(hint);
+}
+
+// ── Panel B: anchored vs fixed at rest ───────────────────────
+function buildB(host) {
+  const { svg, overlay } = makeSvg(host);
+  drawGrid(svg);
+  const sofa = { cx: 250, cy: 130, w: 130, h: 60, rot: 0, label: "Sofa" };
+  const cs = drawSymbol(svg, sofa);
+  // Anchored measurement: fixed wall point -> sofa TL corner (anchored)
+  drawMeasurement(svg, overlay, { x: 60, y: 230 }, cs[3], {
+    aKind: "fixed", bKind: "anchor", label: "1.95 m", anchoredChip: true,
+  });
+  // Fixed measurement: two free points
+  drawMeasurement(svg, overlay, { x: 300, y: 240 }, { x: 380, y: 200 }, {
+    aKind: "fixed", bKind: "fixed", label: "0.92 m", anchoredChip: false,
+  });
+}
+
+// ── Panel C: live-follow before -> after (animated) ──────────
+function buildC(host) {
+  const { svg, overlay } = makeSvg(host);
+  drawGrid(svg);
+  const wall = { x: 70, y: 60 };            // fixed anchor on wall
+  // Draw a faint wall segment to anchor against
+  svg.appendChild(el("line", { x1: 40, y1: 60, x2: 40, y2: 250,
+    stroke: "var(--sym-stroke)", "stroke-width": 4, opacity: 0.35 }));
+  // "before" state (dim, static)
+  const before = { cx: 180, cy: 150, w: 130, h: 60, rot: 0, label: "Sofa" };
+  const csB = corners(before);
+  const gline = el("line", { x1: wall.x, y1: wall.y, x2: csB[0].x, y2: csB[0].y, class: "m-line ghost" });
+  svg.appendChild(gline);
+
+  // live symbol + measurement (animated between before/after)
+  const gLive = el("g", {});
+  svg.appendChild(gLive);
+  const chip = document.createElement("div");
+  chip.className = "measure-chip anchored";
+  overlay.appendChild(chip);
+
+  const after = { cx: 300, cy: 110, w: 130, h: 60, rot: -28, label: "Sofa" };
+  function frame(s, distLabel) {
+    while (gLive.firstChild) gLive.removeChild(gLive.firstChild);
+    const cs = drawSymbol(gLive, s, { sel: true });
+    const anchor = cs[0]; // TL corner tracks the object
+    gLive.appendChild(el("line", { x1: wall.x, y1: wall.y, x2: anchor.x, y2: anchor.y, class: "m-line sel" }));
+    drawTick(gLive, wall, anchor); drawTick(gLive, anchor, wall);
+    drawEndpoint(gLive, wall, "fixed");
+    drawEndpoint(gLive, anchor, "anchor");
+    chip.textContent = distLabel;
+    chip.style.left = pctLeft((wall.x + anchor.x) / 2);
+    chip.style.top  = pctTop((wall.y + anchor.y) / 2);
+  }
+  // simple two-state loop with eased interpolation
+  const A = before, B = after;
+  const dur = 2600;
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function tick(ts) {
+    const phase = (ts % (dur * 2)) / dur;      // 0..2
+    const fwd = phase < 1;
+    const raw = fwd ? phase : 2 - phase;
+    const t = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2; // easeInOut
+    const s = {
+      cx: lerp(A.cx, B.cx, t), cy: lerp(A.cy, B.cy, t),
+      w: A.w, h: A.h, rot: lerp(A.rot, B.rot, t), label: "Sofa",
+    };
+    const anchor = corners(s)[0];
+    const dist = Math.hypot(anchor.x - wall.x, anchor.y - wall.y);
+    const metres = (dist / 45).toFixed(2);     // arbitrary logical->m scale for the demo
+    frame(s, metres + " m");
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+// ── Panel D: delete anchored object → detach to fixed ────────
+function buildD(host) {
+  const { svg, overlay } = makeSvg(host);
+  drawGrid(svg);
+  // Object is gone (deleted); its footprint shown as a faint dashed ghost.
+  const ghost = corners({ cx: 250, cy: 130, w: 130, h: 60, rot: 0 });
+  svg.appendChild(el("polygon", { points: ghost.map(p => `${p.x},${p.y}`).join(" "),
+    fill: "none", stroke: "var(--muted)", "stroke-width": 1, "stroke-dasharray": "4 4", opacity: 0.4 }));
+  // The measurement survived: endpoint converted from anchor -> fixed, frozen at TL.
+  drawMeasurement(svg, overlay, { x: 60, y: 230 }, ghost[0], {
+    aKind: "fixed", bKind: "fixed", label: "1.95 m", anchoredChip: false,
+  });
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.innerHTML = "Sofa deleted — measurement detached, endpoint frozen"
+    + "<button class='toast-action-btn'>Undo</button>";
+  overlay.appendChild(toast);
+}
+
+// ── Panel E: duplicate — copy does not inherit anchor ────────
+function buildE(host) {
+  const { svg, overlay } = makeSvg(host);
+  drawGrid(svg);
+  const orig = { cx: 150, cy: 120, w: 120, h: 55, rot: 0, label: "Sofa" };
+  const copy = { cx: 250, cy: 190, w: 120, h: 55, rot: 0, label: "Sofa" };
+  const csO = drawSymbol(svg, orig);
+  drawSymbol(svg, copy);
+  // "copy" tag
+  const tag = document.createElement("div");
+  tag.className = "hint-tag";
+  tag.style.background = "rgba(201,168,76,0.14)";
+  tag.style.borderColor = "var(--hairline)";
+  tag.style.color = "var(--gold)";
+  tag.textContent = "duplicate · no dimension";
+  tag.style.left = pctLeft(copy.cx); tag.style.top = pctTop(copy.cy + 30);
+  overlay.appendChild(tag);
+  // Original keeps its anchored measurement.
+  drawMeasurement(svg, overlay, { x: 60, y: 60 }, csO[0], {
+    aKind: "fixed", bKind: "anchor", label: "1.20 m", anchoredChip: true,
+  });
+}
+
+// ── Boot ─────────────────────────────────────────────────────
+buildA(document.getElementById("stgA"));
+buildB(document.getElementById("stgB"));
+buildC(document.getElementById("stgC"));
+buildD(document.getElementById("stgD"));
+buildE(document.getElementById("stgE"));
+</script>
+</body>
+</html>
