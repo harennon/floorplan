@@ -40,16 +40,38 @@ flag only changes resize behavior, not defaults or placement.
 **2. Snap the whole pair, not each axis.** A bed's width and depth are not
 independent — Twin is 0.97×1.91, Twin XL is 0.97×2.03. Snapping axes independently
 could synthesize a (0.97, 1.97) that no product has. `snapToPreset` therefore chooses
-the single preset pair minimizing a **span-normalized squared distance**:
+the single preset pair minimizing **raw (un-normalized) squared distance in metres**:
 
 ```
-d² = ((w - p.w)/spanW)² + ((h - p.h)/spanH)²      spanW = max_w-min_w, spanH = max_h-min_h
+d² = (w - p.w)² + (h - p.h)²
 ```
 
-Normalizing by each axis's bound span keeps width and depth contributing
-proportionally, so the wide-ranging width axis (0.97→1.93 for beds) does not swamp the
-narrow depth axis (1.91→2.13). The chosen preset's exact `w`/`h` are returned, so
-results land on catalog numbers that round-trip losslessly through plan JSON.
+*Rationale — why raw, not span-normalized.* A resize edits exactly **one** axis at a
+time (see step 3): the candidate pair is `(edited-axis value, current other-axis
+value)`, so the other axis is *frozen* at whatever it already was. The choice of
+metric decides how much that frozen axis influences the preset picked for the axis the
+user actually typed:
+
+- **Raw metric (chosen).** Because beds span a wide width range (0.97→1.93 m) but a
+  narrow depth range (1.91→2.13 m), width differences naturally carry larger magnitude
+  than depth differences. The edited-width term therefore dominates the pick, and the
+  frozen depth acts as a gentle **tiebreaker** between presets that share a width
+  (e.g. Twin 0.97×1.91 vs Twin XL 0.97×2.03). This is the intuitive behavior: typing a
+  wider number yields a wider bed.
+- **Span-normalized (rejected).** Dividing each term by its axis's bound span
+  (spanW≈0.96, spanH≈0.22) *amplifies* depth differences ~4.4× relative to width. The
+  frozen depth axis then swamps the width the user typed. Verified numerically on a
+  default Queen (1.52×2.03), typing width **1.20 m**: normalized picks Twin XL
+  (0.97×2.03, d²≈0.057) — a 0.97 m-wide bed — over Full (1.37×1.91, d²≈0.329), purely
+  because Twin XL's depth matches the frozen 2.03. A user asking for a *wider* bed gets
+  a much *narrower* one. Rejected.
+
+Under the raw metric the same input (Queen, width 1.20 m → candidate (1.20, 2.03))
+snaps to **Full 1.37×1.91** (d²=0.17²+0.12²=0.0433), beating Twin XL (d²=0.0529) and
+Twin (d²=0.0673) — the intuitive result.
+
+The chosen preset's exact `w`/`h` are returned, so results land on catalog numbers that
+round-trip losslessly through plan JSON.
 
 **3. Apply after clamp, take precedence over lockAspect.** Inside `resizeSymbol`,
 after `clampDim`, if the type is `discrete`: form the candidate pair from the clamped
@@ -59,14 +81,22 @@ pair already fixes the aspect). No discrete type is `circular`, so the two branc
 never interact; the discrete branch is placed after the `circular` branch guard for
 that reason (documented, not load-bearing today).
 
-**4. MCP path is covered for free.** `mcp/src/core.js` re-exports `resizeSymbol`
-(and `clampDim`) *directly* from `../../src/js/symbols.js` — there is **no** duplicated
-catalog or resize implementation in the `mcp/` package (verified). So `tool_resize_symbol`
-and `tool_place_symbol` (which call `resizeSymbol`) inherit the snap with zero MCP code
-changes. `snapToPreset` is pure and DOM-free, so the M4 import-boundary drift guard
-(`mcp/test/import-boundary.test.js`) still passes. This corrects the issue note's
-assumption of a "mirror copy that must stay identical": the MCP core mirrors by
-*re-export*, not by duplication, so there is nothing to keep in sync.
+**4. MCP path inherits the snap logic; one small response field is added.**
+`mcp/src/core.js` re-exports `resizeSymbol` (and `clampDim`) *directly* from
+`../../src/js/symbols.js` — there is **no** duplicated catalog or resize implementation
+in the `mcp/` package (verified). So `tool_resize_symbol` and `tool_place_symbol`
+(which call `resizeSymbol`) inherit the snap **behavior** with no logic changes. This
+corrects the issue note's assumption of a "mirror copy that must stay identical": the
+MCP core mirrors by *re-export*, not by duplication, so there is nothing to keep in
+sync. `snapToPreset` is pure and DOM-free, so the M4 import-boundary drift guard
+(`mcp/test/import-boundary.test.js`) still passes.
+
+The only MCP-side edit is additive reporting: both tools already track `clamped`
+(`clampDim(...) !== metres`). Because snap can change `w`/`h` without clamping, each
+tool also computes a `snapped:boolean` — true when, after `resizeSymbol`, `sym.w`/`sym.h`
+differ from the clamped request — and includes it in the response for discrete types
+(Edge Case 8). This is a pure comparison of already-available values; no new logic in
+`symbols.js`.
 
 ## Interfaces / Types
 
@@ -75,9 +105,10 @@ New pure function in `src/js/symbols.js`:
 ```js
 /**
  * Snap a (w,h) footprint to the nearest catalog preset PAIR for a discrete type.
- * Chooses the preset minimizing span-normalized squared distance so both axes move
- * together to a real, buyable size. No-op (returns {w,h} unchanged) if the type has
- * no presets. Pure; does not mutate.
+ * Chooses the preset minimizing raw squared distance in metres —
+ * (w-p.w)² + (h-p.h)² — so both axes move together to a real, buyable size and the
+ * axis the user edits dominates the pick (see LLD Approach step 2). No-op (returns
+ * {w,h} unchanged) if the type has no presets. Pure; does not mutate.
  * @param {SymbolType} type
  * @param {number} w  metres
  * @param {number} h  metres
@@ -147,8 +178,10 @@ warranted when a drag is already in play, which resize here never is.
 
 ## Edge Cases
 
-1. **Bed width toward a between-size value (1.20 m).** `snapToPreset` picks the nearest
-   whole preset pair (e.g. Full 1.37×1.91 or a Twin), never 1.20. Both dims update.
+1. **Bed width toward a between-size value (1.20 m).** On a default Queen (1.52×2.03),
+   typing width 1.20 m forms candidate (1.20, 2.03); under the raw metric it snaps to
+   **Full 1.37×1.91** (d²=0.0433, vs Twin XL 0.0529, Twin 0.0673) — never 1.20. Both
+   dims update. A test locks in this exact outcome (see Test Requirements).
 2. **Editing width also moves depth.** Expected and correct — a mattress width implies
    its depth. Documented so it is not mistaken for a bug.
 3. **Appliance to a between-rung width.** A fridge dragged toward ~0.70 m snaps to the
@@ -169,16 +202,21 @@ warranted when a drag is already in play, which resize here never is.
 8. **`clamped` flag semantics in MCP responses.** `tool_place_symbol` /
    `tool_resize_symbol` compute `clamped = clampDim(...) !== metres`; for a discrete
    type the returned `w`/`h` may now differ from the requested `metres` even when
-   `clamped` is `false` (because snap, not clamp, changed it). The returned `w`/`h`
-   already communicate the real result. Adding a `snapped:boolean` field is optional
-   and recommended-light for agent clarity, but not required for correctness.
+   `clamped` is `false` (because snap, not clamp, changed it). To let MCP agents
+   distinguish a snap from a clamp, add a `snapped:boolean` field to the discrete-type
+   responses of both tools, set true when the discrete branch changed `w`/`h` from the
+   clamped request. Low cost, DOM-free, improves agent-facing clarity. The returned
+   `w`/`h` remain the source of truth; `snapped` is advisory. (This is the one small
+   `mcp/src/tools.js` change in this LLD; the resize/catalog logic itself stays in
+   `symbols.js` and is inherited by re-export — see Approach step 4.)
 9. **Empty / single preset list.** `snapToPreset` returns the input unchanged when a
    type has no `presets`; with one preset it always returns that preset. (Guards a
    future discrete type added before its presets.)
-10. **Zero span axis.** For a discrete type an axis span could theoretically be 0
-    (min==max); `snapToPreset` must guard division by falling back to span = 1 so it
-    does not divide by zero. (No current discrete type has a zero span, but the guard
-    keeps the helper total.)
+10. **Ties in the distance metric.** If two presets are exactly equidistant under the
+    raw metric, `snapToPreset` returns the first one encountered in `presets` order
+    (stable, deterministic). Catalog preset order is fixed, so the result is
+    reproducible. (The raw metric divides by nothing, so there is no zero-span /
+    divide-by-zero concern that the earlier normalized metric would have needed.)
 
 ## Dependencies
 
@@ -188,8 +226,9 @@ warranted when a drag is already in play, which resize here never is.
   unchanged, inherits snap.
 - `mcp/src/core.js` — re-exports `resizeSymbol`/`clampDim` from `src/js/symbols.js`;
   add `snapToPreset` to the re-export list (optional, for MCP test access).
-- `mcp/src/tools.js` — `tool_resize_symbol` / `tool_place_symbol`; unchanged, inherit
-  snap. No catalog duplication exists here.
+- `mcp/src/tools.js` — `tool_resize_symbol` / `tool_place_symbol`; inherit the snap
+  behavior via `resizeSymbol` (no logic change), plus a small additive `snapped:boolean`
+  field on discrete-type responses (Edge Case 8). No catalog duplication exists here.
 - No new external dependency, no build step (consistent with client-side-only v1).
 
 ## Test Requirements
@@ -198,9 +237,11 @@ warranted when a drag is already in play, which resize here never is.
 - `snapToPreset` returns an exact preset pair for a between-size input (bed 1.20 m
   width → one of the mattress presets; both dims equal a catalog preset).
 - `snapToPreset` is a no-op for a type with no presets, and returns the sole preset
-  for a one-preset type; guards zero-span axis without throwing.
-- `resizeSymbol` on `bed` toward 1.20 m width snaps both `w` and `h` to a standard
-  mattress pair; result equals some `bed.presets[i]`.
+  for a one-preset type; on an exact tie returns the first preset in catalog order.
+- **Intuitive single-edit outcome (locks in the metric fix):** `resizeSymbol` on a
+  default Queen bed (1.52×2.03) toward 1.20 m width snaps to **Full (1.37×1.91)** —
+  exactly, `w===1.37 && h===1.91` — not to Twin XL/Twin. Asserts the raw metric so a
+  future revert to span-normalization is caught. Result equals some `bed.presets[i]`.
 - `resizeSymbol` on a discrete appliance (`fridge`/`stove`/`washer`) snaps width to a
   24/30/33/36-in rung with its paired depth.
 - **Regression:** `resizeSymbol` on a non-discrete type (`sofa`, `table`, `desk`,
@@ -214,7 +255,8 @@ warranted when a drag is already in play, which resize here never is.
 
 **MCP (`mcp/test/mutators.test.js`)**
 - `tool_resize_symbol` on a bed with a between-size `metres` returns `w`/`h` equal to a
-  mattress preset pair (agent-driven resize lands on a real size).
+  mattress preset pair (agent-driven resize lands on a real size), and returns
+  `snapped: true` with `clamped: false` when snap (not clamp) changed the size.
 - `tool_place_symbol` for a discrete appliance with a between-rung `w` returns a
   snapped standard width.
 - `tool_resize_symbol` on a non-discrete type (`sofa`) still returns the clamped, un-
