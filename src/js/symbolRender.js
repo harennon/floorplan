@@ -32,6 +32,7 @@ const CHIP_OFFSET_PX       = 2;   // extra offset so chip doesn't overlap the bo
 
 // ── DOM refs ───────────────────────────────────────────────────────────────────
 
+let _gRugs      = null;
 let _gSymbols   = null;
 let _gOverlay   = null;
 let _dimLabels  = null;
@@ -45,6 +46,7 @@ let _getEditingDim     = () => null;
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 /**
+ * @param {SVGGElement} gRugs
  * @param {SVGGElement} gSymbols
  * @param {SVGGElement} gOverlay
  * @param {HTMLElement} dimLabels
@@ -52,7 +54,8 @@ let _getEditingDim     = () => null;
  * @param {()=>{type,x,y,w,h,rot}|null} getPlacementGhost
  * @param {()=>{symbolId:string,dim:"w"|"h"}|null} getEditingDim
  */
-export function init(gSymbols, gOverlay, dimLabels, getSelectedId, getPlacementGhost, getEditingDim) {
+export function init(gRugs, gSymbols, gOverlay, dimLabels, getSelectedId, getPlacementGhost, getEditingDim) {
+  _gRugs             = gRugs;
   _gSymbols          = gSymbols;
   _gOverlay          = gOverlay;
   _dimLabels         = dimLabels;
@@ -70,7 +73,8 @@ export function init(gSymbols, gOverlay, dimLabels, getSelectedId, getPlacementG
 export function render() {
   if (!_gSymbols) return;
 
-  // Clear only our two SVG groups — never clear .dim-labels
+  // Clear our three SVG groups — never clear .dim-labels
+  if (_gRugs) _clearGroup(_gRugs);
   _clearGroup(_gSymbols);
   _clearGroup(_gOverlay);
 
@@ -79,9 +83,13 @@ export function render() {
   const editingDim = _getEditingDim();
   const ghost = _getPlacementGhost();
 
-  // ── Symbol bodies ──────────────────────────────────────────────────────────
+  // ── Symbol bodies — rugs route to #rugs, everything else to #symbols ───────
   for (const sym of model.symbols) {
-    _renderSymbolBody(_gSymbols, sym, sym.id === selectedId, p);
+    if (CATALOG[sym.type]?.floorLayer) {
+      if (_gRugs) _renderRug(_gRugs, sym, sym.id === selectedId, p);
+    } else {
+      _renderSymbolBody(_gSymbols, sym, sym.id === selectedId, p);
+    }
   }
 
   // ── Selection overlay + chips for selected symbol ─────────────────────────
@@ -98,6 +106,79 @@ export function render() {
   if (ghost) {
     _renderGhost(_gOverlay, ghost, p);
   }
+}
+
+// ── Private: rug body ──────────────────────────────────────────────────────────
+
+/**
+ * Render a rug as a dashed-edge full-footprint fill with a subtle woven hatch.
+ * No type glyph. Painted into the #rugs group (below #symbols).
+ * @param {SVGGElement} parent
+ * @param {import("./symbols.js").Sym} sym
+ * @param {boolean} selected
+ * @param {import("./theme.js").Palette} p
+ */
+function _renderRug(parent, sym, selected, p) {
+  const cs = corners(sym).map(c => worldToScreen(c.x, c.y));
+  const pts = cs.map(s => `${s.x},${s.y}`).join(" ");
+  const ppm = pxPerM();
+  const sc = worldToScreen(sym.x, sym.y);
+  const sw = sym.w * ppm;
+  const sh = sym.h * ppm;
+  const rad = (sym.rot * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const rgb = p.symInkRgb;
+
+  // Full-footprint fill — use sym.color when set, else a low-alpha theme neutral
+  const fillColor = sym.color ? sym.color : `rgba(${rgb},0.12)`;
+
+  // Filled polygon
+  const poly = document.createElementNS(NS, "polygon");
+  poly.setAttribute("points", pts);
+  poly.setAttribute("fill", fillColor);
+  poly.setAttribute("stroke", selected ? p.gold : p.symStroke);
+  poly.setAttribute("stroke-width", selected ? "2" : "1.2");
+  poly.setAttribute("stroke-dasharray", "5 3");
+  poly.setAttribute("stroke-linejoin", "round");
+  parent.appendChild(poly);
+
+  // Woven hatch: diagonal lines at low opacity across the rug surface
+  // Use a clip group so hatch stays inside the rug polygon
+  const clipId = `rug-clip-${sym.id}`;
+  const defs = document.createElementNS(NS, "defs");
+  const clipPath = document.createElementNS(NS, "clipPath");
+  clipPath.setAttribute("id", clipId);
+  const clipPoly = document.createElementNS(NS, "polygon");
+  clipPoly.setAttribute("points", pts);
+  clipPath.appendChild(clipPoly);
+  defs.appendChild(clipPath);
+  parent.appendChild(defs);
+
+  // Draw diagonal hatch lines in local space, then transform to screen
+  const hatchGroup = document.createElementNS(NS, "g");
+  hatchGroup.setAttribute("clip-path", `url(#${clipId})`);
+  hatchGroup.setAttribute("opacity", "0.10");
+
+  // Hatch spacing in screen pixels (wider than furniture ink to look subtle)
+  const hatchSpacing = Math.max(8, Math.min(sw, sh) * 0.12);
+  // Hatch lines run at 45° in local space; extent covers full bounding box
+  const maxExtent = (sw + sh);
+  const helper = (lx, ly) => ({
+    x: sc.x + lx * cos - ly * sin,
+    y: sc.y + lx * sin + ly * cos,
+  });
+
+  for (let d = -maxExtent; d < maxExtent; d += hatchSpacing) {
+    // Line from one corner of the local extent to the other at 45°
+    const a = helper(d - sh, -sh);
+    const b = helper(d + sh,  sh);
+    const hline = _makeLine(a.x, a.y, b.x, b.y);
+    hline.setAttribute("stroke", `rgb(${rgb})`);
+    hline.setAttribute("stroke-width", "0.6");
+    hatchGroup.appendChild(hline);
+  }
+  parent.appendChild(hatchGroup);
 }
 
 // ── Private: symbol body ───────────────────────────────────────────────────────

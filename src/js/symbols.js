@@ -15,7 +15,8 @@
  *   |"armchair"|"coffee-table"|"dining-table-round"
  *   |"monitor"|"gaming-chair"
  *   |"nightstand"|"dresser"|"cabinet"
- *   |"patio-table"|"patio-chair"|"parasol"|"planter"} SymbolType */
+ *   |"patio-table"|"patio-chair"|"parasol"|"planter"
+ *   |"rug"} SymbolType */
 /** @typedef {{ id:string, type:SymbolType, x:number, y:number, w:number, h:number, rot:number, color?:string }} Sym */
 /** @typedef {"openings"|"living"|"kitchen"|"bedroom"|"bath"|"outdoor"} SymCategory */
 
@@ -57,7 +58,8 @@ export const model = { symbols: /** @type {Sym[]} */ ([]) };
  * DIN/US door leaves) so the catalog only offers furniture that actually exists.
  *
  * @type {Record<SymbolType, {label:string, category:SymCategory,
- *   openings?:boolean, circular?:boolean, w:number, h:number,
+ *   openings?:boolean, circular?:boolean, discrete?:boolean, floorLayer?:boolean,
+ *   w:number, h:number,
  *   min_w:number, max_w:number, min_h:number, max_h:number,
  *   presets?:SymPreset[]}>}
  */
@@ -287,6 +289,19 @@ export const CATALOG = {
       { name: "Trough",     w: 0.90, h: 0.35 },
     ],
   },
+
+  // Floor layers — rugs paint below furniture; overlap is INTENDED (see LLD 107).
+  rug: {
+    label: "Rug", category: "living", floorLayer: true,
+    w: 2.44, h: 3.05,                       // 8×10 ft default
+    min_w: 0.61, max_w: 3.66, min_h: 0.91, max_h: 3.66,
+    presets: [
+      { name: "Runner 2.5×8", w: 0.76, h: 2.44 },
+      { name: "5×8",          w: 1.52, h: 2.44 },
+      { name: "8×10",         w: 2.44, h: 3.05 },
+      { name: "9×12",         w: 2.74, h: 3.66 },
+    ],
+  },
 };
 
 // ── CRUD ───────────────────────────────────────────────────────────────────────
@@ -424,18 +439,29 @@ export function hitTest(sym, wx, wy, tolWorld = 0) {
 /**
  * Topmost symbol at world point (last in array wins = drawn last = on top),
  * or null. tolWorld (metres) is forwarded to hitTest.
+ *
+ * Two-tier pick: prefer the topmost non-floorLayer hit; only fall back to a
+ * floorLayer hit when no non-floorLayer symbol is under the cursor. This keeps
+ * selection intuitive when furniture sits on top of a rug (LLD 107).
+ *
  * @param {number} wx
  * @param {number} wy
  * @param {number} [tolWorld=0]
  * @returns {Sym|null}
  */
 export function pickSymbol(wx, wy, tolWorld = 0) {
+  let floorLayerHit = null;
   for (let i = model.symbols.length - 1; i >= 0; i--) {
-    if (hitTest(model.symbols[i], wx, wy, tolWorld)) {
-      return model.symbols[i];
+    const sym = model.symbols[i];
+    if (!hitTest(sym, wx, wy, tolWorld)) continue;
+    if (CATALOG[sym.type]?.floorLayer) {
+      // Record the topmost floor-layer hit but keep looking for non-floor-layer
+      if (floorLayerHit === null) floorLayerHit = sym;
+    } else {
+      return sym; // non-floor-layer hit wins immediately
     }
   }
-  return null;
+  return floorLayerHit; // null or the topmost floor-layer hit
 }
 
 /**

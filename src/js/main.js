@@ -88,6 +88,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const gWorld   = document.getElementById("world");
   const gDraft   = document.getElementById("draft");
   const gSnap    = document.getElementById("snap");
+  const gRugs       = document.getElementById("rugs");
   const gSymbols    = document.getElementById("symbols");
   const gSymOverlay = document.getElementById("symbol-overlay");
   const labelsEl    = document.querySelector(".labels");
@@ -255,7 +256,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initSymbolDimEntry({ stage, dimLabels: dimLabelsEl, getLockAspect });
 
   // symbolRender — reads symbols.model + selection/ghost state, appends to .dim-labels AFTER wall chips
-  initSymbolRender(gSymbols, gSymOverlay, dimLabelsEl, getSelectedId, getPlacementGhost, getEditingDim);
+  initSymbolRender(gRugs, gSymbols, gSymOverlay, dimLabelsEl, getSelectedId, getPlacementGhost, getEditingDim);
 
   // symbolTool — placement, selection, inspector
   initSymbolTool({
