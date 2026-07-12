@@ -19,9 +19,12 @@
   **both** subject and neighbour roles, mirroring the existing `CATALOG[type].openings` guard.
 - A `pickSymbol` tweak-priority tweak so a rug never steals selection from furniture stacked
   on top of it.
-- Dock entry (Living tab, badged `new`), export (SVG/PNG) parity, and MCP catalog parity
-  (the MCP re-exports the same `CATALOG` and shared `clearance.js`, so it inherits the type
-  and the carve-out with no MCP-side logic change).
+- Dock entry (Living tab, badged `new`), export (SVG/PNG) parity, and MCP parity. The MCP
+  re-exports the same `CATALOG` and shared `clearance.js`, so it inherits the type and the
+  `computeClearances` carve-out for free — **but** the MCP's own report builder
+  (`buildClearanceReport` in `mcp/src/feedback.js`) builds its **own** subject list and
+  excludes only openings, so it needs a **one-line** `floorLayer` subject-exclusion added
+  (mirroring its existing openings exclusion). This is the only MCP-side code change.
 - Rug stays a **first-class symbol otherwise**: selectable, movable, rotatable, resizable,
   gold selection box, rotate handle, W×H chips, presets, color swatches.
 
@@ -60,17 +63,32 @@ Fix: within `pickSymbol`, prefer a non-`floorLayer` hit over a `floorLayer` hit;
 to the rug when nothing else is under the cursor. This keeps selection intuitive (click the
 sofa → get the sofa; click the exposed rug border → get the rug).
 
-**5. No new MCP code.** `mcp/src/core.js` re-exports the shared `CATALOG` and imports the shared
-`clearance.js`. Adding the type to `symbols.js` and the guard to `clearance.js` makes
-`floorplan://catalog` list the rug and `check_clearance` skip it with zero MCP edits. Verify by
-test, don't duplicate.
+**5. One-line MCP subject exclusion (the MCP is NOT edit-free).** `mcp/src/core.js` re-exports
+the shared `CATALOG` and imports the shared `clearance.js`, so adding the type to `symbols.js`
+makes `floorplan://catalog` list the rug, and the `computeClearances` guards make the core
+gap engine skip it — those inherit for free. **However**, the `check_clearance` tool does
+**not** iterate `computeClearances()` over all symbols; it calls `buildClearanceReport()`
+(`mcp/src/feedback.js`), which builds its **own** subject list (`world.symbols.filter(...)`,
+feedback.js ~line 362) and excludes **only** openings
+(`if (CATALOG[s.type]?.openings) return false;`). Without a matching `floorLayer` exclusion, a
+full report enumerates the rug as a subject labelled "Rug", and — worse — the containment rule
+(feedback.js ~line 402) flags **any** subject whose centre is not inside a closed room as
+`worstStatus:"bad"` with an "outside room" move. A runner against a wall, or a rug in an
+L-shaped room whose centroid falls outside the polygon, would get a spurious BAD flag — exactly
+the failure this type exists to prevent. **Fix:** add one guard beside the openings one in
+`buildClearanceReport`'s subject filter:
+`if (CATALOG[s.type]?.floorLayer) return false;`. This is the single MCP-side change; verify it
+by test.
 
 ## Interfaces / Types
 
 **`src/js/symbols.js` — type + catalog.**
 
-Extend the `SymbolType` typedef union with `"rug"`. Extend the catalog entry typedef to allow
-an optional `floorLayer?:boolean` flag (sibling to `openings`, `circular`, `discrete`).
+Extend the `SymbolType` typedef union with `"rug"`. Extend the catalog entry typedef (symbols.js
+lines 58–61) to allow an optional `floorLayer?:boolean` flag. Note: that typedef currently lists
+only `openings?` and `circular?` — the already-used `discrete` flag is also absent. If the
+implementer wants the typedef authoritative, add `discrete?:boolean` alongside `floorLayer?`;
+otherwise adding just `floorLayer?` is consistent with the existing loose practice.
 
 Add the catalog entry (metres; ft presets converted at 2-decimal precision, matching the
 existing convention). Category `living` (dock home per Frontend Design). Rectangular,
@@ -105,6 +123,20 @@ topmost floorLayer hit; otherwise null. Signature unchanged.
 - Neighbour guard (inside the `for (const other …)` loop, beside the opening `continue`):
   `if (CATALOG[other.type]?.floorLayer) continue;`
 
+**`mcp/src/feedback.js` — `buildClearanceReport(...)` subject filter (the one MCP code change).**
+Add a `floorLayer` exclusion beside the existing openings exclusion (~line 363) so the rug is
+never a report subject:
+```js
+const subjects = world.symbols.filter((s) => {
+  if (CATALOG[s.type]?.openings) return false;   // openings are not subjects
+  if (CATALOG[s.type]?.floorLayer) return false; // floor layers are not subjects (NEW)
+  if (onlyId !== undefined) return s.id === onlyId;
+  return true;
+});
+```
+This is necessary because `buildClearanceReport` builds its own subject list rather than
+iterating `computeClearances()`, so the core carve-out does not cover it (see Approach step 5).
+
 **`src/js/symbolRender.js` — new group ref + rug body renderer.**
 - `init(...)` gains a `gRugs` parameter (a `<g id="rugs">` element); store as `_gRugs`.
 - `render()` clears `_gRugs` alongside `_gSymbols`/`_gOverlay`, then in the body loop routes
@@ -117,9 +149,14 @@ topmost floorLayer hit; otherwise null. Signature unchanged.
 **`src/js/main.js`** — `const gRugs = document.getElementById("rugs");` and pass it into
 `initSymbolRender(...)` as the new first render group.
 
-**`src/index.html`** — add `<g id="rugs"></g>` immediately **before** `<g id="symbols">`; add
-the Living-tab dock item (see Frontend Design); optionally add one `<pattern>` in `<defs>` for
-the woven hatch (or draw the hatch procedurally in JS — implementer's choice, see Frontend).
+**`src/index.html`** — add `<g id="rugs"></g>` immediately **before** `<g id="symbols">`. The
+current group order is `symbols`, `clearance`, `measure`, `symbol-overlay` (lines ~2114–2120),
+so inserting `#rugs` first places rugs beneath the clearance and measure overlays as well as
+beneath furniture. That is **intended**: a rug is a floor surface and should sit under
+everything except walls/grid, so clearance ticks and measurement annotations reading over a rug
+is the desired layering. Add the Living-tab dock item (see Frontend Design); optionally add one
+`<pattern>` in `<defs>` for the woven hatch (or draw the hatch procedurally in JS —
+implementer's choice, see Frontend).
 
 **`src/js/exportImg.js`** — in `buildExportSvg`, paint rug symbols (dashed edge + hatch, no
 label) in a first pass **before** the furniture pass so export matches on-screen layering.
@@ -161,9 +198,13 @@ label) in a first pass **before** the furniture pass so export matches on-screen
    `resizeSymbol` path (two clamped calls); no discrete hard-snap (a rug is not a `discrete` type).
 7. **Export (SVG/PNG)** — rug paints under furniture with no type label; a viewer sees the woven
    fill beneath the furniture, matching the editor.
-8. **MCP `place_symbol {type:"rug"}`** — works via the shared catalog; `check_clearance` on the
-   rug returns no items (subject guard), and clearance for other pieces ignores it. No MCP code
-   change; covered by test.
+8. **MCP `place_symbol {type:"rug"}`** — works via the shared catalog. `check_clearance` targeting
+   the rug (`onlyId=rug`) returns **no items** and a full `check_clearance` never lists the rug as
+   a subject — **but only after** the `floorLayer` subject-exclusion is added to
+   `buildClearanceReport` (feedback.js). Without that guard the report would enumerate the rug as
+   a "Rug" subject and could spuriously flag it BAD via the containment rule (e.g. a runner whose
+   centroid falls outside the room). Clearance for other pieces ignores the rug via the shared
+   `computeClearances` neighbour guard. Covered by test.
 9. **Color swatch for a rug** — the rug is colorable; it uses the existing LLD 97 **floor**
    swatch group (semantically correct for a floor covering) rather than the living
    wood/upholstery set — see Frontend Design for the one-line mapping.
@@ -182,7 +223,10 @@ All present in this branch; nothing blocks implementation.
   (present)
 - **`src/js/exportImg.js`** — export SVG builder to keep layering parity. (present)
 - **MCP** (`mcp/src/core.js`) — re-exports shared `CATALOG` and imports shared `clearance.js`;
-  inherits type + carve-out. No edit. (present)
+  inherits type + `computeClearances` carve-out for free. (present)
+- **MCP** (`mcp/src/feedback.js`) — `buildClearanceReport` subject filter (~line 362) needs the
+  one-line `floorLayer` exclusion added beside its openings exclusion; otherwise it lists the rug
+  as a subject and can false-flag it BAD via containment. This is the only MCP code edit. (present)
 - **LLD 72a** — the interior-design skill that will *consume* the type to express rule E1 rug
   sizing. This LLD unblocks it; the skill prose is a separate follow-up.
 
@@ -248,8 +292,14 @@ This reuses LLD 97 infrastructure with a one-line special-case and no palette.js
 
 **MCP parity (`mcp` — `cd mcp && node --test`):**
 - `floorplan://catalog` includes `rug` with `floorLayer:true`.
-- `place_symbol {type:"rug"}` succeeds; `check_clearance` targeting the rug returns no items; a
-  furniture piece's `check_clearance` is unaffected by a rug overlapping it.
+- `buildClearanceReport` excludes the rug from its subject list: `place_symbol {type:"rug"}`
+  succeeds; `check_clearance` targeting the rug (`onlyId`) returns **no items**; a full
+  `check_clearance` report does **not** list the rug as a subject even when the rug's centroid
+  lies outside the room (guards against the containment-rule false BAD). This test fails against
+  the current `buildClearanceReport` and passes only after the `floorLayer` subject-exclusion is
+  added — confirming that one-line MCP change is required.
+- A furniture piece's `check_clearance` is unaffected by a rug overlapping it (shared neighbour
+  guard).
 
 **Regression:**
 - Existing symbol/clearance/pick tests stay green (the two guards must not alter non-rug paths).
