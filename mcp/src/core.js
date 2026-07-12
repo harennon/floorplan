@@ -39,6 +39,7 @@ export {
   pointNearRoomWall,
   WALL_M,
   MIN_SEG_M,
+  setRoomColor,
 } from "../../src/js/walls.js";
 
 export {
@@ -57,6 +58,7 @@ export {
   getSymbol,
   corners,
   PARALLEL_TOL_DEG,
+  setSymbolColor,
 } from "../../src/js/symbols.js";
 
 export {

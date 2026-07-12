@@ -10,6 +10,7 @@ import { model as symbolsModel, hydrate as hydrateSymbols, CATALOG } from "./sym
 import { model as measurementsModel, hydrate as hydrateMeasurements } from "./measurements.js";
 import { view, setView } from "./view.js";
 import { unit, setUnit } from "./units.js";
+import { coerceColor } from "./palette.js";
 
 export const PLAN_SCHEMA = 1;
 const APP_TAG = "floorplan";
@@ -45,10 +46,14 @@ function _mmRound(v) {
  * @returns {CompactPlan}
  */
 export function buildCompact(plan) {
-  const r = plan.walls.rooms.map((room) => ({
-    c: room.closed ? 1 : 0,
-    p: room.verts.map((v) => [_mmRound(v.x), _mmRound(v.y)]),
-  }));
+  const r = plan.walls.rooms.map((room) => {
+    const entry = {
+      c: room.closed ? 1 : 0,
+      p: room.verts.map((v) => [_mmRound(v.x), _mmRound(v.y)]),
+    };
+    if (room.color) entry.k = room.color;
+    return entry;
+  });
 
   const k = plan.walls.chain.map((v) => [_mmRound(v.x), _mmRound(v.y)]);
 
@@ -64,6 +69,8 @@ export function buildCompact(plan) {
     if (sym.h !== cat.h) compact.h = _mmRound(sym.h);
     // Omit rot only when strictly 0
     if (sym.rot !== 0) compact.d = sym.rot;
+    // Omit color when not set (keeps lean links for uncolored plans)
+    if (sym.color) compact.k = sym.color;
     return compact;
   });
 
@@ -105,11 +112,14 @@ export function parseCompact(compact) {
         return { x, y };
       });
       if (verts.some((v) => v === null)) return null;
-      return {
+      const roomObj = {
         id: `w${i}`,
         closed: room.c === 1,
         verts,
       };
+      // Pass color through raw; downstream validatePlan will coerce
+      if (room.k !== undefined) roomObj.color = room.k;
+      return roomObj;
     });
     if (rooms.some((r) => r === null)) return null;
 
@@ -133,7 +143,7 @@ export function parseCompact(compact) {
       const h = sym.h !== undefined ? sym.h : (cat ? cat.h : 0);
       const rot = sym.d !== undefined ? sym.d : 0;
       if (!Number.isFinite(w) || !Number.isFinite(h) || !Number.isFinite(rot)) return null;
-      return {
+      const symObj = {
         id: `s${i}`,
         type: t,
         x,
@@ -142,6 +152,9 @@ export function parseCompact(compact) {
         h,
         rot,
       };
+      // Pass color through raw; downstream validatePlan will coerce
+      if (sym.k !== undefined) symObj.color = sym.k;
+      return symObj;
     });
     if (symbols.some((s) => s === null)) return null;
 
@@ -246,6 +259,8 @@ export function validatePlan(raw) {
       if (!Number.isFinite(sym.w)) return null;
       if (!Number.isFinite(sym.h)) return null;
       if (!Number.isFinite(sym.rot)) return null;
+      // color: OPTIONAL — drop to undefined rather than rejecting the plan
+      // (non-hex or wrong-type color degrades to theme fallback)
     }
 
     // view
@@ -267,16 +282,43 @@ export function validatePlan(raw) {
       if (!_isValidVertex(entry.b)) return null;
     }
 
-    // Return a clean copy (normalised)
+    // Return a clean copy (normalised). Coerce color fields: non-hex strings
+    // degrade to undefined (theme fallback) rather than failing the decode.
+    const normRooms = raw.walls.rooms.map((room) => {
+      const nr = {
+        id: room.id,
+        closed: room.closed,
+        verts: JSON.parse(JSON.stringify(room.verts)),
+      };
+      const c = coerceColor(room.color);
+      if (c !== undefined) nr.color = c;
+      return nr;
+    });
+
+    const normSymbols = raw.symbols.symbols.map((sym) => {
+      const ns = {
+        id: sym.id,
+        type: sym.type,
+        x: sym.x,
+        y: sym.y,
+        w: sym.w,
+        h: sym.h,
+        rot: sym.rot,
+      };
+      const c = coerceColor(sym.color);
+      if (c !== undefined) ns.color = c;
+      return ns;
+    });
+
     return {
       schema: raw.schema,
       app: raw.app,
       walls: {
-        rooms: JSON.parse(JSON.stringify(raw.walls.rooms)),
+        rooms: normRooms,
         chain: JSON.parse(JSON.stringify(raw.walls.chain)),
       },
       symbols: {
-        symbols: JSON.parse(JSON.stringify(raw.symbols.symbols)),
+        symbols: normSymbols,
       },
       measurements: JSON.parse(JSON.stringify(rawMeas)),
       view: {

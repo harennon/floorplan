@@ -17,7 +17,7 @@ export const MIN_SEG_M  = 1e-4;  // reject zero-length segments below this
 // ── Types (JSDoc) ─────────────────────────────────────────────────────────────
 
 /** @typedef {{ x:number, y:number }} Vertex */
-/** @typedef {{ id:string, closed:boolean, verts:Vertex[] }} Room */
+/** @typedef {{ id:string, closed:boolean, verts:Vertex[], color?:string }} Room */
 /** @typedef {{ x:number, y:number, type:"grid"|"point"|"close"|"free" }} Snap */
 
 // ── In-memory model ──────────────────────────────────────────────────────────
@@ -567,6 +567,27 @@ export function rectDims(room) {
  * Uses the standard signed-area centroid formula (winding-order-independent).
  * @returns {{ id:string, cx:number, cy:number }[]}   // world metres
  */
+/**
+ * Set or clear the color of a room (floor fill).
+ * Pass a valid hex string to set; pass null or undefined to clear (delete the key).
+ * Clearing makes the room fall back to the theme fill.
+ * Returns true if the value changed.
+ *
+ * @param {Room} room
+ * @param {string|null|undefined} hexOrNull
+ * @returns {boolean}
+ */
+export function setRoomColor(room, hexOrNull) {
+  if (!hexOrNull) {
+    const changed = room.color !== undefined;
+    delete room.color;
+    return changed;
+  }
+  const changed = room.color !== hexOrNull;
+  room.color = hexOrNull;
+  return changed;
+}
+
 export function roomCentroids() {
   const out = [];
   for (const room of model.rooms) {
