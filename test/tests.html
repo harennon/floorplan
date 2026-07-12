@@ -10161,7 +10161,7 @@ const EXPECTED_ACTIONS = new Set([
   "Redo",
   "Delete selected",
   "Duplicate selected",
-  "Nudge selected",
+  "Nudge selection (symbol/room)", // updated by LLD 96
   "Coarse nudge",
   "Rotate 90° CW",
   "Rotate 90° CCW",
@@ -12460,6 +12460,8 @@ import {
   clearSelection as roomClearSelection,
   getSelectedRoomId as roomGetSelectedRoomId,
   hasSelection as roomHasSelection,
+  nudgeSelected as roomNudgeSelected,
+  flushNudge as roomFlushNudge,
   setHistoryAndToast as roomSetHistoryAndToast,
   setClearSymbolSelection as roomSetClearSymbolSelection,
 } from "../src/js/roomTool.js";
@@ -15494,6 +15496,377 @@ describe("LLD 95 — _matchingPreset (via matchingPresetForTest)", () => {
     if (p.name !== "Twin") throw new Error(`Expected 'Twin', got '${p.name}'`);
     expect(sym.w).toBeCloseTo(0.97, 9);
     expect(sym.h).toBeCloseTo(1.91, 9);
+  });
+});
+
+// ─── Tests: LLD 96 — roomTool nudgeSelected / flushNudge ─────────────────────
+
+// Helper: reset model + roomTool state for LLD 96 tests.
+function _resetRT96() {
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  setGridSnap(true);
+  setSnapMode("off");
+}
+
+// Helper: build a spy commit for LLD 96 tests.
+function _spyCommit96() {
+  let count = 0;
+  const spy = () => { count++; };
+  spy.callCount = () => count;
+  return spy;
+}
+
+// Helper: wire a fresh roomTool with spy commit.
+function _initRT96(spy) {
+  roomSetHistoryAndToast({ commit: spy || (() => {}) }, () => {});
+  roomSetClearSymbolSelection(() => {});
+  initRoomTool({ stage: document.createElement("div") });
+}
+
+describe("LLD 96 — roomTool: nudgeSelected moves room verts rigidly", () => {
+  it("nudgeSelected(dx, dy) translates every vertex by exactly (dx, dy) — no snap applied", () => {
+    _resetRT96();
+    const spy = _spyCommit96();
+    _initRT96(spy);
+    model.rooms.push({ id: "n0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]});
+
+    // Select the room by clicking inside at world (2, 1.5) = screen (80, 60).
+    roomOnSelectDown(80, 60);
+    expect(roomHasSelection()).toBe(true);
+
+    roomNudgeSelected(0.5, 0.25);
+
+    const r = model.rooms[0];
+    expect(r.verts[0].x).toBeCloseTo(0.5, 10);
+    expect(r.verts[0].y).toBeCloseTo(0.25, 10);
+    expect(r.verts[1].x).toBeCloseTo(4.5, 10);
+    expect(r.verts[1].y).toBeCloseTo(0.25, 10);
+    expect(r.verts[2].x).toBeCloseTo(4.5, 10);
+    expect(r.verts[2].y).toBeCloseTo(3.25, 10);
+    expect(r.verts[3].x).toBeCloseTo(0.5, 10);
+    expect(r.verts[3].y).toBeCloseTo(3.25, 10);
+
+    roomFlushNudge(); // clean up pending timer
+    roomClearSelection();
+    _resetRT96();
+  });
+
+  it("edge lengths / area are unchanged after nudge (rigid body)", () => {
+    _resetRT96();
+    _initRT96();
+    model.rooms.push({ id: "n1", closed: true, verts: [
+      { x: 1, y: 1 }, { x: 5, y: 1 }, { x: 5, y: 4 }, { x: 1, y: 4 },
+    ]});
+    roomOnSelectDown(120, 80); // world(3,2) inside
+
+    const areaBefore = polygonArea(model.rooms[0].verts);
+    roomNudgeSelected(1.3, -0.7);
+    const areaAfter = polygonArea(model.rooms[0].verts);
+    expect(areaAfter).toBeCloseTo(areaBefore, 9);
+
+    roomFlushNudge();
+    roomClearSelection();
+    _resetRT96();
+  });
+});
+
+describe("LLD 96 — roomTool: nudgeSelected carries furniture", () => {
+  it("symbol inside room moves by same (dx, dy)", () => {
+    _resetRT96();
+    _initRT96();
+    model.rooms.push({ id: "c0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    const inside = createSymbol("chair", 2, 2); addSymbol(inside);
+    const outside = createSymbol("chair", 10, 10); addSymbol(outside);
+
+    roomOnSelectDown(80, 80); // world(2,2)
+    roomNudgeSelected(1, 0.5);
+
+    expect(inside.x).toBeCloseTo(3, 10);
+    expect(inside.y).toBeCloseTo(2.5, 10);
+    expect(outside.x).toBe(10);
+    expect(outside.y).toBe(10);
+
+    roomFlushNudge();
+    roomClearSelection();
+    _resetRT96();
+  });
+
+  it("opening within WALL_M of a room wall is carried; a symbol outside is not", () => {
+    _resetRT96();
+    _initRT96();
+    model.rooms.push({ id: "c1", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    // door cut into bottom wall (center at y=4 is on the boundary)
+    const door = createSymbol("door", 2, 4); addSymbol(door);
+    // symbol far from this room's walls
+    const farSym = createSymbol("chair", 20, 20); addSymbol(farSym);
+
+    roomOnSelectDown(80, 80); // inside room
+    roomNudgeSelected(0.5, 0);
+
+    expect(door.x).toBeCloseTo(2.5, 10);
+    expect(door.y).toBeCloseTo(4, 10);
+    expect(farSym.x).toBe(20);
+    expect(farSym.y).toBe(20);
+
+    roomFlushNudge();
+    roomClearSelection();
+    _resetRT96();
+  });
+
+  it("symbol nudged onto room becomes carried on subsequent nudges (recomputed membership)", () => {
+    _resetRT96();
+    _initRT96();
+    model.rooms.push({ id: "c2", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    // Symbol starts just outside the room at x=4.5
+    const sym = createSymbol("chair", 4.5, 2); addSymbol(sym);
+
+    roomOnSelectDown(80, 80); // inside room
+    // First nudge: room moves by (1, 0); symbol is outside room's new polygon → not carried
+    roomNudgeSelected(1, 0);
+    // Room is now at x: [1,5], y: [0,4]; sym is still at (4.5, 2) — inside the new room!
+    // Second nudge: symbol is inside → carried
+    roomNudgeSelected(0, 1);
+    // Room moved to y: [1,5]; sym should have moved by (0,1) → (4.5, 3)
+    expect(sym.x).toBeCloseTo(4.5, 9);
+    expect(sym.y).toBeCloseTo(3, 9);
+
+    roomFlushNudge();
+    roomClearSelection();
+    _resetRT96();
+  });
+});
+
+describe("LLD 96 — roomTool: nudgeSelected no-ops", () => {
+  it("is a no-op when no room is selected", () => {
+    _resetRT96();
+    _initRT96();
+    model.rooms.push({ id: "nop0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]});
+    // Do NOT select any room
+    roomNudgeSelected(1, 1);
+    expect(model.rooms[0].verts[0].x).toBe(0);
+    _resetRT96();
+  });
+
+  it("is a no-op when the selected room id no longer exists", () => {
+    _resetRT96();
+    const spy = _spyCommit96();
+    _initRT96(spy);
+    model.rooms.push({ id: "nop1", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]});
+    roomOnSelectDown(80, 60);
+    // Remove room from model while still selected
+    model.rooms.length = 0;
+    roomNudgeSelected(1, 0); // should not throw or move anything
+    expect(spy.callCount()).toBe(0); // timer set but nothing to move; fine
+    roomFlushNudge();
+    _resetRT96();
+  });
+
+  it("is a no-op when the selected room has 0 verts", () => {
+    _resetRT96();
+    _initRT96();
+    model.rooms.push({ id: "nop2", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]});
+    roomOnSelectDown(80, 60);
+    // Clear verts while selected
+    model.rooms[0].verts.length = 0;
+    roomNudgeSelected(1, 0); // should be a no-op
+    expect(model.rooms[0].verts.length).toBe(0);
+    roomFlushNudge();
+    _resetRT96();
+  });
+});
+
+describe("LLD 96 — roomTool: nudgeSelected debounce", () => {
+  it("N rapid nudgeSelected calls schedule exactly one commit (verified via flushNudge)", () => {
+    _resetRT96();
+    const spy = _spyCommit96();
+    _initRT96(spy);
+    model.rooms.push({ id: "d0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]});
+    roomOnSelectDown(80, 60);
+
+    roomNudgeSelected(0.1, 0);
+    roomNudgeSelected(0.1, 0);
+    roomNudgeSelected(0.1, 0);
+    roomNudgeSelected(0.1, 0);
+    roomNudgeSelected(0.1, 0);
+
+    // Room has moved 0.5 m; no commit yet (debounce pending)
+    expect(spy.callCount()).toBe(0);
+    expect(model.rooms[0].verts[0].x).toBeCloseTo(0.5, 10);
+
+    // Flush triggers exactly one commit
+    roomFlushNudge();
+    expect(spy.callCount()).toBe(1);
+
+    // Flushing again is a no-op
+    roomFlushNudge();
+    expect(spy.callCount()).toBe(1);
+
+    roomClearSelection();
+    _resetRT96();
+  });
+});
+
+describe("LLD 96 — roomTool: flushNudge", () => {
+  it("is a no-op when no timer is pending", () => {
+    _resetRT96();
+    const spy = _spyCommit96();
+    _initRT96(spy);
+    roomFlushNudge(); // safe to call with nothing pending
+    expect(spy.callCount()).toBe(0);
+    _resetRT96();
+  });
+
+  it("calling flushNudge repeatedly with nothing pending remains a no-op", () => {
+    _resetRT96();
+    const spy = _spyCommit96();
+    _initRT96(spy);
+    roomFlushNudge(); roomFlushNudge(); roomFlushNudge();
+    expect(spy.callCount()).toBe(0);
+    _resetRT96();
+  });
+
+  it("flushNudge with a pending timer commits once and clears the timer", () => {
+    _resetRT96();
+    const spy = _spyCommit96();
+    _initRT96(spy);
+    model.rooms.push({ id: "fn0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]});
+    roomOnSelectDown(80, 60);
+    roomNudgeSelected(0.1, 0);
+    expect(spy.callCount()).toBe(0);
+    roomFlushNudge();
+    expect(spy.callCount()).toBe(1);
+    roomFlushNudge(); // second call must not commit again
+    expect(spy.callCount()).toBe(1);
+
+    roomClearSelection();
+    _resetRT96();
+  });
+});
+
+describe("LLD 96 — roomTool: clearSelection flushes pending nudge", () => {
+  it("clearSelection with a pending nudge commits before dropping the room", () => {
+    _resetRT96();
+    const spy = _spyCommit96();
+    _initRT96(spy);
+    model.rooms.push({ id: "cs0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]});
+    roomOnSelectDown(80, 60);
+    roomNudgeSelected(0.5, 0);
+    expect(spy.callCount()).toBe(0); // still pending
+    roomClearSelection(); // must flush before clearing
+    expect(spy.callCount()).toBe(1);
+    expect(roomHasSelection()).toBe(false);
+    _resetRT96();
+  });
+});
+
+describe("LLD 96 — roomTool: onDrawModeEnter flushes pending nudge", () => {
+  it("onDrawModeEnter with a pending nudge commits before switching mode", () => {
+    _resetRT96();
+    const spy = _spyCommit96();
+    _initRT96(spy);
+    model.rooms.push({ id: "dm0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+    ]});
+    roomOnSelectDown(80, 60);
+    roomNudgeSelected(0.5, 0);
+    expect(spy.callCount()).toBe(0); // still pending
+    roomOnDrawModeEnter(); // must flush + clear
+    expect(spy.callCount()).toBe(1);
+    expect(roomHasSelection()).toBe(false);
+    _resetRT96();
+  });
+});
+
+describe("LLD 96 — roomTool: _carriedSymbolsFor — drag reuses same membership rule", () => {
+  it("drag carry set matches: chair inside carried, chair outside not (regression)", () => {
+    _resetRT96();
+    _initRT96();
+    model.rooms.push({ id: "dr0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    const inside  = createSymbol("chair", 2, 2);  addSymbol(inside);
+    const outside = createSymbol("chair", 10, 10); addSymbol(outside);
+
+    roomOnSelectDown(80, 80); // world(2,2)
+    roomOnSelectMove(120, 80); // dx=+1
+    roomOnSelectUp(120, 80);
+
+    expect(inside.x).toBeCloseTo(3, 9);
+    expect(inside.y).toBeCloseTo(2, 9);
+    expect(outside.x).toBe(10);
+    expect(outside.y).toBe(10);
+
+    roomClearSelection();
+    _resetRT96();
+  });
+
+  it("drag carry set matches: door on wall carried, door on other room's wall not (regression)", () => {
+    _resetRT96();
+    _initRT96();
+    model.rooms.push({ id: "dr1a", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 },
+    ]});
+    model.rooms.push({ id: "dr1b", closed: true, verts: [
+      { x: 10, y: 10 }, { x: 14, y: 10 }, { x: 14, y: 14 }, { x: 10, y: 14 },
+    ]});
+    const myDoor = createSymbol("door", 2, 4);  addSymbol(myDoor);  // on room A's bottom wall
+    const bDoor  = createSymbol("door", 12, 10); addSymbol(bDoor); // on room B's wall
+
+    roomOnSelectDown(80, 80); // selects room A
+    roomOnSelectMove(120, 80);
+    roomOnSelectUp(120, 80);
+
+    expect(myDoor.x).toBeCloseTo(3, 9);
+    expect(bDoor.x).toBe(12); // untouched
+
+    roomClearSelection();
+    _resetRT96();
+  });
+});
+
+describe("LLD 96 — help.js: nudge overlay label updated for rooms", () => {
+  it("Nudge selection row action text contains 'symbol/room'", () => {
+    const nudgeRow = SHORTCUTS.find(s => s.group === "Object" && s.mac === "↑ ↓ ← →");
+    if (!nudgeRow) throw new Error("Expected nudge row with mac '↑ ↓ ← →' in SHORTCUTS");
+    if (!nudgeRow.action.includes("symbol/room")) {
+      throw new Error(`Expected nudge action to contain 'symbol/room', got: "${nudgeRow.action}"`);
+    }
+  });
+
+  it("Nudge row mac and other keys are non-empty (parity checkpoint)", () => {
+    const nudgeRow = SHORTCUTS.find(s => s.group === "Object" && s.mac === "↑ ↓ ← →");
+    if (!nudgeRow) throw new Error("Expected nudge row");
+    if (!nudgeRow.mac) throw new Error("mac chord must be non-empty");
+    if (!nudgeRow.other) throw new Error("other chord must be non-empty");
+  });
+
+  it("Coarse nudge row still exists with unchanged keys", () => {
+    const coarseRow = SHORTCUTS.find(s => s.group === "Object" && s.mac === "⇧↑↓←→");
+    if (!coarseRow) throw new Error("Expected coarse nudge row with mac '⇧↑↓←→'");
+    if (!coarseRow.other.includes("Shift")) throw new Error("Coarse nudge other key must contain 'Shift'");
   });
 });
 
