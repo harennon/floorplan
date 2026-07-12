@@ -28,8 +28,8 @@ export const SHORTCUTS = [
   { group: "Edit",    action: "Delete selected",            mac: "Del / ⌫",    other: "Del / Backspace" },
   { group: "Edit",    action: "Duplicate selected",         mac: "⌘D",         other: "Ctrl+D" },
   // Object
-  { group: "Object",  action: "Nudge selected",             mac: "↑ ↓ ← →",   other: "↑ ↓ ← →" },
-  { group: "Object",  action: "Coarse nudge",               mac: "⇧↑↓←→",     other: "Shift+↑↓←→" },
+  { group: "Object",  action: "Nudge selection (symbol/room)", mac: "↑ ↓ ← →",   other: "↑ ↓ ← →" },
+  { group: "Object",  action: "Coarse nudge",                 mac: "⇧↑↓←→",     other: "Shift+↑↓←→" },
   { group: "Object",  action: "Rotate 90° CW",              mac: "R",          other: "R" },
   { group: "Object",  action: "Rotate 90° CCW",             mac: "⇧R",         other: "Shift+R" },
   // Tools

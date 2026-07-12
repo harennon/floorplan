@@ -33,6 +33,15 @@ let _historyCommit = null;
 let _showToastFn   = null;
 let _clearSymbolSelection = null;
 
+// ── Nudge debounce state (LLD 96) ─────────────────────────────────────────────
+
+/** Debounce window for coalescing a burst of nudges into one undo step.
+ *  Same value as symbolTool.NUDGE_COMMIT_MS (LLD 54). Module-private. */
+const NUDGE_COMMIT_MS = 400;
+
+/** @type {ReturnType<typeof setTimeout>|null} */
+let _nudgeTimer = null;
+
 // ── State ──────────────────────────────────────────────────────────────────────
 
 /** @type {string|null} id of the currently selected room */
@@ -125,20 +134,8 @@ export function onSelectDown(sx, sy) {
   _dragOffsetY = wp.y - ref.y;
 
   // Snapshot carried symbols at drag start (computed once — a symbol that starts
-  // attached stays attached the whole drag). Two membership rules:
-  //   • Furniture: center strictly inside the room polygon (pointInRoom).
-  //   • Openings (doors/windows): their center sits ON the wall line, so the
-  //     interior test is a coin-flip and usually leaves them behind. Instead
-  //     carry an opening if its center is within WALL_M of one of THIS room's
-  //     own wall segments — i.e. it's cut into a wall of the room being moved.
-  _carriedSymbolIds = [];
-  for (const sym of symbolsModel.symbols) {
-    const isOpening = !!CATALOG[sym.type]?.openings;
-    const attached = isOpening
-      ? pointNearRoomWall(hitRoom, sym.x, sym.y, WALL_M)
-      : pointInRoom(hitRoom, sym.x, sym.y);
-    if (attached) _carriedSymbolIds.push(sym.id);
-  }
+  // attached stays attached the whole drag, unlike nudge which recomputes per step).
+  _carriedSymbolIds = _carriedSymbolsFor(hitRoom);
 
   scheduleRender();
   return true;
@@ -201,8 +198,11 @@ export function onSelectUp(sx, sy) {
  * on a symbol hit (mutex: picking a symbol drops the room), and internally by
  * onTapEmpty / onDrawModeEnter. Idempotent; no-op when nothing selected. Does not
  * schedule a render (the caller owns render scheduling).
+ * Flushes any pending nudge first so a pending nudge commits before the room is
+ * dropped (LLD 96 Edge Case 6).
  */
 export function clearSelection() {
+  flushNudge();
   _selectedRoomId = null;
   _dragging = false;
   _carriedSymbolIds = [];
@@ -231,10 +231,77 @@ export function hasSelection() {
 
 /**
  * Clear selection when switching to draw mode (parallels symbolTool.onDrawModeEnter).
+ * clearSelection() flushes any pending nudge before dropping the room (LLD 96).
  */
 export function onDrawModeEnter() {
   clearSelection();
   scheduleRender();
+}
+
+// ── Nudge / flush — keyboard action exports (LLD 96) ─────────────────────────
+
+/**
+ * Ids of symbols carried by `room`: furniture whose center is strictly inside
+ * (pointInRoom), plus openings within WALL_M of one of the room's own wall segments
+ * (pointNearRoomWall). Pure over the current model state. Used by onSelectDown
+ * (snapshot at drag start) and nudgeSelected (recomputed per nudge).
+ * @param {{ verts: {x:number,y:number}[], id: string }} room
+ * @returns {string[]}
+ */
+function _carriedSymbolsFor(room) {
+  const ids = [];
+  for (const sym of symbolsModel.symbols) {
+    const isOpening = !!CATALOG[sym.type]?.openings;
+    const attached = isOpening
+      ? pointNearRoomWall(room, sym.x, sym.y, WALL_M)
+      : pointInRoom(room, sym.x, sym.y);
+    if (attached) ids.push(sym.id);
+  }
+  return ids;
+}
+
+/**
+ * Move the selected room by (dx, dy) world metres, carrying its furniture.
+ * No-op if no room selected or the room has no verts. Applies the delta literally
+ * (no grid snap resolve). Rigidly translates walls via moveRoom and every
+ * currently-carried symbol via moveSymbol, then scheduleRender(). Schedules a
+ * debounced history.commit() (NUDGE_COMMIT_MS) so a burst collapses to one undo step.
+ * Mirrors symbolTool.nudgeSelected (LLD 54).
+ * @param {number} dx  world metres
+ * @param {number} dy  world metres
+ */
+export function nudgeSelected(dx, dy) {
+  if (!_selectedRoomId) return;
+  const room = wallsModel.rooms.find(r => r.id === _selectedRoomId);
+  if (!room || room.verts.length === 0) return;
+  // Compute carried set from the room's CURRENT position (before the move) so that
+  // a symbol the room steps onto becomes carried on the *next* nudge, not this one —
+  // matching the LLD's "nudged onto" language (Edge Case 8).
+  const carried = _carriedSymbolsFor(room);
+  moveRoom(room, dx, dy);
+  for (const id of carried) {
+    const sym = getSymbol(id);
+    if (sym) moveSymbol(sym, sym.x + dx, sym.y + dy);
+  }
+  scheduleRender();
+  clearTimeout(_nudgeTimer);
+  _nudgeTimer = setTimeout(() => {
+    _nudgeTimer = null;
+    if (_historyCommit) _historyCommit();
+  }, NUDGE_COMMIT_MS);
+}
+
+/**
+ * If a nudge commit is pending, cancel the timer and commit now. No-op when none
+ * pending. Called before any other committing action (undo/redo, deselect,
+ * draw-mode enter) so undo-stack ordering stays correct. Mirrors symbolTool.flushNudge.
+ */
+export function flushNudge() {
+  if (_nudgeTimer !== null) {
+    clearTimeout(_nudgeTimer);
+    _nudgeTimer = null;
+    if (_historyCommit) _historyCommit();
+  }
 }
 
 // ── Keyboard (Alt modifier only — no editing shortcuts) ────────────────────────
