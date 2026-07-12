@@ -14470,6 +14470,181 @@ describe("LLD 91 — persistence: tool-created measurement survives plan round-t
   });
 });
 
+// ─── Wall-edge snap (segment projection) tests ────────────────────────────────
+
+describe("LLD 91 — measureTool snap: wall-edge snap (segment projection)", () => {
+  it("snaps to projected point on a wall edge when cursor is near an edge but not a vertex", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setSnapMode("off"); // disable grid to isolate edge snap
+    // Room with a horizontal segment from world (0,5) to (10,5)
+    // At zoom=1, pan=0, pxPerM=40: vertex A → screen (0,200), vertex B → screen (400,200)
+    // Midpoint of segment in world = (5, 5) → screen (200, 200)
+    // Cursor placed at screen (200, 210) — 10px below the midpoint, not near any vertex
+    model.rooms.push({ id: "e0", closed: false, verts: [{ x: 0, y: 5 }, { x: 10, y: 5 }] });
+    measureToolHover(200, 210);
+    const snap = measureToolGetDraftState().cursorSnap;
+    if (!snap) throw new Error("cursorSnap is null");
+    if (snap.type !== "edge") throw new Error(`Expected type 'edge', got '${snap.type}'`);
+    // The projected point should be near world (5, 5)
+    if (Math.abs(snap.x - 5) > 0.1) throw new Error(`snap.x expected ~5, got ${snap.x}`);
+    if (Math.abs(snap.y - 5) > 0.1) throw new Error(`snap.y expected ~5, got ${snap.y}`);
+  });
+
+  it("edge snap does not fire when cursor is farther than SNAP_PX from the edge", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setSnapMode("off");
+    // Horizontal segment at y=5 → screen y=200
+    // Cursor at screen (200, 400) — 200px away, well beyond SNAP_PX
+    model.rooms.push({ id: "e1", closed: false, verts: [{ x: 0, y: 5 }, { x: 10, y: 5 }] });
+    measureToolHover(200, 400);
+    const snap = measureToolGetDraftState().cursorSnap;
+    if (snap && snap.type === "edge") throw new Error("Should not snap to edge from far away");
+  });
+
+  it("vertex snap beats edge snap when cursor is within SNAP_PX of a vertex on the same segment", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setSnapMode("off");
+    // Segment from (0,5) to (10,5): vertex A at screen (0,200), vertex B at (400,200)
+    // Cursor at screen (0, 200) — exactly on vertex A
+    model.rooms.push({ id: "e2", closed: false, verts: [{ x: 0, y: 5 }, { x: 10, y: 5 }] });
+    measureToolHover(0, 200);
+    const snap = measureToolGetDraftState().cursorSnap;
+    if (!snap) throw new Error("cursorSnap is null");
+    // Should be vertex (higher precedence than edge)
+    if (snap.type !== "vertex") throw new Error(`Expected 'vertex' over 'edge', got '${snap.type}'`);
+  });
+
+  it("precedence: corner > center > vertex > edge (cursor near edge only)", () => {
+    // Cursor within SNAP_PX of an edge midpoint only — no vertex, no symbol nearby
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setSnapMode("off");
+    // Segment from (0,5) to (10,5), cursor at midpoint+small offset
+    model.rooms.push({ id: "e3", closed: false, verts: [{ x: 0, y: 5 }, { x: 10, y: 5 }] });
+    measureToolHover(200, 207); // 7px below midpoint — within SNAP_PX=15 of edge
+    const snap = measureToolGetDraftState().cursorSnap;
+    if (!snap) throw new Error("cursorSnap is null");
+    if (snap.type !== "edge") throw new Error(`Expected 'edge', got '${snap.type}'`);
+  });
+
+  it("edge snap projects to clamped endpoint for cursor past segment end", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setSnapMode("off");
+    // Segment from (0,5) to (10,5). Cursor at screen (-5, 200) — off the left end.
+    // Projection should clamp to segment start (0,5).
+    model.rooms.push({ id: "e4", closed: false, verts: [{ x: 0, y: 5 }, { x: 10, y: 5 }] });
+    measureToolHover(-5, 200); // 5px to the left of vertex A, same y
+    const snap = measureToolGetDraftState().cursorSnap;
+    if (!snap) throw new Error("cursorSnap is null");
+    // The projected point is clamped to (0,5) — screen distance is 5px < SNAP_PX=15
+    // so it should snap — could be vertex (0,5) or edge clamped to (0,5)
+    // Either vertex or edge snap is acceptable; both land at (0,5)
+    if (snap.type !== "vertex" && snap.type !== "edge") {
+      throw new Error(`Expected 'vertex' or 'edge' snap for clamped projection, got '${snap.type}'`);
+    }
+    if (Math.abs(snap.x - 0) > 0.1) throw new Error(`Clamped x should be ~0, got ${snap.x}`);
+    if (Math.abs(snap.y - 5) > 0.1) throw new Error(`Clamped y should be ~5, got ${snap.y}`);
+  });
+});
+
+// ─── Tool-switch-invokes-cancel (setMeasureCancel wiring) ─────────────────────
+
+describe("LLD 91 — tool-switch invokes cancel (Edge Case 4 / setMeasureCancel wiring)", () => {
+  it("setTool('select') discards pendingA via injected cancel (M-key then V-key path)", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // Wire the cancel injection (mirrors what main.js does)
+    wallToolSetMeasureCancel(measureToolCancel);
+
+    // Switch to measure mode and set pending A
+    wallToolSetTool("measure");
+    measureToolClick(100, 100); // sets pendingA
+    const draftBefore = measureToolGetDraftState();
+    if (!draftBefore.pendingA) throw new Error("Precondition: pendingA should be set after click");
+
+    // Switch away via setTool — cancel must fire
+    wallToolSetTool("select");
+
+    const draftAfter = measureToolGetDraftState();
+    if (draftAfter.pendingA !== null) throw new Error(
+      "pendingA must be discarded when switching away from measure mode via setTool"
+    );
+    if (measurementsModel.measurements.length !== 0) throw new Error(
+      "No measurement must be created when switching away mid-placement"
+    );
+  });
+
+  it("setTool('wall') also discards pendingA via injected cancel", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    wallToolSetMeasureCancel(measureToolCancel);
+
+    wallToolSetTool("measure");
+    measureToolClick(50, 50); // set A
+    if (!measureToolGetDraftState().pendingA) throw new Error("Precondition: pendingA must be set");
+
+    // Switch to wall mode
+    wallToolSetTool("wall");
+
+    if (measureToolGetDraftState().pendingA !== null) throw new Error(
+      "pendingA must be discarded when switching to wall mode"
+    );
+    if (measurementsModel.measurements.length !== 0) throw new Error(
+      "No measurement created on tool switch"
+    );
+  });
+});
+
+// ─── Dock drag-drop mutex: placing a symbol clears measure selection ───────────
+
+describe("LLD 91 — dock drag-drop mutex: selectSymbol clears measure selection", () => {
+  it("placing a symbol via selectSymbol (bypasses dispatcher) clears a live measure selection", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // Wire the composed clear: symSetClearRoomSelection gets a fn that also clears
+    // measure selection — mirrors what main.js §297 does.
+    symSetClearRoomSelectionMutex(() => {
+      // room clear is a no-op in this isolated test (no room selection)
+      measureToolClearSelection();
+    });
+
+    // Set up a measurement and select it
+    measurementsModel.measurements.push({ id: "mx0", a: { x: 0, y: 5 }, b: { x: 10, y: 5 } });
+    measureToolSelectDown(200, 200); // selects mx0
+    if (!measureToolHasSelection()) throw new Error("Precondition: measure should be selected");
+
+    // Simulate dock drop: selectSymbol directly (bypasses dispatcher)
+    const sym = createSymbol("chair", 2, 2);
+    addSymbol(sym);
+    const { dock, insp } = _buildSymbolToolDOM();
+    initSymbolToolMutex({
+      stage: document.createElement("div"),
+      dock,
+      inspector: insp,
+      setTool: () => {},
+      isDrawMode: () => false,
+    });
+    symSelectSymbolMutex(sym.id);
+
+    // The measure selection must be cleared now
+    if (measureToolHasSelection()) throw new Error(
+      "Measure selection must be cleared when a symbol is placed via selectSymbol"
+    );
+
+    // Cleanup
+    symClearSelectionMutex();
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 

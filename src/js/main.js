@@ -312,6 +312,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const tag = document.activeElement?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
     if (e.key === "w" || e.key === "W") { onDrawModeEnter(); roomOnDrawModeEnter(); }
+    // M key: entering measure mode must clear any existing symbol/room selection,
+    // matching the rail-button click handler below (LLD 91 code-review fix).
+    if (e.key === "m" || e.key === "M") { symClearSelection(); roomClearSelection(); }
   });
 
   // When switching to measure mode via the rail button, clear symbol + room selection
