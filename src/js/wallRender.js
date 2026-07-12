@@ -144,7 +144,7 @@ function _renderRoom(room, p, ppm, highlighted, selected) {
   const pts = room.verts;
   if (pts.length === 0) return;
 
-  const fillColor = highlighted ? p.roomFillHi : p.roomFill;
+  const fillColor = highlighted ? p.roomFillHi : (room.color || p.roomFill);
   const lineColor = highlighted ? p.wallLineHi : p.wallLine;
 
   // Fill (closed rooms only)

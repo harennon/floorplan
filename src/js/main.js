@@ -32,6 +32,7 @@ import {
   flushNudge as roomFlushNudge,
   setHistoryAndToast as roomSetHistoryAndToast,
   setClearSymbolSelection as roomSetClearSymbolSelection,
+  repositionRoomInspector,
 } from "./roomTool.js";
 import { init as initStore, loadLocal, saveNow } from "./store.js";
 import { readBootHash } from "./share.js";
@@ -92,8 +93,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const labelsEl    = document.querySelector(".labels");
   const dimLabelsEl = document.querySelector(".dim-labels");
   const hint     = document.getElementById("hint");
-  const dockEl      = document.getElementById("symbol-dock");
-  const inspectorEl = document.getElementById("symbol-inspector");
+  const dockEl           = document.getElementById("symbol-dock");
+  const inspectorEl      = document.getElementById("symbol-inspector");
+  const symSwatchStripEl = document.getElementById("sym-swatch-strip");
+  const roomInspectorEl  = document.getElementById("room-inspector");
+  const roomSwatchStripEl = document.getElementById("room-swatch-strip");
 
   // HUD
   const elZoom           = document.getElementById("hud-zoom");
@@ -256,16 +260,21 @@ document.addEventListener("DOMContentLoaded", () => {
   // symbolTool — placement, selection, inspector
   initSymbolTool({
     stage,
-    dock:        dockEl,
-    inspector:   inspectorEl,
+    dock:         dockEl,
+    inspector:    inspectorEl,
+    swatchStrip:  symSwatchStripEl,
     setTool,
     isDrawMode,
-    snapTag:     snapTagEl,
-    symOverlay:  gSymOverlay,
+    snapTag:      snapTagEl,
+    symOverlay:   gSymOverlay,
   });
 
   // roomTool — room selection + whole-room move-drag (LLD 63)
-  initRoomTool({ stage });
+  initRoomTool({
+    stage,
+    roomInspector:    roomInspectorEl,
+    roomSwatchStrip:  roomSwatchStripEl,
+  });
 
   // measureTool — measure mode, two-click placement, select/delete (LLD 92)
   initMeasureTool({ stage, btnMeasure, btnSelect, btnWall, snapTag: snapTagEl });
@@ -397,6 +406,7 @@ document.addEventListener("DOMContentLoaded", () => {
   onRender(measureRenderFn);     // measurement annotations, after clearance, before selection overlays
   onRender(symbolDimReposition);
   onRender(repositionInspector);
+  onRender(repositionRoomInspector);
   onRender(measureUpdate);
   onRender(clearancePanelUpdate);
   onRender(dimReposition);

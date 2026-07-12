@@ -108,7 +108,7 @@ function _renderSymbolBody(parent, sym, selected, p) {
 
   const poly = document.createElementNS(NS, "polygon");
   poly.setAttribute("points", pts);
-  poly.setAttribute("fill", selected ? p.symSelFill : p.symFill);
+  poly.setAttribute("fill", selected ? (sym.color || p.symSelFill) : (sym.color || p.symFill));
   poly.setAttribute("stroke", selected ? p.gold : p.symStroke);
   poly.setAttribute("stroke-width", selected ? "2" : "1.5");
   poly.setAttribute("stroke-linejoin", "round");

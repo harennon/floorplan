@@ -29,6 +29,8 @@ import { scheduleRender } from "./surface.js";
 import { getRotateHandleScreen } from "./symbolRender.js";
 import { beginEdit as beginDimEdit, cancel as cancelDimEdit, isEditing as isDimEditing } from "./symbolDimEntry.js";
 import { palette } from "./theme.js";
+import { SWATCHES, swatchGroupsForCategory } from "./palette.js";
+import { setSymbolColor } from "./symbols.js";
 
 // history and showToast are injected to avoid circular dependencies at init time
 let _historyCommit = null;
@@ -144,6 +146,7 @@ let _roomCenters = [];
 let _stage         = null;
 let _dock          = null;
 let _inspector     = null;
+let _swatchStrip   = null;   // #sym-swatch-strip (LLD 97)
 let _snapTagEl     = null;   // .snap-tag (shared with wallTool; symbol path owns it during gestures)
 let _gSymOverlay   = null;   // #symbol-overlay SVG group (for flush guide line)
 let _setToolFn     = null;  // wallTool.setTool injected reference
@@ -166,6 +169,7 @@ export function init(refs) {
   _stage        = refs.stage;
   _dock         = refs.dock;
   _inspector    = refs.inspector;
+  _swatchStrip  = refs.swatchStrip || null;
   _snapTagEl    = refs.snapTag  || null;
   _gSymOverlay  = refs.symOverlay || null;
   _setToolFn    = refs.setTool;
@@ -191,6 +195,12 @@ export function init(refs) {
 
   // NOTE (LLD-21): _onKeyDown (Delete/Backspace) is NOT registered here.
   // Symbol delete via keyboard is now owned solely by the main.js global handler.
+
+  // Swatch strip keyboard navigation — registered once on the persistent element (LLD 97).
+  if (_swatchStrip) {
+    _swatchStrip.addEventListener("keydown", _onSwatchKeydown);
+  }
+
   // Alt held for free snap
   window.addEventListener("keydown", _onAltDown);
   window.addEventListener("keyup",   _onAltUp);
@@ -854,6 +864,9 @@ function _showInspector(sym) {
   if (btnLock) {
     btnLock.setAttribute("aria-pressed", _lockAspect ? "true" : "false");
   }
+
+  // Populate swatch strip for this symbol's category (LLD 97)
+  _populateSwatchStrip(sym);
 }
 
 function _hideInspector() {
@@ -883,6 +896,99 @@ function _positionInspector(sym) {
 
   _inspector.style.left = ix + "px";
   _inspector.style.top  = iy + "px";
+}
+
+/**
+ * Populate the swatch strip for a symbol (LLD 97).
+ * Builds the swatch buttons from palette.js data, filtered by the symbol's
+ * category. Hides the strip for openings (door/window) which are not colorable.
+ *
+ * @param {import("./symbols.js").Sym} sym
+ */
+function _populateSwatchStrip(sym) {
+  if (!_swatchStrip) return;
+
+  const cat = CATALOG[sym.type];
+  const category = cat ? cat.category : "neutral";
+  const groups = swatchGroupsForCategory(category);
+
+  // Hide strip for openings
+  if (groups.length === 0) {
+    _swatchStrip.hidden = true;
+    return;
+  }
+
+  _swatchStrip.hidden = false;
+  _swatchStrip.innerHTML = "";
+
+  // Default (theme) chip — always first
+  const defBtn = _makeSwatchButton(null, "Default (theme)");
+  defBtn.classList.add("swatch-default");
+  if (!sym.color) defBtn.setAttribute("aria-pressed", "true");
+  defBtn.addEventListener("click", () => {
+    const s = getSymbol(_selectedId);
+    if (!s) return;
+    setSymbolColor(s, null);
+    if (_historyCommit) _historyCommit();
+    _populateSwatchStrip(s);
+    scheduleRender();
+  });
+  _swatchStrip.appendChild(defBtn);
+
+  // Collect all swatches from the relevant groups (deduplicated by hex)
+  const seenHex = new Set();
+  for (const group of groups) {
+    const swatches = SWATCHES[group] || [];
+    for (const sw of swatches) {
+      if (seenHex.has(sw.hex)) continue;
+      seenHex.add(sw.hex);
+      const btn = _makeSwatchButton(sw.hex, sw.name);
+      if (sym.color === sw.hex) btn.setAttribute("aria-pressed", "true");
+      btn.addEventListener("click", () => {
+        const s = getSymbol(_selectedId);
+        if (!s) return;
+        setSymbolColor(s, sw.hex);
+        if (_historyCommit) _historyCommit();
+        _populateSwatchStrip(s);
+        scheduleRender();
+      });
+      _swatchStrip.appendChild(btn);
+    }
+  }
+
+}
+
+/**
+ * Create a swatch button element. hex=null → default/theme chip.
+ * @param {string|null} hex
+ * @param {string} name
+ * @returns {HTMLButtonElement}
+ */
+function _makeSwatchButton(hex, name) {
+  const btn = document.createElement("button");
+  btn.className = "swatch";
+  btn.setAttribute("aria-label", name);
+  btn.setAttribute("aria-pressed", "false");
+  btn.setAttribute("type", "button");
+  if (hex) btn.style.background = hex;
+  return btn;
+}
+
+/**
+ * Arrow-key navigation within a swatch strip (roving tabindex, LLD 97).
+ * @param {KeyboardEvent} e
+ */
+function _onSwatchKeydown(e) {
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  const strip = e.currentTarget;
+  const btns = Array.from(strip.querySelectorAll(".swatch"));
+  const idx = btns.indexOf(document.activeElement);
+  if (idx === -1) return;
+  e.preventDefault();
+  const next = e.key === "ArrowRight"
+    ? btns[Math.min(idx + 1, btns.length - 1)]
+    : btns[Math.max(idx - 1, 0)];
+  next.focus();
 }
 
 function _clearSelection() {
