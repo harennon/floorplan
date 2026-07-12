@@ -822,6 +822,81 @@
         font-style: italic;
       }
 
+      /* ── W×H explicit size editor (LLD 82) ──────────────────────── */
+      .measure-wxh {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.35rem 0.7rem;
+        border-bottom: 1px solid var(--hairline);
+        flex-wrap: nowrap;
+      }
+      .measure-wxh-label {
+        color: var(--muted);
+        font-size: 0.6rem;
+        white-space: nowrap;
+        flex-shrink: 0;
+        margin-right: 0.15rem;
+      }
+      .measure-wxh-w,
+      .measure-wxh-h {
+        width: 4ch;
+        min-width: 3.5ch;
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        background: rgba(201,168,76,0.06);
+        border: 1px solid var(--hairline);
+        color: var(--ink);
+        border-radius: 3px;
+        padding: 0.1rem 0.25rem;
+        outline: none;
+        text-align: right;
+        transition: border-color 0.12s;
+        flex-shrink: 0;
+      }
+      .measure-wxh-w:focus,
+      .measure-wxh-h:focus {
+        border-color: var(--gold);
+      }
+      .measure-wxh-w[aria-invalid="true"],
+      .measure-wxh-h[aria-invalid="true"] {
+        border-color: var(--error);
+        box-shadow: 0 0 0 1px rgba(229,115,115,0.25);
+      }
+      .measure-wxh-x {
+        color: var(--muted);
+        font-size: 0.65rem;
+        flex-shrink: 0;
+      }
+      .measure-wxh-unit {
+        color: var(--muted);
+        font-size: 0.6rem;
+        flex-shrink: 0;
+      }
+      .measure-wxh-apply {
+        background: rgba(201,168,76,0.1);
+        border: 1px solid var(--gold-soft);
+        color: var(--gold);
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        padding: 0.1rem 0.45rem;
+        border-radius: 3px;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+        transition: background 0.12s, border-color 0.12s;
+        margin-left: auto;
+      }
+      .measure-wxh-apply:hover {
+        background: rgba(201,168,76,0.2);
+        border-color: var(--gold);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .measure-wxh-w,
+        .measure-wxh-h,
+        .measure-wxh-apply { transition: none; }
+      }
+
       /* Collapsed state: hide body, show only header (Total pill) */
       .measure--collapsed .measure-body {
         display: none;
@@ -2062,6 +2137,17 @@
             <button class="measure-toggle" aria-label="Toggle measure panel" aria-expanded="true">▾</button>
           </div>
           <div class="measure-body">
+            <!-- W×H explicit size editor (LLD 82) — shown only for a selected rectangle -->
+            <div class="measure-wxh" hidden>
+              <span class="measure-wxh-label">Selected room</span>
+              <input class="measure-wxh-w" type="text" inputmode="decimal" autocomplete="off"
+                     aria-label="Room width — type a value and press Enter" />
+              <span class="measure-wxh-x" aria-hidden="true">×</span>
+              <input class="measure-wxh-h" type="text" inputmode="decimal" autocomplete="off"
+                     aria-label="Room height — type a value and press Enter" />
+              <span class="measure-wxh-unit" aria-hidden="true">ft</span>
+              <button class="measure-wxh-apply" type="button">Set</button>
+            </div>
             <div class="measure-list" role="table" aria-label="Room measurements"></div>
           </div>
         </aside>

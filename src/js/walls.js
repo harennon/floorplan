@@ -524,6 +524,41 @@ export function rescaleRectEdge(room, edgeIndex, targetLenM) {
   return true;
 }
 
+// ── rectDims (LLD 82) ────────────────────────────────────────────────────────
+
+/**
+ * For a rectangle, return its two side lengths and the edge indices they map to.
+ * Width = the edge pair nearer horizontal (|dx| >= |dy| for e0); height = the other.
+ * Pure; does not mutate. Returns null if !isRectangle(room).
+ *
+ * @param {Room} room
+ * @returns {{ w:number, h:number, wEdge:number, hEdge:number } | null}
+ *          w/h in world metres; wEdge ∈ {0,2}, hEdge ∈ {1,3} (one member of each
+ *          perpendicular pair; either works since parallel edges are equal length).
+ */
+export function rectDims(room) {
+  if (!isRectangle(room)) return null;
+
+  const verts = room.verts;
+
+  // Edge 0: v0 → v1
+  const e0x = verts[1].x - verts[0].x;
+  const e0y = verts[1].y - verts[0].y;
+  const len0 = Math.sqrt(e0x * e0x + e0y * e0y);
+
+  // Edge 1: v1 → v2
+  const e1x = verts[2].x - verts[1].x;
+  const e1y = verts[2].y - verts[1].y;
+  const len1 = Math.sqrt(e1x * e1x + e1y * e1y);
+
+  // Edge 0 is "width" when its direction is more horizontal (|dx| >= |dy|)
+  if (Math.abs(e0x) >= Math.abs(e0y)) {
+    return { w: len0, h: len1, wEdge: 0, hEdge: 1 };
+  } else {
+    return { w: len1, h: len0, wEdge: 1, hEdge: 0 };
+  }
+}
+
 // ── Room centroids (LLD 37) ──────────────────────────────────────────────────
 
 /**
