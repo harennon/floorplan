@@ -58,6 +58,20 @@ tool active."
 - Add `isMeasureMode()` to `wallTool.js` (`_tool === "measure"`).
 - `setTool("measure")` finishes any open wall chain first (same guard as switching to
   select), clears the snap tag, and sets the cursor class.
+- **Tool-switch cancel of a pending measurement (fixes Edge Cases 4/15).** `wallTool.setTool`
+  is the single funnel for *every* tool change — the rail buttons, the `M`/`V`/`W` key
+  handlers in `_onKeyDown`, and any programmatic switch all call it. So the pending-A cancel
+  must hook there, not in `main.js` (the V-key and rail-button paths never surface to
+  `main.js`). Because `wallTool` must not import `measureTool` (no-circular-import rule), we
+  **inject a measure-cancel callback into `wallTool`**, mirroring the existing
+  `setHistoryCommit(fn)` injection: add `setMeasureCancel(fn)` to `wallTool.js`, and in
+  `setTool`, when leaving measure mode (`_tool === "measure" && t !== "measure"`) call the
+  injected `_measureCancel?.()` **before** reassigning `_tool`. `main.js` wires
+  `wallTool.setMeasureCancel(measureTool.cancel)`. This discards `_pendingA` on any switch
+  away from measure mode (V, W, or rail click), symmetric with how `setTool` already commits
+  the wall chain when leaving wall mode. **Belt-and-suspenders:** `measureRender` additionally
+  gates all draft/rubber-band rendering on `isMeasureMode()` (see Approach §4), so even if a
+  pending point somehow survived, no phantom rubber-band could paint in select/wall mode.
 - The Measure tool's own pointer handling lives in a **new `measureTool.js`** module
   (mirroring how `symbolTool`/`roomTool` own their interaction logic but delegate mode
   ownership to `wallTool`). `measureTool` exposes hover/click/leave/cancel hooks and the
@@ -138,10 +152,15 @@ New module `src/js/measureRender.js`, matching `wallRender.js`/`symbolRender.js`
 injected getter for measureTool's transient state (pending A, cursor snap) and the selected
 id. Its `render()` is registered via `onRender` in `main.js`.
 
-- **Draw target:** a dedicated SVG group. Add a new `<g id="measure">` to `index.html`
-  **above `#symbols` and below `#symbol-overlay`** so measurements sit over furniture but
-  under active selection handles. (Placement rationale: a dimension line should be readable
-  over furniture; the symbol-overlay selection handles stay on top.)
+- **Draw target:** a dedicated SVG group. Add a new `<g id="measure">` to `index.html`.
+  The actual group order in `index.html` is `#grid, #world, #draft, #snap, #symbols,
+  #clearance, #symbol-overlay`. **Place `#measure` immediately after `#clearance` and before
+  `#symbol-overlay`** — i.e. above both furniture *and* clearance leaders, under the active
+  selection handles. Rationale: a dimension line and its label should be readable over
+  furniture and over clearance chips/leaders (which are advisory annotations, not primary
+  content), while the symbol-overlay selection handles must stay on top so a user editing a
+  symbol is never occluded by a measurement line. Paint order is therefore intentional, not
+  incidental.
 - **Committed measurements** (`measurementsModel.measurements`): for each, draw a `<line>`
   A→B, two short perpendicular **end ticks** at A and B (screen-constant length, matching the
   wall dimension tick idiom), and a midpoint distance **label** in the `.dim-labels` HTML
@@ -151,12 +170,32 @@ id. Its `render()` is registered via `onRender` in `main.js`.
 - **Selected state:** if the measure selection id matches, stroke the line with the
   selection/accent color and a slightly heavier width (mirror the room/symbol selected
   treatment; use `palette().accentRgb` / selection color).
-- **In-progress rubber-band:** when `_pendingA` is set, draw a dashed line from A to the
-  current cursor snap point plus a live distance label, and a small marker glyph at A and at
-  the snapped cursor (reuse the snap-glyph vocabulary lightly — a dot is sufficient).
-- Idempotent full redraw each frame (clear group + its labels, redraw), exactly like the
-  other render modules. Colors from `palette()`; dark/light handled for free since palette
-  swaps on theme change and `onThemeChange(scheduleRender)` is wired.
+- **In-progress rubber-band:** when `_pendingA` is set **and `isMeasureMode()` is true**, draw
+  a dashed line from A to the current cursor snap point plus a live distance label, and a small
+  marker glyph at A and at the snapped cursor (reuse the snap-glyph vocabulary lightly — a dot
+  is sufficient). **The draft branch is explicitly gated on `isMeasureMode()`** (import
+  `isMeasureMode` from `wallTool.js`): committed measurements always render, but the
+  rubber-band + live label never paint outside measure mode. This is the second guard against
+  a stale pending point leaking a phantom line into select/wall mode (the first being the
+  tool-switch cancel in Approach §1).
+- **Overlay clearing — scope-remove only our own nodes; never full-clear the shared overlay.**
+  The `.dim-labels` HTML overlay is **shared** across modules and the render modules are **not**
+  alike in how they clear it: `wallRender` runs first (as `surface._wallRender`, before the
+  `onRender` chain) and **full-clears** `.dim-labels` (`while(_dimLabelsEl.firstChild) …`,
+  `wallRender.js` ~L411/L416); `clearanceRender` runs later on the `onRender` chain and
+  deliberately **scope-removes only its own** nodes (`querySelectorAll(".clr-chip, .fit-pill")`,
+  `clearanceRender.js` L67). `measureRender` **must follow the clearanceRender pattern, not the
+  wallRender pattern**: it tags every label chip it creates with a dedicated `.measure-label`
+  class and, each frame, removes only `_dimLabelsEl.querySelectorAll(".measure-label")` before
+  redrawing — it must **never** full-clear `.dim-labels`, or it would erase the wall dim chips
+  and clearance chips already painted that frame. Its dedicated `<g id="measure">` SVG group
+  *may* be full-cleared safely (`while(g.firstChild) g.removeChild(g.firstChild)`), since that
+  group is exclusively owned by measureRender.
+- **Registration order:** `measureRender.render()` is appended to the `onRender` chain in
+  `main.js` **after** `wallRender` (which runs first, off-chain) and after `clearanceRender`,
+  so its scoped label removal can never race a full-clear by wallRender within the same frame.
+- Idempotent full redraw each frame. Colors from `palette()`; dark/light handled for free
+  since palette swaps on theme change and `onThemeChange(scheduleRender)` is wired.
 
 `measureRender.js` matches the `src/js/*Render.js` auto-merge `renderPaths` glob, so the new
 module is covered by the render-diff gate (per project.json).
@@ -185,6 +224,18 @@ onDown(sx, sy) {
 - `measureTool` registers **no** onMove/onUp drag behavior in this phase (endpoints are
   fixed; no handle-drag). The dispatcher's `onMove`/`onUp` simply no-op when
   `owner === "measure"`. `onTapEmpty` also clears the measure selection alongside sym+room.
+- **Close the dock drag-drop mutex hole.** Dropping a symbol from the dock places it via
+  `selectSymbol` (symbolTool), which **bypasses the select dispatcher** — that is why `main.js`
+  L253 already injects `symSetClearRoomSelection(roomClearSelection)` so a dock-placed symbol
+  drops any live *room* selection. That reverse path clears only the room selection, not a
+  measure selection, so placing a symbol while a measurement is selected would leave both
+  selected — violating the single-selection invariant this LLD relies on. **Fix:** the injected
+  clear that `symbolTool` calls on placement must also clear the measure selection. Concretely,
+  wire `symSetClearRoomSelection` to a small composed clear in `main.js` that calls **both**
+  `roomClearSelection()` **and** `measureTool.clearSelection()` (e.g.
+  `symSetClearRoomSelection(() => { roomClearSelection(); measureClearSelection(); })`), rather
+  than passing `roomClearSelection` alone. This keeps the mutex complete across the
+  dispatcher-bypassing placement path.
 - **Delete:** extend the `main.js` global Delete/Backspace handler. Today it delegates to
   `symbolTool.deleteSelected()` when `hasSelection()`. Add: if a measurement is selected
   (`measureHasSelection()`), consume the event and call `measureDeleteSelected()` — which
@@ -303,13 +354,19 @@ export function render()   // idempotent full redraw; registered via onRender in
 ```
 
 Imports: `worldToScreen` (view), `fmtLen`, `unitLabel` (units), `model as measurementsModel`
-+ `edgeLength` (measurements/walls), `palette` (theme).
++ `edgeLength` (measurements/walls), `palette` (theme), `isMeasureMode` (wallTool — gates the
+draft/rubber-band branch). Each label chip carries a dedicated `.measure-label` class; `render()`
+scope-removes only `dimLabelsEl.querySelectorAll(".measure-label")` (never full-clears the shared
+`.dim-labels` overlay) and full-clears its own `<g id="measure">`. Registered on the `onRender`
+chain **after** `clearanceRender` (and after the off-chain `wallRender`).
 
 ### `src/js/wallTool.js` (extended)
 
 ```js
 export function isMeasureMode()   // _tool === "measure"
-// setTool() accepts "measure"; finishes open chain when leaving "wall"; sets .measure-mode cursor
+export function setMeasureCancel(fn) // inject measureTool.cancel; called by setTool when leaving measure mode (mirrors setHistoryCommit)
+// setTool() accepts "measure"; finishes open chain when leaving "wall"; calls injected
+//   _measureCancel() when leaving "measure" (before reassigning _tool); sets .measure-mode cursor
 // keyboard: "m"/"M" → setTool("measure")  (added to _onKeyDown switch)
 ```
 
@@ -331,13 +388,21 @@ export function isMeasureMode()   // _tool === "measure"
 - Compose draw hooks to dispatch wall vs measure (Approach §2).
 - Extend the select dispatcher with the measure owner (Approach §5); inject
   `setClearOtherSelections` and wire measure clears into the symbol/room clear paths.
+- **Close the dock drag-drop mutex hole:** change the existing `symSetClearRoomSelection(...)`
+  wiring (main.js L253) from `roomClearSelection` to a composed clear that also clears the
+  measure selection — `symSetClearRoomSelection(() => { roomClearSelection();
+  measureClearSelection(); })` (Approach §5).
+- **Wire tool-switch cancel:** `wallTool.setMeasureCancel(measureTool.cancel)` so switching
+  away from measure mode discards a pending A (Approach §1 / Edge Case 4).
 - Extend the global Delete/Backspace + Esc handlers to cover measure selection (after
   symbol/room).
 - `measureSetHistoryAndToast({ commit: historyCommit }, showToast)`.
 
 ### `src/index.html` (markup)
 
-- New `<g id="measure">` between `#symbols` and `#symbol-overlay`.
+- New `<g id="measure">` placed **immediately after `#clearance` and before
+  `#symbol-overlay`** (current order: `#grid, #world, #draft, #snap, #symbols, #clearance,
+  #symbol-overlay`) — over furniture and clearance leaders, under selection handles (Approach §4).
 - New `<button id="tool-measure" aria-label="Measure tool (M)" aria-pressed="false">` with a
   dimension-line SVG glyph + `<span class="tool-key-hint">M</span>`, placed after
   `#tool-wall`, before the first `.tool-rail-sep`.
@@ -379,9 +444,14 @@ export function isMeasureMode()   // _tool === "measure"
    `edgeLength(A,B) < MIN_SEG_M`, ignore the B click (stay in `awaitingB`); no zero-length
    measurement is created. (LLD 81 tolerates zero-length in the model, but the tool guards it
    at placement, matching the wall vertex guard.)
-4. **Tool switch mid-placement.** `setTool` (to select/wall) calls `measureTool.cancel()`
-   first (wire in `main.js` or via wallTool) so a dangling pending A is discarded, not
-   silently committed. No commit.
+4. **Tool switch mid-placement.** `wallTool.setTool` (to select/wall — via rail button, or
+   the `V`/`W` key handlers in `wallTool._onKeyDown`, or programmatic) invokes the injected
+   `_measureCancel` callback when leaving measure mode, **before** reassigning `_tool`, so a
+   dangling pending A is discarded, not silently committed. No commit. The injection point is
+   specified in Approach §1 (`wallTool.setMeasureCancel(fn)`, mirroring `setHistoryCommit`);
+   it lives in `wallTool` — not `main.js` — precisely because the V-key and rail-button paths
+   never surface to `main.js`. `measureRender`'s `isMeasureMode()` draft gate (Approach §4) is
+   the backstop.
 5. **Two-finger pinch / pointer-cancel mid-placement.** `interactions.js` calls
    `_drawHooks.onLeave()` on the second finger; measure `onLeave()` clears only the cursor
    snap, **not** pending A (so a one-finger pan-zoom detour doesn't lose point A). A true
@@ -396,7 +466,12 @@ export function isMeasureMode()   // _tool === "measure"
    (Matches the intent that object snapping is always useful; only *grid* obeys the toggle.
    If reviewers prefer the toggle to also gate object snaps, that is a one-line change — the
    recommended behavior is grid-only gating, consistent with `resolveSnap` where point snap
-   is not grid-gated.)
+   is not grid-gated.) **Open decision for CEO/CX confirmation:** whether object/corner/center
+   snapping remaining active while the snap toggle is *off* could surprise users in the "does
+   my couch fit" flow (a user who toggled snapping off may expect fully free placement). The
+   recommended default is grid-only gating; if CX signals users expect the toggle to disable
+   *all* snapping, flip object snaps to also honor `prefs.gridSnap()`. Flagging rather than
+   deciding unilaterally, per the escalation rule.
 8. **Delete with a measurement selected.** Removes it, commits, toast with scoped Undo. Must
    run **after** the symbol/room delete checks so existing behavior is unchanged; a
    measurement and a symbol cannot both be "selected" at once (mutex).
@@ -479,6 +554,9 @@ pass** — especially the LLD 63 selection suite and the LLD 81 round-trip suite
   A/B world coords and a fresh `m<n>` id; state returns to `idle`.
 - Degenerate B (within `MIN_SEG_M` of A) is ignored; no measurement; state stays `awaitingB`.
 - `cancel()` (Esc / tool switch) with pending A creates nothing and returns to `idle`.
+- **Tool switch away from measure mode invokes the injected cancel:** with a pending A,
+  calling `wallTool.setTool("select")` (or `"wall"`) discards `_pendingA` (no measurement, no
+  commit) — asserts the `setMeasureCancel` wiring fires from every switch path.
 - `onLeave()` does not drop pending A (Edge Case 5).
 
 **Unit — selection & delete (`measureTool`):**
@@ -488,6 +566,9 @@ pass** — especially the LLD 63 selection suite and the LLD 81 round-trip suite
 - `deleteSelected` removes the entry, clears selection, and (with history injected) is
   undoable.
 - Selecting a measurement clears any symbol/room selection (mutex) via the injected clear.
+- **Dock drag-drop mutex:** with a measurement selected, placing a symbol via `selectSymbol`
+  (the dispatcher-bypassing path) clears the measure selection — asserts the composed
+  `symSetClearRoomSelection` clears both room and measure selection (no double-selection).
 
 **Unit — history:**
 - Create pushes one undoable snapshot; undo removes the measurement, redo re-adds it.
@@ -511,9 +592,15 @@ pass** — especially the LLD 63 selection suite and the LLD 81 round-trip suite
   finite-check fixtures).
 
 **Render (`measureRender`, structural — mirror LLD 61 render coverage):**
-- Renders one `<line>` + a distance-label chip per committed measurement.
+- Renders one `<line>` + a distance-label chip (`.measure-label`) per committed measurement.
 - Selected measurement renders with the selection stroke treatment.
-- With a pending A, renders a dashed rubber-band + live label; none when idle.
+- With a pending A **and measure mode active**, renders a dashed rubber-band + live label;
+  none when idle.
+- **Draft gate:** with a pending A but the tool switched to select/wall (`isMeasureMode()`
+  false), the rubber-band + live label are NOT rendered (committed measurements still render).
+- **Overlay scoping:** `render()` removes only `.measure-label` nodes and leaves any
+  pre-existing `.clr-chip`/`.fit-pill`/wall dim chips in `.dim-labels` intact (assert a
+  sentinel foreign node survives a measure render; assert measure never full-clears the overlay).
 - Label text reflects the current unit and updates after a unit toggle.
 
 **Interaction (where practical, headless):**
