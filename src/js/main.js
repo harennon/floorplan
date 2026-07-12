@@ -12,7 +12,7 @@ import { init as initTheme, toggleTheme, getTheme, onThemeChange } from "./theme
 import { init as initHud } from "./hud.js";
 import { init as initInteractions, setDrawHooks, setSelectHooks, setMeasureHooks, zoomInStep, zoomOutStep, zoomReset } from "./interactions.js";
 import { init as initWallRender, render as wallRender } from "./wallRender.js";
-import { init as initWallTool, isDrawMode, isMeasureMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit, setOnMeasureModeLeave as wallSetOnMeasureModeLeave } from "./wallTool.js";
+import { init as initWallTool, isDrawMode, isMeasureMode, getSnap, onHover, onClick, onLeave, setTool, setHistoryCommit as wallSetHistoryCommit, setOnMeasureModeLeave as wallSetOnMeasureModeLeave, setOnMeasureModeEnter as wallSetOnMeasureModeEnter } from "./wallTool.js";
 import { init as initMeasure, update as measureUpdate, getHighlightRoomId } from "./measure.js";
 import { init as initDimEntry, reposition as dimReposition, getEditingEdge, setHistoryCommit as dimSetHistoryCommit } from "./dimEntry.js";
 import { init as initSymbolRender, render as symbolRenderFn } from "./symbolRender.js";
@@ -184,6 +184,16 @@ document.addEventListener("DOMContentLoaded", () => {
   // Select rail button) it calls this so the in-progress draft is discarded and
   // the rubber-band preview disappears immediately.
   wallSetOnMeasureModeLeave(measureDiscardDraft);
+
+  // LLD 93 lifecycle step 1: when wallTool switches TO measure mode (M key or
+  // #tool-measure rail button), clear symbol + room selections so the selection
+  // overlay and floating inspector do not persist while in Measure mode.
+  // This covers both the M keydown path (wallTool._onKeyDown → setTool("measure"))
+  // and the rail-button click path (init listener → setTool("measure")).
+  wallSetOnMeasureModeEnter(() => {
+    onDrawModeEnter();       // clear symbol selection
+    roomOnDrawModeEnter();   // clear room selection
+  });
 
   // measureRender — dimension line + chips, registered on onRender after wallRender
   initMeasureRender(gMeasures, dimLabelsEl, measureGetSelectedId, measureGetDraft);

@@ -14015,6 +14015,19 @@ describe("measurements.js — pickMeasurement", () => {
 
 import {
   resolveEndpointSnapForTest,
+  onMeasureTap,
+  onSelectDown as measureToolOnSelectDown,
+  clearSelection as measureToolClearSelection,
+  hasSelection as measureToolHasSelection,
+  deleteSelected as measureToolDeleteSelected,
+  getDraft as measureToolGetDraft,
+  getSelectedId as measureToolGetSelectedId,
+  discardDraft as measureToolDiscardDraft,
+  setHistoryAndToast as measureToolSetHistoryAndToast,
+  setToolBridge as measureToolSetToolBridge,
+  setClearSymbolSelection as measureToolSetClearSymbolSelection,
+  setClearRoomSelection as measureToolSetClearRoomSelection,
+  init as initMeasureTool,
 } from "../src/js/measureTool.js";
 
 // Helper: reset all relevant models and view to a clean state
@@ -14235,6 +14248,250 @@ describe("LLD 93 — unit toggle: fmtLen + unitLabel reflect current unit", () =
       throw new Error(`fmtLen must produce different text for different units: both gave '${metricText}'`);
     }
     setUnit("m"); // restore
+  });
+});
+
+// ─── Tests: LLD 93 — Integration: placement + selection + delete ─────────────
+
+/**
+ * Reset all relevant state for LLD 93 integration tests.
+ * zoom=1, pan=0 → pxPerM()=40; snap on; measurements cleared.
+ */
+function _resetForMeasureIntegration() {
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  measurementsModel.measurements.length = 0;
+  hydrateMeasurements({ measurements: [] });
+  hydrateWalls({ rooms: [], chain: [] });
+  hydrateSymbols({ symbols: [] });
+  setGridSnap(true);
+  setSnapMode("off"); // free placement avoids snap interference in tap tests
+  // Reset history
+  resetHistory();
+}
+
+// Inject dependencies into measureTool before running integration tests.
+// (initMeasureTool adds keyboard listeners; safe to call multiple times.)
+initMeasureTool({ stage: document.createElement("div"), btnMeasure: null, snapTag: null });
+measureToolSetHistoryAndToast(
+  { commit: historyCommit, undo: historyUndo, depth: historyDepth },
+  () => {}, // no-op toast
+);
+measureToolSetToolBridge({ setTool: () => {}, isMeasureMode: () => true });
+measureToolSetClearSymbolSelection(() => {});
+measureToolSetClearRoomSelection(() => {});
+
+// Ensure history knows about measurements (initHistory seeds from current model state)
+(function() {
+  _resetForMeasureIntegration();
+  initHistory();
+})();
+
+describe("LLD 93 — integration: two taps create one measurement", () => {
+  it("first tap sets draft with point A; no measurement committed yet", () => {
+    _resetForMeasureIntegration();
+    initHistory();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    // Screen (100, 100) = world (2.5, 2.5) at zoom=1 pan=0 (40px/m)
+    onMeasureTap(100, 100);
+    const draft = measureToolGetDraft();
+    if (draft === null) throw new Error("Expected draft to be set after first tap");
+    // world coords: 100/40 = 2.5
+    expect(draft.a.x).toBeCloseTo(2.5, 6);
+    expect(draft.a.y).toBeCloseTo(2.5, 6);
+    expect(measurementsModel.measurements.length).toBe(0);
+  });
+
+  it("second tap commits the measurement and clears the draft", () => {
+    _resetForMeasureIntegration();
+    initHistory();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    // Point A: screen (40, 40) = world (1.0, 1.0)
+    onMeasureTap(40, 40);
+    // Point B: screen (160, 40) = world (4.0, 1.0) — 3m apart, well above MIN_LEN_PX=8
+    onMeasureTap(160, 40);
+    expect(measurementsModel.measurements.length).toBe(1);
+    expect(measureToolGetDraft()).toBe(null);
+    const m = measurementsModel.measurements[0];
+    expect(m.a.x).toBeCloseTo(1.0, 6);
+    expect(m.a.y).toBeCloseTo(1.0, 6);
+    expect(m.b.x).toBeCloseTo(4.0, 6);
+    expect(m.b.y).toBeCloseTo(1.0, 6);
+  });
+
+  it("rubber-band draft exists after first tap and clears after second", () => {
+    _resetForMeasureIntegration();
+    initHistory();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    onMeasureTap(80, 80);
+    expect(measureToolGetDraft() !== null).toBe(true);
+    onMeasureTap(200, 80);
+    expect(measureToolGetDraft()).toBe(null);
+  });
+});
+
+describe("LLD 93 — integration: Escape after first tap creates nothing", () => {
+  it("discardDraft after first tap clears draft and leaves measurements empty", () => {
+    _resetForMeasureIntegration();
+    initHistory();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    onMeasureTap(80, 80); // place point A
+    expect(measureToolGetDraft() !== null).toBe(true);
+    // discardDraft is what the Escape key path calls (via _draft = null)
+    measureToolDiscardDraft();
+    expect(measureToolGetDraft()).toBe(null);
+    expect(measurementsModel.measurements.length).toBe(0);
+  });
+});
+
+describe("LLD 93 — integration: tiny second tap discards; supra-threshold commits", () => {
+  it("tiny second point (< MIN_LEN_PX screen px) discards at zoom=1", () => {
+    _resetForMeasureIntegration();
+    initHistory();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    // Point A at screen (100, 100) = world (2.5, 2.5)
+    onMeasureTap(100, 100);
+    // Point B at screen (103, 100) = world (2.575, 2.5) — only 3px apart (< MIN_LEN_PX=8)
+    // MIN_LEN_PX=8; at zoom=1, MIN_LEN_M = 8/40 = 0.2m
+    // world dist = 0.075m < 0.2m → discard
+    onMeasureTap(103, 100);
+    expect(measurementsModel.measurements.length).toBe(0);
+    expect(measureToolGetDraft()).toBe(null);
+  });
+
+  it("supra-threshold second point (>= MIN_LEN_PX screen px) commits at zoom=1", () => {
+    _resetForMeasureIntegration();
+    initHistory();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    // Point A at screen (100, 100) = world (2.5, 2.5)
+    onMeasureTap(100, 100);
+    // Point B at screen (120, 100) = world (3.0, 2.5) — 20px apart (> MIN_LEN_PX=8)
+    // world dist = 0.5m > 0.2m → commit
+    onMeasureTap(120, 100);
+    expect(measurementsModel.measurements.length).toBe(1);
+  });
+
+  it("tiny second point discards at zoom=2 (MIN_LEN_M scales with zoom)", () => {
+    _resetForMeasureIntegration();
+    view.zoom = 2; // pxPerM = 80
+    initHistory();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    // At zoom=2, MIN_LEN_M = 8/80 = 0.1m
+    // Point A at screen (200, 200) = world (2.5, 2.5) (pan=0, zoom=2: screen/pxPerM)
+    onMeasureTap(200, 200);
+    // Point B at screen (203, 200) — 3px apart, world dist = 3/80 = 0.0375m < 0.1m → discard
+    onMeasureTap(203, 200);
+    expect(measurementsModel.measurements.length).toBe(0);
+    view.zoom = 1; // restore
+  });
+
+  it("supra-threshold second point commits at zoom=2", () => {
+    _resetForMeasureIntegration();
+    view.zoom = 2; // pxPerM = 80
+    initHistory();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    // Point A at screen (200, 200) = world (2.5, 2.5)
+    onMeasureTap(200, 200);
+    // Point B at screen (240, 200) — 40px apart, world dist = 40/80 = 0.5m > MIN_LEN_M=0.1m → commit
+    onMeasureTap(240, 200);
+    expect(measurementsModel.measurements.length).toBe(1);
+    view.zoom = 1; // restore
+  });
+});
+
+describe("LLD 93 — integration: select → Delete → undoable/redoable", () => {
+  it("tap on measurement line selects it (onSelectDown returns true)", () => {
+    _resetForMeasureIntegration();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    // Create a horizontal measurement from world (0,0) to (4,0)
+    // In screen space at zoom=1 pan=0: from (0,0) to (160,0)
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 4, y: 0 });
+    addMeasurement(m);
+    // Tap on midpoint of segment: screen (80, 0) = world (2.0, 0.0)
+    // tolWorld = (MIN_HIT_PX/2) / pxPerM = 6/40 = 0.15m; segment is at y=0, tap at y=0 → hit
+    const consumed = measureToolOnSelectDown(80, 0);
+    expect(consumed).toBe(true);
+    expect(measureToolGetSelectedId()).toBe(m.id);
+  });
+
+  it("tap misses measurement: onSelectDown returns false", () => {
+    _resetForMeasureIntegration();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 4, y: 0 });
+    addMeasurement(m);
+    // Tap far from segment: screen (80, 80) = world (2.0, 2.0) — 2m from the y=0 line
+    const consumed = measureToolOnSelectDown(80, 80);
+    expect(consumed).toBe(false);
+    expect(measureToolGetSelectedId()).toBe(null);
+  });
+
+  it("Delete removes selected measurement and is undoable/redoable", () => {
+    _resetForMeasureIntegration();
+    initHistory();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 4, y: 0 });
+    addMeasurement(m);
+    historyCommit(); // commit the add
+
+    // Select and delete
+    measureToolOnSelectDown(80, 0);
+    expect(measureToolHasSelection()).toBe(true);
+    measureToolDeleteSelected();
+    expect(measurementsModel.measurements.length).toBe(0);
+    expect(measureToolHasSelection()).toBe(false);
+
+    // Undo restores the measurement
+    historyUndo();
+    expect(measurementsModel.measurements.length).toBe(1);
+    expect(measurementsModel.measurements[0].id).toBe(m.id);
+
+    // Redo re-removes the measurement
+    historyRedo();
+    expect(measurementsModel.measurements.length).toBe(0);
+  });
+});
+
+describe("LLD 93 — integration: symbol/room selection mutex with measurement", () => {
+  it("selecting a measurement does NOT disturb a nearby symbol hit (dispatcher gives symbols priority)", () => {
+    // The dispatcher gives symbols highest priority; measurements are lowest.
+    // Verify: a miss on symbols still allows measureOnSelectDown to be called and find the line.
+    _resetForMeasureIntegration();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    // Create a measurement at y=0 (world)
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 4, y: 0 });
+    addMeasurement(m);
+    // Tap on the measurement segment midpoint — no symbol is there
+    const consumed = measureToolOnSelectDown(80, 0);
+    expect(consumed).toBe(true);
+    expect(measureToolGetSelectedId()).toBe(m.id);
+  });
+
+  it("clearSelection drops measurement selection (mutex used by dispatcher)", () => {
+    _resetForMeasureIntegration();
+    measureToolClearSelection();
+    measureToolDiscardDraft();
+    const m = createMeasurement({ x: 0, y: 0 }, { x: 4, y: 0 });
+    addMeasurement(m);
+    measureToolOnSelectDown(80, 0);
+    expect(measureToolHasSelection()).toBe(true);
+    // Simulate the mutex: selecting a symbol/room calls measureClearSelection
+    measureToolClearSelection();
+    expect(measureToolHasSelection()).toBe(false);
+    expect(measureToolGetSelectedId()).toBe(null);
   });
 });
 

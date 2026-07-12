@@ -41,6 +41,20 @@ export function setOnMeasureModeLeave(fn) {
   _onMeasureModeLeave = fn;
 }
 
+// Injected from main.js: called when entering measure mode. Clears symbol + room
+// selections so the selection overlay + floating inspector do not persist while
+// in Measure mode (LLD 93 lifecycle step 1).
+let _onMeasureModeEnter = null;
+
+/**
+ * Inject a callback that fires when the active tool switches TO "measure".
+ * main.js registers this to clear symbol + room selection (mutex, LLD 93 §lifecycle 1).
+ * @param {()=>void} fn
+ */
+export function setOnMeasureModeEnter(fn) {
+  _onMeasureModeEnter = fn;
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 /** @type {"wall"|"select"|"measure"} */
@@ -150,6 +164,11 @@ export function setTool(t) {
   // LLD 93 Edge Case 7: leaving measure mode discards any open placement draft.
   if (_tool === "measure" && t !== "measure") {
     if (_onMeasureModeLeave) _onMeasureModeLeave();
+  }
+  // LLD 93 lifecycle step 1: entering measure mode clears symbol + room selections
+  // so the selection overlay and floating inspector don't persist over the canvas.
+  if (t === "measure" && _tool !== "measure") {
+    if (_onMeasureModeEnter) _onMeasureModeEnter();
   }
   _tool = t;
   _snap = null;
