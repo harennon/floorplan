@@ -15,7 +15,7 @@
  *   |"armchair"|"coffee-table"|"dining-table-round"
  *   |"nightstand"|"dresser"|"cabinet"
  *   |"patio-table"|"patio-chair"|"parasol"|"planter"} SymbolType */
-/** @typedef {{ id:string, type:SymbolType, x:number, y:number, w:number, h:number, rot:number }} Sym */
+/** @typedef {{ id:string, type:SymbolType, x:number, y:number, w:number, h:number, rot:number, color?:string }} Sym */
 /** @typedef {"openings"|"living"|"kitchen"|"bedroom"|"bath"|"outdoor"} SymCategory */
 
 // ── In-memory model ───────────────────────────────────────────────────────────
@@ -317,6 +317,7 @@ export function removeSymbol(id) {
 
 /**
  * Duplicate by id, offset by +0.3m x/y, new id. Returns new Sym or null.
+ * Copies the source's color (if set) onto the duplicate.
  * @param {string} id
  * @returns {Sym|null}
  */
@@ -332,8 +333,30 @@ export function duplicateSymbol(id) {
     h: sym.h,
     rot: sym.rot,
   };
+  if (sym.color !== undefined) dup.color = sym.color;
   model.symbols.push(dup);
   return dup;
+}
+
+/**
+ * Set or clear the color of a symbol.
+ * Pass a valid hex string to set; pass null or undefined to clear (delete the key).
+ * Clearing makes the symbol fall back to the theme fill.
+ * Returns true if the value changed.
+ *
+ * @param {Sym} sym
+ * @param {string|null|undefined} hexOrNull
+ * @returns {boolean}
+ */
+export function setSymbolColor(sym, hexOrNull) {
+  if (!hexOrNull) {
+    const changed = sym.color !== undefined;
+    delete sym.color;
+    return changed;
+  }
+  const changed = sym.color !== hexOrNull;
+  sym.color = hexOrNull;
+  return changed;
 }
 
 /**

@@ -20,13 +20,14 @@
  * for free-snap, exactly like symbolTool.
  */
 
-import { screenToWorld } from "./view.js";
-import { model as wallsModel, moveRoom, gridSnap, pointNearRoomWall, WALL_M } from "./walls.js";
+import { screenToWorld, worldToScreen, pxPerM } from "./view.js";
+import { model as wallsModel, moveRoom, gridSnap, pointNearRoomWall, WALL_M, setRoomColor, roomCentroids } from "./walls.js";
 import { pointInRoom } from "./clearance.js";
 import { model as symbolsModel, getSymbol, moveSymbol, CATALOG } from "./symbols.js";
 import { gridSnap as prefsGridSnap } from "./prefs.js";
 import { snapStep } from "./grid.js";
 import { scheduleRender } from "./surface.js";
+import { SWATCHES, swatchGroupsForCategory } from "./palette.js";
 
 // history and clearSymbolSelection are injected from main.js to avoid circular imports
 let _historyCommit = null;
@@ -53,15 +54,19 @@ let _altHeld = false;
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 
-let _stage = null;
+let _stage            = null;
+let _roomInspector    = null;   // #room-inspector (LLD 97)
+let _roomSwatchStrip  = null;   // #room-swatch-strip (LLD 97)
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 /**
- * @param {{ stage: Element }} refs
+ * @param {{ stage: Element, roomInspector?: Element, roomSwatchStrip?: Element }} refs
  */
 export function init(refs) {
-  _stage = refs.stage;
+  _stage           = refs.stage;
+  _roomInspector   = refs.roomInspector  || null;
+  _roomSwatchStrip = refs.roomSwatchStrip || null;
 
   // Alt held for free snap (mirrors symbolTool; not an editing shortcut)
   window.addEventListener("keydown", _onAltDown);
@@ -118,6 +123,9 @@ export function onSelectDown(sx, sy) {
 
   _selectedRoomId = hitRoom.id;
   _dragging = true;
+
+  // Show room/floor color inspector (LLD 97)
+  _showRoomInspector(hitRoom);
 
   // Grabbed anchor is the reference vertex (verts[0]).
   const ref = hitRoom.verts[0];
@@ -206,6 +214,7 @@ export function clearSelection() {
   _selectedRoomId = null;
   _dragging = false;
   _carriedSymbolIds = [];
+  _hideRoomInspector();
 }
 
 /**
@@ -253,4 +262,124 @@ function _onAltUp(e) {
 
 function _onWindowBlur() {
   _altHeld = false;
+}
+
+// ── Room inspector (LLD 97) ───────────────────────────────────────────────────
+
+/**
+ * Show and populate the room inspector for the given room.
+ * @param {import("./walls.js").Room} room
+ */
+function _showRoomInspector(room) {
+  if (!_roomInspector) return;
+  _populateRoomSwatchStrip(room);
+  _roomInspector.classList.add("visible");
+  _positionRoomInspector(room);
+}
+
+function _hideRoomInspector() {
+  if (!_roomInspector) return;
+  _roomInspector.classList.remove("visible");
+}
+
+/**
+ * Reposition the room inspector near the room centroid. Called each render frame.
+ */
+export function repositionRoomInspector() {
+  if (!_selectedRoomId || !_roomInspector || !_roomInspector.classList.contains("visible")) return;
+  const room = wallsModel.rooms.find(r => r.id === _selectedRoomId);
+  if (room) _positionRoomInspector(room);
+}
+
+function _positionRoomInspector(room) {
+  if (!_roomInspector || !room || room.verts.length === 0) return;
+
+  // Compute centroid
+  const n = room.verts.length;
+  let cx = 0, cy = 0;
+  for (const v of room.verts) { cx += v.x; cy += v.y; }
+  cx /= n; cy /= n;
+
+  const sc = worldToScreen(cx, cy);
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const iw = _roomInspector.offsetWidth  || 200;
+  const ih = _roomInspector.offsetHeight || 60;
+
+  let ix = sc.x - iw / 2;
+  let iy = sc.y - ih / 2 - 30;
+
+  // Clamp
+  ix = Math.max(8, Math.min(vw - iw - 8, ix));
+  iy = Math.max(8, Math.min(vh - ih - 8, iy));
+
+  _roomInspector.style.left = ix + "px";
+  _roomInspector.style.top  = iy + "px";
+}
+
+/**
+ * Populate the room swatch strip (floor color pickers).
+ * @param {import("./walls.js").Room} room
+ */
+function _populateRoomSwatchStrip(room) {
+  if (!_roomSwatchStrip) return;
+
+  _roomSwatchStrip.innerHTML = "";
+
+  const groups = swatchGroupsForCategory("floor");
+
+  // Default (theme) chip first
+  const defBtn = _makeRoomSwatchButton(null, "Default (theme)");
+  defBtn.classList.add("swatch-default");
+  if (!room.color) defBtn.setAttribute("aria-pressed", "true");
+  defBtn.addEventListener("click", () => {
+    const r = wallsModel.rooms.find(rm => rm.id === _selectedRoomId);
+    if (!r) return;
+    setRoomColor(r, null);
+    if (_historyCommit) _historyCommit();
+    _populateRoomSwatchStrip(r);
+    scheduleRender();
+  });
+  _roomSwatchStrip.appendChild(defBtn);
+
+  // Floor swatches
+  for (const group of groups) {
+    const swatches = SWATCHES[group] || [];
+    for (const sw of swatches) {
+      const btn = _makeRoomSwatchButton(sw.hex, sw.name);
+      if (room.color === sw.hex) btn.setAttribute("aria-pressed", "true");
+      btn.addEventListener("click", () => {
+        const r = wallsModel.rooms.find(rm => rm.id === _selectedRoomId);
+        if (!r) return;
+        setRoomColor(r, sw.hex);
+        if (_historyCommit) _historyCommit();
+        _populateRoomSwatchStrip(r);
+        scheduleRender();
+      });
+      _roomSwatchStrip.appendChild(btn);
+    }
+  }
+
+  // Keyboard arrow navigation
+  _roomSwatchStrip.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const btns = Array.from(_roomSwatchStrip.querySelectorAll(".swatch"));
+    const idx = btns.indexOf(document.activeElement);
+    if (idx === -1) return;
+    e.preventDefault();
+    const next = e.key === "ArrowRight"
+      ? btns[Math.min(idx + 1, btns.length - 1)]
+      : btns[Math.max(idx - 1, 0)];
+    next.focus();
+  }, { once: true });
+}
+
+function _makeRoomSwatchButton(hex, name) {
+  const btn = document.createElement("button");
+  btn.className = "swatch";
+  btn.setAttribute("aria-label", name);
+  btn.setAttribute("aria-pressed", "false");
+  btn.setAttribute("type", "button");
+  if (hex) btn.style.background = hex;
+  return btn;
 }

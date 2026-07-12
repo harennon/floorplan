@@ -1409,6 +1409,80 @@
         flex-shrink: 0;
       }
 
+      /* ── Swatch strip (LLD 97) ───────────────────────────────────────────────── */
+      .swatch-strip {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        flex-wrap: nowrap;
+        padding: 0.1rem 0;
+      }
+      .swatch-strip[hidden] {
+        display: none;
+      }
+      .swatch {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 1px solid var(--muted);
+        cursor: pointer;
+        flex-shrink: 0;
+        padding: 0;
+        outline: none;
+        transition: border-color 0.12s, box-shadow 0.12s;
+      }
+      .swatch:hover {
+        border-color: var(--ink);
+      }
+      .swatch[aria-pressed="true"] {
+        border-color: var(--gold);
+        box-shadow: 0 0 0 2px var(--gold);
+      }
+      /* Default/"theme" swatch — no background; shows the canvas background */
+      .swatch-default {
+        background: transparent !important;
+        border-style: dashed;
+        position: relative;
+        overflow: hidden;
+      }
+      .swatch-default::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          135deg,
+          transparent 45%, var(--muted) 45%, var(--muted) 55%, transparent 55%
+        );
+      }
+
+      /* ── Room inspector (floating near selected room, LLD 97) ────────────────── */
+      .room-inspector {
+        position: fixed;
+        display: none;
+        align-items: center;
+        gap: 0.25rem;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        padding: 0.35rem 0.5rem;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        z-index: 9;
+        top: 0; left: 0;
+      }
+      .room-inspector.visible {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .room-inspector-label {
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        color: var(--muted);
+        margin-bottom: 0.15rem;
+        user-select: none;
+      }
+
       /* ── Ghost / selection animation (reduced motion) ─────────────────────── */
       @media (prefers-reduced-motion: reduce) {
         .dock-item,
@@ -2201,33 +2275,43 @@
       </div>
 
       <!-- Symbol inspector (floating, hidden until a symbol is selected) -->
-      <div class="symbol-inspector" id="symbol-inspector" role="toolbar" aria-label="Symbol inspector">
-        <button class="insp-btn" data-action="rotate90" aria-label="Rotate 90 degrees">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M3 8 A5 5 0 1 1 8 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
-            <polyline points="3,5 3,8 6,8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </button>
-        <button class="insp-btn" data-action="duplicate" aria-label="Duplicate symbol">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="5" y="2" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
-            <rect x="2" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="var(--bg-deep,#100f0b)"/>
-          </svg>
-        </button>
-        <button class="insp-btn" data-action="delete" aria-label="Delete symbol">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <polyline points="2,4 14,4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-            <path d="M5 4 V13 H11 V4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
-            <polyline points="6,4 6,2 10,2 10,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </button>
-        <div class="insp-sep" aria-hidden="true"></div>
-        <button class="insp-btn" data-action="lock-aspect" aria-label="Lock aspect ratio" aria-pressed="false">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="4" y="7" width="8" height="7" rx="1.2" stroke="currentColor" stroke-width="1.4"/>
-            <path d="M5.5 7 V5 A2.5 2.5 0 0 1 10.5 5 V7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
-          </svg>
-        </button>
+      <div class="symbol-inspector" id="symbol-inspector" role="toolbar" aria-label="Symbol inspector" style="flex-direction:column;align-items:flex-start;gap:0.3rem;">
+        <div style="display:flex;align-items:center;gap:0.2rem;">
+          <button class="insp-btn" data-action="rotate90" aria-label="Rotate 90 degrees">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3 8 A5 5 0 1 1 8 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+              <polyline points="3,5 3,8 6,8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </button>
+          <button class="insp-btn" data-action="duplicate" aria-label="Duplicate symbol">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="5" y="2" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+              <rect x="2" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="var(--bg-deep,#100f0b)"/>
+            </svg>
+          </button>
+          <button class="insp-btn" data-action="delete" aria-label="Delete symbol">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <polyline points="2,4 14,4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <path d="M5 4 V13 H11 V4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+              <polyline points="6,4 6,2 10,2 10,4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </button>
+          <div class="insp-sep" aria-hidden="true"></div>
+          <button class="insp-btn" data-action="lock-aspect" aria-label="Lock aspect ratio" aria-pressed="false">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="4" y="7" width="8" height="7" rx="1.2" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M5.5 7 V5 A2.5 2.5 0 0 1 10.5 5 V7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+            </svg>
+          </button>
+        </div>
+        <!-- Swatch strip (LLD 97): populated by symbolTool.js; hidden for openings -->
+        <div class="swatch-strip" id="sym-swatch-strip" role="group" aria-label="Furniture color" hidden></div>
+      </div>
+
+      <!-- Room/floor color inspector (LLD 97): shown when a room is selected -->
+      <div class="room-inspector" id="room-inspector" aria-label="Floor color">
+        <div class="room-inspector-label">Floor color</div>
+        <div class="swatch-strip" id="room-swatch-strip" role="group" aria-label="Floor color swatches"></div>
       </div>
 
       <!-- Transient toast messages -->
