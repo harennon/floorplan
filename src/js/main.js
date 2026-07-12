@@ -27,6 +27,9 @@ import {
   onDrawModeEnter as roomOnDrawModeEnter,
   clearSelection as roomClearSelection,
   getSelectedRoomId as roomGetSelectedRoomId,
+  hasSelection as roomHasSelection,
+  nudgeSelected as roomNudgeSelected,
+  flushNudge as roomFlushNudge,
   setHistoryAndToast as roomSetHistoryAndToast,
   setClearSymbolSelection as roomSetClearSymbolSelection,
   repositionRoomInspector,
@@ -521,7 +524,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Undo: Ctrl/Cmd+Z (without Shift) — accept both cases so Caps Lock doesn't break it
     if (meta && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
       e.preventDefault();
-      flushNudge(); // flush pending nudge before undo so stack ordering is correct
+      flushNudge();     // flush pending symbol nudge before undo so stack ordering is correct
+      roomFlushNudge(); // flush pending room nudge before undo (LLD 96)
       measureClearSelection(); // drop dangling id if undo removes the selected measurement
       if (historyUndo()) scheduleRender();
       return;
@@ -530,14 +534,16 @@ document.addEventListener("DOMContentLoaded", () => {
     // Redo: Ctrl/Cmd+Shift+Z or Ctrl+Y — accept both cases so Caps Lock doesn't break it
     if (meta && e.shiftKey && (e.key === "z" || e.key === "Z")) {
       e.preventDefault();
-      flushNudge(); // flush pending nudge before redo
+      flushNudge();     // flush pending symbol nudge before redo
+      roomFlushNudge(); // flush pending room nudge before redo (LLD 96)
       measureClearSelection(); // drop dangling id if redo removes the selected measurement
       if (historyRedo()) scheduleRender();
       return;
     }
     if (meta && !e.shiftKey && (e.key === "y" || e.key === "Y")) {
       e.preventDefault();
-      flushNudge(); // flush pending nudge before redo
+      flushNudge();     // flush pending symbol nudge before redo
+      roomFlushNudge(); // flush pending room nudge before redo (LLD 96)
       measureClearSelection(); // drop dangling id if redo removes the selected measurement
       if (historyRedo()) scheduleRender();
       return;
@@ -606,10 +612,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ── New shortcuts (LLD-54) ─────────────────────────────────────────────────
 
-    // Nudge — bare/Shift arrows, only when a symbol is selected and not a chord
+    // Nudge — bare/Shift arrows, when a symbol or room is selected and not a chord
     if (!meta && (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight")) {
-      if (!hasSelection()) return; // let native scroll happen if nothing selected
-      e.preventDefault();
       const base = snapStep() ?? 0.1; // grid step, fallback 0.1m when snap is off
       const step = e.shiftKey ? base * 4 : base;
       let dx = 0, dy = 0;
@@ -617,8 +621,19 @@ document.addEventListener("DOMContentLoaded", () => {
       if (e.key === "ArrowDown")  dy =  step;
       if (e.key === "ArrowLeft")  dx = -step;
       if (e.key === "ArrowRight") dx =  step;
-      nudgeSelected(dx, dy);
-      return;
+      if (hasSelection()) {
+        // Symbol selected — symbol wins; mutex guarantees no room selected simultaneously
+        e.preventDefault();
+        nudgeSelected(dx, dy);
+        return;
+      }
+      if (roomHasSelection()) {
+        // Room selected — nudge the room (LLD 96)
+        e.preventDefault();
+        roomNudgeSelected(dx, dy);
+        return;
+      }
+      return; // nothing selected → native scroll (unchanged)
     }
 
     // Rotate — R (Shift+R = CCW), only with a selection, not a chord
