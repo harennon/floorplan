@@ -2896,6 +2896,11 @@ import {
   model as measurementsModel,
   hydrate as hydrateMeasurements,
   newId as newMeasurementId,
+  add as addMeasurement,
+  remove as removeMeasurement,
+  getById as getMeasurementById,
+  length as measurementLength,
+  nearestMeasurement,
 } from "../src/js/measurements.js";
 
 import {
@@ -10002,6 +10007,7 @@ const EXPECTED_ACTIONS = new Set([
   "Rotate 90° CCW",
   "Draw wall",
   "Select",
+  "Measure tool",
   "Zoom in",
   "Zoom out",
   "Reset zoom",
@@ -13878,6 +13884,808 @@ describe("LLD 88 — resizeSymbol: circular type mirrors both axes", () => {
     expect(s.w).toBeCloseTo(1.80, 9);
     // h must be unchanged — circular branch must not leak to sofa
     expect(s.h).toBeCloseTo(origH, 9);
+  });
+});
+
+// ─── Tests: LLD 92 — measurements.js CRUD + geometry ─────────────────────────
+
+/** Reset measurements model to clean state. */
+function resetMeasurementsModel() {
+  hydrateMeasurements({ measurements: [] });
+}
+
+describe("LLD 92 — measurements.js: add()", () => {
+  it("appends a {id,a,b} entry and returns it", () => {
+    resetMeasurementsModel();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 });
+    expect(measurementsModel.measurements.length).toBe(1);
+    expect(m.a.x).toBe(0);
+    expect(m.b.x).toBe(3);
+    resetMeasurementsModel();
+  });
+
+  it("mints a monotonic m<n> id", () => {
+    resetMeasurementsModel();
+    const m1 = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    const m2 = addMeasurement({ x: 0, y: 0 }, { x: 2, y: 0 });
+    const n1 = parseInt(m1.id.replace("m", ""), 10);
+    const n2 = parseInt(m2.id.replace("m", ""), 10);
+    if (n2 <= n1) throw new Error(`id ${m2.id} is not greater than ${m1.id}`);
+    resetMeasurementsModel();
+  });
+
+  it("stores a deep copy of the endpoints (input mutation does not corrupt model)", () => {
+    resetMeasurementsModel();
+    const a = { x: 1, y: 2 };
+    const b = { x: 5, y: 6 };
+    addMeasurement(a, b);
+    a.x = 999;
+    expect(measurementsModel.measurements[0].a.x).toBe(1);
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: remove()", () => {
+  it("removes existing measurement and returns true", () => {
+    resetMeasurementsModel();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 1 });
+    const ok = removeMeasurement(m.id);
+    expect(ok).toBe(true);
+    expect(measurementsModel.measurements.length).toBe(0);
+    resetMeasurementsModel();
+  });
+
+  it("no-op on missing id and returns false", () => {
+    resetMeasurementsModel();
+    const ok = removeMeasurement("m999");
+    expect(ok).toBe(false);
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: getById()", () => {
+  it("returns the measurement for a known id", () => {
+    resetMeasurementsModel();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    const found = getMeasurementById(m.id);
+    if (!found) throw new Error("getById returned null for known id");
+    expect(found.id).toBe(m.id);
+    resetMeasurementsModel();
+  });
+
+  it("returns null for unknown id", () => {
+    resetMeasurementsModel();
+    const found = getMeasurementById("m9999");
+    if (found !== null) throw new Error("Expected null for unknown id");
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: length()", () => {
+  it("returns Euclidean distance in metres (3-4-5 triangle)", () => {
+    const m = { a: { x: 0, y: 0 }, b: { x: 3, y: 4 } };
+    expect(measurementLength(m)).toBeCloseTo(5, 9);
+  });
+
+  it("returns 0 for coincident endpoints", () => {
+    const m = { a: { x: 2, y: 3 }, b: { x: 2, y: 3 } };
+    expect(measurementLength(m)).toBeCloseTo(0, 9);
+  });
+
+  it("axis-aligned: 5m horizontal segment", () => {
+    const m = { a: { x: 1, y: 3 }, b: { x: 6, y: 3 } };
+    expect(measurementLength(m)).toBeCloseTo(5, 9);
+  });
+});
+
+describe("LLD 92 — measurements.js: nearestMeasurement()", () => {
+  // Set view to identity for predictable screen coords
+  function _setupView() {
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+  }
+
+  it("returns null on empty model", () => {
+    resetMeasurementsModel();
+    _setupView();
+    const r = nearestMeasurement(100, 100, 15);
+    if (r !== null) throw new Error("Expected null on empty model");
+    resetMeasurementsModel();
+  });
+
+  it("hits a segment at its midpoint within tolerance", () => {
+    resetMeasurementsModel();
+    _setupView();
+    // Segment from (10,10) to (50,10) world metres → screen (400,400)...(2000,400)
+    // At zoom=1, BASE=40: screen = world*40
+    addMeasurement({ x: 10, y: 10 }, { x: 50, y: 10 });
+    // Midpoint world=(30,10), screen=(1200,400). Query at (1200,400).
+    const r = nearestMeasurement(1200, 400, 15);
+    if (!r) throw new Error("Expected a hit at midpoint");
+    resetMeasurementsModel();
+  });
+
+  it("misses when query is beyond tolerance", () => {
+    resetMeasurementsModel();
+    _setupView();
+    addMeasurement({ x: 10, y: 10 }, { x: 50, y: 10 });
+    // Midpoint screen=(1200,400). Query 20px away (beyond 15px tolerance).
+    const r = nearestMeasurement(1200, 420, 15);
+    if (r !== null) throw new Error("Expected null when beyond tolerance");
+    resetMeasurementsModel();
+  });
+
+  it("hits near an endpoint", () => {
+    resetMeasurementsModel();
+    _setupView();
+    addMeasurement({ x: 5, y: 5 }, { x: 10, y: 5 });
+    // Endpoint A world=(5,5), screen=(200,200). Query at (202,200) — 2px away.
+    const r = nearestMeasurement(202, 200, 15);
+    if (!r) throw new Error("Expected a hit near endpoint A");
+    resetMeasurementsModel();
+  });
+
+  it("last-match wins on overlapping lines (topmost draw order)", () => {
+    resetMeasurementsModel();
+    _setupView();
+    const m1 = addMeasurement({ x: 5, y: 5 }, { x: 15, y: 5 });
+    const m2 = addMeasurement({ x: 5, y: 5 }, { x: 15, y: 5 }); // exact overlap
+    // Query at midpoint: both segments overlap; last one wins
+    const r = nearestMeasurement(400, 200, 15);
+    if (!r) throw new Error("Expected a hit");
+    if (r.id !== m2.id) throw new Error(`Expected last match ${m2.id}, got ${r.id}`);
+    resetMeasurementsModel();
+  });
+});
+
+describe("LLD 92 — measurements.js: hydrate counter regression", () => {
+  it("hydrate re-syncs counter past m<n> — regression guard", () => {
+    hydrateMeasurements({ measurements: [
+      { id: "m99", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+    ] });
+    const next = newMeasurementId();
+    const n = parseInt(next.replace("m", ""), 10);
+    if (n <= 99) throw new Error(`newId() ${next} would collide with m99`);
+    hydrateMeasurements({ measurements: [] });
+  });
+});
+
+// ─── Tests: LLD 92 — history.js measurements extension ───────────────────────
+
+/** Reset geometry + history for history+measurement tests. */
+function resetForHistoryMeasurements() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  hydrateWalls({ rooms: [], chain: [] });
+  hydrateSymbols({ symbols: [] });
+  hydrateMeasurements({ measurements: [] });
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  resetHistory();
+}
+
+describe("LLD 92 — history.js: measurements captured in snapshot", () => {
+  it("snapshot captures measurements; apply restores them", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    addMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 });
+    historyCommit();
+    // Now undo: model should go back to empty measurements
+    historyUndo();
+    expect(measurementsModel.measurements.length).toBe(0);
+    // Redo: measurement should come back
+    historyRedo();
+    expect(measurementsModel.measurements.length).toBe(1);
+    resetForHistoryMeasurements();
+  });
+
+  it("add-then-undo removes the measurement", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    addMeasurement({ x: 1, y: 0 }, { x: 5, y: 0 });
+    historyCommit();
+    historyUndo();
+    expect(measurementsModel.measurements.length).toBe(0);
+    resetForHistoryMeasurements();
+  });
+
+  it("delete-then-undo restores the measurement", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 2, y: 2 });
+    historyCommit(); // commit add
+    removeMeasurement(m.id);
+    historyCommit(); // commit remove
+    historyUndo();   // undo remove → measurement should be back
+    expect(measurementsModel.measurements.length).toBe(1);
+    resetForHistoryMeasurements();
+  });
+
+  it("undo of unrelated op (symbol add) preserves existing measurements", () => {
+    resetForHistoryMeasurements();
+    initHistory();
+    // Add a measurement and commit
+    addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 });
+    historyCommit();
+    // Now do an unrelated op: add a symbol
+    symbolModel.symbols.push({ id: "s0", type: "sofa", x: 5, y: 5, w: 2, h: 1, rot: 0 });
+    historyCommit();
+    // Undo the symbol add
+    historyUndo();
+    // Measurement must still be present
+    expect(measurementsModel.measurements.length).toBe(1);
+    resetForHistoryMeasurements();
+  });
+});
+
+// ─── Import LLD 92 — measureTool + measureRender ──────────────────────────────
+
+import {
+  _resolvePoint as resolvePoint,
+  init as measureToolInit,
+  onMeasureDown, onMeasureMove, onMeasureLeave,
+  getDraft, getSelectedMeasurementId,
+  onSelectDown, clearSelection, hasSelection, deleteSelected,
+  activate as measureActivate, deactivate as measureDeactivate, isActive as measureIsActive,
+  setHistoryCommit as measureSetHistoryCommit,
+  setClearOtherSelections as measureSetClearOtherSelections,
+} from "../src/js/measureTool.js";
+
+import {
+  init as initMeasureRender,
+  render as measureRender,
+} from "../src/js/measureRender.js";
+
+// ─── LLD 92 — measureTool init helper ─────────────────────────────────────────
+
+/**
+ * Call measureToolInit with lightweight stub DOM elements.
+ * This registers the keydown/keyup/blur listeners on window (needed for Alt/Escape).
+ * Multiple calls are safe (listeners accumulate but are idempotent in effect).
+ */
+function measureToolInitStubs() {
+  const mkBtn = () => {
+    const b = document.createElement("button");
+    b.setAttribute("aria-pressed", "false");
+    return b;
+  };
+  const mkSpan = () => document.createElement("span");
+  const mkDiv  = () => document.createElement("div");
+  measureToolInit({
+    stage:      mkDiv(),
+    btnMeasure: mkBtn(),
+    btnSelect:  mkBtn(),
+    btnWall:    mkBtn(),
+    snapTag:    mkSpan(),
+  });
+}
+
+// Register listeners once so all subsequent keyboard tests work.
+measureToolInitStubs();
+
+// ─── LLD 92 — measureTool._resolvePoint snapping ─────────────────────────────
+
+/**
+ * Reset all geometry models plus view to identity for _resolvePoint tests.
+ * At zoom=1, panX=0, panY=0: worldToScreen(wx,wy) = {x:wx*40, y:wy*40}
+ * Sets snap mode to a fixed step=1 for predictable grid rounding.
+ */
+function resetForResolvePoint() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  hydrateMeasurements({ measurements: [] });
+  setGridSnap(true);
+  setSnapMode(0.25); // fixed step=0.25m for predictable grid rounding in tests
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  // Note: caller must restore snapMode to "auto" if desired. resetForResolvePoint
+  // is called both at start and end of each test; the last test's cleanup restores "auto"
+  // via the explicit call below in each test that's final or via a dedicated cleanup.
+}
+
+describe("LLD 92 — measureTool._resolvePoint: wall vertex snap", () => {
+  it("snaps to wall vertex within SNAP_PT_PX", () => {
+    resetForResolvePoint();
+    // Vertex at world (5, 5) → screen (200, 200) at zoom=1
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 5, y: 5 }] });
+    // Query at screen (205, 200) → 5px from vertex
+    const pt = resolvePoint(205, 200);
+    expect(pt.x).toBeCloseTo(5, 9);
+    expect(pt.y).toBeCloseTo(5, 9);
+    resetForResolvePoint();
+  });
+
+  it("does NOT snap to vertex beyond SNAP_PT_PX — falls to grid (non-integer vertex)", () => {
+    resetForResolvePoint();
+    // Non-integer vertex at world (1.7, 1.0) → screen (68, 40)
+    // Query at screen (85, 40) → dist = 17px > 15px → beyond tolerance
+    // Falls to grid (step=0.25): world (85/40, 40/40) = (2.125, 1.0)
+    //   x: Math.round(2.125/0.25)*0.25 = Math.round(8.5)*0.25 = 9*0.25 = 2.25
+    //   y: Math.round(1.0/0.25)*0.25  = 4*0.25 = 1.0
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 1.7, y: 1.0 }] });
+    const pt = resolvePoint(85, 40);
+    // Should NOT be the vertex (1.7, 1.0)
+    if (Math.abs(pt.x - 1.7) < 0.001 && Math.abs(pt.y - 1.0) < 0.001) {
+      throw new Error("Snapped to vertex that was beyond SNAP_PT_PX tolerance");
+    }
+    expect(pt.x).toBeCloseTo(2.25, 9);
+    expect(pt.y).toBeCloseTo(1.0, 9);
+    resetForResolvePoint();
+  });
+});
+
+describe("LLD 92 — measureTool._resolvePoint: wall edge foot-point snap", () => {
+  it("snaps to perpendicular foot-point on a horizontal wall edge", () => {
+    resetForResolvePoint();
+    // Horizontal segment from world (0,0) to (10,0) → screen (0,0)…(400,0)
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 0, y: 0 }, { x: 10, y: 0 }] });
+    // Query at screen (200, 8) — 8px above the line at its midpoint.
+    // Foot-point: (5, 0). Screen dist = 8px < 15px → snaps to foot.
+    const pt = resolvePoint(200, 8);
+    expect(pt.x).toBeCloseTo(5, 5);
+    expect(pt.y).toBeCloseTo(0, 5);
+    resetForResolvePoint();
+  });
+
+  it("snaps to clamped endpoint when foot falls beyond segment end", () => {
+    resetForResolvePoint();
+    // Segment from world (0,0) to (5,0) → screen (0,0)…(200,0)
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }] });
+    // Query at screen (205, 5): foot projects beyond end, clamps to (200,0) in screen.
+    // Screen dist = sqrt(5²+5²) ≈ 7.1px < 15px → snaps to clamped foot = world (5, 0).
+    const pt = resolvePoint(205, 5);
+    expect(pt.x).toBeCloseTo(5, 4);
+    expect(pt.y).toBeCloseTo(0, 4);
+    resetForResolvePoint();
+  });
+});
+
+describe("LLD 92 — measureTool._resolvePoint: symbol corner and center snap", () => {
+  it("snaps to symbol corner within SNAP_PT_PX", () => {
+    resetForResolvePoint();
+    // Chair: w=h=0.5 at world (5,5). TL corner at (4.75, 4.75) → screen (190, 190).
+    const s = createSymbol("chair", 5, 5);
+    addSymbol(s);
+    // Query at screen (192, 190) → 2px from TL corner.
+    const pt = resolvePoint(192, 190);
+    expect(pt.x).toBeCloseTo(4.75, 5);
+    expect(pt.y).toBeCloseTo(4.75, 5);
+    resetForResolvePoint();
+  });
+
+  it("snaps to symbol AABB center within SNAP_PT_PX", () => {
+    resetForResolvePoint();
+    // Chair at world (5, 5): center at (5, 5) → screen (200, 200).
+    const s = createSymbol("chair", 5, 5);
+    addSymbol(s);
+    // Query at screen (203, 200) → 3px from center.
+    const pt = resolvePoint(203, 200);
+    expect(pt.x).toBeCloseTo(5, 5);
+    expect(pt.y).toBeCloseTo(5, 5);
+    resetForResolvePoint();
+  });
+});
+
+describe("LLD 92 — measureTool._resolvePoint: grid fallback", () => {
+  it("falls to grid when no nearby target and snap is on (step=0.25)", () => {
+    resetForResolvePoint();
+    // No walls, no symbols. Query at screen (62, 52) → world (1.55, 1.3)
+    // gridSnap(step=0.25):
+    //   x: Math.round(1.55/0.25)*0.25 = Math.round(6.2)*0.25 = 6*0.25 = 1.5
+    //   y: Math.round(1.3/0.25)*0.25  = Math.round(5.2)*0.25 = 5*0.25 = 1.25
+    const pt = resolvePoint(62, 52);
+    expect(pt.x).toBeCloseTo(1.5, 9);
+    expect(pt.y).toBeCloseTo(1.25, 9);
+    resetForResolvePoint();
+  });
+
+  it("falls to free (raw world) when persistent snap toggle is off", () => {
+    resetForResolvePoint();
+    setGridSnap(false);
+    // No walls, no symbols. Query at screen (62, 52) → world (1.55, 1.3) — no rounding applied.
+    const pt = resolvePoint(62, 52);
+    expect(pt.x).toBeCloseTo(62 / 40, 4); // 1.55
+    expect(pt.y).toBeCloseTo(52 / 40, 4); // 1.3
+    setGridSnap(true); // restore
+    resetForResolvePoint();
+  });
+});
+
+describe("LLD 92 — measureTool._resolvePoint: Alt=free override", () => {
+  it("Alt held → returns raw world point even when vertex is within snap tolerance", () => {
+    resetForResolvePoint();
+    // Non-integer vertex at world (5.3, 0) → screen (212, 0).
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 5.3, y: 0 }] });
+    // Query at screen (215, 0) — dist = 3px < 15px, would normally snap to (5.3, 0).
+    // Without Alt: resolvePoint should snap.
+    const ptSnapped = resolvePoint(215, 0);
+    expect(ptSnapped.x).toBeCloseTo(5.3, 9); // confirms snapping is working
+
+    // With Alt: set _altHeld via keyboard event (registered by measureToolInitStubs())
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "AltLeft", bubbles: true }));
+    const ptFree = resolvePoint(215, 0);
+    // Alt forces raw world: 215/40 = 5.375, NOT 5.3
+    if (Math.abs(ptFree.x - 5.3) < 0.001) {
+      throw new Error("Alt should suppress snap but vertex coord returned");
+    }
+    expect(ptFree.x).toBeCloseTo(215 / 40, 4);
+
+    window.dispatchEvent(new KeyboardEvent("keyup", { code: "AltLeft", bubbles: true }));
+    resetForResolvePoint();
+  });
+});
+
+describe("LLD 92 — measureTool._resolvePoint: snap-toggle-off keeps object/vertex/edge snap (Edge Case 8)", () => {
+  it("persistent grid-snap toggle off still snaps to wall vertex", () => {
+    resetForResolvePoint();
+    setGridSnap(false);
+    // Vertex at world (5,5) → screen (200,200).
+    model.rooms.push({ id: "r0", closed: false, verts: [{ x: 5, y: 5 }] });
+    // Query 5px away — should still snap to vertex.
+    const pt = resolvePoint(205, 200);
+    expect(pt.x).toBeCloseTo(5, 9);
+    expect(pt.y).toBeCloseTo(5, 9);
+    setGridSnap(true);
+    resetForResolvePoint();
+  });
+});
+
+// ─── LLD 92 — measureTool interaction tests ───────────────────────────────────
+
+/**
+ * Reset measureTool state for interaction tests.
+ */
+function resetMeasureTool() {
+  hydrateMeasurements({ measurements: [] });
+  measureDeactivate();
+  clearSelection();
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+}
+
+describe("LLD 92 — measureTool: two-click create", () => {
+  it("first click sets pendingA (getDraft non-null); second click commits measurement", () => {
+    resetMeasureTool();
+    measureActivate();
+    // First click at screen (0,0) → world (0,0)
+    onMeasureDown(0, 0);
+    const draft = getDraft();
+    if (draft === null) throw new Error("getDraft() should be non-null after first click");
+    expect(measurementsModel.measurements.length).toBe(0); // nothing committed yet
+    // Second click at a different location: screen (200,0) → world (5,0)
+    onMeasureDown(200, 0);
+    const draft2 = getDraft();
+    if (draft2 !== null) throw new Error("getDraft() should be null after commit");
+    expect(measurementsModel.measurements.length).toBe(1);
+    resetMeasureTool();
+  });
+
+  it("third click starts a new measurement (tool stays active after commit)", () => {
+    resetMeasureTool();
+    measureActivate();
+    onMeasureDown(0, 0);
+    onMeasureDown(200, 0); // commit first
+    expect(measurementsModel.measurements.length).toBe(1);
+    // Third click: starts pendingA for second measurement
+    onMeasureDown(80, 0);
+    const draft = getDraft();
+    if (draft === null) throw new Error("getDraft() should be non-null — tool starts next measurement");
+    expect(measurementsModel.measurements.length).toBe(1); // still just 1 committed
+    resetMeasureTool();
+  });
+
+  it("draft present after first click and cleared after Escape", () => {
+    resetMeasureTool();
+    measureActivate();
+    onMeasureDown(0, 0);
+    if (getDraft() === null) throw new Error("Draft should exist after first click");
+    // Escape is handled by measureTool's own keydown listener (registered by measureToolInitStubs)
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    if (getDraft() !== null) throw new Error("Draft should be cleared after Escape");
+    expect(measurementsModel.measurements.length).toBe(0);
+    resetMeasureTool();
+  });
+
+  it("zero-length second click does not commit and preserves pendingA", () => {
+    resetMeasureTool();
+    measureActivate();
+    onMeasureDown(0, 0); // A
+    onMeasureDown(0, 0); // B at same point → reject (zero-length)
+    if (getDraft() === null) throw new Error("Draft should persist after zero-length rejection");
+    expect(measurementsModel.measurements.length).toBe(0);
+    resetMeasureTool();
+  });
+});
+
+describe("LLD 92 — measureTool: select dispatcher + mutex", () => {
+  it("onSelectDown hits a measurement and returns true; sets selection id", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Horizontal measurement at world y=5 → screen y=200; midpoint world (5,5) → screen (200,200)
+    const m = addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    const hit = onSelectDown(200, 200);
+    expect(hit).toBe(true);
+    expect(getSelectedMeasurementId()).toBe(m.id);
+    resetMeasureTool();
+  });
+
+  it("onSelectDown misses beyond tolerance and returns false", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    // Line at screen y=200; query at screen (200, 220) → 20px away > 15px tolerance
+    const hit = onSelectDown(200, 220);
+    expect(hit).toBe(false);
+    if (getSelectedMeasurementId() !== null) throw new Error("No selection expected on miss");
+    resetMeasureTool();
+  });
+
+  it("clearSelection() removes the selection (mutex reverse direction)", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const m = addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    onSelectDown(200, 200);
+    if (!hasSelection()) throw new Error("Expected selection after onSelectDown");
+    clearSelection();
+    if (hasSelection()) throw new Error("Expected no selection after clearSelection()");
+    resetMeasureTool();
+  });
+
+  it("selecting a measurement calls setClearOtherSelections (mutex forward direction)", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    let cleared = false;
+    measureSetClearOtherSelections(() => { cleared = true; });
+    const m = addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    onSelectDown(200, 200);
+    if (!cleared) throw new Error("clearOtherSelections should be called when measurement selected");
+    measureSetClearOtherSelections(() => {}); // restore no-op
+    resetMeasureTool();
+  });
+});
+
+describe("LLD 92 — measureTool: Delete removes measurement and triggers historyCommit", () => {
+  it("deleteSelected() removes the measurement, calls commit, and clears selection", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    let committed = 0;
+    measureSetHistoryCommit(() => { committed++; });
+    const m = addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    onSelectDown(200, 200); // select
+    if (!hasSelection()) throw new Error("Expected selection");
+    deleteSelected();
+    expect(measurementsModel.measurements.length).toBe(0);
+    if (committed === 0) throw new Error("historyCommit not called after deleteSelected");
+    if (hasSelection()) throw new Error("Selection should be cleared after deleteSelected");
+    measureSetHistoryCommit(null);
+    resetMeasureTool();
+  });
+});
+
+describe("LLD 92 — measureTool: dangling-id guard (undo removes selected measurement)", () => {
+  it("getSelectedMeasurementId() returns null when the selected id is no longer in model", () => {
+    resetMeasureTool();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Create and select m2
+    const m1 = addMeasurement({ x: 0, y: 0 }, { x: 1, y: 0 }); // separate measurement
+    const m2 = addMeasurement({ x: 0, y: 5 }, { x: 10, y: 5 });
+    onSelectDown(200, 200); // selects m2
+    if (getSelectedMeasurementId() !== m2.id) throw new Error("Expected m2 selected");
+    // Simulate undo removing m2 (hydrate with only m1)
+    hydrateMeasurements({ measurements: [{ id: m1.id, a: { x: m1.a.x, y: m1.a.y }, b: { x: m1.b.x, y: m1.b.y } }] });
+    // Dangling guard: must return null
+    if (getSelectedMeasurementId() !== null) {
+      throw new Error("Dangling id guard failed: getSelectedMeasurementId should return null when id removed from model");
+    }
+    resetMeasureTool();
+  });
+});
+
+// ─── LLD 92 — measureRender tests ─────────────────────────────────────────────
+
+const NS_SVG_92 = "http://www.w3.org/2000/svg";
+
+/**
+ * Build a minimal DOM rig for measureRender tests.
+ * Each test creates its own rig (isolated DOM). cleanup() removes it.
+ */
+function makeMeasureRenderRig(opts = {}) {
+  const svg = document.createElementNS(NS_SVG_92, "svg");
+  const gMeasure = document.createElementNS(NS_SVG_92, "g");
+  gMeasure.id = "measure";
+  svg.appendChild(gMeasure);
+  const overlay = document.createElement("div");
+  overlay.className = "dim-labels";
+  document.body.appendChild(svg);
+  document.body.appendChild(overlay);
+
+  initMeasureRender(
+    gMeasure,
+    overlay,
+    opts.getMeasurements || (() => measurementsModel.measurements),
+    opts.getDraft        || (() => null),
+    opts.getSelectedId   || (() => null),
+  );
+
+  return {
+    gMeasure,
+    overlay,
+    cleanup() {
+      document.body.removeChild(svg);
+      document.body.removeChild(overlay);
+    },
+  };
+}
+
+describe("LLD 92 — measureRender: committed measurement produces line + ticks + nodes + chip", () => {
+  it("renders main line + two perpendicular ticks + two endpoint nodes + one .measure-chip", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    addMeasurement({ x: 0, y: 0 }, { x: 5, y: 0 });
+    const rig = makeMeasureRenderRig();
+    measureRender();
+
+    // 1 main line + 2 tick lines = 3 total; plus 2 node circles
+    const lines = rig.gMeasure.querySelectorAll("line");
+    if (lines.length < 3) throw new Error(`Expected ≥3 <line> elements (1 main + 2 ticks), got ${lines.length}`);
+    const circles = rig.gMeasure.querySelectorAll("circle");
+    if (circles.length < 2) throw new Error(`Expected ≥2 endpoint node circles, got ${circles.length}`);
+
+    // One .measure-chip in overlay
+    const chips = rig.overlay.querySelectorAll(".measure-chip");
+    if (chips.length !== 1) throw new Error(`Expected 1 .measure-chip, got ${chips.length}`);
+
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+
+  it("chip text equals fmtLen(len) + ' ' + unitLabel()", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    addMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 }); // 5m 3-4-5 triangle
+    const rig = makeMeasureRenderRig();
+    measureRender();
+    const chip = rig.overlay.querySelector(".measure-chip");
+    if (!chip) throw new Error("No .measure-chip found");
+    const expected = fmtLen(5) + " " + unitLabel();
+    if (chip.textContent !== expected) {
+      throw new Error(`Chip text "${chip.textContent}" != expected "${expected}"`);
+    }
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+
+  it("chip text changes after unit toggle (reactive to unit, not stored coords)", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    addMeasurement({ x: 0, y: 0 }, { x: 3, y: 4 }); // 5m
+    const rig = makeMeasureRenderRig();
+
+    measureRender();
+    const textBeforeToggle = (rig.overlay.querySelector(".measure-chip") || {}).textContent || "";
+
+    setUnit("ft");
+    measureRender();
+    const textAfterToggle = (rig.overlay.querySelector(".measure-chip") || {}).textContent || "";
+
+    if (textBeforeToggle === textAfterToggle) {
+      throw new Error("Chip text should change after unit toggle m→ft");
+    }
+    if (!textAfterToggle.includes("ft")) {
+      throw new Error(`Expected 'ft' in chip text after toggle, got: "${textAfterToggle}"`);
+    }
+
+    setUnit("ft"); // restore (already ft)
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+});
+
+describe("LLD 92 — measureRender: does NOT remove non-measure chips (.clr-chip, .dim-chip)", () => {
+  it("clears only .measure-chip nodes; leaves .clr-chip and .dim-chip intact", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    const rig = makeMeasureRenderRig();
+
+    // Pre-seed overlay with foreign chips
+    const clrChip = document.createElement("div");
+    clrChip.className = "clr-chip";
+    clrChip.textContent = "ok";
+    rig.overlay.appendChild(clrChip);
+    const dimChip = document.createElement("div");
+    dimChip.className = "dim-chip";
+    dimChip.textContent = "3.0 m";
+    rig.overlay.appendChild(dimChip);
+
+    addMeasurement({ x: 0, y: 0 }, { x: 5, y: 0 });
+    measureRender();
+
+    if (!rig.overlay.querySelector(".clr-chip")) throw new Error(".clr-chip was wrongly removed by measureRender");
+    if (!rig.overlay.querySelector(".dim-chip")) throw new Error(".dim-chip was wrongly removed by measureRender");
+    if (!rig.overlay.querySelector(".measure-chip")) throw new Error(".measure-chip missing after render");
+
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+});
+
+describe("LLD 92 — measureRender: selected measurement uses thicker stroke", () => {
+  it("selected measurement main line has higher stroke-width than unselected", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    const m = addMeasurement({ x: 0, y: 0 }, { x: 5, y: 0 });
+
+    let selectedId = null;
+    const rig = makeMeasureRenderRig({ getSelectedId: () => selectedId });
+
+    // Render unselected
+    measureRender();
+    const unselectedStroke = parseFloat(
+      (rig.gMeasure.querySelector("line") || {}).getAttribute("stroke-width") || "0"
+    );
+
+    // Render selected
+    selectedId = m.id;
+    measureRender();
+    const selectedStroke = parseFloat(
+      (rig.gMeasure.querySelector("line") || {}).getAttribute("stroke-width") || "0"
+    );
+
+    if (selectedStroke <= unselectedStroke) {
+      throw new Error(`Selected stroke (${selectedStroke}) should be > unselected (${unselectedStroke})`);
+    }
+
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+});
+
+describe("LLD 92 — measureRender: draft renders as dashed line + .measure-chip--draft", () => {
+  it("draft measurement has stroke-dasharray on its line and a .measure-chip--draft chip", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    const draft = { a: { x: 0, y: 0 }, b: { x: 3, y: 4 }, snapType: "grid" };
+    const rig = makeMeasureRenderRig({ getDraft: () => draft });
+
+    measureRender();
+
+    const lines = Array.from(rig.gMeasure.querySelectorAll("line"));
+    const hasDash = lines.some(l => l.getAttribute("stroke-dasharray"));
+    if (!hasDash) throw new Error("Draft main line should have stroke-dasharray attribute");
+
+    const draftChip = rig.overlay.querySelector(".measure-chip--draft");
+    if (!draftChip) throw new Error("Expected .measure-chip--draft in overlay for in-progress draft");
+
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
+  });
+});
+
+describe("LLD 92 — measureRender: idempotent — double render does not duplicate elements", () => {
+  it("calling render() twice yields the same element count as once", () => {
+    hydrateMeasurements({ measurements: [] });
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setUnit("m");
+    addMeasurement({ x: 0, y: 0 }, { x: 5, y: 0 });
+    const rig = makeMeasureRenderRig();
+
+    measureRender();
+    const countFirst = rig.gMeasure.childElementCount;
+    measureRender();
+    const countSecond = rig.gMeasure.childElementCount;
+    if (countFirst !== countSecond) {
+      throw new Error(`Element count changed on second render: ${countFirst} → ${countSecond} (not idempotent)`);
+    }
+
+    rig.cleanup();
+    hydrateMeasurements({ measurements: [] });
   });
 });
 
