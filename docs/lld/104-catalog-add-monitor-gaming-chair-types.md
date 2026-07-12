@@ -48,9 +48,10 @@ Rationale (per the approved selection):
   would mean a new tab, a new `SymCategory` value, a new `swatchGroupsForCategory` mapping,
   and a new `dock-row` panel — scope well beyond two additive types.
 - Placing them in `living` means the existing swatch strip works with no code change:
-  `swatchGroupsForCategory("living")` returns `["wood", "upholstery"]`
-  (`src/js/palette.js:66`), which is appropriate for a monitor (dark/neutral) and a gaming
-  chair (upholstery).
+  `swatchGroupsForCategory("living")` returns `["wood", "upholstery", "neutral"]` — the
+  `_CATEGORY_GROUPS.living` entry is `["wood","upholstery"]` (`src/js/palette.js:66`) and the
+  function appends `"neutral"` for all non-empty, non-openings categories (`palette.js:73-80`).
+  That is appropriate for a monitor (dark/neutral) and a gaming chair (upholstery).
 
 **Dock entries.** Add two `<button class="dock-item" data-type="…">` entries inside the
 existing `#row-living` panel (`src/index.html`, after the `dining-table-round` item ~L2538),
@@ -219,9 +220,10 @@ migration is needed.
    or the LLD-45-style integrity test fails. Verified above; the implementer must not widen a
    preset past a bound without also widening the bound.
 5. **Swatch category.** `gaming-chair` and `monitor` are `living`, so
-   `swatchGroupsForCategory("living")` → `["wood","upholstery"]` supplies color swatches; no
-   new palette group needed. (A monitor colored "wood" is odd but harmless — colors are
-   optional and default to theme.)
+   `swatchGroupsForCategory("living")` → `["wood","upholstery","neutral"]` (the `"neutral"`
+   group is appended by the function) supplies color swatches; no new palette group needed.
+   (A monitor colored "wood" is odd but harmless — colors are optional and default to theme;
+   the appended "neutral" group covers the dark/grey a monitor would realistically use.)
 6. **Wall-flush / alignment / clearance** all operate on the AABB from `w`/`h` and are
    type-agnostic; the new types get flush-to-wall and neighbor alignment for free, with no
    special casing.
@@ -250,9 +252,24 @@ change ships cleanly on its own.
 
 ## Test Requirements
 
-Follows the existing LLD-45-style catalog-integrity pattern in `test/tests.html`. Add
-`monitor` and `gaming-chair` to the type list those tests iterate (e.g. the `LLD45_TYPES`
-array or a new equivalent), so the parameterized suites cover them.
+Follows the existing LLD-45-style catalog-integrity pattern in `test/tests.html`.
+
+**Required test-fixture edits (not optional — the suite fails or silently under-covers
+without them):**
+
+- **`LLD45_TYPES` array** (`test/tests.html:1978-1979`) — a hardcoded array of the 11 LLD-45
+  types that the catalog-integrity and `createSymbol` suites iterate. Append `"monitor"` and
+  `"gaming-chair"`. This does **not** fail if omitted — the parameterized assertions simply
+  never touch the new types, so they would ship untested. The implementer must edit this
+  array (or add an equivalent iterated list); do not assume automatic coverage.
+- **`itemsByCategory` map in `_makeDockDOM()`** (`test/tests.html:9363-9370`) — this map is a
+  **hardcoded synthetic dock**, NOT parsed from `index.html`. Add `"monitor"` and
+  `"gaming-chair"` to the `living` entry (`test/tests.html:9365`). This edit **is required to
+  keep the suite green**: the LLD-50 test "union of all dock-item[data-type] equals the
+  catalog keys" (`test/tests.html:9428-9440`) asserts `dockTypes === Object.keys(CATALOG)`
+  *exactly* and throws on mismatch (line 9434), plus a derived count assertion (line 9439).
+  Adding the two types to `CATALOG` without adding them to `itemsByCategory` makes that
+  equality check fail.
 
 **Unit (browser suite, `test/tests.html`):**
 
@@ -292,6 +309,10 @@ array or a new equivalent), so the parameterized suites cover them.
   drag-place a symbol of that type. A manual check that the placed box renders and is
   selectable is sufficient given no new render branch.
 
-**Regression:** the full suite (`node .github/run-tests.mjs` + `cd mcp && node --test`) stays
-green — the change is additive, so no existing assertion should break unless a test hard-codes
-the total catalog type count (update that count if so).
+**Regression:** with the two required test-fixture edits above (`LLD45_TYPES` and the
+`_makeDockDOM` `itemsByCategory.living` map), the full suite
+(`node .github/run-tests.mjs` + `cd mcp && node --test`) stays green. Note the change is
+**not** purely additive on the test side: the LLD-50 dock-integrity test derives its expected
+count from `Object.keys(CATALOG).length` (no manual count to bump) but demands the synthetic
+dock's `data-type` set equal the catalog keys exactly, so the `itemsByCategory` edit is
+mandatory. No other existing assertion should break.
