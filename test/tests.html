@@ -10002,6 +10002,7 @@ const EXPECTED_ACTIONS = new Set([
   "Rotate 90° CCW",
   "Draw wall",
   "Select",
+  "Measure tool",
   "Zoom in",
   "Zoom out",
   "Reset zoom",
@@ -13878,6 +13879,594 @@ describe("LLD 88 — resizeSymbol: circular type mirrors both axes", () => {
     expect(s.w).toBeCloseTo(1.80, 9);
     // h must be unchanged — circular branch must not leak to sofa
     expect(s.h).toBeCloseTo(origH, 9);
+  });
+});
+
+// ─── Tests: LLD 91 — measureTool ─────────────────────────────────────────────
+
+import {
+  init as measureToolInit,
+  onClick as measureToolClick,
+  onHover as measureToolHover,
+  onLeave as measureToolLeave,
+  cancel as measureToolCancel,
+  selectDown as measureToolSelectDown,
+  clearSelection as measureToolClearSelection,
+  hasSelection as measureToolHasSelection,
+  getSelectedId as measureToolGetSelectedId,
+  deleteSelected as measureToolDeleteSelected,
+  setHistoryAndToast as measureToolSetHistoryAndToast,
+  setClearOtherSelections as measureToolSetClearOtherSelections,
+  getDraftState as measureToolGetDraftState,
+} from "../src/js/measureTool.js";
+
+import {
+  isMeasureMode, setTool as wallToolSetTool, setMeasureCancel as wallToolSetMeasureCancel,
+} from "../src/js/wallTool.js";
+
+// Initialise measureTool module once (registers Alt key listeners)
+measureToolInit({ stage: document.createElement("div") });
+
+/** Reset all state for measureTool tests. */
+function resetForMeasure() {
+  model.rooms.length = 0;
+  model.chain.length = 0;
+  symbolModel.symbols.length = 0;
+  measurementsModel.measurements.length = 0;
+  view.zoom = 1; view.panX = 0; view.panY = 0;
+  setSnapMode("off");
+  // Reset measureTool transient state
+  measureToolCancel();
+  measureToolClearSelection();
+  // Ensure measure history/toast are injected (no-op shims)
+  measureToolSetHistoryAndToast(
+    { commit: () => {}, undo: () => false, depth: () => 0 },
+    () => {},
+  );
+  measureToolSetClearOtherSelections(() => {});
+}
+
+// ─── Snap resolver tests ──────────────────────────────────────────────────────
+
+describe("LLD 91 — measureTool snap: Alt held → free snap", () => {
+  it("with Alt held, snap type is 'free' even with a room vertex nearby", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Place a vertex at world (0,0) → screen (0,0) at zoom=1, pan=0
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }] });
+
+    // Simulate Alt held by dispatching a keydown event
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "AltLeft", bubbles: true }));
+    measureToolHover(0, 0);
+    const snap = measureToolGetDraftState().cursorSnap;
+    // Reset alt immediately
+    window.dispatchEvent(new KeyboardEvent("keyup", { code: "AltLeft", bubbles: true }));
+
+    if (!snap) throw new Error("cursorSnap is null after hover");
+    if (snap.type !== "free") throw new Error(`Expected type 'free', got '${snap.type}'`);
+  });
+});
+
+describe("LLD 91 — measureTool snap: vertex snap", () => {
+  it("snaps to a nearby room vertex within SNAP_PX", () => {
+    resetForMeasure();
+    // At zoom=1, pan=0: world (2,3) → screen (80,120)  [BASE_PX_PER_M=40]
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 2, y: 3 }, { x: 5, y: 3 }] });
+    measureToolHover(80, 120); // exact screen position of vertex
+    const snap = measureToolGetDraftState().cursorSnap;
+    if (!snap) throw new Error("cursorSnap is null");
+    if (snap.type !== "vertex") throw new Error(`Expected type 'vertex', got '${snap.type}'`);
+    if (Math.abs(snap.x - 2) > 0.001) throw new Error(`snap.x expected 2, got ${snap.x}`);
+    if (Math.abs(snap.y - 3) > 0.001) throw new Error(`snap.y expected 3, got ${snap.y}`);
+  });
+
+  it("no vertex snap when cursor is farther than SNAP_PX away", () => {
+    resetForMeasure();
+    setSnapMode("off"); // disable grid snap to get a free snap
+    model.rooms.push({ id: "w0", closed: false, verts: [{ x: 2, y: 3 }, { x: 5, y: 3 }] });
+    // Move cursor 200px away from the vertex (far outside SNAP_PX=15)
+    measureToolHover(280, 320);
+    const snap = measureToolGetDraftState().cursorSnap;
+    if (snap && snap.type === "vertex") throw new Error("Should not snap to vertex from far away");
+  });
+});
+
+describe("LLD 91 — measureTool snap: symbol corner and center", () => {
+  it("snaps to symbol corner when cursor is within SNAP_PX", () => {
+    resetForMeasure();
+    // Add a symbol at world (5,5) with w=2, h=1, rot=0
+    // Top-left corner at world (4, 4.5) → screen (160, 180)
+    const s = createSymbol("sofa", 5, 5);
+    addSymbol(s);
+    const tl = corners(s)[0]; // TL corner
+    const sc = worldToScreen(tl.x, tl.y);
+    measureToolHover(sc.x, sc.y);
+    const snap = measureToolGetDraftState().cursorSnap;
+    if (!snap) throw new Error("cursorSnap is null");
+    if (snap.type !== "corner") throw new Error(`Expected type 'corner', got '${snap.type}'`);
+  });
+
+  it("corner snap beats center snap when both are in range", () => {
+    resetForMeasure();
+    // A small symbol where TL corner might be closer than center
+    const s = createSymbol("sofa", 0, 0);
+    addSymbol(s);
+    // Hover directly on TL corner
+    const tl = corners(s)[0];
+    const sc = worldToScreen(tl.x, tl.y);
+    measureToolHover(sc.x, sc.y);
+    const snap = measureToolGetDraftState().cursorSnap;
+    if (!snap) throw new Error("cursorSnap is null");
+    // Should be corner, not center
+    if (snap.type !== "corner") throw new Error(`Expected type 'corner', got '${snap.type}'`);
+  });
+});
+
+describe("LLD 91 — measureTool snap: grid snap", () => {
+  it("snaps to grid when prefs.gridSnap on and snapStep non-null", () => {
+    resetForMeasure();
+    setSnapMode(0.25); // valid snap preset (0.25m grid step)
+    // No rooms or symbols nearby — should fall through to grid snap
+    // At zoom=1, pan=0: screen (30, 30) → world (0.75, 0.75)
+    // with 0.25m grid → world (0.75, 0.75) → rounds to (0.75, 0.75) exactly
+    measureToolHover(30, 30);
+    const snap = measureToolGetDraftState().cursorSnap;
+    if (!snap) throw new Error("cursorSnap is null");
+    // Should be grid (gridSnap pref is true by default)
+    if (snap.type !== "grid") throw new Error(`Expected type 'grid' got '${snap.type}'`);
+    if (!Number.isFinite(snap.x)) throw new Error("Non-finite snap.x");
+    if (!Number.isFinite(snap.y)) throw new Error("Non-finite snap.y");
+  });
+
+  it("falls back to free when snap mode is off", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    measureToolHover(30, 30);
+    const snap = measureToolGetDraftState().cursorSnap;
+    if (!snap) throw new Error("cursorSnap is null");
+    if (snap.type !== "free") throw new Error(`Expected type 'free' got '${snap.type}'`);
+  });
+});
+
+describe("LLD 91 — measureTool snap: never returns non-finite coordinates", () => {
+  it("snap result has finite x and y for all branches", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    const positions = [[0,0],[100,200],[-50,300],[500,500]];
+    for (const [sx, sy] of positions) {
+      measureToolHover(sx, sy);
+      const snap = measureToolGetDraftState().cursorSnap;
+      if (!snap) throw new Error(`cursorSnap is null at (${sx},${sy})`);
+      if (!Number.isFinite(snap.x)) throw new Error(`Non-finite snap.x at (${sx},${sy}): ${snap.x}`);
+      if (!Number.isFinite(snap.y)) throw new Error(`Non-finite snap.y at (${sx},${sy}): ${snap.y}`);
+    }
+  });
+});
+
+// ─── Placement state machine tests ────────────────────────────────────────────
+
+describe("LLD 91 — measureTool placement: state machine", () => {
+  it("onClick(A) sets pendingA and transitions to awaitingB", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    setSnapMode("off"); // free snap for predictable coords
+    measureToolClick(100, 100);
+    const draft = measureToolGetDraftState();
+    if (!draft.pendingA) throw new Error("pendingA should be set after first click");
+    if (measurementsModel.measurements.length !== 0) throw new Error("No measurement yet after first click");
+  });
+
+  it("onClick(B) non-degenerate creates exactly one measurement and returns to idle", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measureToolClick(0, 0);
+    // Click B far away (400px = 10m from A at zoom=1)
+    measureToolClick(400, 0);
+    if (measurementsModel.measurements.length !== 1) throw new Error(`Expected 1 measurement, got ${measurementsModel.measurements.length}`);
+    const draft = measureToolGetDraftState();
+    if (draft.pendingA !== null) throw new Error("pendingA should be null after B placed");
+    // Verify coordinates are finite
+    const m = measurementsModel.measurements[0];
+    if (!Number.isFinite(m.a.x)) throw new Error("m.a.x not finite");
+    if (!Number.isFinite(m.b.x)) throw new Error("m.b.x not finite");
+    if (!m.id.startsWith("m")) throw new Error(`id should start with 'm', got ${m.id}`);
+  });
+
+  it("degenerate B (same as A within MIN_SEG_M) is ignored; state stays awaitingB", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measureToolClick(100, 100); // set A
+    measureToolClick(100, 100); // same position → degenerate
+    if (measurementsModel.measurements.length !== 0) throw new Error("Degenerate B must not create a measurement");
+    const draft = measureToolGetDraftState();
+    if (!draft.pendingA) throw new Error("pendingA should still be set in awaitingB after degenerate B");
+  });
+
+  it("cancel() drops pendingA and returns to idle without creating a measurement", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measureToolClick(100, 100); // set A
+    measureToolCancel();
+    if (measurementsModel.measurements.length !== 0) throw new Error("cancel() must not create a measurement");
+    const draft = measureToolGetDraftState();
+    if (draft.pendingA !== null) throw new Error("pendingA should be null after cancel");
+  });
+
+  it("onLeave() does NOT drop pendingA (Edge Case 5)", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measureToolClick(100, 100); // set A
+    measureToolLeave(); // cursor left canvas
+    const draft = measureToolGetDraftState();
+    if (!draft.pendingA) throw new Error("pendingA must survive onLeave() — it is NOT a cancel");
+  });
+});
+
+describe("LLD 91 — measureTool placement: history commit", () => {
+  it("creating a measurement calls historyCommit once", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    let commitCount = 0;
+    measureToolSetHistoryAndToast(
+      { commit: () => { commitCount++; }, undo: () => false, depth: () => 0 },
+      () => {},
+    );
+    measureToolClick(0, 0);
+    measureToolClick(400, 0);
+    if (commitCount !== 1) throw new Error(`Expected 1 commit, got ${commitCount}`);
+  });
+});
+
+// ─── Selection & delete tests ─────────────────────────────────────────────────
+
+describe("LLD 91 — measureTool selection: selectDown hit test", () => {
+  it("selectDown within HIT_PX of segment returns true and selects it", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Measurement from world (0,5) to (10,5) → screen (0,200) to (400,200)
+    measurementsModel.measurements.push({ id: "m0", a: { x:0, y:5 }, b: { x:10, y:5 } });
+    // Click near midpoint (200, 200) → should hit the horizontal line at y=200
+    const hit = measureToolSelectDown(200, 200);
+    if (!hit) throw new Error("selectDown should return true on hit");
+    if (measureToolGetSelectedId() !== "m0") throw new Error(`Expected 'm0', got '${measureToolGetSelectedId()}'`);
+    if (!measureToolHasSelection()) throw new Error("hasSelection() should be true");
+  });
+
+  it("selectDown far from segment returns false (miss)", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measurementsModel.measurements.push({ id: "m0", a: { x:0, y:5 }, b: { x:10, y:5 } });
+    // Click at y=0 (screen y=0) — far from the line at y=200
+    const hit = measureToolSelectDown(200, 0);
+    if (hit) throw new Error("selectDown should return false on miss");
+    if (measureToolHasSelection()) throw new Error("hasSelection() should be false after miss");
+  });
+
+  it("last-match-wins when two segments are under the cursor", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    // Both measurements pass through approximately screen y=200
+    measurementsModel.measurements.push({ id: "m0", a: { x:0, y:5 }, b: { x:10, y:5 } });
+    measurementsModel.measurements.push({ id: "m1", a: { x:0, y:5 }, b: { x:10, y:5 } });
+    measureToolSelectDown(200, 200);
+    // Last in array wins
+    if (measureToolGetSelectedId() !== "m1") throw new Error(`Expected 'm1' (last-match-wins), got '${measureToolGetSelectedId()}'`);
+  });
+
+  it("selecting a measurement calls the injected clearOtherSelections", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    let clearCalled = false;
+    measureToolSetClearOtherSelections(() => { clearCalled = true; });
+    measurementsModel.measurements.push({ id: "m0", a: { x:0, y:5 }, b: { x:10, y:5 } });
+    measureToolSelectDown(200, 200);
+    if (!clearCalled) throw new Error("clearOtherSelections was not called on measure hit");
+  });
+});
+
+describe("LLD 91 — measureTool selection: clearSelection and hasSelection", () => {
+  it("clearSelection() sets hasSelection() to false", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measurementsModel.measurements.push({ id: "m0", a: { x:0, y:5 }, b: { x:10, y:5 } });
+    measureToolSelectDown(200, 200);
+    if (!measureToolHasSelection()) throw new Error("Should be selected");
+    measureToolClearSelection();
+    if (measureToolHasSelection()) throw new Error("hasSelection should be false after clear");
+  });
+});
+
+describe("LLD 91 — measureTool: deleteSelected removes measurement and calls commit", () => {
+  it("deleteSelected removes the selected measurement from model", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measurementsModel.measurements.push({ id: "m0", a: { x:0, y:5 }, b: { x:10, y:5 } });
+    measureToolSelectDown(200, 200);
+    if (!measureToolHasSelection()) throw new Error("Precondition: should be selected");
+
+    let commitCalled = false;
+    measureToolSetHistoryAndToast(
+      { commit: () => { commitCalled = true; }, undo: () => false, depth: () => 0 },
+      () => {},
+    );
+    measureToolDeleteSelected();
+
+    if (measurementsModel.measurements.length !== 0) throw new Error("Measurement should be removed");
+    if (measureToolHasSelection()) throw new Error("Selection should be cleared after delete");
+    if (!commitCalled) throw new Error("historyCommit was not called after delete");
+  });
+
+  it("after deleteSelected, undo via history restores the measurement", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    hydrateWalls({ rooms: [], chain: [] });
+    hydrateSymbols({ symbols: [] });
+    hydrateMeasurements({ measurements: [] });
+    resetHistory();
+    initHistory();
+
+    // Wire real history into measureTool
+    measureToolSetHistoryAndToast(
+      { commit: historyCommit, undo: historyUndo, depth: historyDepth },
+      () => {},
+    );
+
+    // Create a measurement
+    measurementsModel.measurements.push({ id: "m0", a: { x:0, y:0 }, b: { x:5, y:0 } });
+    historyCommit();
+
+    // Select and delete
+    measureToolSelectDown(100, 0); // y=0 in screen coords
+    measureToolDeleteSelected();
+
+    if (measurementsModel.measurements.length !== 0) throw new Error("Should be deleted");
+
+    // Undo
+    historyUndo();
+    if (measurementsModel.measurements.length !== 1) throw new Error("Undo should restore the measurement");
+    if (measurementsModel.measurements[0].id !== "m0") throw new Error("Restored measurement should have id m0");
+  });
+});
+
+// ─── History: measurements in snapshot ────────────────────────────────────────
+
+describe("LLD 91 — history: measurements included in snapshot", () => {
+  it("commit() + undo() round-trips a created measurement", () => {
+    resetForMeasure();
+    hydrateWalls({ rooms: [], chain: [] });
+    hydrateSymbols({ symbols: [] });
+    hydrateMeasurements({ measurements: [] });
+    resetHistory();
+    initHistory();
+
+    // Add a measurement and commit
+    measurementsModel.measurements.push({ id: "m0", a: { x:0, y:0 }, b: { x:3, y:0 } });
+    historyCommit();
+    if (!canUndo()) throw new Error("should be undoable after adding a measurement");
+
+    // Undo → measurement removed
+    historyUndo();
+    if (measurementsModel.measurements.length !== 0) throw new Error("Undo should remove the measurement");
+
+    // Redo → measurement restored
+    historyRedo();
+    if (measurementsModel.measurements.length !== 1) throw new Error("Redo should restore the measurement");
+    if (measurementsModel.measurements[0].id !== "m0") throw new Error("Redo: wrong measurement id");
+  });
+
+  it("undo/redo of measurements does NOT disturb rooms or symbols", () => {
+    resetForMeasure();
+    hydrateWalls({ rooms: [], chain: [] });
+    hydrateSymbols({ symbols: [] });
+    hydrateMeasurements({ measurements: [] });
+    resetHistory();
+    initHistory();
+
+    // Add a room and symbol (baseline)
+    model.rooms.push({ id: "w0", closed: true, verts: [{x:0,y:0},{x:1,y:0},{x:0.5,y:1}] });
+    const s = createSymbol("bed", 2, 2);
+    addSymbol(s);
+    historyCommit();
+
+    // Now add a measurement
+    measurementsModel.measurements.push({ id: "m0", a: { x:0,y:0 }, b: { x:5,y:0 } });
+    historyCommit();
+
+    // Undo: measurement removed, room+symbol intact
+    historyUndo();
+    if (measurementsModel.measurements.length !== 0) throw new Error("measurement should be undone");
+    if (model.rooms.length !== 1) throw new Error("room should be intact after measurement undo");
+    if (symbolModel.symbols.length !== 1) throw new Error("symbol should be intact after measurement undo");
+  });
+
+  it("commit() is a no-op when measurements (and rooms/symbols) are unchanged", () => {
+    resetForMeasure();
+    hydrateWalls({ rooms: [], chain: [] });
+    hydrateSymbols({ symbols: [] });
+    hydrateMeasurements({ measurements: [] });
+    resetHistory();
+    initHistory();
+
+    measurementsModel.measurements.push({ id: "m0", a: { x:0,y:0 }, b: { x:5,y:0 } });
+    historyCommit();
+    const depthBefore = historyDepth();
+    historyCommit(); // nothing changed
+    const depthAfter = historyDepth();
+    if (depthAfter !== depthBefore) throw new Error("commit() must be no-op when nothing changed");
+  });
+});
+
+// ─── Render: structural overlay-scoping tests ─────────────────────────────────
+
+import { init as initMeasureRender, render as measureRenderFn } from "../src/js/measureRender.js";
+
+describe("LLD 91 — measureRender: overlay scoping", () => {
+  it("render() adds .measure-label chips for committed measurements", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    // Create a minimal SVG group and overlay
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const overlay = document.createElement("div");
+    document.body.appendChild(overlay);
+
+    initMeasureRender(g, overlay, () => ({ pendingA: null, cursorSnap: null }), () => null);
+
+    measurementsModel.measurements.push({ id: "m0", a: { x:0,y:0 }, b: { x:5,y:0 } });
+    measureRenderFn();
+
+    const chips = overlay.querySelectorAll(".measure-label");
+    if (chips.length !== 1) throw new Error(`Expected 1 .measure-label chip, got ${chips.length}`);
+
+    // Cleanup
+    overlay.remove();
+  });
+
+  it("render() never removes foreign chips (.clr-chip etc.) from overlay", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const overlay = document.createElement("div");
+    document.body.appendChild(overlay);
+
+    // Add a sentinel foreign chip
+    const sentinel = document.createElement("div");
+    sentinel.className = "clr-chip";
+    sentinel.textContent = "SENTINEL";
+    overlay.appendChild(sentinel);
+
+    initMeasureRender(g, overlay, () => ({ pendingA: null, cursorSnap: null }), () => null);
+    measurementsModel.measurements.push({ id: "m0", a: { x:0,y:0 }, b: { x:5,y:0 } });
+    measureRenderFn();
+
+    // Sentinel must survive
+    const survivingSentinels = overlay.querySelectorAll(".clr-chip");
+    if (survivingSentinels.length !== 1) throw new Error(`Sentinel .clr-chip was removed by measureRender`);
+
+    overlay.remove();
+  });
+
+  it("render() with no measurements but pendingA + measure mode NOT active: no rubber-band", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const overlay = document.createElement("div");
+    document.body.appendChild(overlay);
+
+    // pendingA set but isMeasureMode() should be false (wallTool is in "wall" mode by default after setTool)
+    const fakePending = { x: 0, y: 0 };
+    const fakeCursor  = { x: 5, y: 0, type: "free" };
+    initMeasureRender(g, overlay, () => ({ pendingA: fakePending, cursorSnap: fakeCursor }), () => null);
+
+    // Ensure NOT in measure mode
+    // (wallTool._tool starts as "wall", so isMeasureMode() is false)
+    measureRenderFn();
+
+    const draftLabels = overlay.querySelectorAll(".measure-label--draft");
+    if (draftLabels.length !== 0) throw new Error("Draft label must NOT render when isMeasureMode() is false");
+
+    // Also check no rubber-band line in SVG
+    const lines = g.querySelectorAll("line");
+    // zero lines expected (no committed measurements)
+    if (lines.length !== 0) throw new Error(`Expected 0 SVG lines without active measure mode, got ${lines.length}`);
+
+    overlay.remove();
+  });
+
+  it("render() label text reflects current unit", () => {
+    resetForMeasure();
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const overlay = document.createElement("div");
+    document.body.appendChild(overlay);
+
+    initMeasureRender(g, overlay, () => ({ pendingA: null, cursorSnap: null }), () => null);
+
+    // Measurement of exactly 3m (will be rendered differently in ft vs m)
+    measurementsModel.measurements.push({ id: "m0", a: { x:0,y:0 }, b: { x:3,y:0 } });
+
+    setUnit("m");
+    measureRenderFn();
+    const mChip = overlay.querySelector(".measure-label");
+    if (!mChip) throw new Error("No .measure-label chip after render (m)");
+    if (!mChip.textContent.includes("m")) throw new Error(`Label should include 'm' for metric: '${mChip.textContent}'`);
+
+    // Remove our chips
+    for (const c of overlay.querySelectorAll(".measure-label")) c.remove();
+
+    setUnit("ft");
+    measureRenderFn();
+    const ftChip = overlay.querySelector(".measure-label");
+    if (!ftChip) throw new Error("No .measure-label chip after render (ft)");
+    if (!ftChip.textContent.includes("ft")) throw new Error(`Label should include 'ft' for imperial: '${ftChip.textContent}'`);
+
+    // Reset
+    setUnit("ft");
+    overlay.remove();
+  });
+});
+
+// ─── Integration: LLD 63 dispatcher regression ────────────────────────────────
+
+describe("LLD 91 — regression: LLD 63 dispatcher unaffected by measure", () => {
+  it("measurementsModel is included in history snapshot (commit dirty-checks it)", () => {
+    resetForMeasure();
+    hydrateWalls({ rooms: [], chain: [] });
+    hydrateSymbols({ symbols: [] });
+    hydrateMeasurements({ measurements: [] });
+    resetHistory();
+    initHistory();
+
+    // Empty → no change → no-op
+    const depthBefore = historyDepth();
+    historyCommit();
+    if (historyDepth() !== depthBefore) throw new Error("Baseline commit should be no-op");
+
+    // Add measurement → dirty → commit succeeds
+    measurementsModel.measurements.push({ id: "m0", a: { x:0,y:0 }, b: { x:5,y:0 } });
+    historyCommit();
+    if (historyDepth() !== depthBefore + 1) throw new Error("Dirty commit after adding measurement should increment depth");
+  });
+});
+
+// ─── Integration: persistence round-trip with tool-created measurements ───────
+
+describe("LLD 91 — persistence: tool-created measurement survives plan round-trip", () => {
+  it("buildPlan → validatePlan → applyPlan preserves a tool-created measurement", () => {
+    resetAll();
+    measurementsModel.measurements.push({
+      id: "m0", a: { x: 1, y: 2 }, b: { x: 5, y: 6 },
+    });
+    const plan = buildPlan();
+    const validated = validatePlan(plan);
+    if (!validated) throw new Error("validatePlan rejected plan with tool-created measurement");
+    applyPlan(validated);
+    if (measurementsModel.measurements.length !== 1) throw new Error("measurement count changed after round-trip");
+    if (Math.abs(measurementsModel.measurements[0].a.x - 1) > 1e-9) throw new Error("a.x wrong after round-trip");
+    if (Math.abs(measurementsModel.measurements[0].b.y - 6) > 1e-9) throw new Error("b.y wrong after round-trip");
+  });
+
+  it("tool-created measurement has finite endpoints (no NaN/Infinity)", () => {
+    resetForMeasure();
+    setSnapMode("off");
+    view.zoom = 1; view.panX = 0; view.panY = 0;
+    measureToolClick(50, 50);
+    measureToolClick(250, 50);
+    if (measurementsModel.measurements.length !== 1) throw new Error("Expected 1 measurement");
+    const m = measurementsModel.measurements[0];
+    if (!Number.isFinite(m.a.x)) throw new Error("m.a.x not finite");
+    if (!Number.isFinite(m.a.y)) throw new Error("m.a.y not finite");
+    if (!Number.isFinite(m.b.x)) throw new Error("m.b.x not finite");
+    if (!Number.isFinite(m.b.y)) throw new Error("m.b.y not finite");
   });
 });
 
