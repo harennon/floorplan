@@ -1976,7 +1976,7 @@ describe("symbols.js — units reuse: fmtLen/parseLen round-trip for w/h", () =>
 // ─── Tests: LLD-45 — new furniture types ─────────────────────────────────────
 
 const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer",
-                     "nightstand", "dresser", "cabinet"];
+                     "nightstand", "dresser", "cabinet", "monitor", "gaming-chair"];
 
 describe("LLD-45 — catalog integrity: all new types present and valid", () => {
   it("every new type exists in CATALOG with a valid category (updated by LLD-50/LLD-76)", () => {
@@ -9362,7 +9362,7 @@ function _makeDockDOM() {
   // Item types per category (matching CATALOG)
   const itemsByCategory = {
     openings: ["door", "window"],
-    living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf", "armchair", "coffee-table", "dining-table-round", "rug"],
+    living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf", "armchair", "coffee-table", "dining-table-round", "rug", "monitor", "gaming-chair"],
     kitchen:  ["fridge", "stove", "sink", "washer"],
     bedroom:  ["bed", "wardrobe", "nightstand", "dresser", "cabinet"],
     bath:     ["toilet", "bathtub"],
@@ -16369,6 +16369,237 @@ describe("LLD 97 — backward compat: old compact hash (no 'k' key) decodes clea
     if (!v) throw new Error("validatePlan should accept old compact-decoded plan");
     if ("color" in v.walls.rooms[0]) throw new Error("Old room should not have color key");
     if ("color" in v.symbols.symbols[0]) throw new Error("Old symbol should not have color key");
+  });
+});
+
+// ─── Tests: LLD-104 — monitor + gaming-chair catalog types ───────────────────
+
+const LLD104_TYPES = ["monitor", "gaming-chair"];
+
+describe("LLD-104 — catalog integrity: monitor and gaming-chair", () => {
+  it("both types exist in CATALOG with category 'living'", () => {
+    for (const t of LLD104_TYPES) {
+      if (!(t in CATALOG)) throw new Error(t + " missing from CATALOG");
+      if (CATALOG[t].category !== "living") throw new Error(t + " category should be 'living', got '" + CATALOG[t].category + "'");
+    }
+  });
+
+  it("both types have a non-empty label", () => {
+    for (const t of LLD104_TYPES) {
+      const label = CATALOG[t].label;
+      if (!label || label.trim() === "") throw new Error(t + " has empty label");
+    }
+  });
+
+  it("both types have finite w, h, and per-axis bounds", () => {
+    for (const t of LLD104_TYPES) {
+      const cat = CATALOG[t];
+      for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
+        if (!isFinite(cat[key])) throw new Error(t + "." + key + " is not finite: " + cat[key]);
+      }
+    }
+  });
+
+  it("min_w <= w <= max_w and min_h <= h <= max_h for both types", () => {
+    for (const t of LLD104_TYPES) {
+      const { w, h, min_w, max_w, min_h, max_h } = CATALOG[t];
+      if (w < min_w || w > max_w) throw new Error(t + ": w=" + w + " not in [" + min_w + "," + max_w + "]");
+      if (h < min_h || h > max_h) throw new Error(t + ": h=" + h + " not in [" + min_h + "," + max_h + "]");
+    }
+  });
+
+  it("neither type has openings:true", () => {
+    for (const t of LLD104_TYPES) {
+      if (CATALOG[t].openings) throw new Error(t + " unexpectedly has openings:true");
+    }
+  });
+
+  it("monitor: w=0.60, h=0.22, bounds w[0.45,0.85] h[0.18,0.28]", () => {
+    const cat = CATALOG["monitor"];
+    expect(cat.w).toBeCloseTo(0.60, 9);
+    expect(cat.h).toBeCloseTo(0.22, 9);
+    expect(cat.min_w).toBeCloseTo(0.45, 9);
+    expect(cat.max_w).toBeCloseTo(0.85, 9);
+    expect(cat.min_h).toBeCloseTo(0.18, 9);
+    expect(cat.max_h).toBeCloseTo(0.28, 9);
+  });
+
+  it("gaming-chair: w=0.66, h=0.66, bounds w[0.55,0.80] h[0.55,0.82]", () => {
+    const cat = CATALOG["gaming-chair"];
+    expect(cat.w).toBeCloseTo(0.66, 9);
+    expect(cat.h).toBeCloseTo(0.66, 9);
+    expect(cat.min_w).toBeCloseTo(0.55, 9);
+    expect(cat.max_w).toBeCloseTo(0.80, 9);
+    expect(cat.min_h).toBeCloseTo(0.55, 9);
+    expect(cat.max_h).toBeCloseTo(0.82, 9);
+  });
+
+  it("monitor.max_w < tv.min_w (desk-scale screen does not overlap tv size band)", () => {
+    if (CATALOG["monitor"].max_w >= CATALOG["tv"].min_w) {
+      throw new Error("monitor.max_w (" + CATALOG["monitor"].max_w + ") must be < tv.min_w (" + CATALOG["tv"].min_w + ")");
+    }
+  });
+
+  it("gaming-chair default size differs from chair and armchair defaults", () => {
+    const gc = CATALOG["gaming-chair"];
+    const ch = CATALOG["chair"];
+    const ac = CATALOG["armchair"];
+    if (gc.w === ch.w && gc.h === ch.h) throw new Error("gaming-chair and chair should have different default sizes");
+    if (gc.w === ac.w && gc.h === ac.h) throw new Error("gaming-chair and armchair should have different default sizes");
+  });
+});
+
+describe("LLD-104 — preset validity: every preset within per-axis bounds", () => {
+  it("all monitor presets satisfy min_w<=p.w<=max_w and min_h<=p.h<=max_h", () => {
+    const cat = CATALOG["monitor"];
+    for (const p of cat.presets) {
+      if (p.w < cat.min_w || p.w > cat.max_w) throw new Error("monitor preset '" + p.name + "' w=" + p.w + " out of [" + cat.min_w + "," + cat.max_w + "]");
+      if (p.h < cat.min_h || p.h > cat.max_h) throw new Error("monitor preset '" + p.name + "' h=" + p.h + " out of [" + cat.min_h + "," + cat.max_h + "]");
+    }
+  });
+
+  it("all gaming-chair presets satisfy min_w<=p.w<=max_w and min_h<=p.h<=max_h", () => {
+    const cat = CATALOG["gaming-chair"];
+    for (const p of cat.presets) {
+      if (p.w < cat.min_w || p.w > cat.max_w) throw new Error("gaming-chair preset '" + p.name + "' w=" + p.w + " out of [" + cat.min_w + "," + cat.max_w + "]");
+      if (p.h < cat.min_h || p.h > cat.max_h) throw new Error("gaming-chair preset '" + p.name + "' h=" + p.h + " out of [" + cat.min_h + "," + cat.max_h + "]");
+    }
+  });
+
+  it("monitor has 4 named presets with name, w, h each", () => {
+    const presets = CATALOG["monitor"].presets;
+    if (!Array.isArray(presets) || presets.length !== 4) throw new Error("monitor should have 4 presets, got " + (presets ? presets.length : "none"));
+    for (const p of presets) {
+      if (!p.name || typeof p.w !== "number" || typeof p.h !== "number") throw new Error("monitor preset missing name/w/h: " + JSON.stringify(p));
+    }
+  });
+
+  it("gaming-chair has 3 named presets with name, w, h each", () => {
+    const presets = CATALOG["gaming-chair"].presets;
+    if (!Array.isArray(presets) || presets.length !== 3) throw new Error("gaming-chair should have 3 presets, got " + (presets ? presets.length : "none"));
+    for (const p of presets) {
+      if (!p.name || typeof p.w !== "number" || typeof p.h !== "number") throw new Error("gaming-chair preset missing name/w/h: " + JSON.stringify(p));
+    }
+  });
+});
+
+describe("LLD-104 — createSymbol: new types return correct Sym", () => {
+  it("createSymbol returns correct type, catalog defaults, rot:0, and string id", () => {
+    resetSymbolModel();
+    for (const t of LLD104_TYPES) {
+      const s = createSymbol(t, 1, 2);
+      if (s.type !== t) throw new Error(t + ": type mismatch");
+      if (Math.abs(s.w - CATALOG[t].w) > 1e-9) throw new Error(t + ": w mismatch");
+      if (Math.abs(s.h - CATALOG[t].h) > 1e-9) throw new Error(t + ": h mismatch");
+      if (s.rot !== 0) throw new Error(t + ": rot should be 0");
+      if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(t + ": invalid id " + s.id);
+    }
+  });
+});
+
+describe("LLD-104 — clampDim: monitor and gaming-chair clamp at per-axis bounds", () => {
+  it("monitor: width below min_w (0.45) clamps to 0.45", () => {
+    expect(clampDim("monitor", "w", 0.10)).toBeCloseTo(0.45, 9);
+  });
+
+  it("monitor: width above max_w (0.85) clamps to 0.85", () => {
+    expect(clampDim("monitor", "w", 9.99)).toBeCloseTo(0.85, 9);
+  });
+
+  it("monitor: in-range width 0.65 passes through unchanged", () => {
+    expect(clampDim("monitor", "w", 0.65)).toBeCloseTo(0.65, 9);
+  });
+
+  it("monitor: depth below min_h (0.18) clamps to 0.18", () => {
+    expect(clampDim("monitor", "h", 0.05)).toBeCloseTo(0.18, 9);
+  });
+
+  it("monitor: depth above max_h (0.28) clamps to 0.28", () => {
+    expect(clampDim("monitor", "h", 1.00)).toBeCloseTo(0.28, 9);
+  });
+
+  it("gaming-chair: width below min_w (0.55) clamps to 0.55", () => {
+    expect(clampDim("gaming-chair", "w", 0.10)).toBeCloseTo(0.55, 9);
+  });
+
+  it("gaming-chair: width above max_w (0.80) clamps to 0.80", () => {
+    expect(clampDim("gaming-chair", "w", 5.00)).toBeCloseTo(0.80, 9);
+  });
+
+  it("gaming-chair: in-range width 0.70 passes through unchanged", () => {
+    expect(clampDim("gaming-chair", "w", 0.70)).toBeCloseTo(0.70, 9);
+  });
+
+  it("gaming-chair: depth above max_h (0.82) clamps to 0.82", () => {
+    expect(clampDim("gaming-chair", "h", 9.99)).toBeCloseTo(0.82, 9);
+  });
+});
+
+describe("LLD-104 — resizeSymbol: continuous (non-discrete) behavior", () => {
+  it("monitor: resize w to in-range value between presets keeps exact value (continuous, not snapped)", () => {
+    resetSymbolModel();
+    const s = createSymbol("monitor", 0, 0);
+    // 0.68 is between 27\" (0.62) and 32\" (0.71), within [0.45,0.85]
+    const changed = resizeSymbol(s, "w", 0.68);
+    expect(s.w).toBeCloseTo(0.68, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("gaming-chair: resize h to in-range value between presets keeps exact value (continuous, not snapped)", () => {
+    resetSymbolModel();
+    const s = createSymbol("gaming-chair", 0, 0);
+    // 0.70 is between Task (0.60) and Big & Tall (0.78), within [0.55,0.82]
+    const changed = resizeSymbol(s, "h", 0.70);
+    expect(s.h).toBeCloseTo(0.70, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("monitor: resize w to below min_w clamps and returns changed:true", () => {
+    resetSymbolModel();
+    const s = createSymbol("monitor", 0, 0);
+    const changed = resizeSymbol(s, "w", 0.01);
+    expect(s.w).toBeCloseTo(0.45, 9);
+    expect(changed).toBe(true);
+  });
+
+  it("gaming-chair: resize h to above max_h clamps and returns changed:true", () => {
+    resetSymbolModel();
+    const s = createSymbol("gaming-chair", 0, 0);
+    const changed = resizeSymbol(s, "h", 99);
+    expect(s.h).toBeCloseTo(0.82, 9);
+    expect(changed).toBe(true);
+  });
+});
+
+describe("LLD-104 — JSON round-trip: monitor and gaming-chair serialize and hydrate losslessly", () => {
+  it("monitor round-trips through JSON (type, w, h, rot, id preserved)", () => {
+    resetSymbolModel();
+    const s = createSymbol("monitor", 3, 4);
+    s.rot = 90;
+    addSymbol(s);
+    const snap = JSON.parse(JSON.stringify(symbolModel));
+    const rt = snap.symbols[0];
+    if (rt.type !== "monitor") throw new Error("type not preserved");
+    if (Math.abs(rt.w - CATALOG["monitor"].w) > 1e-9) throw new Error("monitor w not preserved: " + rt.w);
+    if (Math.abs(rt.h - CATALOG["monitor"].h) > 1e-9) throw new Error("monitor h not preserved: " + rt.h);
+    if (rt.rot !== 90) throw new Error("rot not preserved: " + rt.rot);
+    if (rt.id !== s.id) throw new Error("id not preserved");
+    resetSymbolModel();
+  });
+
+  it("gaming-chair round-trips through JSON (type, w, h, rot, id preserved)", () => {
+    resetSymbolModel();
+    const s = createSymbol("gaming-chair", 5, 6);
+    s.rot = 180;
+    addSymbol(s);
+    const snap = JSON.parse(JSON.stringify(symbolModel));
+    const rt = snap.symbols[0];
+    if (rt.type !== "gaming-chair") throw new Error("type not preserved");
+    if (Math.abs(rt.w - CATALOG["gaming-chair"].w) > 1e-9) throw new Error("gaming-chair w not preserved: " + rt.w);
+    if (Math.abs(rt.h - CATALOG["gaming-chair"].h) > 1e-9) throw new Error("gaming-chair h not preserved: " + rt.h);
+    if (rt.rot !== 180) throw new Error("rot not preserved: " + rt.rot);
+    if (rt.id !== s.id) throw new Error("id not preserved");
+    resetSymbolModel();
   });
 });
 

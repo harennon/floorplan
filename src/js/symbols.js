@@ -13,6 +13,7 @@
 /** @typedef {"door"|"window"|"bed"|"sofa"|"table"|"chair"|"desk"|"fridge"
  *   |"toilet"|"bathtub"|"sink"|"stove"|"wardrobe"|"bookshelf"|"tv"|"washer"
  *   |"armchair"|"coffee-table"|"dining-table-round"
+ *   |"monitor"|"gaming-chair"
  *   |"nightstand"|"dresser"|"cabinet"
  *   |"patio-table"|"patio-chair"|"parasol"|"planter"
  *   |"rug"} SymbolType */
@@ -142,6 +143,25 @@ export const CATALOG = {
       { name: "Seats 4", w: 1.00, h: 1.00 },
       { name: "Seats 6", w: 1.25, h: 1.25 },
       { name: "Seats 8", w: 1.65, h: 1.65 },
+    ],
+  },
+  monitor: {
+    label: "Monitor", category: "living", w: 0.60, h: 0.22,
+    min_w: 0.45, max_w: 0.85, min_h: 0.18, max_h: 0.28,
+    presets: [
+      { name: "24\"",           w: 0.54, h: 0.20 },
+      { name: "27\"",           w: 0.62, h: 0.22 },
+      { name: "32\"",           w: 0.71, h: 0.24 },
+      { name: "Ultrawide 34\"", w: 0.81, h: 0.24 },
+    ],
+  },
+  "gaming-chair": {
+    label: "Gaming Chair", category: "living", w: 0.66, h: 0.66,
+    min_w: 0.55, max_w: 0.80, min_h: 0.55, max_h: 0.82,
+    presets: [
+      { name: "Task",       w: 0.60, h: 0.60 },
+      { name: "Racing",     w: 0.66, h: 0.66 },
+      { name: "Big & Tall", w: 0.75, h: 0.78 },
     ],
   },
 

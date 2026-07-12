@@ -772,3 +772,77 @@ test("LLD 99: tool_resize_symbol on an already-preset-aligned bed returns snappe
   // Snap did not change anything beyond clamp, so snapped must be false.
   assert.equal(rz.snapped, false);
 });
+
+// ── LLD 104: monitor + gaming-chair catalog types ─────────────────────────────
+
+test("LLD 104: place_symbol({type:'monitor'}) returns ok:true with catalog-default dims", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "monitor", x: 3, y: 3 });
+  assert.equal(p.ok, true);
+  assert.ok(Math.abs(p.w - CATALOG.monitor.w) < 1e-9, `w expected ${CATALOG.monitor.w}, got ${p.w}`);
+  assert.ok(Math.abs(p.h - CATALOG.monitor.h) < 1e-9, `h expected ${CATALOG.monitor.h}, got ${p.h}`);
+});
+
+test("LLD 104: place_symbol({type:'gaming-chair'}) returns ok:true with catalog-default dims", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "gaming-chair", x: 4, y: 4 });
+  assert.equal(p.ok, true);
+  assert.ok(Math.abs(p.w - CATALOG["gaming-chair"].w) < 1e-9, `w expected ${CATALOG["gaming-chair"].w}, got ${p.w}`);
+  assert.ok(Math.abs(p.h - CATALOG["gaming-chair"].h) < 1e-9, `h expected ${CATALOG["gaming-chair"].h}, got ${p.h}`);
+});
+
+test("LLD 104: place_symbol monitor with preset:'27\"' resolves to 0.62×0.22", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "monitor", x: 3, y: 3, preset: "27\"" });
+  assert.equal(p.ok, true);
+  assert.ok(Math.abs(p.w - 0.62) < 1e-9, `w expected 0.62, got ${p.w}`);
+  assert.ok(Math.abs(p.h - 0.22) < 1e-9, `h expected 0.22, got ${p.h}`);
+  assert.equal(p.presetApplied, "27\"");
+});
+
+test("LLD 104: place_symbol gaming-chair with preset:'Racing' resolves to 0.66×0.66", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "gaming-chair", x: 4, y: 4, preset: "Racing" });
+  assert.equal(p.ok, true);
+  assert.ok(Math.abs(p.w - 0.66) < 1e-9, `w expected 0.66, got ${p.w}`);
+  assert.ok(Math.abs(p.h - 0.66) < 1e-9, `h expected 0.66, got ${p.h}`);
+  assert.equal(p.presetApplied, "Racing");
+});
+
+test("LLD 104: place_symbol monitor with unknown preset → ok:false with valid names listed", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const countBefore = symbolsModel.symbols.length;
+  const r = tools.tool_place_symbol({ type: "monitor", x: 3, y: 3, preset: "50\" OLED" });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /unknown preset/);
+  assert.match(r.reason, /27"/); // valid names listed
+  assert.equal(symbolsModel.symbols.length, countBefore);
+});
+
+test("LLD 104: place_symbol gaming-chair with unknown preset → ok:false with valid names listed", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const countBefore = symbolsModel.symbols.length;
+  const r = tools.tool_place_symbol({ type: "gaming-chair", x: 4, y: 4, preset: "Recliner" });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /unknown preset/);
+  assert.match(r.reason, /Racing/); // valid names listed
+  assert.equal(symbolsModel.symbols.length, countBefore);
+});
+
+test("LLD 104: set_brief with furniture:[{type:'monitor'}] is accepted", () => {
+  session.newPlan();
+  const r = tools.tool_set_brief({ furniture: [{ type: "monitor" }] });
+  assert.equal(r.ok, true);
+});
+
+test("LLD 104: set_brief with furniture:[{type:'gaming-chair'}] is accepted", () => {
+  session.newPlan();
+  const r = tools.tool_set_brief({ furniture: [{ type: "gaming-chair" }] });
+  assert.equal(r.ok, true);
+});
