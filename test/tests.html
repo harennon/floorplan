@@ -16600,6 +16600,9 @@ describe("LLD-104 — JSON round-trip: monitor and gaming-chair serialize and hy
     if (rt.rot !== 180) throw new Error("rot not preserved: " + rt.rot);
     if (rt.id !== s.id) throw new Error("id not preserved");
     resetSymbolModel();
+  });
+});
+
 // ─── Tests: LLD 107 — rug catalog entry and floorLayer flag ───────────────────
 
 describe("LLD 107 — CATALOG.rug entry and floorLayer flag", () => {
