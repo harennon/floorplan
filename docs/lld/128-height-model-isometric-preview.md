@@ -78,31 +78,66 @@ box (see Edge Cases). Openings (`door`, `window`) get a realistic leaf height bu
 extruded as boxes flush in the wall plane like any other footprint this cut (no cut-out
 geometry — a documented simplification).
 
-### 2. Projection: single fixed axonometric angle
+### 2. Projection: single fixed axonometric angle — projection lives in `view.js`
 
-Use a **fixed axonometric projection** (no rotation UI). We project world metres → screen
-using a 2:1 dimetric-style transform, standard for "video-game isometric" reads:
+Use a **fixed axonometric projection** (no rotation UI). The dimetric fold, in world
+metres, is:
 
 ```
-isoX = (wx - wy) * cos(θ)
-isoY = (wx + wy) * sin(θ) - wz * kZ
+isoWX = (wx - wy) * cos(θ)
+isoWY = (wx + wy) * sin(θ) - wz * ISO_KZ
 ```
 
-with θ = 30° and `kZ` a vertical scale for height. The world→screen pipeline still runs
-through `view.js` for pan/zoom of the whole scene (the preview honours the current
-zoom/pan so the plan stays framed), but the axonometric fold is applied in a pure helper
-inside `isoRender.js` operating on `(wx, wy, wz)` in metres, producing screen offsets that
-are then scaled by `pxPerM()` and translated by the view pan. Height `wz` is up (screen
-−y).
+with θ = 30°. This produces a folded world-metre coordinate that is then run through the
+**same** zoom/pan pipeline as the 2D editor so the preview stays framed with the plan.
 
-We do NOT reuse `worldToScreen` directly for the fold because that function is a pure
-2D affine with no z term; instead `isoRender` computes iso screen coordinates from world
-metres using `pxPerM()` and `view.panX/panY` (read via a small projection helper) so the
-scene pans/zooms consistently with the 2D editor's framing.
+**Invariant compliance (was BLOCKING).** `view.js` documents a load-bearing contract:
+"All world↔screen conversion must go through this module. No other module may read
+panX/panY/zoom and do its own math." The earlier draft violated this by having
+`isoRender` read `view.panX/panY`. **Resolution:** the projection (including the z term)
+is added to `view.js` as a new exported function, and `isoRender` consumes it — reading
+pan/zoom stays entirely inside `view.js`. We add to `view.js`:
+
+```js
+// view.js — new exports; θ and vertical scale live with the projection math.
+export const ISO_THETA = Math.PI / 6;   // 30°
+export const ISO_KZ    = 0.82;          // metres-of-height → folded-metres; nonzero so
+                                        // height changes visibly raise top faces
+
+/**
+ * Axonometric world→screen projection. Folds (wx,wy,wz) world metres into the
+ * dimetric plane, then applies the SAME zoom/pan as worldToScreen so the iso
+ * scene shares the 2D editor's framing. wz is up (decreases screen y).
+ * @returns {{ x:number, y:number }} screen pixels
+ */
+export function worldToScreenIso(wx, wy, wz) {
+  const isoWX = (wx - wy) * Math.cos(ISO_THETA);
+  const isoWY = (wx + wy) * Math.sin(ISO_THETA) - wz * ISO_KZ;
+  return worldToScreen(isoWX, isoWY);   // reuses pxPerM() + panX/panY internally
+}
+```
+
+`isoRender` calls `worldToScreenIso(wx, wy, wz)` and never touches `view.panX/panY/zoom`
+or `pxPerM()` directly. The 2D `worldToScreen` is left untouched. Because the fold reuses
+`worldToScreen`, the preview pans/zooms consistently with the 2D framing for free
+(Edge Case 11). `view.js`'s header comment is updated to note the iso variant is the
+sanctioned z-aware projection so future readers don't treat the invariant as forbidding
+it.
 
 ### 3. Extruded box geometry — 3 faces, painter's sort
 
-Each extruded item (wall quad segment or furniture footprint) is a **prism**: a bottom
+**Wall segment source (was BLOCKING).** `walls.wallSegments()` is NOT the extrusion source:
+it returns segments for *all* rooms (open included) **plus the active draft chain**, which
+would contradict "open walls don't appear" (Edge Case 3) and "preview hides the in-progress
+chain" (Edge Case 9). Instead `buildItems` iterates `walls.model.rooms` directly, keeps
+only `room.closed === true` rooms, and **never reads `walls.model.chain`**. For each kept
+room it walks consecutive vertex pairs plus the closing edge (`verts[n-1]→verts[0]`) and
+turns each edge into a wall quad footprint of thickness `WALL_M` (centered on the edge
+centerline, mirroring how the 2D wall body is drawn), skipping edges shorter than
+`MIN_SEG_M`. This keeps the extrusion set aligned with what actually renders as enclosed
+rooms.
+
+Each extruded item (wall quad footprint or furniture footprint) is a **prism**: a bottom
 polygon at z=0 and a top polygon at z=height, connected by vertical side faces. For the
 blocky read we draw only the visible faces given the fixed camera:
 
@@ -112,15 +147,45 @@ blocky read we draw only the visible faces given the fixed camera:
 
 Because the camera is fixed, exactly which two of the four vertical faces are "front-left"
 and "front-right" is constant, so we pick them deterministically (the two edges whose
-outward normal faces the camera). Each face is a 4-point SVG `<polygon>`. Three flat
-shades per box are derived from the item's base fill color:
+outward normal faces the camera). Each face is a 4-point SVG `<polygon>`.
 
-- top = base color at full/High lightness,
+**Opaque, distinguishable base color derivation (was BLOCKING).** The 2D editor's base
+fills are *translucent and shared* — uncolored furniture is `symFill`
+`rgba(201,168,76,0.12)`, walls are `wallBody` `rgba(201,168,76,0.30)`. Using those
+directly would make every box the same near-transparent gold: faces would show through
+each other (breaking painter occlusion) and `shade()`'s RGB multiply would ignore the
+alpha. So the preview does **not** consume those fills. Instead `buildItems` resolves each
+item to an **opaque** RGB base color via this deterministic rule:
+
+1. **Furniture with an explicit `sym.color`** (user-picked, LLD 97) → use it. These are
+   opaque hex already; if a stored color ever carries alpha, composite it over the theme
+   `bg` to force opacity before shading.
+2. **Uncolored furniture** → an opaque per-category base color, so a sofa, a fridge and a
+   bed are visually distinct instead of all-gold. Define a small
+   `CATEGORY_BASE: Record<SymCategory, {light:string, dark:string}>` map in `isoRender.js`
+   (opaque hex, one pair per existing `SymCategory`: openings/living/kitchen/bedroom/bath/
+   outdoor), chosen to sit harmoniously with the blueprint palette. `buildItems` picks the
+   light/dark member by the current theme (`theme.getTheme()`), giving readable boxes in
+   both themes.
+3. **Walls** → an opaque wall base color derived from the theme (a fully-opaque form of the
+   gold `wallLine`/`gold` token, NOT the 0.30-alpha `wallBody`), so walls read as a
+   consistent neutral shell distinct from furniture.
+4. **Floor slab** → stays translucent on purpose (it is a ground plane drawn behind all
+   boxes, never occluded by design), so it keeps using a low-alpha theme neutral.
+
+Three flat shades per box are then derived from the resolved **opaque** base color:
+
+- top = base color at full lightness,
 - left side = base color scaled to ~0.72 lightness,
 - right side = base color scaled to ~0.58 lightness.
 
-This gives the 3-shade blocky look with NO lighting/gradients — just three precomputed
-solid fills.
+Because the base is opaque, `shade()` (multiply RGB by a factor, clamp) is well-defined and
+faces are fully opaque, so the painter's algorithm occludes correctly. This gives the
+3-shade blocky look with NO lighting/gradients — just three precomputed solid fills.
+
+`shade()` operates on `{r,g,b}` parsed from an opaque hex or `rgb()` string; a helper
+`toOpaqueRgb(color, bgColor)` normalises any input (hex, `rgb()`, or `rgba()`) to opaque
+RGB by compositing over `bgColor` when an alpha channel is present.
 
 ### 4. Painter's algorithm (back-to-front)
 
@@ -132,13 +197,24 @@ correctly occludes it. The faint floor slab for each room is drawn first (furthe
 before any boxes. Within a single box, faces are emitted bottom→sides→top so the top always
 paints last.
 
+**Known limitation (per-object centroid sort).** A single centroid depth key per object is
+not a true per-face depth order. A long wall spanning a large depth range can sort as a
+single unit and mis-order against furniture whose centroid falls "inside" that range,
+producing occasional occlusion glitches (e.g. a chair against a long back wall). This is an
+accepted tradeoff for this cut — a full BSP/per-face painter sort is out of scope. Stated
+here (not asserted as correct) so the reviewer and follow-ups know it is a deliberate
+simplification; the painter-order test asserts only the common furniture-vs-wall case, not
+the degenerate long-wall case.
+
 ### 5. Renderer structure — pure core + SVG painter
 
 `isoRender.js` splits into:
 
-- **Pure functions** (no DOM): `projectIso(wx, wy, wz)`, `extrudeFootprint(corners, z0,
-  z1)` → prism faces, `boxFaces(sym)` / `wallBoxFaces(segment)` → the visible face polygons
-  in world/iso space, `depthSort(items)`. These are unit-testable without a DOM.
+- **Pure functions** (no DOM): `extrudeFootprint(corners, z0, z1)` → prism faces (projected
+  via `view.worldToScreenIso`), `buildItems(...)` → item list, `depthSort(items)`,
+  `shade(baseColor, factor)`, `toOpaqueRgb(color, bgColor)`. The axonometric fold itself,
+  `worldToScreenIso`, lives in `view.js` (Approach §2). These are unit-testable without a
+  DOM (`view.js` runs headless; `worldToScreenIso` needs no DOM).
 - **`render()`** (DOM): clears the `#iso` SVG group, and when preview is active, builds the
   floor slabs + sorted boxes as SVG polygons and appends them. Registered as a
   surface `onRender` hook, and short-circuits (draws nothing) when preview is off.
@@ -230,22 +306,18 @@ inspection state, exactly like clearance `enabled`/`threshold`).
 ### `isoRender.js` (new) — projection core + SVG painter
 
 ```js
-// Fixed camera constants
-export const ISO_THETA = Math.PI / 6;   // 30°
-export const ISO_KZ    = <vertical scale for height>;
+// Fixed camera constants — the projection + θ + vertical scale live in view.js
+// (see Approach §2). isoRender re-exports CEILING_M and imports the projection.
 export const CEILING_M = 2.4;           // whole-plan ceiling height (metres)
-
-/**
- * Pure axonometric fold: world metres (wx, wy up-is-+y screen-plane, wz up) →
- * screen-pixel offset relative to the projected world origin, honouring pxPerM().
- * @returns {{ x:number, y:number }}
- */
-export function projectIso(wx, wy, wz);
+// ISO_THETA and ISO_KZ are exported from view.js:
+//   ISO_KZ = 0.82  — nonzero so height changes visibly move top faces up
+//                    (satisfies the height-sensitivity acceptance test).
 
 /**
  * The visible faces of a box given its 2D footprint corners (world) and z-range.
- * Returns an ordered list of faces (bottom/sides/top order), each a list of
- * projected screen points and a shade role.
+ * Projects each corner via view.worldToScreenIso(wx, wy, wz). Returns an ordered
+ * list of faces (bottom/sides/top order), each a list of projected SCREEN points
+ * and a shade role.
  * @param {{x,y}[]} footprint  world-metre polygon (e.g. corners(sym) or a wall quad)
  * @param {number} z0  base height (metres, usually 0)
  * @param {number} z1  top height (metres)
@@ -254,11 +326,20 @@ export function projectIso(wx, wy, wz);
 export function extrudeFootprint(footprint, z0, z1);
 
 /**
- * Build the extrudable item list from the live models: one item per closed-room
- * wall quad segment (z0=0, z1=CEILING_M) and one per non-floorLayer symbol
- * (z0=0, z1=CATALOG[type].z). floorLayer symbols (rugs) become flat floor decals,
- * not boxes. Returns items with a precomputed depth sort key.
- * @returns {{ footprint:{x,y}[], z0:number, z1:number, baseColor:string, sortKey:number }[]}
+ * Build the extrudable item list from the live models.
+ *
+ * Walls: iterate wallsModel.rooms, keep ONLY room.closed === true; for each kept
+ *   room, emit one item per edge (consecutive vert pairs + the closing edge),
+ *   expanded to a WALL_M-thick quad footprint, z0=0, z1=CEILING_M. Open rooms and
+ *   wallsModel.chain (the in-progress draft) are NEVER read — so open walls and the
+ *   active chain do not appear (Edge Cases 3, 9).
+ * Furniture: one item per non-floorLayer symbol (z0=0, z1=CATALOG[type].z).
+ *   floorLayer symbols (rugs) become flat floor decals (z1≈z0), not boxes.
+ *
+ * baseColor is an OPAQUE color resolved per Approach §3 (sym.color, else the
+ * per-category opaque base for the current theme; walls use the opaque wall base).
+ * Returns items with a precomputed depth sort key.
+ * @returns {{ kind:"wall"|"furniture"|"rug", footprint:{x,y}[], z0:number, z1:number, baseColor:string, sortKey:number }[]}
  */
 export function buildItems(wallsModel, symbolsModel);
 
@@ -272,8 +353,10 @@ export function init(gIso, getActive);
 export function render();
 ```
 
-Shade derivation is a pure helper `shade(baseColor, factor)` (multiply RGB channels by
-`factor`, clamp) so the three face fills are deterministic and testable.
+Shade derivation is a pure helper `shade(baseColor, factor)` (parse to opaque RGB, multiply
+channels by `factor`, clamp) so the three face fills are deterministic and testable.
+`toOpaqueRgb(color, bgColor)` composites any alpha-bearing input over `bgColor` first so
+`shade` always receives an opaque color (see Approach §3).
 
 ### `index.html`
 
@@ -283,6 +366,17 @@ Shade derivation is a pure helper `shade(baseColor, factor)` (multiply RGB chann
   aria-pressed="false">` with an icon and `<span class="tool-key-hint">P</span>`.
 - CSS: a `.stage--preview` class on `#stage` that hides the 2D layers/overlays and shows
   `#iso`; the accent-ring active style for `#tool-preview[aria-pressed="true"]`.
+
+### `help.js` — shortcuts overlay (LLD 54)
+
+Add one row to the `SHORTCUTS` data array so the new `P` shortcut appears in the cheat-sheet
+overlay alongside the other tool keys:
+
+```js
+{ group: "Tools", action: "3D preview toggle", mac: "P", other: "P" },
+```
+
+No other change to `help.js` (it renders the table from the array).
 
 ### `main.js` wiring (mirrors clearance/measure)
 
@@ -347,10 +441,11 @@ class is derived from `_active` and reset on load.
    Verified by a round-trip test.
 2. **Empty plan (no rooms, no symbols).** Preview renders nothing (empty `#iso` group);
    toggling on/off is a no-op visually. No crash.
-3. **Open rooms (unclosed chains / open polylines).** No enclosed footprint → no floor slab
-   and no wall boxes for that room this cut (walls are extruded from closed-room wall quad
-   segments). Document as a known limitation; open walls simply don't appear in 3D. (A
-   follow-up may extrude open wall segments as thin slabs.)
+3. **Open rooms (unclosed chains / open polylines).** `buildItems` keeps only
+   `room.closed === true` rooms (it iterates `walls.model.rooms` directly, NOT
+   `wallSegments()`), so an open room contributes no floor slab and no wall boxes this cut.
+   Document as a known limitation; open walls simply don't appear in 3D. (A follow-up may
+   extrude open wall segments as thin slabs.)
 4. **Rug / floorLayer symbols.** `z ≈ 0.01` → rendered as a flat projected floor decal at
    z=0 (top face only, no visible side faces), never a box. Keeps the "peek" clean.
 5. **Openings (door/window).** Extruded as boxes at their leaf height, flush in the wall
@@ -365,16 +460,19 @@ class is derived from `_active` and reset on load.
 8. **Very tall item vs ceiling (e.g. wardrobe 2.0m, bookshelf 1.8m).** Furniture is
    extruded to its own `z` independent of `CEILING_M`; an item taller than the ceiling is
    allowed to poke above wall tops (rare, realistic-ish, and cheap). No clamping.
-9. **Preview toggled on mid-draw (active chain in progress).** The chain is draft-only 2D
-   state; preview hides it and does not commit or discard it. Exiting preview restores the
-   in-progress chain untouched.
+9. **Preview toggled on mid-draw (active chain in progress).** `buildItems` never reads
+   `walls.model.chain`, so the in-progress draft contributes nothing to the preview. The
+   chain is draft-only 2D state; preview does not commit or discard it, and exiting preview
+   restores the in-progress chain untouched (it was never mutated).
 10. **Pointer events on the stage while preview is active.** Tool handlers early-return on
     `preview.isActive()`, so no vertex placement / selection / measurement can mutate the
     plan. Guarantees read-only.
-11. **Zoom/pan while preview active.** The iso projection reads `pxPerM()` + view pan, so
-    the scene pans/zooms consistently; no separate camera state to desync.
-12. **Degenerate footprint (zero-area / collinear).** Skipped (no faces emitted), mirroring
-    how `roomCentroids`/`wallSegments` skip degenerate geometry.
+11. **Zoom/pan while preview active.** `worldToScreenIso` reuses `worldToScreen`'s
+    `pxPerM()` + pan internally (Approach §2), so the scene pans/zooms consistently with the
+    2D framing; no separate camera state to desync.
+12. **Degenerate footprint (zero-area / collinear).** Skipped (no faces emitted): wall edges
+    below `MIN_SEG_M` and zero-area footprints are dropped, mirroring how `roomCentroids`
+    skips degenerate polygons.
 13. **Theme switch (dark/light) while preview active.** Face shades derive from the live
     palette base colors at render time, so a theme toggle re-derives shades on the next
     `scheduleRender()` (already fired by `onThemeChange`).
@@ -385,15 +483,20 @@ Everything needed already exists in the codebase; no new runtime dependency, no 
 
 - **`symbols.js`** — `CATALOG` (add `z` per type), `corners(sym)` (footprint), `CATALOG`
   `floorLayer`/`openings` flags (rug/opening handling), `model`.
-- **`walls.js`** — `model.rooms`, `wallSegments()` (source of wall quads to extrude),
-  `roomCentroids()` (floor-slab source + depth key aid), `WALL_M` (wall thickness for the
-  wall quad width).
-- **`view.js`** — `pxPerM()`, `view.panX/panY` for scene framing (zoom/pan consistency);
-  `onChange` already re-renders.
+- **`walls.js`** — `model.rooms` (iterated directly; filter `room.closed`, exclude
+  `model.chain` — NOT via `wallSegments()`, which includes open rooms + the draft chain),
+  `roomCentroids()` (floor-slab footprints + depth-key aid), `WALL_M` (wall quad thickness),
+  `MIN_SEG_M` (degenerate-edge skip).
+- **`view.js`** — **NEW** `worldToScreenIso(wx,wy,wz)` + `ISO_THETA`/`ISO_KZ` exports
+  (added here so pan/zoom reads stay inside `view.js`, honouring its invariant — Approach
+  §2); `onChange` already re-renders on pan/zoom.
 - **`surface.js`** — `onRender(cb)` hook registration + `scheduleRender()`.
-- **`theme.js`** — `palette()` for base fill colors + `onThemeChange` (already wired to
-  re-render).
+- **`theme.js`** — `palette()` (opaque tokens: `bg` for compositing, `gold`/`wallLine` for
+  the wall base), `getTheme()` (light/dark selection for the per-category base colors), and
+  `onThemeChange` (already wired to re-render, so shades re-derive on theme switch).
 - **`main.js`** — tool-rail toggle wiring, keydown handlers (mirror measure/clearance).
+- **`help.js`** — add a `SHORTCUTS` row documenting the `P` shortcut in the cheat-sheet
+  overlay (LLD 54).
 - **`plan.js`** — referenced only to confirm NO change is required (back-compat is a
   non-event because height is a catalog constant).
 - **`index.html`** — add `#iso` SVG group, `#tool-preview` button + separator, and CSS for
@@ -417,20 +520,30 @@ build a detached SVG group, call `render()`, assert on child polygons.
 
 ### Unit — projection core (pure)
 
-- `projectIso(0,0,0)` maps to origin offset; `projectIso` is linear in each of wx/wy/wz.
+- `worldToScreenIso(0,0,0)` equals `worldToScreen(0,0)`; `worldToScreenIso` is linear in
+  each of wx/wy/wz at a fixed zoom/pan.
 - Increasing `wz` moves the projected point strictly up (screen −y) — height reads as up.
+  Requires `ISO_KZ > 0` (asserted nonzero; value 0.82).
 - `extrudeFootprint` returns the expected face count for a 4-corner footprint: 1 top + 2
   camera-facing sides (+ bottom if emitted) — assert the exact number of `role:"top"` /
   `role:"left"` / `role:"right"` faces.
 - `shade(base, factor)` produces darker fills for smaller factors and is deterministic.
+- `toOpaqueRgb` composites an `rgba(...,a<1)` input over a bg to an opaque color (no alpha
+  in output) and passes an already-opaque input through unchanged.
 - `depthSort` orders items ascending by `sortKey` (back-to-front), stable for ties.
 
 ### Unit — item build
 
-- `buildItems` produces one box per closed-room wall segment (z0=0, z1=CEILING_M) and one
-  per non-floorLayer symbol (z1 = catalog `z`); floorLayer (rug) items are flat (z1≈z0)
-  decals, not boxes.
-- Open rooms contribute no wall boxes; empty model → empty item list.
+- `buildItems` produces one box per closed-room wall edge (z0=0, z1=CEILING_M) and one per
+  non-floorLayer symbol (z1 = catalog `z`); floorLayer (rug) items are flat (z1≈z0) decals,
+  not boxes.
+- **Open rooms contribute no wall boxes** (a model with one open + one closed room yields
+  wall items only for the closed room).
+- **The active draft chain contributes nothing** (`buildItems` on a model with a non-empty
+  `walls.model.chain` and no closed rooms yields an empty wall set).
+- Empty model → empty item list.
+- Every furniture/wall item's `baseColor` is opaque (no `rgba(...,a<1)`); two different
+  categories yield different base colors.
 
 ### SVG-structural — renderer (LLD 61 pattern)
 
@@ -443,8 +556,10 @@ build a detached SVG group, call `render()`, assert on child polygons.
   a specific top-face vertex's y decreases. This is the acceptance-criterion test that
   "a change in height/ceiling changes the projected geometry."
 - Rug renders a flat decal (single top polygon, no side faces).
-- Painter order: the polygon for a nearer item appears **after** (later in child order than)
-  a farther item it overlaps.
+- Painter order: for the common furniture-vs-wall case (a piece with a nearer centroid than
+  a wall), the nearer item's polygons appear **after** (later in child order than) the
+  farther item's. (The long-wall mis-order case in Approach §4 is a known limitation and is
+  NOT asserted.)
 
 ### Integration — back-compat round-trip (acceptance)
 
