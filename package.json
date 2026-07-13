@@ -1,4 +1,13 @@
 {
-  "name": "floorplan-tests",
-  "private": true
+  "name": "floorplan",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^6.0.7"
+  }
 }

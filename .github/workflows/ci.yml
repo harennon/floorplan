@@ -29,6 +29,17 @@ jobs:
         with:
           node-version: "20"
 
+      # ── Step 0: Build (Vite) ─────────────────────────────────────────────────
+      # LLD 127: the app now ships as a Vite bundle under dist/ (not raw src/).
+      # `npm ci` installs Vite from the committed lockfile; `npm run build` emits
+      # dist/. This MUST run before the Playwright install below (npm ci wipes
+      # node_modules) and before the tests — the integration + smoke tests drive
+      # dist/index.html, the artifact Cloudflare Pages actually deploys.
+      - name: Install deps and build
+        run: |
+          npm ci
+          npm run build
+
       # ── Step 1: HTML validation ──────────────────────────────────────────────
       # html-validate checks structural correctness of all HTML files: the app
       # under src/ and the test harness under test/.
@@ -63,15 +74,27 @@ jobs:
       # local HTTP server (so the harness can import ../src/js/* app modules),
       # load the page in headless Chromium, and read window.__testResult
       # (set by the harness's render() function after all async tests resolve).
-      # playwright is installed locally (--no-save avoids creating package.json)
-      # so run-tests.mjs can import it; node_modules/ is gitignored.
+      # playwright is installed with --no-save so it stays out of the committed
+      # lockfile that `npm ci` (Step 0) validates — it's a CI-only test tool, not
+      # an app dependency. node_modules/ is gitignored.
       - name: Install Playwright and Chromium
         run: |
           npm install --no-save playwright@1.49.1
           npx playwright install --with-deps chromium
 
-      - name: Run unit tests
+      # Unit tests import app modules from source; integration tests (in the same
+      # runner) drive dist/index.html — the built artifact — so they need the
+      # Step 0 build to have produced dist/.
+      - name: Run unit + integration tests
         run: node .github/run-tests.mjs
+
+      # ── Step 3d: Build smoke test ────────────────────────────────────────────
+      # Validates the shipped bundle: dist/index.html exists, references a hashed
+      # asset (proves Vite transformed the source), and boots headless with zero
+      # console errors. Guards against a build that passes source tests but emits
+      # broken output (LLD 127).
+      - name: Build smoke test
+        run: node .github/build-smoke.mjs
 
       # ── Step 3b: MCP server tests (pure Node, no Chromium) ───────────────────
       # The mcp/ suite (node --test) is the import-boundary drift guard from LLD 32
