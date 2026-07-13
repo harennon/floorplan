@@ -846,3 +846,77 @@ test("LLD 104: set_brief with furniture:[{type:'gaming-chair'}] is accepted", ()
   const r = tools.tool_set_brief({ furniture: [{ type: "gaming-chair" }] });
   assert.equal(r.ok, true);
 });
+
+// ── LLD 129: counter + island catalog types ───────────────────────────────────
+
+test("LLD 129: place_symbol({type:'counter'}) returns ok:true with catalog-default dims", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "counter", x: 3, y: 3 });
+  assert.equal(p.ok, true);
+  assert.ok(Math.abs(p.w - CATALOG.counter.w) < 1e-9, `w expected ${CATALOG.counter.w}, got ${p.w}`);
+  assert.ok(Math.abs(p.h - CATALOG.counter.h) < 1e-9, `h expected ${CATALOG.counter.h}, got ${p.h}`);
+});
+
+test("LLD 129: place_symbol({type:'island'}) returns ok:true with catalog-default dims", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "island", x: 5, y: 5 });
+  assert.equal(p.ok, true);
+  assert.ok(Math.abs(p.w - CATALOG.island.w) < 1e-9, `w expected ${CATALOG.island.w}, got ${p.w}`);
+  assert.ok(Math.abs(p.h - CATALOG.island.h) < 1e-9, `h expected ${CATALOG.island.h}, got ${p.h}`);
+});
+
+test("LLD 129: place_symbol counter with preset:'Prep run 36\"' resolves to 0.91×0.61", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "counter", x: 3, y: 3, preset: "Prep run 36\"" });
+  assert.equal(p.ok, true);
+  assert.ok(Math.abs(p.w - 0.91) < 1e-9, `w expected 0.91, got ${p.w}`);
+  assert.ok(Math.abs(p.h - 0.61) < 1e-9, `h expected 0.61, got ${p.h}`);
+  assert.equal(p.presetApplied, "Prep run 36\"");
+});
+
+test("LLD 129: place_symbol island with preset:'Standard' resolves to 1.20×0.90", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "island", x: 5, y: 5, preset: "Standard" });
+  assert.equal(p.ok, true);
+  assert.ok(Math.abs(p.w - 1.20) < 1e-9, `w expected 1.20, got ${p.w}`);
+  assert.ok(Math.abs(p.h - 0.90) < 1e-9, `h expected 0.90, got ${p.h}`);
+  assert.equal(p.presetApplied, "Standard");
+});
+
+test("LLD 129: place_symbol counter with unknown preset → ok:false with valid names listed", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const countBefore = symbolsModel.symbols.length;
+  const r = tools.tool_place_symbol({ type: "counter", x: 3, y: 3, preset: "Corner L-shape" });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /unknown preset/);
+  assert.match(r.reason, /Prep run 36/);
+  assert.equal(symbolsModel.symbols.length, countBefore);
+});
+
+test("LLD 129: place_symbol island with unknown preset → ok:false with valid names listed", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const countBefore = symbolsModel.symbols.length;
+  const r = tools.tool_place_symbol({ type: "island", x: 5, y: 5, preset: "Waterfall" });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /unknown preset/);
+  assert.match(r.reason, /Standard/);
+  assert.equal(symbolsModel.symbols.length, countBefore);
+});
+
+test("LLD 129: set_brief with furniture:[{type:'counter'}] is accepted", () => {
+  session.newPlan();
+  const r = tools.tool_set_brief({ furniture: [{ type: "counter" }] });
+  assert.equal(r.ok, true);
+});
+
+test("LLD 129: set_brief with furniture:[{type:'island'}] is accepted", () => {
+  session.newPlan();
+  const r = tools.tool_set_brief({ furniture: [{ type: "island" }] });
+  assert.equal(r.ok, true);
+});

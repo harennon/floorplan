@@ -14,6 +14,7 @@
  *   |"toilet"|"bathtub"|"sink"|"stove"|"wardrobe"|"bookshelf"|"tv"|"washer"
  *   |"armchair"|"coffee-table"|"dining-table-round"
  *   |"monitor"|"gaming-chair"
+ *   |"counter"|"island"
  *   |"nightstand"|"dresser"|"cabinet"
  *   |"patio-table"|"patio-chair"|"parasol"|"planter"
  *   |"rug"} SymbolType */
@@ -200,6 +201,27 @@ export const CATALOG = {
     presets: [
       { name: "24\" compact",  w: 0.61, h: 0.65 },
       { name: "27\" standard", w: 0.69, h: 0.76 },
+    ],
+  },
+  counter: {
+    label: "Counter", category: "kitchen", w: 0.91, h: 0.61,
+    min_w: 0.30, max_w: 3.66, min_h: 0.55, max_h: 0.68,
+    presets: [
+      { name: "Fridge landing 15\"", w: 0.38, h: 0.61 },
+      { name: "Sink/stove side 24\"", w: 0.61, h: 0.61 },
+      { name: "Prep run 36\"",        w: 0.91, h: 0.61 },
+      { name: "Run 48\"",             w: 1.22, h: 0.61 },
+      { name: "Run 72\"",             w: 1.83, h: 0.61 },
+    ],
+  },
+  island: {
+    label: "Island", category: "kitchen", w: 1.20, h: 0.90,
+    min_w: 0.90, max_w: 3.00, min_h: 0.60, max_h: 1.22,
+    presets: [
+      { name: "Compact",  w: 1.00, h: 0.60 },
+      { name: "Standard", w: 1.20, h: 0.90 },
+      { name: "Large",    w: 1.83, h: 1.00 },
+      { name: "Seating",  w: 2.44, h: 1.07 },
     ],
   },
 
