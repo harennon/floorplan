@@ -204,26 +204,34 @@ export function extrudeFootprint(footprint, z0, z1) {
   // Bottom face first
   faces.push({ role: "bottom", pts: bottom });
 
-  // Side faces: camera looks from +x+y direction
+  // Footprint centroid (world metres) — used to orient each edge normal
+  // outward. This is winding-independent, so it works for both furniture
+  // footprints (corners(), CCW) and wall quads (_wallQuad, CW) alike.
+  let fcx = 0, fcy = 0;
+  for (const p of footprint) { fcx += p.x; fcy += p.y; }
+  fcx /= n; fcy /= n;
+
+  // Side faces: camera looks from the +x+y direction, so an edge is visible
+  // when its OUTWARD normal has a positive dot with (1,1).
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
     const ax = footprint[i].x, ay = footprint[i].y;
     const bx = footprint[j].x, by = footprint[j].y;
     const ex = bx - ax, ey = by - ay;
 
-    // Two candidate outward normals (CW and CCW orientation)
-    const nx1 =  ey, ny1 = -ex;
-    const nx2 = -ey, ny2 =  ex;
-    const dot1 = nx1 + ny1;
-    const dot2 = nx2 + ny2;
-    const dot = Math.max(dot1, dot2);
+    // Edge perpendicular, flipped to point away from the centroid (outward).
+    let nx = ey, ny = -ex;
+    const mx = (ax + bx) / 2 - fcx;
+    const my = (ay + by) / 2 - fcy;
+    if (nx * mx + ny * my < 0) { nx = -nx; ny = -ny; }
+
+    const dot = nx + ny; // dot(outwardNormal, cameraDir=(1,1))
     if (dot <= 0) continue; // edge faces away from camera
 
     const pts = [bottom[i], bottom[j], top[j], top[i]];
     // Left face: normal has (nx-ny) < 0 (roughly along world-y axis facing camera)
     // Right face: normal has (nx-ny) >= 0 (roughly along world-x axis facing camera)
-    const winner = (dot1 >= dot2) ? { nx: nx1, ny: ny1 } : { nx: nx2, ny: ny2 };
-    const role = (winner.nx - winner.ny) >= 0 ? "right" : "left";
+    const role = (nx - ny) >= 0 ? "right" : "left";
     faces.push({ role, pts });
   }
 

@@ -31,6 +31,7 @@ import { beginEdit as beginDimEdit, cancel as cancelDimEdit, isEditing as isDimE
 import { palette } from "./theme.js";
 import { SWATCHES, swatchGroupsForCategory } from "./palette.js";
 import { setSymbolColor } from "./symbols.js";
+import { isActive as previewIsActive } from "./preview.js";
 
 // history and showToast are injected to avoid circular dependencies at init time
 let _historyCommit = null;
@@ -377,6 +378,9 @@ export function selectSymbol(id) {
 // ── Dock drag-placement ────────────────────────────────────────────────────────
 
 function _onDockPointerDown(e) {
+  // Preview is a read-only view mode (LLD 128, edge case 10): dock drag-placement
+  // must not mutate the plan. Mirror the guarded select/draw/measure/dim paths.
+  if (previewIsActive()) return;
   const btn = e.target.closest("[data-type]");
   if (!btn) return;
   const type = btn.getAttribute("data-type");

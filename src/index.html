@@ -196,12 +196,16 @@
       .stage--preview #measure,
       .stage--preview #symbol-overlay { display: none; }
       .stage--preview #iso { display: block; }
-      /* Hide chip HTML overlays in preview mode */
-      .stage--preview ~ .labels,
-      .stage--preview ~ .dim-labels { display: none; }
-      /* Hide HTML overlays that are siblings of #stage (e.g. symbol-inspector,
-         clearance panel, measure panel): use pointer-events:none so they don't
-         block pan/zoom gestures; visibility toggles are managed in main.js */
+      /* Hide chip HTML overlays in preview mode. .labels/.dim-labels are CHILDREN
+         of #stage, so this must be a descendant selector, not `~` (general-sibling
+         never matched — interactive dim-chips leaked over the read-only preview). */
+      .stage--preview .labels,
+      .stage--preview .dim-labels { display: none; }
+      /* Hide the mutation-capable HTML overlays that are later SIBLINGS of #stage
+         (symbol dock + symbol inspector) so they can't leak edits over the
+         read-only preview. The dock handler is additionally guarded in JS. */
+      .stage--preview ~ #symbol-dock,
+      .stage--preview ~ #symbol-inspector { display: none; }
       /* #iso is always in the DOM but invisible by default in 2D mode */
       #iso { display: none; }
       .stage--preview #iso { display: block; }

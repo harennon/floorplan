@@ -17007,9 +17007,31 @@ describe("LLD 128 — extrudeFootprint", () => {
     // Must have bottom
     const bottoms = roles.filter(r => r === "bottom");
     if (bottoms.length !== 1) throw new Error("Expected exactly 1 bottom face, got " + bottoms.length);
-    // Must have at least 2 side faces (left/right)
+    // Must have EXACTLY 2 camera-facing side faces (back-face culling). A
+    // weakened `>= 2` here previously masked a culling no-op that rendered all
+    // four side faces (rear faces bled through). Assert the exact count.
     const sides = roles.filter(r => r === "left" || r === "right");
-    if (sides.length < 2) throw new Error("Expected >= 2 side faces, got " + sides.length);
+    if (sides.length !== 2) throw new Error("Expected exactly 2 side faces, got " + sides.length);
+  });
+
+  it("culls to exactly 2 sides regardless of winding (CW footprint)", () => {
+    // Walls (_wallQuad) wind CW, furniture (corners) winds CCW — opposite of
+    // the CCW square above. Centroid-based normals must cull both to the same
+    // 2 camera-facing faces (one left, one right). Guards against a fixed-normal
+    // regression that would render the rear faces of every wall.
+    view128.zoom = 1; view128.panX = 0; view128.panY = 0;
+    const cw = [
+      { x: 0, y: 0 },
+      { x: 0, y: 2 },
+      { x: 2, y: 2 },
+      { x: 2, y: 0 },
+    ];
+    const roles = extrudeFootprint(cw, 0, 1).map(f => f.role);
+    const sides = roles.filter(r => r === "left" || r === "right");
+    if (sides.length !== 2) throw new Error("CW footprint: expected exactly 2 side faces, got " + sides.length);
+    if (!roles.includes("left") || !roles.includes("right")) {
+      throw new Error("CW footprint: expected one left + one right face, got " + JSON.stringify(roles));
+    }
   });
 
   it("each face has >= 3 pts", () => {
@@ -17379,6 +17401,51 @@ describe("LLD 128 — preview state module", () => {
     previewOnChange(() => { count++; });
     previewSetActive(false); // same value
     if (count !== 0) throw new Error("onChange should not fire when value unchanged");
+  });
+
+  it("dock drag-placement is a no-op while preview is active (read-only guarantee)", () => {
+    // Read-only leak regression (LLD 128 edge case 10): #symbol-dock is a sibling
+    // of #stage, so the .stage--preview CSS can't reach it — _onDockPointerDown
+    // must itself early-return on previewIsActive(), or a dock drag would add a
+    // symbol to the plan while "view-only" preview is showing.
+    const stage = document.createElement("div");
+    stage.setPointerCapture = () => {};
+    const dock = document.createElement("div");
+    dock.setPointerCapture = () => {};
+    const inspector = document.createElement("div");
+    const item = document.createElement("button");
+    item.className = "dock-item";
+    item.setAttribute("data-type", "chair");
+    dock.appendChild(item);
+    document.body.appendChild(stage);
+    document.body.appendChild(dock);
+    document.body.appendChild(inspector);
+
+    initSymbolTool({ stage, dock, inspector, setTool: () => {}, isDrawMode: () => false });
+
+    symbolModel.symbols.length = 0;
+    previewSetActive(true);
+
+    // Simulate the start of a dock drag on the chair item.
+    item.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 42,
+      clientX: 100, clientY: 100, pointerType: "mouse", buttons: 1,
+    }));
+    // And a drop, which is where createSymbol/addSymbol would fire if unguarded.
+    dock.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true, cancelable: true, pointerId: 42,
+      clientX: 200, clientY: 200, pointerType: "mouse",
+    }));
+
+    const leaked = symbolModel.symbols.length;
+
+    previewSetActive(false);
+    symbolModel.symbols.length = 0;
+    document.body.removeChild(stage);
+    document.body.removeChild(dock);
+    document.body.removeChild(inspector);
+
+    if (leaked !== 0) throw new Error(`Dock drag mutated the plan during preview: added ${leaked} symbol(s)`);
   });
 });
 
