@@ -1976,7 +1976,8 @@ describe("symbols.js — units reuse: fmtLen/parseLen round-trip for w/h", () =>
 // ─── Tests: LLD-45 — new furniture types ─────────────────────────────────────
 
 const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer",
-                     "nightstand", "dresser", "cabinet", "monitor", "gaming-chair"];
+                     "nightstand", "dresser", "cabinet", "monitor", "gaming-chair",
+                     "counter", "island"];
 
 describe("LLD-45 — catalog integrity: all new types present and valid", () => {
   it("every new type exists in CATALOG with a valid category (updated by LLD-50/LLD-76)", () => {
@@ -9363,7 +9364,7 @@ function _makeDockDOM() {
   const itemsByCategory = {
     openings: ["door", "window"],
     living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf", "armchair", "coffee-table", "dining-table-round", "rug", "monitor", "gaming-chair"],
-    kitchen:  ["fridge", "stove", "sink", "washer"],
+    kitchen:  ["fridge", "stove", "sink", "washer", "counter", "island"],
     bedroom:  ["bed", "wardrobe", "nightstand", "dresser", "cabinet"],
     bath:     ["toilet", "bathtub"],
     outdoor:  ["patio-table", "patio-chair", "parasol", "planter"],
@@ -16838,6 +16839,217 @@ describe("LLD 107 — symbolRender: rug routes to #rugs, not #symbols", () => {
     // Selection overlay should have children (selection box + rotate handle)
     if (rig.gOverlay.children.length === 0)
       throw new Error("No overlay elements for selected rug (selection box/handle missing)");
+  });
+});
+
+// ─── Tests: LLD 129 — counter + island catalog types ──────────────────────────
+
+describe("LLD 129 — CATALOG: counter entry", () => {
+  it("CATALOG.counter exists", () => {
+    if (!("counter" in CATALOG)) throw new Error("CATALOG.counter is missing");
+  });
+
+  it("CATALOG.counter.category is 'kitchen'", () => {
+    expect(CATALOG.counter.category).toBe("kitchen");
+  });
+
+  it("CATALOG.counter has a non-empty label", () => {
+    if (!CATALOG.counter.label || CATALOG.counter.label.trim() === "") throw new Error("counter has empty label");
+  });
+
+  it("CATALOG.counter has finite w, h, and per-axis bounds", () => {
+    const cat = CATALOG.counter;
+    for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
+      if (!isFinite(cat[key])) throw new Error(`CATALOG.counter.${key} is not finite: ${cat[key]}`);
+    }
+  });
+
+  it("CATALOG.counter: min_w <= w <= max_w and min_h <= h <= max_h", () => {
+    const { w, h, min_w, max_w, min_h, max_h } = CATALOG.counter;
+    if (w < min_w || w > max_w) throw new Error(`counter: w=${w} not in [${min_w},${max_w}]`);
+    if (h < min_h || h > max_h) throw new Error(`counter: h=${h} not in [${min_h},${max_h}]`);
+  });
+
+  it("CATALOG.counter has no openings, circular, discrete, or floorLayer flags", () => {
+    const cat = CATALOG.counter;
+    if (cat.openings)   throw new Error("counter unexpectedly has openings:true");
+    if (cat.circular)   throw new Error("counter unexpectedly has circular:true");
+    if (cat.discrete)   throw new Error("counter unexpectedly has discrete:true");
+    if (cat.floorLayer) throw new Error("counter unexpectedly has floorLayer:true");
+  });
+
+  it("CATALOG.counter.presets: all presets lie within per-axis bounds", () => {
+    const { min_w, max_w, min_h, max_h, presets } = CATALOG.counter;
+    for (const p of presets) {
+      if (p.w < min_w || p.w > max_w) throw new Error(`counter preset '${p.name}': w=${p.w} not in [${min_w},${max_w}]`);
+      if (p.h < min_h || p.h > max_h) throw new Error(`counter preset '${p.name}': h=${p.h} not in [${min_h},${max_h}]`);
+    }
+  });
+
+  it("CATALOG.counter: min_w <= 0.38 (fridge landing 15\" fits within bounds)", () => {
+    expect(CATALOG.counter.min_w).toBeLessThanOrEqual(0.38);
+  });
+
+  it("CATALOG.counter: 'Prep run 36\"' preset width 0.91 lies within [min_w, max_w]", () => {
+    const { min_w, max_w, presets } = CATALOG.counter;
+    const prepRun = presets.find(p => p.name === "Prep run 36\"");
+    if (!prepRun) throw new Error("counter: 'Prep run 36\"' preset not found");
+    if (prepRun.w < min_w || prepRun.w > max_w) throw new Error(`counter 'Prep run 36\"': w=${prepRun.w} not in [${min_w},${max_w}]`);
+  });
+});
+
+describe("LLD 129 — CATALOG: island entry", () => {
+  it("CATALOG.island exists", () => {
+    if (!("island" in CATALOG)) throw new Error("CATALOG.island is missing");
+  });
+
+  it("CATALOG.island.category is 'kitchen'", () => {
+    expect(CATALOG.island.category).toBe("kitchen");
+  });
+
+  it("CATALOG.island has a non-empty label", () => {
+    if (!CATALOG.island.label || CATALOG.island.label.trim() === "") throw new Error("island has empty label");
+  });
+
+  it("CATALOG.island has finite w, h, and per-axis bounds", () => {
+    const cat = CATALOG.island;
+    for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h"]) {
+      if (!isFinite(cat[key])) throw new Error(`CATALOG.island.${key} is not finite: ${cat[key]}`);
+    }
+  });
+
+  it("CATALOG.island: min_w <= w <= max_w and min_h <= h <= max_h", () => {
+    const { w, h, min_w, max_w, min_h, max_h } = CATALOG.island;
+    if (w < min_w || w > max_w) throw new Error(`island: w=${w} not in [${min_w},${max_w}]`);
+    if (h < min_h || h > max_h) throw new Error(`island: h=${h} not in [${min_h},${max_h}]`);
+  });
+
+  it("CATALOG.island has no openings, circular, discrete, or floorLayer flags", () => {
+    const cat = CATALOG.island;
+    if (cat.openings)   throw new Error("island unexpectedly has openings:true");
+    if (cat.circular)   throw new Error("island unexpectedly has circular:true");
+    if (cat.discrete)   throw new Error("island unexpectedly has discrete:true");
+    if (cat.floorLayer) throw new Error("island unexpectedly has floorLayer:true");
+  });
+
+  it("CATALOG.island.presets: all presets lie within per-axis bounds", () => {
+    const { min_w, max_w, min_h, max_h, presets } = CATALOG.island;
+    for (const p of presets) {
+      if (p.w < min_w || p.w > max_w) throw new Error(`island preset '${p.name}': w=${p.w} not in [${min_w},${max_w}]`);
+      if (p.h < min_h || p.h > max_h) throw new Error(`island preset '${p.name}': h=${p.h} not in [${min_h},${max_h}]`);
+    }
+  });
+});
+
+describe("LLD 129 — createSymbol: counter and island return correct Sym", () => {
+  it("createSymbol('counter') returns correct type, catalog defaults, rot:0, and string id", () => {
+    resetSymbolModel();
+    const s = createSymbol("counter", 1, 2);
+    expect(s.type).toBe("counter");
+    expect(s.w).toBeCloseTo(CATALOG.counter.w, 9);
+    expect(s.h).toBeCloseTo(CATALOG.counter.h, 9);
+    expect(s.rot).toBe(0);
+    if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(`invalid id: ${s.id}`);
+    resetSymbolModel();
+  });
+
+  it("createSymbol('island') returns correct type, catalog defaults, rot:0, and string id", () => {
+    resetSymbolModel();
+    const s = createSymbol("island", 3, 4);
+    expect(s.type).toBe("island");
+    expect(s.w).toBeCloseTo(CATALOG.island.w, 9);
+    expect(s.h).toBeCloseTo(CATALOG.island.h, 9);
+    expect(s.rot).toBe(0);
+    if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(`invalid id: ${s.id}`);
+    resetSymbolModel();
+  });
+});
+
+describe("LLD 129 — clampDim: counter and island clamp at per-axis bounds", () => {
+  it("counter: width below min_w (0.30) clamps to min_w", () => {
+    expect(clampDim("counter", "w", 0.10)).toBeCloseTo(CATALOG.counter.min_w, 9);
+  });
+
+  it("counter: width above max_w (3.66) clamps to max_w", () => {
+    expect(clampDim("counter", "w", 9.99)).toBeCloseTo(CATALOG.counter.max_w, 9);
+  });
+
+  it("counter: depth below min_h (0.55) clamps to min_h", () => {
+    expect(clampDim("counter", "h", 0.10)).toBeCloseTo(CATALOG.counter.min_h, 9);
+  });
+
+  it("counter: depth above max_h (0.68) clamps to max_h", () => {
+    expect(clampDim("counter", "h", 9.99)).toBeCloseTo(CATALOG.counter.max_h, 9);
+  });
+
+  it("island: width below min_w (0.90) clamps to min_w", () => {
+    expect(clampDim("island", "w", 0.10)).toBeCloseTo(CATALOG.island.min_w, 9);
+  });
+
+  it("island: width above max_w (3.00) clamps to max_w", () => {
+    expect(clampDim("island", "w", 9.99)).toBeCloseTo(CATALOG.island.max_w, 9);
+  });
+
+  it("island: depth below min_h (0.60) clamps to min_h", () => {
+    expect(clampDim("island", "h", 0.10)).toBeCloseTo(CATALOG.island.min_h, 9);
+  });
+
+  it("island: depth above max_h (1.22) clamps to max_h", () => {
+    expect(clampDim("island", "h", 9.99)).toBeCloseTo(CATALOG.island.max_h, 9);
+  });
+});
+
+describe("LLD 129 — resizeSymbol: counter and island are continuous (non-discrete)", () => {
+  it("counter: resize w to in-range value between presets keeps exact value (continuous, not snapped)", () => {
+    resetSymbolModel();
+    const s = createSymbol("counter", 0, 0);
+    // 0.75 is between 'Sink/stove side 24\"' (0.61) and 'Prep run 36\"' (0.91), within [0.30,3.66]
+    const changed = resizeSymbol(s, "w", 0.75);
+    expect(s.w).toBeCloseTo(0.75, 9);
+    expect(changed).toBe(true);
+    resetSymbolModel();
+  });
+
+  it("island: resize w to in-range value between presets keeps exact value (continuous, not snapped)", () => {
+    resetSymbolModel();
+    const s = createSymbol("island", 0, 0);
+    // 1.50 is between 'Standard' (1.20) and 'Large' (1.83), within [0.90,3.00]
+    const changed = resizeSymbol(s, "w", 1.50);
+    expect(s.w).toBeCloseTo(1.50, 9);
+    expect(changed).toBe(true);
+    resetSymbolModel();
+  });
+});
+
+describe("LLD 129 — JSON round-trip: counter and island serialize and hydrate losslessly", () => {
+  it("counter round-trips through JSON (type, w, h, rot, id preserved)", () => {
+    resetSymbolModel();
+    const s = createSymbol("counter", 2, 3);
+    s.rot = 90;
+    addSymbol(s);
+    const snap = JSON.parse(JSON.stringify(symbolModel));
+    const rt = snap.symbols[0];
+    if (rt.type !== "counter") throw new Error("type not preserved");
+    if (Math.abs(rt.w - CATALOG.counter.w) > 1e-9) throw new Error("counter w not preserved: " + rt.w);
+    if (Math.abs(rt.h - CATALOG.counter.h) > 1e-9) throw new Error("counter h not preserved: " + rt.h);
+    if (rt.rot !== 90) throw new Error("rot not preserved: " + rt.rot);
+    if (rt.id !== s.id) throw new Error("id not preserved");
+    resetSymbolModel();
+  });
+
+  it("island round-trips through JSON (type, w, h, rot, id preserved)", () => {
+    resetSymbolModel();
+    const s = createSymbol("island", 5, 6);
+    s.rot = 180;
+    addSymbol(s);
+    const snap = JSON.parse(JSON.stringify(symbolModel));
+    const rt = snap.symbols[0];
+    if (rt.type !== "island") throw new Error("type not preserved");
+    if (Math.abs(rt.w - CATALOG.island.w) > 1e-9) throw new Error("island w not preserved: " + rt.w);
+    if (Math.abs(rt.h - CATALOG.island.h) > 1e-9) throw new Error("island h not preserved: " + rt.h);
+    if (rt.rot !== 180) throw new Error("rot not preserved: " + rt.rot);
+    if (rt.id !== s.id) throw new Error("id not preserved");
+    resetSymbolModel();
   });
 });
 
