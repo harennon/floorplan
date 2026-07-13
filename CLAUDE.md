@@ -72,6 +72,8 @@ out.
 ## Deployment
 
 Push to `main` → Cloudflare Pages runs `npm run build` and deploys the resulting `dist/`.
-The build command is set in the Cloudflare Pages dashboard (it cannot live in `wrangler.toml`,
-which only carries `pages_build_output_dir`). Per-PR preview deployments remain automatic via
-the Git integration.
+`wrangler.toml` is the source of truth for Pages config: it carries `name`,
+`pages_build_output_dir`, `compatibility_date`, and any runtime bindings, and Cloudflare
+locks the matching dashboard fields once they're set there. The one exception is the build
+*command* (`npm run build`) — Pages has no `wrangler.toml` key for it, so it stays set in
+the dashboard. Per-PR preview deployments remain automatic via the Git integration.
