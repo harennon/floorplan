@@ -74,6 +74,10 @@ import { model as measurementsModel } from "./measurements.js";
 import { init as initLoupe, setViewModule as loupeSetViewModule, reposition as loupeReposition } from "./loupe.js";
 import { toggleGridSnap } from "./prefs.js";
 import { init as initOnboarding, maybeShow as onboardingMaybeShow, dismiss as onboardingDismiss } from "./onboarding.js";
+import { isActive as previewIsActive, toggle as previewToggle, onChange as previewOnChange } from "./preview.js";
+import { initIsoRender, render as isoRenderFn } from "./isoRender.js";
+import * as _wallsModRef from "./walls.js";
+import * as _symbolsModRef from "./symbols.js";
 
 /** Detect macOS for platform-correct tooltip chords. */
 const _isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
@@ -165,6 +169,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnHelp        = document.getElementById("btn-help");
   const helpOverlayEl  = document.getElementById("help-overlay");
 
+  // 3D preview (LLD 128)
+  const gIso         = document.getElementById("iso");
+  const btnPreview   = document.getElementById("tool-preview");
+
   // Theme toggle button
   const btnThemeToggle = document.getElementById("btn-theme-toggle");
 
@@ -205,7 +213,12 @@ document.addEventListener("DOMContentLoaded", () => {
   initWallLayer(gDraft, gSnap, labelsEl, wallRender);
 
   // Inject draw hooks into interactions (no static wall import there)
-  setDrawHooks({ isDrawMode, onHover, onClick, onLeave });
+  setDrawHooks({
+    isDrawMode,
+    onHover(sx, sy, pt) { if (!previewIsActive()) onHover(sx, sy, pt); },
+    onClick(sx, sy) { if (!previewIsActive()) onClick(sx, sy); },
+    onLeave,
+  });
 
   initInteractions(stage, hint, btnZoomIn, btnZoomOut, btnReset);
 
@@ -290,6 +303,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let _activeSelectOwner = null; // "symbol" | "room" | "measurement" | null
   setSelectHooks({
     onDown(sx, sy) {
+      if (previewIsActive()) return false; // preview is read-only (LLD 128)
       if (onSelectDown(sx, sy)) {
         roomClearSelection();          // MUTEX: picking a symbol drops the room
         measureClearSelection();       // MUTEX: picking a symbol drops measurement
@@ -346,7 +360,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Wire measure hooks into interactions (no static measureTool import there)
   setMeasureHooks({
     isActive: measureIsActive,
-    onDown:   onMeasureDown,
+    onDown(sx, sy) { if (previewIsActive()) return false; return onMeasureDown(sx, sy); },
     onMove:   onMeasureMove,
     onLeave:  onMeasureLeave,
   });
@@ -395,12 +409,24 @@ document.addEventListener("DOMContentLoaded", () => {
       measureActivate();
       scheduleRender();
     }
+    // P: toggle 3D preview mode (LLD 128)
+    if (e.key === "p" || e.key === "P") {
+      previewToggle();
+      _syncPreview();
+      scheduleRender();
+    }
   });
+
+  // 3D isometric preview (LLD 128): bind model refs + active getter, register last.
+  if (gIso) {
+    initIsoRender(gIso, previewIsActive, _wallsModRef, _symbolsModRef);
+  }
 
   // Register post-render hooks
   // Order: wallRender (in _wallRender) → symbolRenderFn → clearanceRenderFn →
   //        measureRenderFn → symbolDimReposition → repositionInspector →
   //        dimReposition → measureUpdate → clearancePanelUpdate → loupeReposition
+  //        → isoRenderFn (last: overlays all 2D layers)
   onRender(symbolRenderFn);
   onRender(repositionFlushGuide); // re-append guide line after symbolRender clears overlay
   onRender(clearanceRenderFn);   // leaders above symbol bodies, below #symbol-overlay
@@ -412,6 +438,7 @@ document.addEventListener("DOMContentLoaded", () => {
   onRender(clearancePanelUpdate);
   onRender(dimReposition);
   onRender(loupeReposition);     // loupe content stays aligned after pan/zoom
+  onRender(isoRenderFn);         // iso preview — topmost, last in the chain (LLD 128)
 
   // Initialise store (save pill + autosave hook)
   if (savePillEl) {
@@ -458,6 +485,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Keep toggle label in sync if theme is changed programmatically
   onThemeChange(_updateThemeToggle);
+
+  // ── 3D preview (LLD 128) ──────────────────────────────────────────────────
+
+  /** Sync button + stage class to current preview state. */
+  function _syncPreview() {
+    const active = previewIsActive();
+    if (btnPreview) btnPreview.setAttribute("aria-pressed", active ? "true" : "false");
+    if (stage) {
+      if (active) {
+        stage.classList.add("stage--preview");
+      } else {
+        stage.classList.remove("stage--preview");
+      }
+    }
+  }
+
+  if (btnPreview) {
+    btnPreview.addEventListener("click", () => {
+      previewToggle();
+      _syncPreview();
+      scheduleRender();
+    });
+  }
+
+  // Keep aria-pressed + stage class in sync when preview state changes programmatically
+  previewOnChange(() => {
+    _syncPreview();
+    scheduleRender();
+  });
 
   // ── History (LLD-21) ──────────────────────────────────────────────────────
   // Wire history.reset into actions.js so _confirmReset can call it
@@ -590,6 +646,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // (registered earlier); it does not stopPropagation, so we still receive the
     // event — but we must not deselect when wallTool is about to finish a chain.
     if (!meta && e.key === "Escape") {
+      // Exit 3D preview mode on Esc (LLD 128)
+      if (previewIsActive()) {
+        e.preventDefault();
+        previewToggle(); // setActive(false)
+        _syncPreview();
+        scheduleRender();
+        return;
+      }
       if (isDrawMode() && wallsModel.chain.length > 0) {
         // Let wallTool bubble-phase listener handle chain finish/cancel
         return;

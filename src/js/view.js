@@ -9,6 +9,10 @@
  *
  * All world↔screen conversion must go through this module.
  * No other module may read panX/panY/zoom and do its own math.
+ *
+ * Isometric projection (LLD 128): worldToScreenIso is the sanctioned z-aware
+ * projection. It folds a 3D world point (wx, wy, wz) into the dimetric plane
+ * and then calls worldToScreen so pan/zoom handling stays here.
  */
 
 export const BASE_PX_PER_M = 40; // 40px = 1m at zoom 1
@@ -137,4 +141,35 @@ export function fitToContent(bounds, W, H) {
 
 function _notify() {
   for (const cb of _listeners) cb();
+}
+
+// ── Isometric projection (LLD 128) ───────────────────────────────────────────
+
+/** Fixed axonometric fold angle (30°). */
+export const ISO_THETA = Math.PI / 6;
+
+/**
+ * Vertical scale factor: metres-of-height → folded-world-metres.
+ * Nonzero (0.82) so raising an item visibly lifts its top face on screen.
+ */
+export const ISO_KZ = 0.82;
+
+/**
+ * Axonometric world→screen projection (LLD 128). Folds the 3D world point
+ * (wx, wy, wz) into the dimetric plane and applies the SAME zoom/pan as
+ * worldToScreen so the isometric scene shares the 2D editor's framing.
+ *
+ * wz is "up" in world space (decreases screen y).
+ * Pan/zoom remain exclusively inside view.js — callers must not read
+ * panX/panY/zoom directly (invariant holds for the iso case too).
+ *
+ * @param {number} wx  world x (metres)
+ * @param {number} wy  world y (metres)
+ * @param {number} wz  world z (metres, height above floor)
+ * @returns {{ x:number, y:number }} screen pixels
+ */
+export function worldToScreenIso(wx, wy, wz) {
+  const isoWX = (wx - wy) * Math.cos(ISO_THETA);
+  const isoWY = (wx + wy) * Math.sin(ISO_THETA) - wz * ISO_KZ;
+  return worldToScreen(isoWX, isoWY);
 }
