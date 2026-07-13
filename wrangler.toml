@@ -1,11 +1,16 @@
 # Cloudflare Pages configuration (LLD 127).
 #
-# Only the build OUTPUT directory can live in repo config; Cloudflare Pages does
-# not support declaring the build COMMAND here (it is set in the dashboard:
-# `npm run build`). See https://developers.cloudflare.com/pages/functions/wrangler-configuration/
+# This file is the source of truth for Pages config: once a field is set here,
+# Cloudflare locks the matching dashboard field read-only. Everything below can
+# live in the repo. The ONE exception is the build COMMAND, which Pages has no
+# wrangler key for — it stays in the dashboard as `npm run build`.
+# See https://developers.cloudflare.com/pages/functions/wrangler-configuration/
 #
-# Git integration is retained (auto-deploy on push to main + per-PR previews),
-# so this file declares output location and is the home for any future runtime
-# bindings / compatibility flags.
+# Git integration is retained (auto-deploy on push to main + per-PR previews).
+# Add runtime bindings (kv_namespaces, d1_databases, r2_buckets, vars, …) here as
+# the app needs them; none are required for the current static build.
 name = "floorplan"
 pages_build_output_dir = "dist"
+
+# Workers runtime version pinned in-repo (was dashboard-only until now).
+compatibility_date = "2026-07-06"
