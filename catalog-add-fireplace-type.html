@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Catalog: Fireplace type — mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#14140f; --bg-deep:#100f0b; --ink:#ece7d6; --muted:#8f8a78;
+    --gold:#c9a84c; --gold-soft:rgba(201,168,76,0.55);
+    --grid-fine:rgba(201,168,76,0.055); --grid-major:rgba(201,168,76,0.14);
+    --panel:rgba(20,20,15,0.72); --stroke:rgba(201,168,76,0.22);
+    --snap-teal:#7fd0c8; --ember:#e08a3c; --ember-soft:rgba(224,138,60,0.5);
+    --font-ui:"DM Sans",system-ui,sans-serif;
+    --font-mono:"DM Mono","Courier New",monospace;
+    --font-display:"Libre Baskerville",Georgia,serif;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; font-family:var(--font-ui); color:var(--ink);
+    background:
+      linear-gradient(135deg,var(--bg) 0%,var(--bg-deep) 100%);
+    min-height:100vh; padding:2.4rem 1.4rem 4rem;
+  }
+  .page { max-width:1080px; margin:0 auto; }
+  header.doc { margin-bottom:1.8rem; }
+  header.doc h1 {
+    font-family:var(--font-display); color:var(--gold);
+    font-size:1.5rem; font-weight:400; margin:0 0 0.4rem; letter-spacing:0.01em;
+  }
+  header.doc p { color:var(--muted); font-family:var(--font-mono); font-size:0.82rem; margin:0.2rem 0; max-width:70ch; line-height:1.5; }
+  .tag { display:inline-block; font-family:var(--font-mono); font-size:0.62rem; text-transform:uppercase; letter-spacing:0.08em;
+    color:var(--gold); border:1px solid var(--gold-soft); border-radius:5px; padding:0.15rem 0.45rem; margin-right:0.4rem; }
+
+  h2.section { font-family:var(--font-display); color:var(--ink); font-size:1.05rem; font-weight:400;
+    margin:2.4rem 0 0.9rem; border-bottom:1px solid var(--stroke); padding-bottom:0.4rem; }
+  .note { color:var(--muted); font-family:var(--font-mono); font-size:0.75rem; line-height:1.55; max-width:80ch; }
+  .note code { color:var(--gold); background:rgba(201,168,76,0.08); padding:0 0.25rem; border-radius:3px; }
+
+  /* ── Dock strip (mirrors src .symbol-dock / .dock-item) ── */
+  .dock {
+    display:flex; flex-wrap:wrap; gap:0.3rem; align-items:center;
+    background:var(--panel); border:1px solid var(--stroke); border-radius:11px;
+    padding:0.5rem; backdrop-filter:blur(8px);
+  }
+  .dock-label { font-family:var(--font-mono); font-size:0.6rem; text-transform:uppercase; letter-spacing:0.08em;
+    color:var(--muted); padding:0 0.5rem 0 0.3rem; }
+  .dock-item {
+    position:relative; background:transparent; border:1px solid transparent; color:var(--muted);
+    font-family:var(--font-mono); font-size:0.55rem; letter-spacing:0.04em;
+    width:2.9rem; height:2.9rem; border-radius:7px; cursor:grab;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.15rem;
+    padding:0.2rem 0; transition:color .12s,border-color .12s,background .12s;
+  }
+  .dock-item:hover { color:var(--gold); border-color:var(--gold-soft); background:rgba(201,168,76,0.07); }
+  .dock-item.active { color:var(--gold); border-color:var(--gold-soft); background:rgba(201,168,76,0.13); cursor:grabbing; }
+  .dock-item__badge {
+    position:absolute; top:1px; right:1px; padding:0 3px; border-radius:4px;
+    font-size:0.46rem; line-height:1.4; font-weight:700; letter-spacing:0.02em; text-transform:uppercase;
+    background:var(--gold); color:var(--bg); pointer-events:none;
+  }
+  .dock-item svg { pointer-events:none; }
+
+  /* ── Canvas (blueprint grid) ── */
+  .canvas-wrap { display:grid; grid-template-columns:1fr 240px; gap:1rem; align-items:start; }
+  @media (max-width:720px){ .canvas-wrap { grid-template-columns:1fr; } }
+  .canvas {
+    position:relative; aspect-ratio:16/10; border:1px solid var(--stroke); border-radius:10px; overflow:hidden;
+    background:
+      linear-gradient(var(--grid-major) 1px,transparent 1px) 0 0/56px 56px,
+      linear-gradient(90deg,var(--grid-major) 1px,transparent 1px) 0 0/56px 56px,
+      linear-gradient(var(--grid-fine) 1px,transparent 1px) 0 0/14px 14px,
+      linear-gradient(90deg,var(--grid-fine) 1px,transparent 1px) 0 0/14px 14px,
+      linear-gradient(135deg,var(--bg) 0%,var(--bg-deep) 100%);
+  }
+  .canvas svg { position:absolute; inset:0; width:100%; height:100%; }
+  .caption { font-family:var(--font-mono); font-size:0.68rem; color:var(--muted); margin:0.5rem 0 0; text-align:center; }
+
+  /* ── Inspector (mirrors src inspector / dim chips / preset chips) ── */
+  .inspector {
+    background:var(--panel); border:1px solid var(--stroke); border-radius:11px; padding:0.9rem;
+    font-family:var(--font-mono); backdrop-filter:blur(8px);
+  }
+  .inspector h3 { font-family:var(--font-display); font-weight:400; color:var(--gold); font-size:0.95rem; margin:0 0 0.6rem; }
+  .insp-row { display:flex; justify-content:space-between; font-size:0.72rem; color:var(--muted); margin:0.3rem 0; }
+  .insp-row b { color:var(--ink); font-weight:500; }
+  .preset-label { font-size:0.6rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--muted); margin:0.8rem 0 0.4rem; }
+  .preset-row { display:flex; flex-wrap:wrap; gap:0.3rem; }
+  .preset-chip {
+    font-family:var(--font-mono); font-size:0.66rem; color:var(--muted);
+    border:1px solid var(--stroke); background:transparent; border-radius:20px; padding:0.22rem 0.6rem; cursor:pointer;
+    transition:color .12s,border-color .12s,background .12s;
+  }
+  .preset-chip:hover { color:var(--gold); border-color:var(--gold-soft); }
+  .preset-chip.sel { color:var(--bg); background:var(--gold); border-color:var(--gold); }
+
+  /* variant option cards */
+  .opts { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:1rem; margin-top:0.8rem; }
+  .opt { border:1px solid var(--stroke); border-radius:10px; padding:1rem; background:rgba(201,168,76,0.02); }
+  .opt.reco { border-color:var(--gold-soft); background:rgba(201,168,76,0.06); }
+  .opt h4 { font-family:var(--font-mono); font-size:0.78rem; color:var(--gold); margin:0 0 0.5rem; letter-spacing:0.03em; }
+  .opt .glyphs { display:flex; gap:0.6rem; align-items:center; margin:0.6rem 0; }
+  .opt .glyphbox { width:64px; height:64px; border:1px solid var(--stroke); border-radius:8px; display:flex; align-items:center; justify-content:center; background:var(--bg-deep); }
+  .opt p { font-family:var(--font-mono); font-size:0.68rem; color:var(--muted); line-height:1.5; margin:0.4rem 0 0; }
+  .pill-reco { display:inline-block; font-size:0.55rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--bg); background:var(--gold); border-radius:4px; padding:0.1rem 0.35rem; margin-left:0.4rem; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="doc">
+    <span class="tag">LLD 108</span><span class="tag">Living</span><span class="tag">Catalog</span>
+    <h1>Fireplace — a wall-anchored focal element</h1>
+    <p>Adds a <code style="color:var(--gold)">fireplace</code> type to the living catalog so the interior-design skill can place and orient seating toward a real fireplace — the top focal priority (fireplace &gt; TV &gt; window &gt; blank wall). Wall-anchored, shallow depth, per-axis bounds + named presets like every other catalog entry.</p>
+    <p style="color:var(--muted)">This mockup shows: the new dock button glyph (3 options), the on-canvas symbol render (default + rotated/flush-to-wall, with a sofa oriented toward it), and the inspector preset chips.</p>
+  </header>
+
+  <h2 class="section">1 · The dock — new button in the Living row</h2>
+  <p class="note">The fireplace button drops into <code>#row-living</code> next to <code>tv</code> / <code>bookshelf</code>. It reuses the generic <code>.dock-item</code> markup — <code>data-type="fireplace"</code> is the only load-bearing attribute; placement/select/resize are automatic. A <code>new</code> badge marks it on first ship (CSS-only, matches the rug precedent).</p>
+  <div class="dock" style="margin-top:0.6rem">
+    <span class="dock-label">Living</span>
+    <button class="dock-item" aria-label="Sofa">
+      <svg width="20" height="20" viewBox="0 0 18 18" fill="none"><rect x="2" y="6" width="14" height="8" rx="1.5" stroke="currentColor" stroke-width="1.3"/><rect x="2" y="4" width="14" height="4" rx="1.5" stroke="currentColor" stroke-width="0.9" fill="currentColor" fill-opacity="0.12"/></svg>
+      <span>Sofa</span>
+    </button>
+    <button class="dock-item" aria-label="TV">
+      <svg width="20" height="20" viewBox="0 0 18 18" fill="none"><rect x="2" y="4" width="14" height="9" rx="1" stroke="currentColor" stroke-width="1.3" fill="currentColor" fill-opacity="0.06"/><line x1="9" y1="13" x2="9" y2="16" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      <span>TV</span>
+    </button>
+    <button class="dock-item active" aria-label="Add fireplace">
+      <span class="dock-item__badge">new</span>
+      <!-- Option A glyph (recommended): mantel + hearth opening + flame -->
+      <svg width="20" height="20" viewBox="0 0 18 18" fill="none">
+        <rect x="2" y="4" width="14" height="11" rx="1" stroke="currentColor" stroke-width="1.3"/>
+        <line x1="1.4" y1="4" x2="16.6" y2="4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <rect x="5.5" y="7.5" width="7" height="7.5" rx="0.6" stroke="currentColor" stroke-width="1" fill="currentColor" fill-opacity="0.08"/>
+        <path d="M9 13.4c-1.2-0.5-1.6-1.7-0.9-2.7 0.15 0.5 0.5 0.7 0.8 0.8-0.2-1 0.3-1.9 1-2.4-0.15 0.9 0.35 1.3 0.8 1.8 0.5 0.55 0.7 1.4 0.15 2.1-0.35 0.45-1 0.7-1.85 0.4z" fill="var(--ember)" stroke="var(--ember)" stroke-width="0.4"/>
+      </svg>
+      <span>Fireplace</span>
+    </button>
+    <button class="dock-item" aria-label="Bookshelf">
+      <svg width="20" height="20" viewBox="0 0 18 18" fill="none"><rect x="2" y="5" width="14" height="8" rx="1" stroke="currentColor" stroke-width="1.3"/><line x1="3" y1="7.7" x2="15" y2="7.7" stroke="currentColor" stroke-width="0.8" opacity="0.6"/><line x1="3" y1="10.3" x2="15" y2="10.3" stroke="currentColor" stroke-width="0.8" opacity="0.6"/></svg>
+      <span>Shelf</span>
+    </button>
+  </div>
+
+  <h2 class="section">2 · Glyph direction — pick one</h2>
+  <p class="note">All three read at 18px in the dock and reuse <code>currentColor</code> (gold on hover). The only decision is whether the flame gets a warm <code>--ember</code> accent (the sole non-monochrome glyph in the catalog) or stays monochrome like every existing dock icon.</p>
+  <div class="opts">
+    <div class="opt reco">
+      <h4>A · Mantel + ember flame <span class="pill-reco">recommended</span></h4>
+      <div class="glyphs">
+        <div class="glyphbox"><svg width="40" height="40" viewBox="0 0 18 18" fill="none"><rect x="2" y="4" width="14" height="11" rx="1" stroke="var(--ink)" stroke-width="1.3"/><line x1="1.4" y1="4" x2="16.6" y2="4" stroke="var(--ink)" stroke-width="1.4" stroke-linecap="round"/><rect x="5.5" y="7.5" width="7" height="7.5" rx="0.6" stroke="var(--ink)" stroke-width="1" fill="var(--ink)" fill-opacity="0.08"/><path d="M9 13.4c-1.2-0.5-1.6-1.7-0.9-2.7 0.15 0.5 0.5 0.7 0.8 0.8-0.2-1 0.3-1.9 1-2.4-0.15 0.9 0.35 1.3 0.8 1.8 0.5 0.55 0.7 1.4 0.15 2.1-0.35 0.45-1 0.7-1.85 0.4z" fill="var(--ember)" stroke="var(--ember)" stroke-width="0.4"/></svg></div>
+        <div class="glyphbox"><svg width="40" height="40" viewBox="0 0 18 18" fill="none"><rect x="2" y="4" width="14" height="11" rx="1" stroke="var(--gold)" stroke-width="1.3"/><line x1="1.4" y1="4" x2="16.6" y2="4" stroke="var(--gold)" stroke-width="1.4" stroke-linecap="round"/><rect x="5.5" y="7.5" width="7" height="7.5" rx="0.6" stroke="var(--gold)" stroke-width="1" fill="var(--gold)" fill-opacity="0.08"/><path d="M9 13.4c-1.2-0.5-1.6-1.7-0.9-2.7 0.15 0.5 0.5 0.7 0.8 0.8-0.2-1 0.3-1.9 1-2.4-0.15 0.9 0.35 1.3 0.8 1.8 0.5 0.55 0.7 1.4 0.15 2.1-0.35 0.45-1 0.7-1.85 0.4z" fill="var(--ember)" stroke="var(--ember)" stroke-width="0.4"/></svg></div>
+      </div>
+      <p>Mantel top rail + recessed hearth opening + a single ember flame. Instantly reads "fireplace" and the warm accent flags it as the focal element. Left tile = resting (ink), right = hover (gold).</p>
+    </div>
+    <div class="opt">
+      <h4>B · Monochrome hearth</h4>
+      <div class="glyphs">
+        <div class="glyphbox"><svg width="40" height="40" viewBox="0 0 18 18" fill="none"><rect x="2" y="4" width="14" height="11" rx="1" stroke="var(--ink)" stroke-width="1.3"/><line x1="1.4" y1="4" x2="16.6" y2="4" stroke="var(--ink)" stroke-width="1.4" stroke-linecap="round"/><rect x="5.5" y="7.5" width="7" height="7.5" rx="0.6" stroke="var(--ink)" stroke-width="1" fill="var(--ink)" fill-opacity="0.08"/><path d="M9 13.4c-1.2-0.5-1.6-1.7-0.9-2.7 0.15 0.5 0.5 0.7 0.8 0.8-0.2-1 0.3-1.9 1-2.4-0.15 0.9 0.35 1.3 0.8 1.8 0.5 0.55 0.7 1.4 0.15 2.1-0.35 0.45-1 0.7-1.85 0.4z" fill="none" stroke="var(--ink)" stroke-width="0.9"/></svg></div>
+      </div>
+      <p>Same silhouette, flame drawn as an outline in <code>currentColor</code>. Perfectly consistent with the existing monochrome dock set — zero new palette token. Slightly less "at-a-glance focal" than A.</p>
+    </div>
+    <div class="opt">
+      <h4>C · Flame-only mark</h4>
+      <div class="glyphs">
+        <div class="glyphbox"><svg width="40" height="40" viewBox="0 0 18 18" fill="none"><path d="M9 16c-2.6-0.9-3.6-3.3-2-5.5 0.3 1 1 1.4 1.7 1.6-0.5-2 0.6-3.9 2.1-4.9-0.3 1.8 0.7 2.7 1.6 3.7 1 1.1 1.4 2.8 0.3 4.3-0.7 0.95-2 1.4-3.7 0.8z" fill="var(--ember)" stroke="var(--ember)" stroke-width="0.4"/></svg></div>
+      </div>
+      <p>Just the flame, no hearth. Boldest read but risks colliding with "candle/heat" meaning and drops the wall-anchored cue. Not recommended for a plan-view furniture piece.</p>
+    </div>
+  </div>
+
+  <h2 class="section">3 · On the canvas — plan-view render + focal orientation</h2>
+  <p class="note">Plan-view interior glyph (proposed for <code>_renderInterior</code>): a shallow hearth box flush to the wall with a small ember mark, so it reads as a fireplace from above and is distinct from a <code>tv</code> or <code>bookshelf</code>. The sofa's front faces the fireplace — exactly the focal orientation the skill computes. Selected fireplace shown with the gold dashed selection box + rotate handle + dim chips.</p>
+  <div class="canvas-wrap">
+    <div>
+      <div class="canvas">
+        <svg viewBox="0 0 640 400" preserveAspectRatio="xMidYMid meet">
+          <!-- room walls -->
+          <rect x="70" y="50" width="500" height="300" fill="none" stroke="var(--gold-soft)" stroke-width="7" />
+
+          <!-- FIREPLACE flush to top wall, selected -->
+          <!-- body -->
+          <rect x="250" y="54" width="140" height="34" fill="rgba(201,168,76,0.10)" stroke="var(--gold)" stroke-width="2" />
+          <!-- hearth opening -->
+          <rect x="272" y="60" width="96" height="24" rx="2" fill="rgba(224,138,60,0.10)" stroke="var(--muted)" stroke-width="1.2" />
+          <!-- ember mark -->
+          <path d="M320 82c-6-2.4-8-8-4.5-13 0.8 2.4 2.5 3.4 4 4-1-5 1.5-9.4 5-11.9-0.8 4.4 1.7 6.6 4 9 2.5 2.7 3.4 6.9 0.8 10.4-1.7 2.3-5 3.4-9.3 1.5z" transform="translate(0,-4) scale(1,0.72) translate(0,26)" fill="var(--ember)" opacity="0.85" />
+          <!-- selection box (dashed gold) -->
+          <rect x="250" y="54" width="140" height="34" fill="none" stroke="var(--gold)" stroke-width="2" stroke-dasharray="5 3" />
+          <!-- rotate handle stem + knob -->
+          <line x1="320" y1="54" x2="320" y2="34" stroke="var(--gold-soft)" stroke-width="1" />
+          <circle cx="320" cy="34" r="6" fill="var(--gold)" />
+
+          <!-- SOFA facing the fireplace (front = top edge, toward fireplace) -->
+          <rect x="250" y="250" width="140" height="60" rx="3" fill="rgba(201,168,76,0.06)" stroke="var(--muted)" stroke-width="1.6" />
+          <rect x="250" y="298" width="140" height="12" rx="3" fill="rgba(201,168,76,0.12)" stroke="var(--muted)" stroke-width="1" />
+          <rect x="250" y="256" width="10" height="54" rx="2" fill="rgba(201,168,76,0.08)" stroke="var(--muted)" stroke-width="0.9" />
+          <rect x="380" y="256" width="10" height="54" rx="2" fill="rgba(201,168,76,0.08)" stroke="var(--muted)" stroke-width="0.9" />
+
+          <!-- focal-orientation arrow: sofa front -> fireplace -->
+          <line x1="320" y1="248" x2="320" y2="94" stroke="var(--snap-teal)" stroke-width="1.4" stroke-dasharray="4 4" opacity="0.8" />
+          <path d="M320 90 l-5 9 l10 0 z" fill="var(--snap-teal)" opacity="0.9" />
+
+          <!-- dim chips -->
+          <g font-family="DM Mono, monospace" font-size="12">
+            <rect x="298" y="30" width="44" height="17" rx="4" fill="var(--bg-deep)" stroke="var(--gold-soft)" />
+            <text x="320" y="42" text-anchor="middle" fill="var(--gold)">1.30 m</text>
+            <rect x="205" y="62" width="42" height="17" rx="4" fill="var(--bg-deep)" stroke="var(--gold-soft)" />
+            <text x="226" y="74" text-anchor="middle" fill="var(--gold)">0.32 m</text>
+          </g>
+          <text x="320" y="180" text-anchor="middle" font-family="DM Mono, monospace" font-size="11" fill="var(--snap-teal)" opacity="0.85">seating front → focal</text>
+        </svg>
+      </div>
+      <p class="caption">Fireplace flush to the top wall (1.30 × 0.32 m), selected. Sofa front oriented at it — the focal geometry the skill enforces.</p>
+    </div>
+    <div class="inspector">
+      <h3>Fireplace</h3>
+      <div class="insp-row"><span>Width</span><b>1.30 m</b></div>
+      <div class="insp-row"><span>Depth</span><b>0.32 m</b></div>
+      <div class="insp-row"><span>Rotation</span><b>0°</b></div>
+      <div class="preset-label">Presets</div>
+      <div class="preset-row">
+        <button class="preset-chip">Insert 30&quot;</button>
+        <button class="preset-chip sel">Standard 48&quot;</button>
+        <button class="preset-chip">Wide 60&quot;</button>
+        <button class="preset-chip">Custom</button>
+      </div>
+      <div class="preset-label" style="margin-top:0.9rem">Bounds (per-axis)</div>
+      <div class="insp-row"><span>width</span><b>0.60 – 1.83 m</b></div>
+      <div class="insp-row"><span>depth</span><b>0.25 – 0.45 m</b></div>
+    </div>
+  </div>
+
+  <h2 class="section">4 · Proposed catalog data (for the LLD)</h2>
+  <p class="note">Wall-anchored, shallow depth, continuous resize (like <code>sofa</code>/<code>tv</code> — not <code>discrete</code>, not <code>openings</code>, not <code>circular</code>). Category <code>living</code>. Dimensions grounded in real hearth/insert widths (30&quot; insert → 60&quot; wide) and shallow projection (~0.25–0.45 m). Presets sit within the per-axis bounds.</p>
+  <pre class="note" style="background:rgba(201,168,76,0.04);border:1px solid var(--stroke);border-radius:8px;padding:0.9rem;overflow:auto;"><code style="color:var(--ink);background:none;">fireplace: {
+  label: "Fireplace", category: "living", w: 1.22, h: 0.32,
+  min_w: 0.60, max_w: 1.83, min_h: 0.25, max_h: 0.45,
+  presets: [
+    { name: "Insert 30\"",   w: 0.76, h: 0.30 },
+    { name: "Standard 48\"", w: 1.22, h: 0.32 },
+    { name: "Wide 60\"",     w: 1.52, h: 0.38 },
+  ],
+}</code></pre>
+  <p class="note">Open questions for the LLD / your decision: (1) glyph direction A / B / C; (2) whether to add a dedicated <code>_renderInterior</code> branch now (shown here) or defer to the plain box fallback like LLD 104 did for monitor/gaming-chair; (3) exact preset widths. The catalog numbers above are a starting proposal — the architect will finalize against retailer specs.</p>
+</div>
+</body>
+</html>
