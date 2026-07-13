@@ -1,0 +1,11 @@
+# Cloudflare Pages configuration (LLD 127).
+#
+# Only the build OUTPUT directory can live in repo config; Cloudflare Pages does
+# not support declaring the build COMMAND here (it is set in the dashboard:
+# `npm run build`). See https://developers.cloudflare.com/pages/functions/wrangler-configuration/
+#
+# Git integration is retained (auto-deploy on push to main + per-PR previews),
+# so this file declares output location and is the home for any future runtime
+# bindings / compatibility flags.
+name = "floorplan"
+pages_build_output_dir = "dist"

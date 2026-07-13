@@ -23,7 +23,12 @@ import { fileURLToPath } from "url";
 
 const ROOT_DIR = join(fileURLToPath(import.meta.url), "../..");
 const TEST_PAGE = "/test/tests.html";
-const APP_PAGE  = "/src/index.html";
+// Unit tests import app modules from source (../src/js/*), so the unit harness
+// runs against source. Integration tests, however, drive the SHIPPED artifact:
+// APP_PAGE points at the Vite build output (dist/index.html) so CI exercises the
+// bundled/minified app Cloudflare Pages actually deploys (LLD 127). Requires
+// `npm run build` to have run first.
+const APP_PAGE  = "/dist/index.html";
 const PORT = 3742; // arbitrary; unlikely to collide in CI
 
 const MIME = {

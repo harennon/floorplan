@@ -8,14 +8,18 @@ couch fit?" measuring focus the incumbents (e.g. floorplancreator.net) don't off
 
 ## Project Structure
 
-- `src/` — the deployed site (HTML, CSS, vanilla JS). Cloudflare Pages serves from here.
+- `src/` — the app source (HTML, CSS, vanilla JS). Built by Vite into `dist/`.
+- `dist/` — Vite build output; the deployed artifact (gitignored, produced by `npm run build`).
 - `design-mockups/` — throwaway HTML mockups for visual design exploration.
 - `docs/` — design docs; `docs/lld/` holds low-level designs written by the pipeline.
 
 ## Tech Stack
 
-- **Pure HTML + CSS + vanilla JS** — no framework, no build step.
-- **Hosting:** Cloudflare Pages (deploys from `src/`), subdomain `floorplan.danbing.app`.
+- **HTML + CSS + vanilla JS, no framework.** Bundled with **Vite** (`npm run build` → `dist/`).
+  Dependencies are allowed (npm, version-locked); the "no build step" constraint was lifted
+  in #102 in favor of proper dependency hygiene.
+- **Hosting:** Cloudflare Pages (Git-integrated; runs `npm run build`, deploys `dist/`),
+  subdomain `floorplan.danbing.app`.
 - **State (v1):** entirely client-side. Plans autosave to `localStorage`; a plan can be
   exported as JSON/PNG/SVG or shared via a URL hash that encodes the whole plan —
   **nothing is sent to a server in v1.**
@@ -34,8 +38,9 @@ candidate direction), minimal chrome. Visual language echoes the danbing.app por
   `docs/` roadmap) and must not be bundled into v1.
 - **Instant + zero-setup.** A first-time visitor can sketch a recognizable room and read
   its area within ~2 minutes, on mobile or desktop, with no signup.
-- **Deploy cheap.** Static files only; no build step. Anything requiring a build pipeline
-  needs explicit justification.
+- **Deploy cheap.** Cloudflare Pages builds and serves the static `dist/` for free. Keep the
+  build fast and dependencies lean — add a dependency only when it removes more complexity than
+  it adds (the #102 rationale).
 - **Free, no gates.** The differentiator vs. incumbents is no paywalled export and no
   forced login. Vector (SVG) and raster (PNG) export stay free.
 - **Shareable artifacts.** Favor features that produce something a person wants to send
@@ -66,4 +71,7 @@ out.
 
 ## Deployment
 
-Push to `main` → Cloudflare Pages auto-deploys from `src/`.
+Push to `main` → Cloudflare Pages runs `npm run build` and deploys the resulting `dist/`.
+The build command is set in the Cloudflare Pages dashboard (it cannot live in `wrangler.toml`,
+which only carries `pages_build_output_dir`). Per-PR preview deployments remain automatic via
+the Git integration.
