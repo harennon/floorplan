@@ -35,7 +35,7 @@ import {
   repositionRoomInspector,
 } from "./roomTool.js";
 import { init as initStore, loadLocal, saveNow } from "./store.js";
-import { readBootHash } from "./share.js";
+import { readBootHash, encodeShareHash } from "./share.js";
 import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
 import { contentBounds } from "./exportImg.js";
 import { init as initActions, showToast, showConflictBanner, setHistoryReset, setOpenTemplates } from "./actions.js";
@@ -449,6 +449,11 @@ document.addEventListener("DOMContentLoaded", () => {
     rooms: wallsModel.rooms.map((r) => ({ verts: r.verts.map((v) => ({ x: v.x, y: v.y })) })),
   });
 
+  // Expose encodeShareHash for the LLD 136 boot-conflict + pv=1 integration
+  // test. Lets the Playwright rig build a valid share hash (with &pv=1) without
+  // duplicating the codec in Node.js (which can't use CompressionStream).
+  window.__encodeShareHash = encodeShareHash;
+
   // Register post-render hooks
   // Order: wallRender (in _wallRender) → symbolRenderFn → clearanceRenderFn →
   //        measureRenderFn → symbolDimReposition → repositionInspector →
@@ -539,6 +544,16 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // LLD 136 fix: when preview is entered at boot (pv=1 in the share URL), the
+  // async previewOnChange callback can fire "3D unavailable — showing 2.5D preview"
+  // in the microtask immediately after await render3d.enter() resolves, which
+  // would overwrite the boot recovery toast ("Opened shared plan" with the
+  // "Keep my last plan instead" action button).  Set this flag to true just
+  // before the boot-driven previewSetActive(true) call; capture and clear it
+  // synchronously at the top of the callback (before the first await) so it
+  // suppresses the fallback toast for that specific boot entry only.
+  let _suppressFallbackToast = false;
+
   // Single choke point for the 3D renderer side-effects (LLD 130). Every path
   // that changes preview state — the button click, the P shortcut, the Esc-exit
   // branch, and any programmatic setActive — converges on previewToggle(), which
@@ -547,6 +562,10 @@ document.addEventListener("DOMContentLoaded", () => {
   previewOnChange(async () => {
     _syncPreview();
     scheduleRender();
+    // Capture and clear synchronously before the first await so subsequent
+    // interactive entries (button, keyboard) are never affected.
+    const suppressFallback = _suppressFallbackToast;
+    _suppressFallbackToast = false;
     if (previewIsActive()) {
       const r = await render3d.enter();       // lazy-load + build + frame
       if (!previewIsActive()) {                // toggled off mid-load (Edge Case 3)
@@ -557,7 +576,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (r && r.ok === false && r.fallback) { // WebGL/import failed → 2.5D fallback
         stage?.classList.add("preview--fallback");
         isoRenderFn();                          // paint the 2.5D SVG fallback once
-        showToast("3D unavailable — showing 2.5D preview");
+        if (!suppressFallback) {
+          showToast("3D unavailable — showing 2.5D preview");
+        }
       } else {
         stage?.classList.remove("preview--fallback");
       }
@@ -945,7 +966,15 @@ document.addEventListener("DOMContentLoaded", () => {
         // below), which does the full lazy-load + build + fallback sequence.
         // applyLocal path ("Keep my last plan instead") — the pv flag described
         // the shared plan; do NOT enter preview for the user's own local plan.
+        //
+        // IMPORTANT ordering (QA fix): on no-WebGL devices, the previewOnChange
+        // callback's `await render3d.enter()` resolves in the very next microtask
+        // and would emit "3D unavailable" — overwriting the recovery toast and
+        // destroying the "Keep my last plan instead" action button.  Suppress the
+        // fallback toast for this boot-driven entry only, then show the recovery
+        // toast AFTER previewSetActive so it is always the last toast shown.
         if (hashPreview) {
+          _suppressFallbackToast = true;
           previewSetActive(true);
         }
         showToast("Opened shared plan", {
@@ -988,7 +1017,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // LLD 136: single end-of-IIFE preview entry for all hash-displaying branches.
     // Does not run for the early-return conflict branch (handled inline above) or
     // when enterPreview is false (local-only, empty-start, or hash-preview=false).
+    // Suppress the no-WebGL fallback toast here so it cannot overwrite the boot
+    // confirmation toast ("Opened shared plan") that was shown just above.
     if (enterPreview) {
+      _suppressFallbackToast = true;
       previewSetActive(true);
     }
   })();
