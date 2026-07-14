@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Template thumbnails from plan data — mockup</title>
+  <style>
+    :root {
+      --bg:          #14140f;
+      --bg-deep:     #100f0b;
+      --panel:       rgba(28,26,20,0.92);
+      --hairline:    rgba(201,168,76,0.18);
+      --ink:         #ece3c8;
+      --muted:       #8f8a78;
+      --gold:        #c9a84c;
+      --gold-soft:   rgba(201,168,76,0.55);
+      --wall-body:   rgba(201,168,76,0.30);
+      --wall-line:   #d9be6e;
+      --room-fill:   rgba(201,168,76,0.07);
+      --sym-fill:    rgba(201,168,76,0.12);
+      --sym-stroke:  #d9be6e;
+      --font-mono:   "DM Mono", ui-monospace, "Cascadia Mono", "Courier New", monospace;
+      --font-display: var(--font-mono);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      background:
+        radial-gradient(1200px 600px at 20% -10%, rgba(201,168,76,0.05), transparent 60%),
+        var(--bg);
+      color: var(--ink);
+      font-family: var(--font-mono);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      padding: 2.5rem 1.25rem 4rem;
+    }
+    .wrap { max-width: 52rem; margin: 0 auto; }
+
+    .intro h1 {
+      font-family: var(--font-display);
+      color: var(--gold);
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      margin: 0 0 0.6rem;
+    }
+    .lede { color: var(--muted); font-size: 0.82rem; max-width: 44rem; margin: 0 0 1.25rem; }
+    code { color: var(--wall-line); font-size: 0.9em; }
+
+    .controls {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem;
+      font-size: 0.72rem; color: var(--muted);
+      padding: 0.6rem 0.75rem; margin-bottom: 1.5rem;
+      border: 1px solid var(--hairline); border-radius: 8px;
+      background: rgba(201,168,76,0.03);
+    }
+    .controls-label { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.62rem; }
+    .controls-sep { opacity: 0.4; margin: 0 0.15rem; }
+    .seg {
+      font-family: var(--font-mono); font-size: 0.72rem;
+      color: var(--muted); background: transparent;
+      border: 1px solid var(--hairline); border-radius: 6px;
+      padding: 0.25rem 0.6rem; cursor: pointer;
+      transition: color 0.12s, border-color 0.12s, background 0.12s;
+    }
+    .seg:hover { color: var(--ink); border-color: var(--gold-soft); }
+    .seg.is-active { color: var(--bg); background: var(--gold); border-color: var(--gold); font-weight: 600; }
+
+    /* ── Gallery panel (mirrors index.html .template-overlay-panel) ─────────── */
+    .template-overlay-panel {
+      position: relative;
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem 1.5rem;
+      box-shadow: 0 6px 32px rgba(0,0,0,0.6);
+    }
+    .template-overlay-title {
+      font-family: var(--font-display);
+      font-size: 1rem; color: var(--gold);
+      margin-bottom: 1rem; font-weight: 700;
+    }
+    .template-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 0.75rem;
+    }
+    .template-card {
+      display: flex; flex-direction: column; align-items: stretch; gap: 0.4rem;
+      background: rgba(201,168,76,0.04);
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 0.7rem 0.6rem 0.6rem;
+      cursor: pointer; text-align: left;
+      transition: border-color 0.15s, background 0.15s, transform 0.15s;
+      font-family: var(--font-mono);
+      color: inherit;
+    }
+    .template-card:hover, .template-card:focus-visible {
+      border-color: var(--gold-soft);
+      background: rgba(201,168,76,0.1);
+      transform: translateY(-1px);
+      outline: none;
+    }
+    /* Thumbnail box: fixed 4:3, holds the generated SVG */
+    .template-thumb {
+      display: block; width: 100%; aspect-ratio: 4 / 3;
+      overflow: hidden; border-radius: 4px;
+      background: rgba(201,168,76,0.05);
+      border: 1px solid rgba(201,168,76,0.1);
+    }
+    .template-thumb svg { width: 100%; height: 100%; display: block; }
+    .template-card-name {
+      font-size: 0.75rem; color: var(--ink); font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .template-card-desc { font-size: 0.62rem; color: var(--muted); line-height: 1.35; }
+
+    .notes { margin-top: 2rem; font-size: 0.78rem; color: var(--muted); }
+    .notes h2 { font-family: var(--font-display); color: var(--gold); font-size: 0.9rem; margin: 0 0 0.6rem; }
+    .notes ul { margin: 0; padding-left: 1.1rem; }
+    .notes li { margin-bottom: 0.5rem; }
+    .notes b { color: var(--ink); font-weight: 600; }
+
+    @media (max-width: 480px) {
+      .template-overlay-panel { padding: 1rem; }
+      .template-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.5rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .seg, .template-card { transition: none; }
+      .template-card:hover, .template-card:focus-visible { transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="intro">
+      <h1>Auto-generated template thumbnails</h1>
+      <p class="lede">
+        Each gallery card's preview is rendered from its <code>plan</code> data by a
+        shared static SVG renderer (walls + room fills + symbol footprints), fit into
+        the thumbnail box. No hand-authored <code>thumb</code> SVG. Adding a template
+        needs only a valid plan.
+      </p>
+      <div class="controls" role="group" aria-label="Rendering style">
+        <span class="controls-label">Footprint detail:</span>
+        <button class="seg is-active" data-mode="glyph" type="button">Detailed glyphs</button>
+        <button class="seg" data-mode="flat" type="button">Flat footprints</button>
+        <span class="controls-sep">·</span>
+        <span class="controls-label">Fit:</span>
+        <button class="seg is-active" data-fit="contain" type="button">Contain (whole plan)</button>
+      </div>
+    </header>
+
+    <!-- Simulated gallery overlay panel -->
+    <section class="template-overlay-panel" aria-label="Start from a template">
+      <div class="template-overlay-title">Start from a template</div>
+      <div class="template-grid" role="list" id="grid"></div>
+    </section>
+
+    <section class="notes">
+      <h2>What the renderer draws</h2>
+      <ul>
+        <li><b>Room fills + walls</b> — closed-room polygons filled at low alpha, wall body + crisp centerline, mirroring <code>exportImg.js</code>.</li>
+        <li><b>Symbol footprints</b> — every symbol's rotated bounding box. <em>Detailed glyphs</em> additionally reuses the <code>symbolRender.js</code> interior marks (bed pillow, sofa back, door swing, stove burners…). <em>Flat footprints</em> draws boxes only — cheapest, always correct.</li>
+        <li><b>Auto-fit</b> — world bounds + margin drive the SVG <code>viewBox</code>; the box is <code>preserveAspectRatio</code> centered, so any plan proportion fits the 4:3 card without distortion.</li>
+        <li><b>No chrome</b> — no dimension labels, grid, snap glyphs, or type text. It is a silent preview, not an export.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script>
+  // ── Symbol catalog (defaults + a subset of interior-glyph metadata) ──────────
+  // In the real app these come from symbols.js CATALOG. Here we only need w/h
+  // defaults and the openings/floorLayer flags the renderer branches on.
+  const CATALOG = {
+    door:   { w: 0.81, h: 0.12, openings: true },
+    window: { w: 0.91, h: 0.12, openings: true },
+    sofa:   { w: 2.00, h: 0.90 },
+    table:  { w: 1.20, h: 0.80 },
+    chair:  { w: 0.50, h: 0.50 },
+    desk:   { w: 1.40, h: 0.70 },
+    tv:     { w: 1.20, h: 0.40 },
+    fridge: { w: 0.76, h: 0.81 },
+    stove:  { w: 0.76, h: 0.71 },
+    bed:    { w: 1.52, h: 2.03 },
+    "gaming-chair": { w: 0.66, h: 0.66 },
+    monitor:{ w: 0.60, h: 0.22 },
+    rug:    { w: 2.00, h: 1.40, floorLayer: true },
+  };
+
+  // ── Template records — ONLY id/name/description/plan. No `thumb`. ────────────
+  const TEMPLATES = [
+    {
+      id: "studio", name: "Studio apartment",
+      description: "~27 m² open plan with bed, sofa & kitchenette",
+      plan: {
+        rooms: [{ closed: true, verts: [[0,0],[5.5,0],[5.5,4.9],[0,4.9]] }],
+        symbols: [
+          { type:"bed",    x:0.9,  y:1.1,  w:1.5, h:2.0, rot:0 },
+          { type:"sofa",   x:3.3,  y:0.65, w:2.0, h:0.9, rot:0 },
+          { type:"table",  x:3.3,  y:2.0,  w:1.2, h:0.8, rot:0 },
+          { type:"fridge", x:0.55, y:4.35, w:0.7, h:0.7, rot:0 },
+          { type:"door",   x:5.5,  y:3.5,  w:0.9, h:0.12, rot:90 },
+        ],
+      },
+    },
+    {
+      id: "one-bedroom", name: "1-bedroom apartment",
+      description: "~55 m² with bedroom, living room & kitchen",
+      plan: {
+        rooms: [
+          { closed:true, verts:[[0,0],[3.5,0],[3.5,3.5],[0,3.5]] },
+          { closed:true, verts:[[3.5,0],[7.5,0],[7.5,3.5],[3.5,3.5]] },
+          { closed:true, verts:[[0,3.5],[7.5,3.5],[7.5,7.0],[0,7.0]] },
+        ],
+        symbols: [
+          { type:"bed",    x:1.0,  y:1.3,  w:1.5, h:2.0, rot:0 },
+          { type:"sofa",   x:5.5,  y:0.7,  w:2.0, h:0.9, rot:0 },
+          { type:"table",  x:5.5,  y:2.3,  w:1.2, h:0.8, rot:0 },
+          { type:"fridge", x:0.55, y:4.25, w:0.7, h:0.7, rot:0 },
+          { type:"desk",   x:2.2,  y:4.25, w:1.4, h:0.7, rot:0 },
+          { type:"door",   x:1.75, y:3.5,  w:0.9, h:0.12, rot:0 },
+          { type:"door",   x:5.5,  y:3.5,  w:0.9, h:0.12, rot:0 },
+          { type:"window", x:7.5,  y:1.75, w:1.0, h:0.12, rot:90 },
+        ],
+      },
+    },
+    {
+      id: "single-room", name: "Rectangular room",
+      description: "~20 m² blank room — add your own furniture",
+      plan: {
+        rooms: [{ closed:true, verts:[[0,0],[5.0,0],[5.0,4.0],[0,4.0]] }],
+        symbols: [
+          { type:"door",   x:0.6, y:4.0, w:0.9, h:0.12, rot:0 },
+          { type:"window", x:2.5, y:0,   w:1.2, h:0.12, rot:0 },
+        ],
+      },
+    },
+    {
+      id: "small-office", name: "Small office",
+      description: "~15 m² office with desk, chair & storage",
+      plan: {
+        rooms: [{ closed:true, verts:[[0,0],[5.0,0],[5.0,3.0],[0,3.0]] }],
+        symbols: [
+          { type:"desk",  x:0.8, y:0.45, w:1.4, h:0.7, rot:0 },
+          { type:"chair", x:0.8, y:1.2,  w:0.5, h:0.5, rot:0 },
+          { type:"desk",  x:3.2, y:1.5,  w:1.4, h:0.7, rot:0 },
+          { type:"chair", x:3.2, y:0.55, w:0.5, h:0.5, rot:0 },
+          { type:"table", x:2.2, y:2.1,  w:1.2, h:0.8, rot:0 },
+          { type:"door",  x:4.4, y:3.0,  w:0.9, h:0.12, rot:0 },
+          { type:"window",x:2.5, y:0,    w:1.0, h:0.12, rot:0 },
+        ],
+      },
+    },
+    {
+      // NEW template authored with a plan ONLY (no hand-drawn thumb) —
+      // demonstrates acceptance criterion #2.
+      id: "gaming-room", name: "Gaming room",
+      description: "~14 m² battlestation with rug, desk, monitors & sofa",
+      plan: {
+        rooms: [{ closed:true, verts:[[0,0],[4.2,0],[4.2,3.4],[0,3.4]] }],
+        symbols: [
+          { type:"rug",          x:2.0, y:2.2,  w:2.6, h:1.8, rot:0 },
+          { type:"desk",         x:2.0, y:0.55, w:1.6, h:0.7, rot:0 },
+          { type:"monitor",      x:1.6, y:0.35, w:0.6, h:0.22, rot:0 },
+          { type:"monitor",      x:2.4, y:0.35, w:0.6, h:0.22, rot:0 },
+          { type:"gaming-chair", x:2.0, y:1.5,  w:0.66,h:0.66, rot:0 },
+          { type:"sofa",         x:2.1, y:2.95, w:2.0, h:0.9, rot:0 },
+          { type:"tv",           x:0.35,y:1.7,  w:1.2, h:0.4, rot:90 },
+          { type:"door",         x:3.7, y:3.4,  w:0.9, h:0.12, rot:0 },
+        ],
+      },
+    },
+  ];
+
+  // ── Static renderer (mirrors exportImg.js geometry, thumbnail-tuned) ─────────
+  // In production this is `renderThumbnail(plan, opts)` in a small shared module
+  // (e.g. thumbRender.js) composed from the same primitives as wallRender.js /
+  // symbolRender.js / exportImg.js. It takes a plan and returns SVG markup.
+  const NS = "http://www.w3.org/2000/svg";
+  const WALL_M = 0.12;
+  const MARGIN_M = 0.35;   // world-space padding around content
+  const PX_PER_M = 40;     // arbitrary internal scale; viewBox handles the fit
+  const INK = "201,168,76";
+
+  function corners(sym) {
+    const rad = sym.rot * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const hw = sym.w / 2, hh = sym.h / 2;
+    return [
+      { x: sym.x + (-hw)*cos - (-hh)*sin, y: sym.y + (-hw)*sin + (-hh)*cos },
+      { x: sym.x + ( hw)*cos - (-hh)*sin, y: sym.y + ( hw)*sin + (-hh)*cos },
+      { x: sym.x + ( hw)*cos - ( hh)*sin, y: sym.y + ( hw)*sin + ( hh)*cos },
+      { x: sym.x + (-hw)*cos - ( hh)*sin, y: sym.y + (-hw)*sin + ( hh)*cos },
+    ];
+  }
+
+  // World bounds over room verts + symbol footprints. null when empty.
+  function contentBounds(plan) {
+    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+    for (const room of plan.rooms) for (const v of room.verts) {
+      a = Math.min(a, v[0]); b = Math.min(b, v[1]);
+      c = Math.max(c, v[0]); d = Math.max(d, v[1]);
+    }
+    for (const sym of plan.symbols) for (const p of corners(sym)) {
+      a = Math.min(a, p.x); b = Math.min(b, p.y);
+      c = Math.max(c, p.x); d = Math.max(d, p.y);
+    }
+    if (!isFinite(a)) return null;
+    return { minX: a, minY: b, maxX: c, maxY: d };
+  }
+
+  // Returns a full <svg> string generated purely from the plan.
+  // opts.mode: "glyph" (footprint + interior mark) | "flat" (footprint only)
+  function renderThumbnail(plan, opts) {
+    const mode = (opts && opts.mode) || "glyph";
+    const b = contentBounds(plan);
+    let ox, oy, wM, hM;
+    if (!b) { ox = 0; oy = 0; wM = 5; hM = 5; }
+    else {
+      ox = b.minX - MARGIN_M; oy = b.minY - MARGIN_M;
+      wM = (b.maxX - b.minX) + 2*MARGIN_M;
+      hM = (b.maxY - b.minY) + 2*MARGIN_M;
+    }
+    const W = wM * PX_PER_M, H = hM * PX_PER_M;
+    const wx = x => (x - ox) * PX_PER_M;
+    const wy = y => (y - oy) * PX_PER_M;
+    const wallPx = Math.max(3, WALL_M * PX_PER_M);
+    let body = "";
+
+    // Rooms: fill + wall body + centerline
+    for (const room of plan.rooms) {
+      if (!room.verts.length) continue;
+      const pts = room.verts.map(v => `${wx(v[0])},${wy(v[1])}`).join(" ");
+      const tag = room.closed ? "polygon" : "polyline";
+      if (room.closed && room.verts.length >= 3)
+        body += `<polygon points="${pts}" fill="var(--room-fill)" stroke="none"/>`;
+      body += `<${tag} points="${pts}" fill="none" stroke="var(--wall-body)" stroke-width="${wallPx}" stroke-linejoin="round" stroke-linecap="round"/>`;
+      body += `<${tag} points="${pts}" fill="none" stroke="var(--wall-line)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    }
+
+    // Rugs first (floor layer), then furniture, then openings on top.
+    const rugs   = plan.symbols.filter(s => CATALOG[s.type] && CATALOG[s.type].floorLayer);
+    const opens  = plan.symbols.filter(s => CATALOG[s.type] && CATALOG[s.type].openings);
+    const others = plan.symbols.filter(s => CATALOG[s.type] && !CATALOG[s.type].floorLayer && !CATALOG[s.type].openings);
+    for (const s of rugs)   body += symbolSvg(s, wx, wy, mode, true);
+    for (const s of others) body += symbolSvg(s, wx, wy, mode, false);
+    for (const s of opens)  body += symbolSvg(s, wx, wy, mode, false);
+
+    return `<svg xmlns="${NS}" viewBox="0 0 ${W.toFixed(1)} ${H.toFixed(1)}" `
+      + `preserveAspectRatio="xMidYMid meet" aria-hidden="true">${body}</svg>`;
+  }
+
+  // One symbol → footprint polygon (+ optional interior glyph). Reuses the same
+  // marks symbolRender.js draws; here a representative subset for the mockup.
+  function symbolSvg(sym, wx, wy, mode, isRug) {
+    const cs = corners(sym).map(c => `${wx(c.x)},${wy(c.y)}`).join(" ");
+    if (isRug) {
+      // dashed low-alpha footprint, no glyph (floor surface)
+      return `<polygon points="${cs}" fill="rgba(${INK},0.10)" stroke="var(--sym-stroke)" `
+        + `stroke-width="1" stroke-dasharray="4 3" stroke-linejoin="round"/>`;
+    }
+    let out = `<polygon points="${cs}" fill="var(--sym-fill)" stroke="var(--sym-stroke)" `
+      + `stroke-width="1.2" stroke-linejoin="round"/>`;
+    if (mode === "glyph") out += interiorGlyph(sym, wx, wy);
+    return out;
+  }
+
+  // Representative interior marks (subset of symbolRender._renderInterior).
+  function interiorGlyph(sym, wx, wy) {
+    const rad = sym.rot * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const scx = wx(sym.x), scy = wy(sym.y);
+    const sw = sym.w * PX_PER_M, sh = sym.h * PX_PER_M;
+    // local (lx,ly px from center) → screen
+    const lp = (lx, ly) => ({ x: scx + lx*cos - ly*sin, y: scy + lx*sin + ly*cos });
+    const box = (x0,y0,x1,y1,alpha) => {
+      const p = [lp(x0,y0),lp(x1,y0),lp(x1,y1),lp(x0,y1)].map(q=>`${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" ");
+      return `<polygon points="${p}" fill="rgba(${INK},${alpha})" stroke="var(--sym-stroke)" stroke-width="0.6"/>`;
+    };
+    const line = (x0,y0,x1,y1,op) => {
+      const a = lp(x0,y0), b = lp(x1,y1);
+      return `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="var(--sym-stroke)" stroke-width="0.7" opacity="${op}"/>`;
+    };
+    const circle = (cx,cy,r,fill) => {
+      const c = lp(cx,cy);
+      return `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${r.toFixed(1)}" fill="${fill}" stroke="var(--sym-stroke)" stroke-width="0.7"/>`;
+    };
+    const t = sym.type;
+    if (t === "bed")   return box(-sw*0.4,-sh/2+3,sw*0.4,-sh/2+3+sh*0.25,0.2) + line(0,-sh/2+3+sh*0.25,0,sh/2,0.5);
+    if (t === "sofa")  return box(-sw*0.45,-sh/2+2,sw*0.45,-sh/2+2+sh*0.22,0.15);
+    if (t === "table") return line(-sw/2+3,-sh/2+3,sw/2-3,sh/2-3,0.5) + line(sw/2-3,-sh/2+3,-sw/2+3,sh/2-3,0.5);
+    if (t === "chair" || t === "gaming-chair") return circle(0,0,Math.min(sw,sh)/2*0.65,"none");
+    if (t === "desk")  return line(-sw/2+3,-sh/2+3,sw/2-3,-sh/2+3,0.6) + line(-sw/2+3,-sh/2+3,-sw/2+3,sh/2-3,0.6);
+    if (t === "fridge")return line(-sw/2+2,-sh/2+sh*0.3,sw/2-2,-sh/2+sh*0.3,0.7);
+    if (t === "stove") return circle(-sw*0.26,-sh*0.26,Math.min(sw,sh)*0.12,"none")+circle(sw*0.26,-sh*0.26,Math.min(sw,sh)*0.12,"none")+circle(-sw*0.26,sh*0.26,Math.min(sw,sh)*0.12,"none")+circle(sw*0.26,sh*0.26,Math.min(sw,sh)*0.12,"none");
+    if (t === "tv" || t === "monitor") return box(-sw*0.44,-sh/2+2,sw*0.44,-sh/2+2+sh*0.6,0.08);
+    if (CATALOG[t] && CATALOG[t].openings) return line(0,-sh/2,0,sh/2,0.6); // door/window swing seam
+    return "";
+  }
+
+  // ── Card rendering (mirrors templates.js _renderCards) ───────────────────────
+  const grid = document.getElementById("grid");
+  let curMode = "glyph";
+
+  function buildCards() {
+    grid.innerHTML = "";
+    for (const tpl of TEMPLATES) {
+      const card = document.createElement("button");
+      card.className = "template-card";
+      card.type = "button";
+      card.setAttribute("role", "listitem");
+      card.setAttribute("aria-label", tpl.name + " — " + tpl.description);
+
+      const thumb = document.createElement("span");
+      thumb.className = "template-thumb";
+      thumb.innerHTML = renderThumbnail(tpl.plan, { mode: curMode });
+
+      const name = document.createElement("span");
+      name.className = "template-card-name";
+      name.textContent = tpl.name;
+
+      const desc = document.createElement("span");
+      desc.className = "template-card-desc";
+      desc.textContent = tpl.description;
+
+      card.append(thumb, name, desc);
+      grid.appendChild(card);
+    }
+  }
+
+  // Mode toggle
+  document.querySelectorAll(".seg[data-mode]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".seg[data-mode]").forEach(b => b.classList.remove("is-active"));
+      btn.classList.add("is-active");
+      curMode = btn.dataset.mode;
+      buildCards();
+    });
+  });
+
+  buildCards();
+  </script>
+</body>
+</html>
