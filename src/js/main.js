@@ -6,7 +6,7 @@
  */
 
 import { onChange as onViewChange, resetView, fitToContent, view, pxPerM, worldToScreen } from "./view.js";
-import { onChange as onUnitChange } from "./units.js";
+import { onChange as onUnitChange, fmtArea, areaUnitLabel } from "./units.js";
 import { init as initSurface, initWallLayer, onRender, resize, render, scheduleRender, W, H } from "./surface.js";
 import { init as initTheme, toggleTheme, getTheme, onThemeChange } from "./theme.js";
 import { init as initHud } from "./hud.js";
@@ -40,7 +40,7 @@ import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
 import { contentBounds } from "./exportImg.js";
 import { init as initActions, showToast, showConflictBanner, setHistoryReset, setOpenTemplates } from "./actions.js";
 import { init as initTemplates, open as openTemplates } from "./templates.js";
-import { model as wallsModel } from "./walls.js";
+import { model as wallsModel, roomMetrics } from "./walls.js";
 import { getSymbol } from "./symbols.js";
 import { init as initHistory, reset as historyReset, commit as historyCommit, undo as historyUndo, redo as historyRedo, canUndo, canRedo, depth as historyDepth, onChange as historyOnChange } from "./history.js";
 import { init as initHelp } from "./help.js";
@@ -74,8 +74,8 @@ import { model as measurementsModel } from "./measurements.js";
 import { init as initLoupe, setViewModule as loupeSetViewModule, reposition as loupeReposition } from "./loupe.js";
 import { toggleGridSnap } from "./prefs.js";
 import { init as initOnboarding, maybeShow as onboardingMaybeShow, dismiss as onboardingDismiss } from "./onboarding.js";
-import { isActive as previewIsActive, toggle as previewToggle, onChange as previewOnChange } from "./preview.js";
-import { initIsoRender, render as isoRenderFn } from "./isoRender.js";
+import { isActive as previewIsActive, toggle as previewToggle, onChange as previewOnChange, getScope as previewGetScope, setScope as previewSetScope } from "./preview.js";
+import { initIsoRender, render as isoRenderFn, scopeFilter, buildItems, isoBounds } from "./isoRender.js";
 import * as _wallsModRef from "./walls.js";
 import * as _symbolsModRef from "./symbols.js";
 
@@ -169,9 +169,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnHelp        = document.getElementById("btn-help");
   const helpOverlayEl  = document.getElementById("help-overlay");
 
-  // 3D preview (LLD 128)
-  const gIso         = document.getElementById("iso");
-  const btnPreview   = document.getElementById("tool-preview");
+  // 3D preview (LLD 128 / 130)
+  const gIso          = document.getElementById("iso");
+  const btnPreview    = document.getElementById("tool-preview");
+  const previewScope  = document.getElementById("preview-scope");
 
   // Theme toggle button
   const btnThemeToggle = document.getElementById("btn-theme-toggle");
@@ -417,9 +418,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // 3D isometric preview (LLD 128): bind model refs + active getter, register last.
+  // 3D isometric preview (LLD 128 / 130): bind model refs + active + scope getters.
   if (gIso) {
-    initIsoRender(gIso, previewIsActive, _wallsModRef, _symbolsModRef);
+    initIsoRender(gIso, previewIsActive, previewGetScope, _wallsModRef, _symbolsModRef);
   }
 
   // Register post-render hooks
@@ -486,7 +487,69 @@ document.addEventListener("DOMContentLoaded", () => {
   // Keep toggle label in sync if theme is changed programmatically
   onThemeChange(_updateThemeToggle);
 
-  // ── 3D preview (LLD 128) ──────────────────────────────────────────────────
+  // ── 3D preview (LLD 128 / 130) ───────────────────────────────────────────
+
+  /**
+   * Compute in-scope built items and fit the view to the iso scene.
+   * Called on preview enter and on scope change.
+   */
+  function _refitIso() {
+    if (!_wallsModRef || !_symbolsModRef) return;
+    const wm = /** @type {any} */ (_wallsModRef.model);
+    const sm = /** @type {any} */ (_symbolsModRef.model);
+    const scopeId = previewGetScope();
+    const { rooms, symbols } = scopeFilter(wm, sm, scopeId);
+    const items = buildItems(rooms, symbols);
+    const bounds = isoBounds(items);
+    if (bounds) fitToContent(bounds, W, H);
+  }
+
+  /**
+   * Build the scope pill: one "All" segment + one per closed room.
+   * Clears and rebuilds; no-op when previewScope is absent.
+   */
+  function _buildScopePill() {
+    if (!previewScope) return;
+    previewScope.innerHTML = "";
+    const wm = /** @type {any} */ (_wallsModRef && _wallsModRef.model);
+    if (!wm) return;
+
+    const closedRooms = wm.rooms.filter(r => r.closed);
+
+    // "All" segment
+    const allBtn = document.createElement("button");
+    allBtn.type = "button";
+    allBtn.className = "scope-seg";
+    allBtn.textContent = "All";
+    allBtn.setAttribute("aria-pressed", previewGetScope() === "all" ? "true" : "false");
+    allBtn.setAttribute("aria-label", "Preview All");
+    allBtn.addEventListener("click", () => {
+      previewSetScope("all");
+      _buildScopePill();
+      _refitIso();
+      scheduleRender();
+    });
+    previewScope.appendChild(allBtn);
+
+    closedRooms.forEach((room, idx) => {
+      const metrics = roomMetrics(room);
+      const areaStr = fmtArea(metrics.area) + " " + areaUnitLabel();
+      const label = `Room ${idx + 1} ${areaStr}`;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "scope-seg";
+      btn.textContent = label;
+      btn.setAttribute("aria-pressed", previewGetScope() === room.id ? "true" : "false");
+      btn.setAttribute("aria-label", `Preview ${label}`);
+      btn.addEventListener("click", () => {
+        previewSetScope(room.id);
+        _buildScopePill();
+        _refitIso();
+        scheduleRender();
+      });
+      previewScope.appendChild(btn);
+    });
+  }
 
   /** Sync button + stage class to current preview state. */
   function _syncPreview() {
@@ -497,6 +560,17 @@ document.addEventListener("DOMContentLoaded", () => {
         stage.classList.add("stage--preview");
       } else {
         stage.classList.remove("stage--preview");
+      }
+    }
+    if (active) {
+      if (previewScope) previewScope.style.display = "flex";
+      _buildScopePill();
+      _refitIso();
+    } else {
+      // Clear pill when leaving preview
+      if (previewScope) {
+        previewScope.innerHTML = "";
+        previewScope.style.display = "none";
       }
     }
   }

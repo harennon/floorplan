@@ -61,18 +61,23 @@ export const model = { symbols: /** @type {Sym[]} */ ([]) };
  * (LLD 128). It is a type constant — not a per-instance field — so old plans
  * that lack a per-instance `z` resolve height from the catalog at render time.
  *
+ * `sill` / `head` (metres from floor) are optional opening-height fields for
+ * the isometric renderer (LLD 130). When present they define the vertical band
+ * the opening reveal occupies ([sill, head]). Absent values fall back to
+ * `sill ?? 0` and `head ?? z`. Only meaningful for opening types.
+ *
  * @type {Record<SymbolType, {label:string, category:SymCategory,
  *   openings?:boolean, circular?:boolean, discrete?:boolean, floorLayer?:boolean,
  *   w:number, h:number,
  *   min_w:number, max_w:number, min_h:number, max_h:number,
- *   z:number,
+ *   z:number, sill?:number, head?:number,
  *   presets?:SymPreset[]}>}
  */
 export const CATALOG = {
   // Openings — width-only; depth pinned to the thin wall marker (min_h===max_h===h).
   door: {
     label: "Door", category: "openings", openings: true, w: 0.81, h: 0.12,
-    min_w: 0.61, max_w: 0.91, min_h: 0.12, max_h: 0.12, z: 2.03,
+    min_w: 0.61, max_w: 0.91, min_h: 0.12, max_h: 0.12, z: 2.03, sill: 0, head: 2.03,
     presets: [
       { name: "Closet 24\"",   w: 0.61, h: 0.12 },
       { name: "Bath 28\"",     w: 0.71, h: 0.12 },
@@ -84,7 +89,7 @@ export const CATALOG = {
   },
   window: {
     label: "Window", category: "openings", openings: true, w: 0.91, h: 0.12,
-    min_w: 0.61, max_w: 2.44, min_h: 0.12, max_h: 0.12, z: 1.20,
+    min_w: 0.61, max_w: 2.44, min_h: 0.12, max_h: 0.12, z: 1.20, sill: 0.9, head: 2.1,
     presets: [
       { name: "24\"", w: 0.61, h: 0.12 },
       { name: "32\"", w: 0.81, h: 0.12 },

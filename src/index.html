@@ -210,6 +210,49 @@
       #iso { display: none; }
       .stage--preview #iso { display: block; }
 
+      /* ── Scope pill (LLD 130) ────────────────────────────────────────── */
+      #preview-scope {
+        display: none;
+        position: absolute;
+        top: 0.75rem;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 30;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        max-width: calc(100% - 2rem);
+        white-space: nowrap;
+        background: var(--panel-bg, rgba(20,20,15,0.85));
+        border: 1px solid var(--gold-soft, rgba(201,168,76,0.25));
+        border-radius: 20px;
+        padding: 3px 4px;
+        gap: 2px;
+        scrollbar-width: none;
+      }
+      #preview-scope::-webkit-scrollbar { display: none; }
+      .stage--preview ~ #preview-scope,
+      .stage--preview + #preview-scope { display: none; }
+      /* pill is shown by stage--preview class but it's a sibling — controlled via JS inline display */
+      .scope-seg {
+        display: inline-block;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-family: inherit;
+        cursor: pointer;
+        border: none;
+        border-radius: 16px;
+        background: transparent;
+        color: var(--text, #e8d9a8);
+        white-space: nowrap;
+        transition: background 0.1s, color 0.1s;
+      }
+      .scope-seg:hover { background: rgba(201,168,76,0.12); }
+      .scope-seg[aria-pressed="true"] {
+        background: var(--gold, #c9a84c);
+        color: #14140f;
+        font-weight: 600;
+      }
+
       /* Active-ring accent for the preview button */
       #tool-preview[aria-pressed="true"] {
         color: var(--gold);
@@ -2178,6 +2221,9 @@
         <!-- Interactive committed dimension chips (pointer-events:auto on chips) -->
         <div class="dim-labels"></div>
       </div>
+
+      <!-- Scope pill for per-room preview (LLD 130); built + shown by main.js when preview is active -->
+      <div id="preview-scope" role="group" aria-label="Preview scope"></div>
 
       <!-- Grain texture overlay -->
       <div class="grain" aria-hidden="true"></div>

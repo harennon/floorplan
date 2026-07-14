@@ -13,7 +13,7 @@
  */
 
 import { corners, CATALOG } from "./symbols.js";
-import { WALL_M } from "./walls.js";
+import { WALL_M, pointNearRoomWall } from "./walls.js";
 
 // ── Types (JSDoc) ─────────────────────────────────────────────────────────────
 
@@ -180,6 +180,24 @@ export function pointInRoom(room, x, y) {
     }
   }
   return inside;
+}
+
+/**
+ * True if `sym` belongs to `room`: openings by proximity to the room's walls
+ * (pointNearRoomWall, WALL_M), all other symbols by center-in-polygon
+ * (pointInRoom). Pure. Assumes a closed room (see pointInRoom semantics).
+ *
+ * Factored out of roomTool._carriedSymbolsFor so both that call site and
+ * isoRender.scopeFilter share one rule (LLD 130).
+ *
+ * @param {import("./walls.js").Room} room
+ * @param {import("./symbols.js").Sym} sym
+ * @returns {boolean}
+ */
+export function symbolBelongsToRoom(room, sym) {
+  return CATALOG[sym.type]?.openings
+    ? pointNearRoomWall(room, sym.x, sym.y, WALL_M)
+    : pointInRoom(room, sym.x, sym.y);
 }
 
 /**

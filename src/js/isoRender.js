@@ -19,10 +19,11 @@
  * accepted for this cut.
  */
 
-import { worldToScreenIso } from "./view.js";
+import { worldToScreenIso, ISO_THETA, ISO_KZ, view } from "./view.js";
 import { CATALOG, corners } from "./symbols.js";
 import { WALL_M, MIN_SEG_M } from "./walls.js";
 import { palette, getTheme } from "./theme.js";
+import { pointInRoom, symbolBelongsToRoom } from "./clearance.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,13 @@ const CATEGORY_BASE = {
   outdoor:  { light: "#88b888", dark: "#70a870" },
 };
 
+/**
+ * Tiny sort bias added to an opening's parent wall sortKey so the reveal
+ * paints just over the specific wall segment it cuts (off-center included).
+ * (LLD 130)
+ */
+const OPENING_BIAS = 1e-3;
+
 // SVG namespace
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -52,6 +60,8 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 let _gIso = null;
 /** @type {(()=>boolean)|null} */
 let _getActive = null;
+/** @type {(()=>("all"|string))|null} */
+let _getScope = null;
 /** @type {{ model: { rooms: any[], chain: any[] } }|null} */
 let _wallsMod = null;
 /** @type {{ model: { symbols: any[] } }|null} */
@@ -244,20 +254,21 @@ export function extrudeFootprint(footprint, z0, z1) {
 // ── Item builder ──────────────────────────────────────────────────────────────
 
 /**
- * Build the list of extrudable items from the provided models.
+ * Build the list of extrudable items from filtered rooms and symbols arrays.
  *
- * Walls: iterates wallsModel.rooms, keeps only closed rooms. Emits one item
- *   per edge (including closing edge). Open rooms and wallsModel.chain are
- *   NEVER read (ensures open walls and the draft chain don't appear).
+ * Walls: iterates rooms, keeps only closed rooms. Emits one item per edge
+ *   (including closing edge). Open rooms are NEVER read.
  *
  * Furniture: one item per symbol. floorLayer symbols (rugs) are emitted as
- *   flat decals (z1 ≈ z0 = 0), not boxes.
+ *   flat decals (z1 ≈ z0 = 0). openings-category symbols emit kind:"opening"
+ *   at [sill, head] from the catalog, with sortKey bound to the parent wall's
+ *   sortKey + OPENING_BIAS (LLD 130).
  *
- * @param {{ rooms: {closed:boolean, verts:{x:number,y:number}[]}[], chain: any[] }} wallsModel
- * @param {{ symbols: {id:string, type:string, x:number, y:number, w:number, h:number, rot:number, color?:string}[] }} symbolsModel
- * @returns {{ kind:"wall"|"furniture"|"rug", footprint:{x:number,y:number}[], z0:number, z1:number, baseColor:string, sortKey:number }[]}
+ * @param {{closed:boolean, verts:{x:number,y:number}[]}[]} rooms
+ * @param {{id:string, type:string, x:number, y:number, w:number, h:number, rot:number, color?:string}[]} symbols
+ * @returns {{ kind:"wall"|"furniture"|"rug"|"opening", footprint:{x:number,y:number}[], z0:number, z1:number, baseColor:string, sortKey:number }[]}
  */
-export function buildItems(wallsModel, symbolsModel) {
+export function buildItems(rooms, symbols) {
   const pal = palette();
   const bg = toOpaqueRgb(pal.bg, "#14140f");
   const theme = getTheme();
@@ -265,11 +276,18 @@ export function buildItems(wallsModel, symbolsModel) {
   // Opaque wall base: use the wallLine token (already nearly-opaque gold)
   const wallBase = toOpaqueRgb(pal.wallLine, bg);
 
+  // Opaque recess color for opening reveals: heavily-darkened wall base (LLD 130)
+  const recessBase = shade(wallBase, 0.4);
+
   /** @type {ReturnType<typeof buildItems>} */
   const items = [];
 
   // ── Walls ────────────────────────────────────────────────────────────────
-  for (const room of wallsModel.rooms) {
+  // Retain wall centerline endpoints + sortKey for opening parent-binding.
+  /** @type {{ a:{x:number,y:number}, b:{x:number,y:number}, sortKey:number }[]} */
+  const wallEdges = [];
+
+  for (const room of rooms) {
     if (!room.closed) continue;
     const verts = room.verts;
     const n = verts.length;
@@ -284,6 +302,7 @@ export function buildItems(wallsModel, symbolsModel) {
       let cx = 0, cy = 0;
       for (const p of quad) { cx += p.x; cy += p.y; }
       cx /= quad.length; cy /= quad.length;
+      const sk = cx + cy;
 
       items.push({
         kind: "wall",
@@ -291,17 +310,62 @@ export function buildItems(wallsModel, symbolsModel) {
         z0: 0,
         z1: CEILING_M,
         baseColor: wallBase,
-        sortKey: cx + cy,
+        sortKey: sk,
       });
+
+      // Retain centerline for opening binding (LLD 130)
+      wallEdges.push({ a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y }, sortKey: sk });
     }
   }
 
   // ── Symbols ──────────────────────────────────────────────────────────────
-  for (const sym of symbolsModel.symbols) {
+  for (const sym of symbols) {
     const cat = CATALOG[sym.type];
     if (!cat) continue;
 
     const isRug = !!cat.floorLayer;
+    const isOpening = !!cat.openings;
+
+    // ── Opening reveal (LLD 130) ─────────────────────────────────────────
+    if (isOpening) {
+      const z0 = cat.sill ?? 0;
+      const z1 = Math.min(cat.head ?? cat.z, CEILING_M); // clamped to wall top
+
+      const footprint = corners(sym);
+
+      // Find parent wall: wall segment minimising squared point-to-segment distance
+      // from the opening center to the segment a→b. This guarantees the reveal
+      // sorts immediately after the exact wall it cuts (off-center included).
+      let parentSortKey = null;
+      let minDist2 = Infinity;
+      for (const edge of wallEdges) {
+        const d2 = _pointToSegDist2(sym.x, sym.y, edge.a, edge.b);
+        if (d2 < minDist2) {
+          minDist2 = d2;
+          parentSortKey = edge.sortKey;
+        }
+      }
+
+      // Fallback: own-centroid if no wall exists (opening on open polyline, EC2)
+      let ownCx = 0, ownCy = 0;
+      for (const p of footprint) { ownCx += p.x; ownCy += p.y; }
+      ownCx /= footprint.length; ownCy /= footprint.length;
+
+      const sortKey = parentSortKey !== null
+        ? parentSortKey + OPENING_BIAS
+        : ownCx + ownCy + OPENING_BIAS;
+
+      items.push({
+        kind: "opening",
+        footprint,
+        z0,
+        z1,
+        baseColor: recessBase,
+        sortKey,
+      });
+      continue;
+    }
+
     const z1 = isRug ? 0 : (cat.z ?? 0.75);
 
     // Resolve opaque base color
@@ -337,6 +401,26 @@ export function buildItems(wallsModel, symbolsModel) {
 }
 
 /**
+ * Squared point-to-segment distance from (px,py) to segment a→b. Pure.
+ * @param {number} px
+ * @param {number} py
+ * @param {{x:number,y:number}} a
+ * @param {{x:number,y:number}} b
+ * @returns {number}
+ */
+function _pointToSegDist2(px, py, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-18) {
+    // degenerate segment — point-to-point
+    return (px - a.x) ** 2 + (py - a.y) ** 2;
+  }
+  const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / lenSq));
+  const qx = a.x + t * dx, qy = a.y + t * dy;
+  return (px - qx) ** 2 + (py - qy) ** 2;
+}
+
+/**
  * Stable back-to-front sort of items (ascending sortKey). Pure; returns a
  * new array without mutating the input.
  *
@@ -347,19 +431,87 @@ export function depthSort(items) {
   return items.slice().sort((a, b) => a.sortKey - b.sortKey);
 }
 
+// ── Scope filter (LLD 130) ────────────────────────────────────────────────────
+
+/**
+ * Filter live models to the in-scope subset. Pure.
+ *
+ * "all" → the models' rooms and symbols unchanged.
+ * A room id → that single closed room (if it resolves) + the symbols belonging
+ * to it, decided by clearance.symbolBelongsToRoom (furniture by center-in-room;
+ * openings by near-wall). An unresolved id behaves as "all" (fail-safe).
+ *
+ * @param {{ rooms: any[] }} wallsModel
+ * @param {{ symbols: any[] }} symbolsModel
+ * @param {"all"|string} scopeId
+ * @returns {{ rooms: any[], symbols: any[] }}
+ */
+export function scopeFilter(wallsModel, symbolsModel, scopeId) {
+  if (scopeId === "all") {
+    return { rooms: wallsModel.rooms, symbols: symbolsModel.symbols };
+  }
+  // Find the target closed room
+  const room = wallsModel.rooms.find(r => r.id === scopeId && r.closed);
+  if (!room) {
+    // Stale / unresolved id — fail-safe: treat as "all"
+    return { rooms: wallsModel.rooms, symbols: symbolsModel.symbols };
+  }
+  const rooms = [room];
+  const symbols = symbolsModel.symbols.filter(sym => symbolBelongsToRoom(room, sym));
+  return { rooms, symbols };
+}
+
+/**
+ * Folded-world AABB of the in-scope geometry for framing. Pure, no pan/zoom.
+ *
+ * Takes the BUILT-items list (buildItems output); folds each item's footprint
+ * corners at z0 and z1 with the iso projection math and returns
+ * { minX, minY, maxX, maxY } in folded-world metres for view.fitToContent.
+ * Returns null when the items list is empty.
+ *
+ * @param {ReturnType<typeof buildItems>} items
+ * @returns {{minX:number,minY:number,maxX:number,maxY:number}|null}
+ */
+export function isoBounds(items) {
+  if (items.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const cos = Math.cos(Math.PI / 6); // ISO_THETA
+  const sin = Math.sin(Math.PI / 6);
+  const kz  = 0.82;                  // ISO_KZ
+
+  for (const item of items) {
+    for (const z of [item.z0, item.z1]) {
+      for (const p of item.footprint) {
+        // iso fold (without pan/zoom — gives the "folded world" coords)
+        const fx = (p.x - p.y) * cos;
+        const fy = (p.x + p.y) * sin - z * kz;
+        if (fx < minX) minX = fx;
+        if (fx > maxX) maxX = fx;
+        if (fy < minY) minY = fy;
+        if (fy > maxY) maxY = fy;
+      }
+    }
+  }
+  if (minX === Infinity) return null;
+  return { minX, minY, maxX, maxY };
+}
+
 // ── DOM: initialise ───────────────────────────────────────────────────────────
 
 /**
- * Bind SVG group, preview-active getter, and model refs. Call once from main.js.
+ * Bind SVG group, preview-active getter, scope getter, and model refs.
+ * Call once from main.js.
  *
  * @param {SVGGElement} gIso
  * @param {()=>boolean} getActive
+ * @param {()=>("all"|string)} getScope
  * @param {{ model: object }} wallsMod
  * @param {{ model: object }} symbolsMod
  */
-export function initIsoRender(gIso, getActive, wallsMod, symbolsMod) {
+export function initIsoRender(gIso, getActive, getScope, wallsMod, symbolsMod) {
   _gIso = gIso;
   _getActive = getActive;
+  _getScope = getScope;
   _wallsMod = wallsMod;
   _symbolsMod = symbolsMod;
 }
@@ -367,11 +519,13 @@ export function initIsoRender(gIso, getActive, wallsMod, symbolsMod) {
 // ── DOM: render hook ──────────────────────────────────────────────────────────
 
 /**
- * surface.onRender hook (LLD 128).
+ * surface.onRender hook (LLD 128, extended in LLD 130).
  *
  * When preview is OFF: clears #iso (returns quickly — 2D layers remain).
- * When preview is ON:  clears #iso, builds items from live models, sorts
- *   back-to-front, paints floor slabs + box faces as SVG polygons.
+ * When preview is ON:  clears #iso, applies scopeFilter, builds items from
+ *   live models, sorts back-to-front, paints floor slabs + box faces as SVG
+ *   polygons. Openings render as recessed dark reveals at [sill, head].
+ *   Empty scope → shows a "No walls to preview" hint text.
  *
  * Never mutates walls.model or symbols.model (read-only guarantee).
  */
@@ -385,8 +539,30 @@ export function render() {
   const symbolsModel = /** @type {any} */ (_symbolsMod.model);
   const pal = palette();
 
+  // Apply scope filter (LLD 130)
+  const scopeId = _getScope ? _getScope() : "all";
+  const { rooms, symbols } = scopeFilter(wallsModel, symbolsModel, scopeId);
+
+  // ── Empty state ───────────────────────────────────────────────────────────
+  // Show hint when there are no closed rooms (no wall geometry to extrude).
+  // Symbols-only (e.g. a rug with no walls) are still rendered — no early return.
+  const hasClosedRooms = rooms.some(r => r.closed && r.verts && r.verts.length >= 3);
+  if (!hasClosedRooms && symbols.length === 0) {
+    const txt = document.createElementNS(SVG_NS, "text");
+    txt.setAttribute("x", "50%");
+    txt.setAttribute("y", "50%");
+    txt.setAttribute("text-anchor", "middle");
+    txt.setAttribute("dominant-baseline", "middle");
+    txt.setAttribute("fill", pal.wallLine || "#c9a84c");
+    txt.setAttribute("fill-opacity", "0.45");
+    txt.setAttribute("font-size", "14");
+    txt.textContent = "No walls to preview";
+    _gIso.appendChild(txt);
+    return;
+  }
+
   // ── Floor slabs (drawn first, behind all boxes) ───────────────────────────
-  for (const room of wallsModel.rooms) {
+  for (const room of rooms) {
     if (!room.closed) continue;
     const verts = room.verts;
     if (verts.length < 3) continue;
@@ -401,7 +577,7 @@ export function render() {
   }
 
   // ── Extruded boxes ────────────────────────────────────────────────────────
-  const items = depthSort(buildItems(wallsModel, symbolsModel));
+  const items = depthSort(buildItems(rooms, symbols));
 
   for (const item of items) {
     if (item.footprint.length < 3) continue;
@@ -415,6 +591,30 @@ export function render() {
       poly.setAttribute("fill-opacity", "0.6");
       poly.setAttribute("stroke", "none");
       _gIso.appendChild(poly);
+      continue;
+    }
+
+    // Opening reveal (LLD 130): extruded at [sill, head] with darker recess shades
+    // Wall box is unmodified beneath it — reads as wall-with-an-opening.
+    if (item.kind === "opening") {
+      const faces = extrudeFootprint(item.footprint, item.z0, item.z1);
+      for (const face of faces) {
+        if (face.pts.length < 3) continue;
+        // Darker shading for the recess to read as shadow/depth
+        let fillColor;
+        switch (face.role) {
+          case "top":    fillColor = shade(item.baseColor, 0.80); break;
+          case "left":   fillColor = shade(item.baseColor, 0.60); break;
+          case "right":  fillColor = shade(item.baseColor, 0.50); break;
+          case "bottom": fillColor = shade(item.baseColor, 0.35); break;
+          default:       fillColor = item.baseColor;
+        }
+        const poly = document.createElementNS(SVG_NS, "polygon");
+        poly.setAttribute("points", face.pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "));
+        poly.setAttribute("fill", fillColor);
+        poly.setAttribute("stroke", "none");
+        _gIso.appendChild(poly);
+      }
       continue;
     }
 

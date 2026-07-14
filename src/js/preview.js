@@ -13,6 +13,9 @@
 /** @type {boolean} */
 let _active = false;
 
+/** Session-only preview scope: "all" or a room id (LLD 130). Never persisted. */
+let _scope = "all";
+
 // ── Listeners ─────────────────────────────────────────────────────────────────
 
 /** @type {Array<()=>void>} */
@@ -27,18 +30,38 @@ export function isActive() {
 
 /**
  * Set preview active state. Fires onChange listeners if the value changed.
+ * Resets scope to "all" when turning off (LLD 130).
  * @param {boolean} on
  */
 export function setActive(on) {
   const next = !!on;
   if (next === _active) return;
   _active = next;
+  if (!_active) _scope = "all";
   _notify();
 }
 
-/** Toggle preview active state. Fires onChange listeners. */
+/** Toggle preview active state. Fires onChange listeners.
+ *  Resets scope to "all" when toggling off (LLD 130). */
 export function toggle() {
   _active = !_active;
+  if (!_active) _scope = "all";
+  _notify();
+}
+
+/** @returns {"all"|string} current scope: "all" or a room id (LLD 130) */
+export function getScope() {
+  return _scope;
+}
+
+/**
+ * Set the preview scope. Fires onChange if the value changed (LLD 130).
+ * @param {"all"|string} scopeId
+ */
+export function setScope(scopeId) {
+  const next = scopeId ?? "all";
+  if (next === _scope) return;
+  _scope = next;
   _notify();
 }
 

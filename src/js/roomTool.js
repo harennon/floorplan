@@ -21,9 +21,9 @@
  */
 
 import { screenToWorld, worldToScreen, pxPerM } from "./view.js";
-import { model as wallsModel, moveRoom, gridSnap, pointNearRoomWall, WALL_M, setRoomColor } from "./walls.js";
-import { pointInRoom } from "./clearance.js";
-import { model as symbolsModel, getSymbol, moveSymbol, CATALOG } from "./symbols.js";
+import { model as wallsModel, moveRoom, gridSnap, setRoomColor } from "./walls.js";
+import { pointInRoom, symbolBelongsToRoom } from "./clearance.js";
+import { model as symbolsModel, getSymbol, moveSymbol } from "./symbols.js";
 import { gridSnap as prefsGridSnap } from "./prefs.js";
 import { snapStep } from "./grid.js";
 import { scheduleRender } from "./surface.js";
@@ -255,9 +255,9 @@ export function onDrawModeEnter() {
 // ── Nudge / flush — keyboard action exports (LLD 96) ─────────────────────────
 
 /**
- * Ids of symbols carried by `room`: furniture whose center is strictly inside
- * (pointInRoom), plus openings within WALL_M of one of the room's own wall segments
- * (pointNearRoomWall). Pure over the current model state. Used by onSelectDown
+ * Ids of symbols carried by `room`: furniture by center-in-room, openings by
+ * near-wall proximity — delegated to the shared clearance.symbolBelongsToRoom
+ * predicate (LLD 130). Pure over the current model state. Used by onSelectDown
  * (snapshot at drag start) and nudgeSelected (recomputed per nudge).
  * @param {{ verts: {x:number,y:number}[], id: string }} room
  * @returns {string[]}
@@ -265,11 +265,7 @@ export function onDrawModeEnter() {
 function _carriedSymbolsFor(room) {
   const ids = [];
   for (const sym of symbolsModel.symbols) {
-    const isOpening = !!CATALOG[sym.type]?.openings;
-    const attached = isOpening
-      ? pointNearRoomWall(room, sym.x, sym.y, WALL_M)
-      : pointInRoom(room, sym.x, sym.y);
-    if (attached) ids.push(sym.id);
+    if (symbolBelongsToRoom(room, sym)) ids.push(sym.id);
   }
   return ids;
 }
