@@ -50,12 +50,24 @@ grows the `TEMPLATES` array literal. No control-flow, no CSS, no new module.
   reads as a real product and `buildCompact`'s default-omission stays meaningful.
 
 ### Per-plan arrangement (interior-design principles)
-- **Gaming room (~11 m², 3.5×3.2):** a battlestation — desk flush to one wall, two monitors
-  seated at the back of the desk, gaming-chair centered in front with pull-in clearance, a
-  5×8 rug under the seat/desk zone. Door on a free wall; window opposite the desk.
+- **Gaming room (~11 m², 3.5×3.2):** a battlestation. The desk is pulled **≥ 0.22 m off the
+  wall** (its wall-side edge sits ~0.22–0.25 m from the wall), and the two monitors seat in
+  that gap **between the desk and the wall** — each monitor's footprint (0.62×0.22) lies fully
+  in the strip behind the desk, flush-ish to the wall, so **no monitor overlaps the desk**.
+  Concretely: with the desk's wall-side edge at ~0.27 m from the wall and a 0.22 m-deep
+  monitor centered at ~0.11 m + small gap, the monitor's far edge stops short of the desk's
+  near edge. This satisfies both "monitors at the back of the setup" and the no-overlap rule
+  (Edge Case 5) — the overlap exception is NOT extended; monitors are spaced, not stacked on
+  the desk. Gaming-chair centered in front with pull-in clearance (front edge ~0.15 m off the
+  desk, mirroring the shipped small-office desk/chair gap). A 5×8 rug (a `floorLayer`) sits
+  under the seat/desk zone and MAY overlap the desk/chair — that is the sole permitted overlap.
+  Door on a free wall; window opposite the desk.
 - **Kitchen (~10.8 m², 3.6×3.0):** a work-triangle — fridge and stove along the top wall,
   sink on the adjacent (left) wall rotated 90°, a cabinet run as counter, and a dining
-  table with two chairs in the open lower half. Door on the bottom wall; window on the right.
+  table with two chairs in the open lower half. The two chairs are **spaced ~0.15 m off the
+  table edge, NOT tucked under it** (following the shipped small-office s0/s1 desk-chair
+  convention), so no chair footprint overlaps the table — the plan passes the same no-overlap
+  QA check (Edge Case 5). Door on the bottom wall; window on the right.
 - **Cozy living room (~15 m², 4.2×3.6):** a conversation group — sofa facing a wall-mounted
   TV across a coffee-table, one armchair angled in on the side, an 8×10 rug (rotated to
   landscape) anchoring the group. Door on the left wall; window on the right.
@@ -111,13 +123,19 @@ No new interfaces. Each new entry conforms to the existing `Template` typedef
 ```
 
 ### Symbol types used (all pre-existing `CATALOG` keys — verified against `symbols.js`)
-- **Gaming room:** `desk` (1.4×0.7), `monitor` (0.62×0.22, ×2), `gaming-chair` (0.66×0.66),
-  `rug` (`5×8` preset 1.52×2.44), `door` (0.81×0.12), `window` (0.91×0.12).
+- **Gaming room:** `desk` (default 1.4×0.7), `monitor` (**`27"` preset** 0.62×0.22, ×2 —
+  catalog default is 0.60×0.22), `gaming-chair` (default 0.66×0.66), `rug` (`5×8` preset
+  1.52×2.44), `door` (default 0.81×0.12), `window` (default 0.91×0.12). The non-default
+  monitor and rug presets serialize `w`/`h` explicitly in the compact codec (consistent with
+  Edge Case 4).
 - **Kitchen:** `fridge` (0.76×0.81), `stove` (0.76×0.71), `sink` (0.76×0.51, rot 90),
   `cabinet` (0.90×0.45 as counter run), `table` (`Dining 4` 1.22×0.90), `chair` (0.5×0.5,
   ×2), `door`, `window`.
-- **Cozy living room:** `sofa` (2.0×0.9), `armchair` (0.8×0.8), `coffee-table` (1.1×0.55),
-  `tv` (1.4×0.4), `rug` (`8×10` 2.44×3.05, rotated to landscape), `door`, `window`.
+- **Cozy living room:** `sofa` (default 2.0×0.9), `armchair` (default 0.8×0.8), `coffee-table`
+  (default 1.1×0.55), `tv` (**`55" stand` preset** 1.40×0.40 — catalog default is 1.20×0.40),
+  `rug` (`8×10` preset 2.44×3.05, rotated to landscape), `door` (default), `window` (default).
+  The non-default tv and rug presets serialize `w`/`h` explicitly in the compact codec
+  (consistent with Edge Case 4).
 
 Each `id` within a plan is a unique `s<n>` string; `rooms[].id` is `r0` (or `w`-prefixed —
 either passes `validatePlan`, which only requires a string). Follow the shipped `r0`/`s<n>`
@@ -136,7 +154,6 @@ into the bundle, never mutated at runtime, never persisted. When a user selects 
 4. From there the plan participates in the normal in-memory → `localStorage` autosave and
    URL-hash/export flows like any user-drawn plan. Templates add no new persisted state.
 
-## Edge Cases
 ## Edge Cases
 
 1. **Existing `TEMPLATES.length` bound (3–5) will fail at 7.** `test/tests.html`
