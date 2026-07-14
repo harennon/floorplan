@@ -710,6 +710,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         render3d.exit();
         stage?.classList.remove("preview--fallback");
+        _updateEmptyState();
       }
     } else if (scopeEdge && active) {
       // Scope changed while preview is active: rebuild without full re-entry
@@ -854,6 +855,17 @@ document.addEventListener("DOMContentLoaded", () => {
     // (registered earlier); it does not stopPropagation, so we still receive the
     // event — but we must not deselect when wallTool is about to finish a chain.
     if (!meta && e.key === "Escape") {
+      // Close scope popover first if it is open (EC13: popover-Esc precedence).
+      // The menuitem keydown handler stops propagation when focus is inside the
+      // popover; this branch handles the case where the popover is open but focus
+      // has moved outside it (rare, but the window-level handler must not exit
+      // preview in that situation).
+      if (scopePopoverEl && !scopePopoverEl.hidden) {
+        e.preventDefault();
+        _closeScopePopover();
+        if (scopeCaretBtn) scopeCaretBtn.focus();
+        return;
+      }
       // Exit 3D preview mode on Esc (LLD 128)
       if (previewIsActive()) {
         e.preventDefault();
