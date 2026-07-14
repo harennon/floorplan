@@ -76,17 +76,45 @@ Mechanically, in `buildItems` an `openings`-category symbol becomes
 - `z0 = cat.sill ?? 0`, `z1 = cat.head ?? cat.z`.
 - `baseColor` = an **opaque dark recess color** derived from the theme (a heavily-darkened
   neutral, e.g. `shade(wallBase, 0.4)` composited opaque), NOT the `openings` category color.
-- `sortKey = centroid(wx+wy) + OPENING_BIAS` where `OPENING_BIAS` is a tiny positive value
-  (e.g. `1e-3`). The opening footprint's centroid sits on the wall centerline, so its raw
-  depth ties the wall; the bias guarantees the reveal paints **just after** (over) its wall
-  in `depthSort`.
+- `sortKey = parentWallSortKey + OPENING_BIAS` where `OPENING_BIAS` is a tiny positive value
+  (e.g. `1e-3`) — see the parent-wall binding below. This is the load-bearing correction over
+  the naïve "opening centroid + bias" (which is wrong for off-center openings, per below).
+
+**Parent-wall depth binding (critical).** A wall edge is emitted as a *single* item whose
+`sortKey` is the **whole-edge midpoint** (`cx+cy` of the wall quad, LLD 128 `buildItems`
+lines 284–295). An opening only occupies a slice of that edge, so binding the opening's depth
+to *its own* footprint centroid is unsound: a door near one end of a long wall has an
+`x+y` that differs from the wall midpoint by far more than `OPENING_BIAS`. When it lands on
+the near-origin half of the edge its own-centroid key is **less** than the wall's, `depthSort`
+paints the wall *after* (over) the reveal, and the opening is fully occluded.
+(Concrete failure: room `(0,0)–(4,3)`, bottom wall midpoint sortKey `= 2`; a door centered at
+`x=1` has own-centroid key `≈ 1.06 < 2`, so it paints behind the wall's visible inner face.)
+This hits a large fraction of realistic (non-centered) door/window placements.
+
+Therefore each opening is bound to the **specific wall segment it cuts**, not its own
+centroid:
+
+- During the wall loop, `buildItems` retains, per emitted wall item, its centerline endpoints
+  `{a, b}` and its `sortKey` (the value already computed at LLD 128 lines 284–295).
+- For each `openings` symbol, the **parent wall** is the retained wall segment minimising the
+  point-to-segment distance from the opening center `(sym.x, sym.y)` to the segment `a→b`
+  (same squared point-to-segment math as `walls.pointNearRoomWall`). The opening's
+  `sortKey = parentWall.sortKey + OPENING_BIAS`, which guarantees the reveal sorts **immediately
+  after** (paints over) the exact wall it cuts — for centered *and* off-center openings alike.
+- **Fallback:** if no wall item exists (e.g. an opening dropped on an open polyline that emits
+  no wall — Edge Case 2), the opening falls back to `ownCentroid + OPENING_BIAS`. It has no
+  wall behind it, so ordering is moot; it simply floats at its band.
 
 `render` handles `kind:"opening"` by calling the **existing** `extrudeFootprint(footprint,
 sill, head)` and filling its faces with recess shades (top/left/right darkened further than
 a normal box). No new geometry primitive. This reuses the shipped extrusion + painter path.
 
-> The per-object centroid sort limitation from LLD 128 §4 still applies; the bias only fixes
-> the opening-vs-its-own-wall tie, which is the case the cutout test asserts.
+> The per-object centroid sort limitation from LLD 128 §4 still applies to **furniture vs.
+> walls** (unchanged, unaddressed here). It does **not** apply to opening-vs-its-parent-wall,
+> because openings no longer use centroid sort against walls — they inherit the parent wall's
+> key + bias, which is a *guarantee* for that specific pair, off-center included. There is no
+> contradiction: the guarantee is scoped to the opening/parent-wall pair, and the LLD 128
+> caveat is scoped to the general furniture case.
 
 ### 3. Per-room scoping — a projection filter, not a state fork
 
@@ -110,11 +138,15 @@ directly — a one-line indirection so scoping is a filter, not a branch inside 
 ### 4. Framing + empty state
 
 - **Framing:** on entering preview and on every scope change, `main.js` computes the
-  **folded-world AABB** of the in-scope geometry (a pure `isoBounds(items)` helper that folds
-  each footprint corner at z0 and z1 via the iso projection math, without pan/zoom) and calls
-  the existing `view.fitToContent(bounds, W, H)`. Because `worldToScreenIso` feeds *folded*
-  coordinates through `worldToScreen`, fitting to folded bounds frames the iso scene
-  correctly and reuses the shipped fit logic. Returning to "All" reframes to the whole plan.
+  **folded-world AABB** of the in-scope geometry via the pure `isoBounds(items)` helper and
+  calls the existing `view.fitToContent(bounds, W, H)`. `items` is the **built-items list**
+  (`buildItems(rooms, symbols)` output) — each item carries its `footprint` + `z0`/`z1`, which
+  is exactly what the fold needs, so `isoBounds` folds each footprint corner at z0 and z1 via
+  the iso projection math (no pan/zoom) and unions the results. Feeding the built items (rather
+  than raw rooms/symbols) means `isoBounds` does not re-derive wall quads or opening bands — it
+  reuses the geometry the renderer already builds. Because `worldToScreenIso` feeds *folded*
+  coordinates through `worldToScreen`, fitting to folded bounds frames the iso scene correctly
+  and reuses the shipped fit logic. Returning to "All" reframes to the whole plan.
 - **Empty state:** when the in-scope filter yields no wall geometry (empty plan, or a scope
   that no longer resolves to a closed room), `render` appends a single centered SVG `<text>`
   hint (e.g. "No walls to preview") to `#iso` and returns. No crash, no boxes.
@@ -220,7 +252,8 @@ export function setScope(scopeId);
 ### `isoRender.js` — additive changes (NO rewrite)
 
 ```js
-/** Tiny sort bias so an opening reveal paints just over its own wall. */
+/** Tiny sort bias added to an opening's PARENT wall sortKey so the reveal
+ *  paints just over the specific wall segment it cuts (off-center included). */
 const OPENING_BIAS = 1e-3;
 
 /**
@@ -233,11 +266,13 @@ export function scopeFilter(wallsModel, symbolsModel, scopeId);
 
 /**
  * Folded-world AABB of the in-scope geometry for framing (pure, no pan/zoom).
- * Folds each footprint corner at z0 and z1 with the iso math and returns
+ * Takes the BUILT-items list (buildItems output); folds each item's footprint
+ * corner at its z0 and z1 with the iso math and returns
  * { minX, minY, maxX, maxY } in folded-world metres for view.fitToContent.
+ * @param {ReturnType<typeof buildItems>} items
  * @returns {{minX,minY,maxX,maxY}|null}  null when empty
  */
-export function isoBounds(scopedRooms, scopedSymbols);
+export function isoBounds(items);
 ```
 
 `buildItems` signature changes to accept the **filtered arrays** rather than reading the
@@ -250,8 +285,12 @@ models directly:
 
 Inside `buildItems`, `openings`-category symbols now emit `kind:"opening"` with
 `z0=cat.sill ?? 0`, `z1=cat.head ?? cat.z`, the dark recess `baseColor`, and
-`sortKey = centroid + OPENING_BIAS`. `render` gains a `case "opening"` that extrudes
-`[sill,head]` and fills with recess shades; the wall box beneath is unchanged.
+`sortKey = parentWall.sortKey + OPENING_BIAS` (parent wall = the emitted wall segment nearest
+the opening center by point-to-segment distance; own-centroid fallback if no wall exists — see
+Approach §2). This requires the wall loop to retain each wall item's centerline endpoints and
+its `sortKey` so the symbol loop can bind against them; walls are built before symbols already.
+`render` gains a `case "opening"` that extrudes `[sill,head]` and fills with recess shades; the
+wall box beneath is unchanged.
 
 `render` computes `const { rooms, symbols } = scopeFilter(_wallsMod.model, _symbolsMod.model,
 getScope())`, draws floor slabs from `rooms`, boxes from `buildItems(rooms, symbols)`, and the
@@ -263,9 +302,10 @@ into `initIsoRender`.
 - Pass `preview.getScope` into `initIsoRender(gIso, previewIsActive, previewGetScope,
   _wallsModRef, _symbolsModRef)`.
 - Build/refresh the scope pill in `_syncPreview()` when preview turns on; clear it when off.
-- Pill segment click → `preview.setScope(id)` → refit via `isoBounds` + `view.fitToContent`
-  → `scheduleRender()`.
-- On preview enter (and on scope change) call the refit helper.
+- Pill segment click → `preview.setScope(id)` → refit → `scheduleRender()`. The refit helper
+  computes the in-scope items (`buildItems(scopeFilter(...).rooms, ...symbols)`), passes them to
+  `isoBounds(items)`, and calls `view.fitToContent(bounds, W, H)`.
+- On preview enter (and on scope change) call the same refit helper.
 
 ### `index.html`
 
@@ -351,9 +391,13 @@ there is nothing new to serialize — a round-trip test asserts the symbol shape
 12. **Zoom/pan while scoped.** Framing is applied once on scope change; subsequent manual
     zoom/pan works through `worldToScreenIso`'s reuse of `worldToScreen` exactly as in LLD 128
     — no separate camera state.
-13. **Opening depth-sort vs its wall.** `OPENING_BIAS` guarantees the reveal paints just after
-    its co-centroid wall; the general long-wall mis-order limitation (LLD 128 §4) is unchanged
-    and not addressed here.
+13. **Opening depth-sort vs its wall (incl. off-center).** The opening inherits its **parent
+    wall segment's** `sortKey` (the wall it cuts, found by min point-to-segment distance) plus
+    `OPENING_BIAS`, so the reveal paints immediately after that exact wall regardless of where
+    along the wall it sits — a door near one end sorts correctly, not just a centered one. The
+    general furniture-vs-long-wall mis-order limitation (LLD 128 §4) is unchanged and not
+    addressed here; it does not affect opening-vs-parent-wall because openings no longer use
+    own-centroid sort against walls.
 
 ## Dependencies
 
@@ -407,8 +451,23 @@ group, call `render()`, assert on child polygons).
 - `buildItems([room],[door])` emits the door as `kind:"opening"` with `z0=sill`, `z1=head`
   (from catalog), not a normal furniture box.
 - Opening `baseColor` is opaque and darker than the `openings` category color (recess).
-- Opening `sortKey` exceeds its co-located wall's key (bias applied) so it sorts after.
+- **Off-center opening ordering (parent-wall binding).** On a long wall (e.g. bottom edge of
+  room `(0,0)–(4,3)`), a door placed near one end (`x≈1`) — where its *own* centroid key is
+  **less** than the wall midpoint key — must still emit `sortKey > that wall's sortKey`
+  (parent = the wall it cuts, not its own centroid). Assert the door sorts after that specific
+  wall in `depthSort` output. This is the regression the previous "co-located/centered opening"
+  test could not catch.
+- Opening `sortKey` = its parent wall's key + `OPENING_BIAS` (also verified for a centered
+  opening, so both centered and off-center cases are covered).
 - Non-opening furniture still builds as before (regression guard on the refactored signature).
+
+> **Migration note (not a regression):** `buildItems`'s signature changes from
+> `buildItems(wallsModel, symbolsModel)` to `buildItems(rooms, symbols)`. The existing LLD 128
+> **direct** `buildItems` unit tests (`test/tests.html` ~line 17173+, which call
+> `buildItems({rooms,chain}, {symbols})`) therefore MUST be updated to the new signature
+> (`buildItems(rooms, symbols)`) — this breakage is expected and intended, not a regression to
+> fix. Only the `render()`-driven tests (which call `render()`, not `buildItems` directly) and
+> the 2D tests are unaffected by the signature change.
 
 ### SVG-structural — renderer (LLD 61/128 pattern)
 
@@ -422,6 +481,11 @@ group, call `render()`, assert on child polygons).
   `sill > 0`). Assert the reveal paints **after** its wall in child order.
 - **Door band:** a door reveal's bottom sits at the floor (`sill = 0`) and its top below the
   wall top (`head < CEILING_M`) — the lintel wall remains painted above it.
+- **Off-center reveal is visible (parent-wall ordering, structural):** a door offset toward one
+  end of a long wall (e.g. `x≈1` on the bottom edge of room `(0,0)–(4,3)`) renders with its
+  reveal polygon painted **after** (later in `#iso` child order than) that wall's faces and thus
+  visible — not occluded. This is the SVG-structural counterpart to the off-center unit test and
+  is the case that would silently regress under own-centroid sorting.
 - **Empty state:** scope with no walls (or empty plan) renders the `<text>` hint and no box
   polygons.
 - **Whole-plan unaffected:** preview OFF leaves `#iso` empty; "All" scope reproduces the
@@ -441,8 +505,10 @@ group, call `render()`, assert on child polygons).
   scope to `"all"`.
 - Entering preview + switching scope + exiting leaves `walls.model` and `symbols.model` deeply
   equal to their pre-toggle snapshots (no mutation — scoping is a filter).
-- The 2D editing path and the LLD 128 whole-plan preview are unaffected (existing tests still
-  pass).
+- The 2D editing path and the LLD 128 whole-plan preview are unaffected: all `render()`-driven
+  preview tests and 2D tests still pass unchanged. (The **direct** `buildItems` unit tests are
+  the sole exception — they are updated to the new signature per the migration note above; that
+  is a deliberate call-site update, not a behavioral regression.)
 
 ### Not tested (out of scope)
 
