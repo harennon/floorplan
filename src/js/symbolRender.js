@@ -195,18 +195,23 @@ function _renderSymbolBody(parent, sym, selected, p) {
   poly.setAttribute("stroke-linejoin", "round");
   parent.appendChild(poly);
 
-  // Type-specific interior glyph
-  _renderInterior(parent, sym, cs, p);
+  // Type-specific interior glyph (live view uses worldToScreen / pxPerM())
+  appendSymbolInterior(parent, sym, cs, p, worldToScreen, pxPerM());
 }
 
 /**
- * Draw a simple interior glyph so the symbol type is recognisable.
+ * Append a symbol's interior glyph to `parent`, using an injected projector
+ * so the recipe is reusable off any coordinate system (live view OR thumbnail).
+ * @param {SVGElement} parent
+ * @param {import("./symbols.js").Sym} sym
+ * @param {{x:number,y:number}[]} cs         screen/local corners [TL,TR,BR,BL]
  * @param {import("./theme.js").Palette} p
+ * @param {(wx:number,wy:number)=>{x:number,y:number}} project  world→target
+ * @param {number} ppm                        pixels/target-units per metre
  */
-function _renderInterior(parent, sym, cs, p) {
-  // cs = [TL, TR, BR, BL] in screen space
-  const ppm = pxPerM();
-  const sc = worldToScreen(sym.x, sym.y); // screen center
+export function appendSymbolInterior(parent, sym, cs, p, project, ppm) {
+  // cs = [TL, TR, BR, BL] in target space
+  const sc = project(sym.x, sym.y); // target-space center
   const sw = sym.w * ppm;
   const sh = sym.h * ppm;
   const rad = (sym.rot * Math.PI) / 180;
