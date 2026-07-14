@@ -13,7 +13,7 @@
 /** @typedef {"door"|"window"|"bed"|"sofa"|"table"|"chair"|"desk"|"fridge"
  *   |"toilet"|"bathtub"|"sink"|"stove"|"wardrobe"|"bookshelf"|"tv"|"washer"
  *   |"armchair"|"coffee-table"|"dining-table-round"
- *   |"monitor"|"gaming-chair"
+ *   |"monitor"|"gaming-chair"|"fireplace"
  *   |"nightstand"|"dresser"|"cabinet"
  *   |"patio-table"|"patio-chair"|"parasol"|"planter"
  *   |"rug"} SymbolType */
@@ -167,6 +167,17 @@ export const CATALOG = {
       { name: "Task",       w: 0.60, h: 0.60 },
       { name: "Racing",     w: 0.66, h: 0.66 },
       { name: "Big & Tall", w: 0.75, h: 0.78 },
+    ],
+  },
+  fireplace: {
+    label: "Fireplace", category: "living", w: 1.30, h: 0.40,
+    min_w: 0.75, max_w: 2.00, min_h: 0.15, max_h: 0.60, z: 1.10,
+    presets: [
+      { name: "Wall insert 30\"", w: 0.76, h: 0.18 },
+      { name: "Electric 42\"",    w: 1.07, h: 0.30 },
+      { name: "Mantel 48\"",      w: 1.22, h: 0.40 },
+      { name: "Surround 60\"",    w: 1.52, h: 0.45 },
+      { name: "Hearth 72\"",      w: 1.83, h: 0.50 },
     ],
   },
 

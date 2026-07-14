@@ -1976,7 +1976,7 @@ describe("symbols.js — units reuse: fmtLen/parseLen round-trip for w/h", () =>
 // ─── Tests: LLD-45 — new furniture types ─────────────────────────────────────
 
 const LLD45_TYPES = ["toilet", "bathtub", "sink", "stove", "wardrobe", "bookshelf", "tv", "washer",
-                     "nightstand", "dresser", "cabinet", "monitor", "gaming-chair"];
+                     "nightstand", "dresser", "cabinet", "monitor", "gaming-chair", "fireplace"];
 
 describe("LLD-45 — catalog integrity: all new types present and valid", () => {
   it("every new type exists in CATALOG with a valid category (updated by LLD-50/LLD-76)", () => {
@@ -9362,7 +9362,7 @@ function _makeDockDOM() {
   // Item types per category (matching CATALOG)
   const itemsByCategory = {
     openings: ["door", "window"],
-    living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf", "armchair", "coffee-table", "dining-table-round", "rug", "monitor", "gaming-chair"],
+    living:   ["sofa", "table", "chair", "desk", "tv", "bookshelf", "armchair", "coffee-table", "dining-table-round", "rug", "monitor", "gaming-chair", "fireplace"],
     kitchen:  ["fridge", "stove", "sink", "washer"],
     bedroom:  ["bed", "wardrobe", "nightstand", "dresser", "cabinet"],
     bath:     ["toilet", "bathtub"],
@@ -17740,6 +17740,123 @@ describe("LLD 130 — render3d enter()/exit() smoke + read-only", () => {
     render3dExit();
     const after = JSON.stringify({ rooms: wallsMod.model.rooms, symbols: symMod.model.symbols });
     if (before !== after) throw new Error("preview enter/exit mutated the plan models");
+  });
+});
+
+// ─── Tests: LLD-139 — fireplace catalog type ──────────────────────────────────
+
+describe("LLD-139 — catalog integrity: fireplace", () => {
+  it("fireplace exists in CATALOG with category 'living'", () => {
+    if (!("fireplace" in CATALOG)) throw new Error("fireplace missing from CATALOG");
+    if (CATALOG.fireplace.category !== "living") throw new Error(`fireplace.category is '${CATALOG.fireplace.category}', expected 'living'`);
+  });
+
+  it("fireplace has a non-empty label", () => {
+    const label = CATALOG.fireplace.label;
+    if (!label || label.trim() === "") throw new Error("fireplace has empty label");
+  });
+
+  it("fireplace has finite w, h, min_w, max_w, min_h, max_h, z", () => {
+    const cat = CATALOG.fireplace;
+    for (const key of ["w", "h", "min_w", "max_w", "min_h", "max_h", "z"]) {
+      if (!isFinite(cat[key])) throw new Error(`fireplace.${key} is not finite: ${cat[key]}`);
+    }
+  });
+
+  it("min_w <= w <= max_w and min_h <= h <= max_h", () => {
+    const { w, h, min_w, max_w, min_h, max_h } = CATALOG.fireplace;
+    if (w < min_w || w > max_w) throw new Error(`fireplace: w=${w} not in [${min_w},${max_w}]`);
+    if (h < min_h || h > max_h) throw new Error(`fireplace: h=${h} not in [${min_h},${max_h}]`);
+  });
+
+  it("fireplace is not openings, not circular, not discrete", () => {
+    const cat = CATALOG.fireplace;
+    if (cat.openings) throw new Error("fireplace unexpectedly has openings:true");
+    if (cat.circular) throw new Error("fireplace unexpectedly has circular:true");
+    if (cat.discrete) throw new Error("fireplace unexpectedly has discrete:true");
+  });
+
+  it("fireplace default dims match the spec (1.30 x 0.40 m)", () => {
+    expect(CATALOG.fireplace.w).toBeCloseTo(1.30, 9);
+    expect(CATALOG.fireplace.h).toBeCloseTo(0.40, 9);
+  });
+
+  it("fireplace z matches the spec (1.10 m)", () => {
+    expect(CATALOG.fireplace.z).toBeCloseTo(1.10, 9);
+  });
+});
+
+describe("LLD-139 — preset validity: fireplace presets within per-axis bounds", () => {
+  it("every fireplace preset has name, w, h and lies within per-axis bounds", () => {
+    const cat = CATALOG.fireplace;
+    if (!cat.presets || cat.presets.length === 0) throw new Error("fireplace has no presets");
+    for (const p of cat.presets) {
+      if (typeof p.name !== "string" || p.name.trim() === "") throw new Error("fireplace preset has empty name");
+      if (!isFinite(p.w) || !isFinite(p.h)) throw new Error(`fireplace preset '${p.name}' has non-finite w/h`);
+      if (p.w < cat.min_w || p.w > cat.max_w) throw new Error(`fireplace preset '${p.name}': w=${p.w} not in [${cat.min_w},${cat.max_w}]`);
+      if (p.h < cat.min_h || p.h > cat.max_h) throw new Error(`fireplace preset '${p.name}': h=${p.h} not in [${cat.min_h},${cat.max_h}]`);
+    }
+  });
+
+  it("fireplace has exactly 5 presets", () => {
+    expect(CATALOG.fireplace.presets.length).toBe(5);
+  });
+});
+
+describe("LLD-139 — createSymbol: fireplace returns correct Sym", () => {
+  it("createSymbol('fireplace') returns Sym with catalog defaults, rot:0, and s<n> id", () => {
+    resetSymbolModel();
+    const s = createSymbol("fireplace", 3, 4);
+    if (s.type !== "fireplace") throw new Error(`type mismatch: ${s.type}`);
+    if (Math.abs(s.w - CATALOG.fireplace.w) > 1e-9) throw new Error(`w mismatch: ${s.w}`);
+    if (Math.abs(s.h - CATALOG.fireplace.h) > 1e-9) throw new Error(`h mismatch: ${s.h}`);
+    if (s.rot !== 0) throw new Error(`rot should be 0, got ${s.rot}`);
+    if (typeof s.id !== "string" || !s.id.startsWith("s")) throw new Error(`invalid id: ${s.id}`);
+    resetSymbolModel();
+  });
+});
+
+describe("LLD-139 — clampDim: fireplace clamps at per-axis bounds", () => {
+  it("width below min_w clamps to min_w", () => {
+    expect(clampDim("fireplace", "w", CATALOG.fireplace.min_w - 0.1)).toBeCloseTo(CATALOG.fireplace.min_w, 9);
+  });
+  it("width above max_w clamps to max_w", () => {
+    expect(clampDim("fireplace", "w", CATALOG.fireplace.max_w + 1)).toBeCloseTo(CATALOG.fireplace.max_w, 9);
+  });
+  it("depth below min_h clamps to min_h", () => {
+    expect(clampDim("fireplace", "h", CATALOG.fireplace.min_h - 0.1)).toBeCloseTo(CATALOG.fireplace.min_h, 9);
+  });
+  it("depth above max_h clamps to max_h", () => {
+    expect(clampDim("fireplace", "h", CATALOG.fireplace.max_h + 1)).toBeCloseTo(CATALOG.fireplace.max_h, 9);
+  });
+});
+
+describe("LLD-139 — resizeSymbol: fireplace is continuous (not discrete)", () => {
+  it("resizeSymbol to in-range value between presets keeps that exact value (no snap)", () => {
+    const s = createSymbol("fireplace", 0, 0);
+    const targetW = 1.40; // between presets Electric 42\" (1.07) and Mantel 48\" (1.22) and Surround 60\" (1.52)
+    resizeSymbol(s, "w", targetW);
+    expect(s.w).toBeCloseTo(targetW, 9);
+
+    const targetH = 0.35; // between preset values
+    resizeSymbol(s, "h", targetH);
+    expect(s.h).toBeCloseTo(targetH, 9);
+  });
+});
+
+describe("LLD-139 — JSON round-trip: fireplace serializes and hydrates losslessly", () => {
+  it("placed fireplace round-trips through JSON with type, w, h, rot, id preserved", () => {
+    resetSymbolModel();
+    const s = createSymbol("fireplace", 2, 3);
+    addSymbol(s);
+    const snap = JSON.parse(JSON.stringify(symbolModel));
+    const rt = snap.symbols[0];
+    if (rt.type !== "fireplace") throw new Error(`type not preserved: ${rt.type}`);
+    if (Math.abs(rt.w - s.w) > 1e-9) throw new Error(`w not preserved: ${rt.w}`);
+    if (Math.abs(rt.h - s.h) > 1e-9) throw new Error(`h not preserved: ${rt.h}`);
+    if (rt.rot !== s.rot) throw new Error(`rot not preserved: ${rt.rot}`);
+    if (rt.id !== s.id) throw new Error(`id not preserved: ${rt.id}`);
+    resetSymbolModel();
   });
 });
 

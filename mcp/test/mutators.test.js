@@ -846,3 +846,42 @@ test("LLD 104: set_brief with furniture:[{type:'gaming-chair'}] is accepted", ()
   const r = tools.tool_set_brief({ furniture: [{ type: "gaming-chair" }] });
   assert.equal(r.ok, true);
 });
+
+// ── LLD 139: fireplace catalog type ──────────────────────────────────────────
+
+test("LLD 139: place_symbol {type:'fireplace'} returns ok:true at catalog-default dims", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "fireplace", x: 6, y: 6 });
+  assert.equal(p.ok, true);
+  assert.ok(Math.abs(p.w - CATALOG.fireplace.w) < 1e-9, `w expected ${CATALOG.fireplace.w}, got ${p.w}`);
+  assert.ok(Math.abs(p.h - CATALOG.fireplace.h) < 1e-9, `h expected ${CATALOG.fireplace.h}, got ${p.h}`);
+  assert.equal(p.presetApplied, undefined);
+});
+
+test("LLD 139: place_symbol with preset:'Mantel 48\"' resolves to 1.22×0.40", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const p = tools.tool_place_symbol({ type: "fireplace", x: 6, y: 6, preset: "Mantel 48\"" });
+  assert.equal(p.ok, true);
+  assert.ok(Math.abs(p.w - 1.22) < 1e-9, `w expected 1.22, got ${p.w}`);
+  assert.ok(Math.abs(p.h - 0.40) < 1e-9, `h expected 0.40, got ${p.h}`);
+  assert.equal(p.presetApplied, "Mantel 48\"");
+});
+
+test("LLD 139: place_symbol fireplace with unknown preset → ok:false with valid names listed, nothing placed", () => {
+  session.newPlan();
+  tools.tool_add_room({ rect: { x: 0, y: 0, w: 12, h: 12 } });
+  const countBefore = symbolsModel.symbols.length;
+  const r = tools.tool_place_symbol({ type: "fireplace", x: 6, y: 6, preset: "Gas Log 36\"" });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /unknown preset/);
+  assert.match(r.reason, /Mantel 48"/); // valid names listed
+  assert.equal(symbolsModel.symbols.length, countBefore);
+});
+
+test("LLD 139: set_brief with furniture:[{type:'fireplace'}] is accepted", () => {
+  session.newPlan();
+  const r = tools.tool_set_brief({ furniture: [{ type: "fireplace" }] });
+  assert.equal(r.ok, true);
+});
