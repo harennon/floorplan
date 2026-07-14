@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Template card — live area badge (mockups)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Libre+Baskerville:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:         #14140f;
+      --bg-deep:    #100f0b;
+      --ink:        #ece7d6;
+      --muted:      #8f8a78;
+      --gold:       #c9a84c;
+      --gold-soft:  rgba(201, 168, 76, 0.55);
+      --panel:      rgba(20, 20, 15, 0.72);
+      --hairline:   rgba(201, 168, 76, 0.18);
+      --font-mono:    "DM Mono", "Courier New", monospace;
+      --font-display: "Libre Baskerville", Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 800px at 70% -10%, #1b1a12 0%, transparent 60%),
+        linear-gradient(160deg, var(--bg) 0%, var(--bg-deep) 100%);
+      font-family: var(--font-mono);
+      min-height: 100vh;
+      padding: 2rem 1.25rem 4rem;
+    }
+    /* faint graph-paper grid */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(201,168,76,0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(201,168,76,0.05) 1px, transparent 1px);
+      background-size: 24px 24px;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .wrap { position: relative; z-index: 1; max-width: 60rem; margin: 0 auto; }
+    h1 {
+      font-family: var(--font-display);
+      color: var(--gold);
+      font-weight: 700;
+      font-size: 1.35rem;
+      margin: 0 0 0.35rem;
+    }
+    .sub { color: var(--muted); font-size: 0.78rem; margin: 0 0 2rem; line-height: 1.5; }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .toolbar-label { color: var(--muted); font-size: 0.7rem; }
+    .unit-toggle {
+      display: inline-flex;
+      border: 1px solid var(--hairline);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .unit-toggle button {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      padding: 0.35rem 0.7rem;
+      cursor: pointer;
+      transition: color 0.12s, background 0.12s;
+    }
+    .unit-toggle button[aria-pressed="true"] {
+      background: rgba(201,168,76,0.14);
+      color: var(--gold);
+    }
+
+    /* ── Section framing (each option) ────────────────────────── */
+    .option { margin-bottom: 2.75rem; }
+    .option-head {
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+      margin-bottom: 0.3rem;
+    }
+    .option-tag {
+      font-family: var(--font-display);
+      color: var(--gold);
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .option-note { color: var(--muted); font-size: 0.72rem; line-height: 1.5; margin: 0 0 1rem; }
+
+    /* ── Grid + card (from index.html LLD-43) ─────────────────── */
+    .template-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 0.75rem;
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+      border-radius: 10px;
+      padding: 1rem;
+    }
+    .template-card {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.4rem;
+      background: rgba(201,168,76,0.04);
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 0.7rem 0.6rem 0.6rem;
+      cursor: pointer;
+      text-align: left;
+      transition: border-color 0.15s, background 0.15s;
+      font-family: var(--font-mono);
+      position: relative;
+    }
+    .template-card:hover,
+    .template-card:focus-visible {
+      border-color: var(--gold-soft);
+      background: rgba(201,168,76,0.1);
+      outline: none;
+    }
+    .template-thumb {
+      display: block;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      overflow: hidden;
+      border-radius: 4px;
+      background: rgba(201,168,76,0.05);
+      border: 1px solid rgba(201,168,76,0.1);
+      position: relative;
+    }
+    .template-thumb svg { width: 100%; height: 100%; }
+    .template-card-name {
+      font-size: 0.75rem;
+      color: var(--ink);
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .template-card-desc {
+      font-size: 0.62rem;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+
+    /* ── Option A: pill badge in the name row (inline, right-aligned) ── */
+    .name-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.4rem;
+    }
+    .name-row .template-card-name { flex: 1 1 auto; }
+    .area-pill {
+      flex: 0 0 auto;
+      font-size: 0.6rem;
+      font-weight: 500;
+      color: var(--gold);
+      background: rgba(201,168,76,0.12);
+      border: 1px solid var(--hairline);
+      border-radius: 999px;
+      padding: 0.1rem 0.45rem;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .area-pill .unit { color: var(--muted); }
+
+    /* ── Option B: badge overlaid on the thumbnail (top-right corner) ── */
+    .area-overlay {
+      position: absolute;
+      top: 0.35rem;
+      right: 0.35rem;
+      font-size: 0.6rem;
+      font-weight: 500;
+      color: var(--gold);
+      background: rgba(16,15,11,0.78);
+      border: 1px solid var(--gold-soft);
+      border-radius: 5px;
+      padding: 0.12rem 0.4rem;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+      backdrop-filter: blur(2px);
+      -webkit-backdrop-filter: blur(2px);
+    }
+    .area-overlay .unit { color: var(--muted); }
+
+    /* ── Option C: metric footer row (area + door/window count style) ── */
+    .card-meta {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      margin-top: 0.05rem;
+      padding-top: 0.4rem;
+      border-top: 1px solid rgba(201,168,76,0.1);
+    }
+    .card-meta .area-figure {
+      font-size: 0.72rem;
+      color: var(--ink);
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
+    .card-meta .area-figure .unit { color: var(--muted); font-size: 0.62rem; }
+    .card-meta .area-cap {
+      font-size: 0.55rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Template card — live area badge</h1>
+    <p class="sub">
+      Each card's floor area is computed live from its own plan via <code>polygonArea</code>
+      summed over rooms — the exact same source the HUD reads. Toggle units to confirm the
+      badge tracks metric/imperial. Note the "1-bedroom" card: its old copy said "~55&nbsp;m²"
+      but the plan actually measures <strong>52.50&nbsp;m²</strong> — the drift this change removes.
+    </p>
+
+    <div class="toolbar">
+      <span class="toolbar-label">Units</span>
+      <div class="unit-toggle" id="unitToggle">
+        <button data-unit="ft" aria-pressed="true">ft</button>
+        <button data-unit="m" aria-pressed="false">m</button>
+      </div>
+    </div>
+
+    <section class="option">
+      <div class="option-head"><span class="option-tag">Option A</span> — Pill in the name row</div>
+      <p class="option-note">
+        A compact gold pill sits to the right of the template name. Reads as a spec chip,
+        keeps the thumbnail clean, and lives in the existing flow (no absolute positioning).
+        Recommended: lowest footprint, clearest "this is a fact about the plan" framing.
+      </p>
+      <div class="template-grid" id="gridA"></div>
+    </section>
+
+    <section class="option">
+      <div class="option-head"><span class="option-tag">Option B</span> — Corner overlay on thumbnail</div>
+      <p class="option-note">
+        The area floats over the top-right of the preview, like a photo timestamp. Most
+        eye-catching and ties the number to the drawing, but overlaps thumbnail content and
+        needs a scrim for contrast.
+      </p>
+      <div class="template-grid" id="gridB"></div>
+    </section>
+
+    <section class="option">
+      <div class="option-head"><span class="option-tag">Option C</span> — Metric footer row</div>
+      <p class="option-note">
+        A bordered footer beneath the description presents the area as a labelled figure,
+        echoing the measurements panel. Most room to grow (could add perimeter later) but
+        the tallest card.
+      </p>
+      <div class="template-grid" id="gridC"></div>
+    </section>
+  </div>
+
+  <script>
+  // ── polygonArea: verbatim from src/js/walls.js ────────────────────────
+  function polygonArea(verts) {
+    const n = verts.length;
+    if (n < 3) return 0;
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      sum += verts[i].x * verts[j].y;
+      sum -= verts[j].x * verts[i].y;
+    }
+    return Math.abs(sum) / 2;
+  }
+
+  // ── unit formatting: mirrors src/js/units.js ──────────────────────────
+  const M_PER_FT = 0.3048;
+  const M2_PER_FT2 = M_PER_FT * M_PER_FT;
+  let unit = "ft"; // imperial default, same as units.js
+  function fmtArea(m2) {
+    return unit === "ft" ? (m2 / M2_PER_FT2).toFixed(1) : m2.toFixed(2);
+  }
+  function areaUnitLabel() { return unit === "ft" ? "ft²" : "m²"; }
+
+  // total floor area of a plan = polygonArea over closed rooms
+  function planArea(plan) {
+    return plan.walls.rooms.reduce(
+      (acc, r) => acc + (r.closed ? polygonArea(r.verts) : 0), 0);
+  }
+
+  // ── TEMPLATES: room verts copied from src/js/templates.js ─────────────
+  //    descriptions are the NEW copy (hard-coded "~N m²" removed)
+  const R = (verts) => ({ closed: true, verts });
+  const TEMPLATES = [
+    {
+      id: "studio", name: "Studio apartment",
+      description: "Open plan with bed, sofa & kitchenette",
+      thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="8" y="8" width="104" height="74" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+        <rect x="14" y="13" width="22" height="30" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+        <rect x="42" y="13" width="36" height="16" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+        <rect x="46" y="34" width="24" height="16" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+        <rect x="14" y="66" width="12" height="12" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+      </svg>`,
+      plan: { walls: { rooms: [R([{x:0,y:0},{x:5.5,y:0},{x:5.5,y:4.9},{x:0,y:4.9}])] } },
+    },
+    {
+      id: "one-bedroom", name: "1-bedroom apartment",
+      description: "Bedroom, living room & kitchen",
+      thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="8" y="8" width="48" height="40" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+        <rect x="56" y="8" width="56" height="40" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+        <rect x="8" y="48" width="104" height="34" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+        <rect x="13" y="13" width="22" height="28" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+        <rect x="62" y="13" width="36" height="16" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+        <rect x="13" y="53" width="12" height="12" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+      </svg>`,
+      plan: { walls: { rooms: [
+        R([{x:0,y:0},{x:3.5,y:0},{x:3.5,y:3.5},{x:0,y:3.5}]),
+        R([{x:3.5,y:0},{x:7.5,y:0},{x:7.5,y:3.5},{x:3.5,y:3.5}]),
+        R([{x:0,y:3.5},{x:7.5,y:3.5},{x:7.5,y:7.0},{x:0,y:7.0}]),
+      ] } },
+    },
+    {
+      id: "single-room", name: "Rectangular room",
+      description: "Blank room — add your own furniture",
+      thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="12" y="12" width="96" height="66" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+        <path d="M 12 66 A 20 20 0 0 1 32 66" stroke="#d9be6e" stroke-width="1" stroke-dasharray="3 2" fill="none" opacity="0.5"/>
+      </svg>`,
+      plan: { walls: { rooms: [R([{x:0,y:0},{x:5.0,y:0},{x:5.0,y:4.0},{x:0,y:4.0}])] } },
+    },
+    {
+      id: "small-office", name: "Small office",
+      description: "Office with desk, chair & storage",
+      thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="16" y="12" width="88" height="66" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+        <rect x="21" y="17" width="36" height="14" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+        <circle cx="81" cy="48" r="10" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+        <rect x="56" y="30" width="30" height="18" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+      </svg>`,
+      plan: { walls: { rooms: [R([{x:0,y:0},{x:5.0,y:0},{x:5.0,y:3.0},{x:0,y:3.0}])] } },
+    },
+  ];
+
+  // ── Card builders (one per option) ────────────────────────────────────
+  function baseCard(t) {
+    const card = document.createElement("button");
+    card.className = "template-card";
+    card.setAttribute("role", "listitem");
+    return card;
+  }
+  function thumb(t) {
+    const s = document.createElement("span");
+    s.className = "template-thumb";
+    s.innerHTML = t.thumb;
+    return s;
+  }
+  function areaText(t) {
+    return `${fmtArea(planArea(t.plan))} ${areaUnitLabel()}`;
+  }
+  // split "12.5 ft²" → figure + unit spans so unit can be muted
+  function areaSpans(t, cls) {
+    const val = fmtArea(planArea(t.plan));
+    const label = areaUnitLabel();
+    return `<span class="${cls}">${val} <span class="unit">${label}</span></span>`;
+  }
+
+  function renderA(grid) {
+    grid.innerHTML = "";
+    for (const t of TEMPLATES) {
+      const card = baseCard(t);
+      const nameRow = document.createElement("span");
+      nameRow.className = "name-row";
+      nameRow.innerHTML =
+        `<span class="template-card-name">${t.name}</span>` +
+        areaSpans(t, "area-pill");
+      const desc = document.createElement("span");
+      desc.className = "template-card-desc";
+      desc.textContent = t.description;
+      card.append(thumb(t), nameRow, desc);
+      grid.appendChild(card);
+    }
+  }
+
+  function renderB(grid) {
+    grid.innerHTML = "";
+    for (const t of TEMPLATES) {
+      const card = baseCard(t);
+      const th = thumb(t);
+      const badge = document.createElement("span");
+      badge.className = "area-overlay";
+      badge.innerHTML = `${fmtArea(planArea(t.plan))} <span class="unit">${areaUnitLabel()}</span>`;
+      th.appendChild(badge);
+      const name = document.createElement("span");
+      name.className = "template-card-name";
+      name.textContent = t.name;
+      const desc = document.createElement("span");
+      desc.className = "template-card-desc";
+      desc.textContent = t.description;
+      card.append(th, name, desc);
+      grid.appendChild(card);
+    }
+  }
+
+  function renderC(grid) {
+    grid.innerHTML = "";
+    for (const t of TEMPLATES) {
+      const card = baseCard(t);
+      const name = document.createElement("span");
+      name.className = "template-card-name";
+      name.textContent = t.name;
+      const desc = document.createElement("span");
+      desc.className = "template-card-desc";
+      desc.textContent = t.description;
+      const meta = document.createElement("span");
+      meta.className = "card-meta";
+      meta.innerHTML =
+        `<span class="area-cap">Floor area</span>` +
+        areaSpans(t, "area-figure");
+      card.append(thumb(t), name, desc, meta);
+      grid.appendChild(card);
+    }
+  }
+
+  function renderAll() {
+    renderA(document.getElementById("gridA"));
+    renderB(document.getElementById("gridB"));
+    renderC(document.getElementById("gridC"));
+  }
+
+  // ── Unit toggle ───────────────────────────────────────────────────────
+  document.getElementById("unitToggle").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-unit]");
+    if (!btn) return;
+    unit = btn.dataset.unit;
+    for (const b of document.querySelectorAll("#unitToggle button")) {
+      b.setAttribute("aria-pressed", b.dataset.unit === unit ? "true" : "false");
+    }
+    renderAll();
+  });
+
+  renderAll();
+  </script>
+</body>
+</html>
