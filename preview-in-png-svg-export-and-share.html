@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mockup — 2.5D preview in PNG/SVG export + share link</title>
+<style>
+:root {
+  --bg: #14140f; --bg-deep: #100f0b; --ink: #ece7d6; --muted: #8f8a78;
+  --gold: #c9a84c; --gold-soft: rgba(201,168,76,0.55);
+  --panel: rgba(20,20,15,0.72); --hairline: rgba(201,168,76,0.18);
+  --grid-major: rgba(201,168,76,0.14);
+  --font-mono: "DM Mono", "Courier New", monospace;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: radial-gradient(circle at 50% -10%, var(--bg) 0%, var(--bg-deep) 100%);
+  color: var(--ink); font-family: var(--font-sans); min-height: 100vh;
+  padding: 1.6rem clamp(1rem, 4vw, 3rem) 4rem;
+}
+.page-head h1 { font-family: var(--font-mono); font-size: 1.35rem; margin: 0 0 .3rem; color: var(--gold); letter-spacing: .01em; }
+.page-head .sub { max-width: 62ch; color: var(--muted); font-size: .85rem; line-height: 1.55; margin: 0 0 1rem; }
+.page-head em { color: var(--ink); font-style: normal; border-bottom: 1px dotted var(--gold-soft); }
+
+.dir-tabs { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: .7rem; }
+.dir-tab {
+  font-family: var(--font-mono); font-size: .74rem; padding: .5rem .8rem;
+  background: transparent; color: var(--muted); border: 1px solid var(--hairline);
+  border-radius: 7px; cursor: pointer; transition: all .14s;
+}
+.dir-tab:hover { color: var(--ink); border-color: var(--gold-soft); }
+.dir-tab.is-active { color: var(--bg-deep); background: var(--gold); border-color: var(--gold); font-weight: 600; }
+.dir-blurb { font-size: .82rem; color: var(--muted); max-width: 66ch; line-height: 1.55; margin: 0 0 1.4rem; min-height: 2.4em; }
+.dir-blurb b { color: var(--ink); }
+
+.stage-wrap { display: grid; grid-template-columns: 1fr; gap: 1.4rem; }
+@media (min-width: 1080px) { .stage-wrap { grid-template-columns: minmax(0,1.4fr) minmax(340px,1fr); align-items: start; } }
+
+/* App shell */
+.app {
+  position: relative; background: var(--bg-deep);
+  border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden;
+  min-height: 460px; box-shadow: 0 8px 40px rgba(0,0,0,.4);
+}
+.canvas {
+  position: absolute; inset: 0;
+  background-image: linear-gradient(var(--grid-major) 1px, transparent 1px), linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+  background-size: 28px 28px; background-position: -1px -1px;
+}
+.canvas-mode-tag {
+  position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
+  font-family: var(--font-mono); font-size: .68rem; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--muted);
+  background: var(--panel); border: 1px solid var(--hairline);
+  padding: .25rem .7rem; border-radius: 20px; backdrop-filter: blur(8px); z-index: 4;
+}
+.svg-holder { position: absolute; inset: 0; display: grid; place-items: center; }
+.svg-holder.hidden { display: none; }
+
+/* Tool rail */
+.tool-rail {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: .3rem; padding: .4rem;
+  background: var(--panel); border: 1px solid var(--hairline); border-radius: 12px;
+  backdrop-filter: blur(10px); z-index: 6;
+}
+.tool-rail button {
+  position: relative; width: 40px; height: 40px; border-radius: 9px;
+  background: transparent; border: 1px solid transparent; color: var(--ink);
+  font-size: 1.05rem; cursor: pointer; display: grid; place-items: center; transition: all .14s;
+}
+.tool-rail button:hover { background: rgba(201,168,76,.1); }
+.tool-rail button[aria-pressed="true"] {
+  background: var(--gold); color: var(--bg-deep);
+  box-shadow: 0 0 0 2px var(--bg-deep), 0 0 0 4px var(--gold-soft);
+}
+.rail-sep { height: 1px; background: var(--hairline); margin: .25rem .3rem; }
+.tool-rail .key-hint {
+  position: absolute; right: 3px; bottom: 2px; font-family: var(--font-mono);
+  font-size: .5rem; opacity: .6; pointer-events: none;
+}
+.iso-glyph { font-size: 1.1rem; }
+
+/* Actions cluster */
+.actions {
+  position: absolute; right: 14px; top: 14px; display: flex; gap: .5rem; align-items: flex-start; z-index: 8;
+}
+.act-btn {
+  font-family: var(--font-mono); font-size: .74rem; color: var(--ink);
+  background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px;
+  padding: .5rem .75rem; cursor: pointer; display: inline-flex; align-items: center; gap: .4rem;
+  backdrop-filter: blur(10px); transition: all .14s; white-space: nowrap;
+}
+.act-btn:hover { border-color: var(--gold-soft); color: var(--gold); }
+.act-anchor { position: relative; }
+
+/* Popup menus */
+.menu {
+  position: absolute; top: calc(100% + .4rem); right: 0; min-width: 12rem;
+  background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px;
+  padding: .3rem 0; z-index: 20; display: none; flex-direction: column;
+  backdrop-filter: blur(12px); box-shadow: 0 4px 24px rgba(0,0,0,.5);
+}
+.menu.open { display: flex; }
+.menu button, .menu .menu-row {
+  background: transparent; border: none; color: var(--ink); font-family: var(--font-mono);
+  font-size: .72rem; padding: .45rem 1rem; text-align: left; cursor: pointer;
+  display: flex; align-items: center; gap: .5rem; transition: background .1s;
+}
+.menu button:hover { background: rgba(201,168,76,.12); }
+.menu-sep { height: 1px; background: var(--hairline); margin: .3rem 0; }
+.menu-head {
+  font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  padding: .35rem 1rem .2rem;
+}
+.menu-hint { font-size: .62rem; color: var(--muted); padding: .1rem 1rem .35rem; line-height: 1.4; }
+.view-badge {
+  margin-left: auto; font-size: .56rem; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--gold); border: 1px solid var(--gold-soft); border-radius: 10px; padding: .05rem .4rem;
+}
+
+/* Segmented view switch (dir B / C) */
+.seg { display: inline-flex; border: 1px solid var(--hairline); border-radius: 7px; overflow: hidden; margin: .1rem 1rem .4rem; }
+.seg button {
+  flex: 1; padding: .35rem .5rem; font-size: .66rem; justify-content: center;
+  border-right: 1px solid var(--hairline);
+}
+.seg button:last-child { border-right: none; }
+.seg button.sel { background: var(--gold); color: var(--bg-deep); font-weight: 600; }
+.seg button.sel:hover { background: var(--gold); }
+
+/* Share popover (dir C) */
+.share-pop {
+  position: absolute; top: calc(100% + .4rem); right: 0; width: 20rem;
+  background: var(--panel); border: 1px solid var(--hairline); border-radius: 10px;
+  padding: .8rem; z-index: 20; display: none; flex-direction: column; gap: .55rem;
+  backdrop-filter: blur(12px); box-shadow: 0 4px 24px rgba(0,0,0,.5);
+}
+.share-pop.open { display: flex; }
+.share-pop .url {
+  font-family: var(--font-mono); font-size: .64rem; color: var(--muted);
+  background: var(--bg-deep); border: 1px solid var(--hairline); border-radius: 6px;
+  padding: .5rem; word-break: break-all; max-height: 3.4em; overflow: hidden;
+}
+.toggle-row { display: flex; align-items: center; gap: .6rem; cursor: pointer; }
+.switch { position: relative; width: 34px; height: 19px; border-radius: 20px; background: var(--hairline); flex: 0 0 auto; transition: background .16s; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: var(--muted); transition: all .16s; }
+.toggle-row.on .switch { background: var(--gold); }
+.toggle-row.on .switch::after { left: 17px; background: var(--bg-deep); }
+.toggle-row .lbl { font-family: var(--font-mono); font-size: .72rem; }
+.toggle-row .desc { font-size: .62rem; color: var(--muted); line-height: 1.35; }
+.copy-btn { font-family: var(--font-mono); font-size: .72rem; background: var(--gold); color: var(--bg-deep); border: none; border-radius: 7px; padding: .5rem; cursor: pointer; font-weight: 600; }
+
+/* Artifact panel */
+.artifact { background: var(--panel); border: 1px solid var(--hairline); border-radius: 12px; padding: 1.1rem 1.2rem; }
+.artifact h2 { font-family: var(--font-mono); font-size: .82rem; margin: 0 0 .2rem; color: var(--gold); }
+.artifact .art-sub { font-size: .72rem; color: var(--muted); margin: 0 0 .9rem; line-height: 1.5; }
+.art-frame {
+  border: 1px dashed var(--gold-soft); border-radius: 8px; background: var(--bg-deep);
+  min-height: 190px; display: grid; place-items: center; position: relative; overflow: hidden;
+}
+.art-frame .art-caption {
+  position: absolute; left: 8px; bottom: 8px; font-family: var(--font-mono);
+  font-size: .6rem; color: var(--muted); background: rgba(0,0,0,.35); padding: .2rem .45rem; border-radius: 4px;
+}
+.art-note { font-size: .68rem; color: var(--muted); margin: .8rem 0 0; line-height: 1.5; }
+.art-note code { color: var(--gold); font-family: var(--font-mono); font-size: .92em; }
+
+/* Toast */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px);
+  background: var(--panel); border: 1px solid var(--gold-soft); color: var(--ink);
+  font-family: var(--font-mono); font-size: .74rem; padding: .6rem 1rem; border-radius: 8px;
+  backdrop-filter: blur(10px); opacity: 0; pointer-events: none; transition: all .25s; z-index: 50;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+<header class="page-head">
+  <h1>2.5D preview in export &amp; share</h1>
+  <p class="sub">LLD 131 · Include the isometric preview in PNG/SVG export and the URL-hash share link. Three directions for <em>how the artifact-view is chosen</em>. Toggle the app's preview mode and try each.</p>
+  <div class="dir-tabs" role="tablist" aria-label="Design directions">
+    <button class="dir-tab is-active" data-dir="A" role="tab">A · View-follows (auto)</button>
+    <button class="dir-tab" data-dir="B" role="tab">B · Explicit picker</button>
+    <button class="dir-tab" data-dir="C" role="tab">C · Share popover flag</button>
+  </div>
+  <p class="dir-blurb" id="dir-blurb"></p>
+</header>
+
+<main class="stage-wrap">
+  <!-- App shell mock -->
+  <div class="app" id="app">
+    <!-- Canvas -->
+    <div class="canvas" id="canvas">
+      <div class="canvas-mode-tag" id="canvas-tag">2D plan</div>
+      <div class="svg-holder" id="svg2d"></div>
+      <div class="svg-holder hidden" id="svgIso"></div>
+    </div>
+
+    <!-- Tool rail (left) -->
+    <nav class="tool-rail" aria-label="Drawing tools">
+      <button title="Select">◱</button>
+      <button title="Wall">╱</button>
+      <button title="Measure">↔</button>
+      <div class="rail-sep" aria-hidden="true"></div>
+      <button id="rail-preview" aria-pressed="false" aria-label="3D preview (P)">
+        <span class="iso-glyph">◈</span>
+        <span class="key-hint">P</span>
+      </button>
+    </nav>
+
+    <!-- Actions cluster (top-right) -->
+    <div class="actions" id="actions"></div>
+  </div>
+
+  <!-- What gets produced -->
+  <section class="artifact" id="artifact"></section>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+// ── Shared mock state ────────────────────────────────────────────────
+const state = {
+  dir: "A",          // active design direction
+  previewActive: false,  // is the in-app 2.5D preview toggled on?
+  shareFlag: false,      // dir C: "open recipients in preview" flag
+  pickB: "follow",       // dir B export-view choice: follow | 2d | iso
+};
+
+const T = document.getElementById("toast");
+let toastTimer;
+function toast(msg) {
+  T.textContent = msg; T.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => T.classList.remove("show"), 2600);
+}
+
+// ── SVG scenes: a small studio plan, flat vs isometric ───────────────
+function scene2D() {
+  return `<svg viewBox="0 0 300 220" width="86%" style="max-width:420px">
+    <rect x="52" y="40" width="196" height="140" fill="rgba(201,168,76,0.07)"/>
+    <rect x="52" y="40" width="196" height="140" fill="none" stroke="#c9a84c" stroke-width="7" stroke-linejoin="round"/>
+    <rect x="52" y="40" width="196" height="140" fill="none" stroke="#ece7d6" stroke-width="1.4"/>
+    <!-- sofa --><rect x="70" y="120" width="70" height="34" rx="3" fill="#b89a60" stroke="#100f0b" stroke-width="1"/>
+    <!-- bed  --><rect x="176" y="60" width="54" height="70" rx="2" fill="#9090c0" stroke="#100f0b" stroke-width="1"/>
+    <!-- table--><rect x="96" y="72" width="40" height="26" rx="2" fill="#a89070" stroke="#100f0b" stroke-width="1"/>
+    <text x="150" y="34" fill="#8f8a78" font-family="monospace" font-size="9" text-anchor="middle">4.10 m</text>
+    <text x="44" y="112" fill="#8f8a78" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-90 44 112)">2.90 m</text>
+  </svg>`;
+}
+function sceneIso() {
+  // pre-projected axonometric boxes (illustrative, not the real projector)
+  return `<svg viewBox="0 0 320 240" width="92%" style="max-width:440px">
+    <!-- floor slab --><polygon points="60,150 180,90 280,140 160,200" fill="rgba(201,168,76,0.10)"/>
+    <!-- back walls --><polygon points="60,150 180,90 180,60 60,120" fill="#8a6f34"/>
+    <polygon points="180,90 280,140 280,110 180,60" fill="#6b551f"/>
+    <!-- bed box --><polygon points="196,104 232,122 232,104 196,86" fill="#9090c0"/>
+    <polygon points="232,122 250,113 250,95 232,104" fill="#6a6a90"/>
+    <polygon points="196,86 232,104 250,95 214,77" fill="#a8a8d0"/>
+    <!-- sofa box --><polygon points="96,150 150,177 150,166 96,139" fill="#b89a60"/>
+    <polygon points="150,177 176,164 176,153 150,166" fill="#8a7040"/>
+    <polygon points="96,139 150,166 176,153 122,126" fill="#cbb078"/>
+    <!-- table box --><polygon points="138,118 162,130 162,124 138,112" fill="#a89070"/>
+    <polygon points="162,130 176,123 176,117 162,124" fill="#7d6a50"/>
+    <polygon points="138,112 162,124 176,117 152,105" fill="#c2ac86"/>
+  </svg>`;
+}
+
+function paintCanvas() {
+  document.getElementById("svg2d").innerHTML = scene2D();
+  document.getElementById("svgIso").innerHTML = sceneIso();
+  const on = state.previewActive;
+  document.getElementById("svg2d").classList.toggle("hidden", on);
+  document.getElementById("svgIso").classList.toggle("hidden", !on);
+  document.getElementById("canvas-tag").textContent = on ? "2.5D preview" : "2D plan";
+  const rp = document.getElementById("rail-preview");
+  rp.setAttribute("aria-pressed", String(on));
+}
+
+// ── Direction copy ───────────────────────────────────────────────────
+const BLURBS = {
+  A: "<b>View-follows (auto).</b> Export &amp; Share always emit whatever is on screen. Turn preview ON and PNG/SVG/link carry the 2.5D view; OFF and they carry the flat plan. Zero new controls — the preview toggle you already have <em>is</em> the switch. The Export menu just relabels to say which view it will capture. Simplest to build and to explain; the risk is a user forgetting which mode they are in.",
+  B: "<b>Explicit picker.</b> The Export menu gains a small segmented <em>view</em> switch (Plan / 3D) so you can export the isometric even while editing in 2D — and vice-versa. Decouples 'what I'm looking at' from 'what I export'. Share still follows the switch. More control, one extra affordance to learn.",
+  C: "<b>Share popover flag.</b> Export follows the on-screen view (like A), but Share opens a small popover with a toggle: <em>'Open recipient straight in 3D peek'</em>. That writes an additive, back-compatible flag into the URL hash so the link lands in preview mode. Old links keep working; the flag defaults off. Best serves the 'send something they want to open' goal.",
+};
+
+// ── Actions cluster per direction ────────────────────────────────────
+function renderActions() {
+  const a = document.getElementById("actions");
+  const viewWord = state.previewActive ? "3D view" : "2D plan";
+  let html = `<span class="act-btn" style="cursor:default;opacity:.7">saved ✓</span>`;
+
+  if (state.dir === "A") {
+    html += `
+      <div class="act-anchor">
+        <button class="act-btn" id="btn-share">↗ Share</button>
+      </div>
+      <div class="act-anchor">
+        <button class="act-btn" id="btn-export">↓ Export</button>
+        <div class="menu" id="export-menu">
+          <div class="menu-head">Export — captures ${viewWord} <span class="view-badge">${state.previewActive ? "3D" : "2D"}</span></div>
+          <button data-x="png">PNG image</button>
+          <button data-x="svg">SVG image</button>
+          <button data-x="json">JSON file</button>
+          <div class="menu-sep"></div>
+          <button data-x="import">Import JSON…</button>
+          <div class="menu-hint">Tip: toggle <b>3D preview (P)</b> first to export the isometric.</div>
+        </div>
+      </div>`;
+  } else if (state.dir === "B") {
+    const sel = (v) => state.pickB === v ? "sel" : "";
+    html += `
+      <div class="act-anchor">
+        <button class="act-btn" id="btn-share">↗ Share</button>
+      </div>
+      <div class="act-anchor">
+        <button class="act-btn" id="btn-export">↓ Export</button>
+        <div class="menu" id="export-menu">
+          <div class="menu-head">View to export</div>
+          <div class="seg" id="seg-view">
+            <button data-v="follow" class="${sel('follow')}">Current</button>
+            <button data-v="2d" class="${sel('2d')}">Plan</button>
+            <button data-v="iso" class="${sel('iso')}">3D</button>
+          </div>
+          <button data-x="png">PNG image</button>
+          <button data-x="svg">SVG image</button>
+          <button data-x="json">JSON file</button>
+          <div class="menu-sep"></div>
+          <button data-x="import">Import JSON…</button>
+        </div>
+      </div>`;
+  } else {
+    html += `
+      <div class="act-anchor">
+        <button class="act-btn" id="btn-share">↗ Share</button>
+        <div class="share-pop" id="share-pop">
+          <div class="menu-head" style="padding:0 0 .1rem">Share link</div>
+          <div class="url" id="share-url"></div>
+          <div class="toggle-row ${state.shareFlag ? 'on' : ''}" id="flag-row">
+            <span class="switch"></span>
+            <span>
+              <span class="lbl">Open in 3D peek</span><br>
+              <span class="desc">Recipient lands directly in the 2.5D preview.</span>
+            </span>
+          </div>
+          <button class="copy-btn" id="copy-link">Copy link</button>
+        </div>
+      </div>
+      <div class="act-anchor">
+        <button class="act-btn" id="btn-export">↓ Export</button>
+        <div class="menu" id="export-menu">
+          <div class="menu-head">Export — captures ${viewWord} <span class="view-badge">${state.previewActive ? "3D" : "2D"}</span></div>
+          <button data-x="png">PNG image</button>
+          <button data-x="svg">SVG image</button>
+          <button data-x="json">JSON file</button>
+          <div class="menu-sep"></div>
+          <button data-x="import">Import JSON…</button>
+        </div>
+      </div>`;
+  }
+  a.innerHTML = html;
+  wireActions();
+}
+
+// ── Which view an export will actually emit ──────────────────────────
+function effectiveExportView() {
+  if (state.dir === "B") {
+    if (state.pickB === "2d") return "2d";
+    if (state.pickB === "iso") return "iso";
+  }
+  return state.previewActive ? "iso" : "2d";  // follows on-screen view
+}
+
+// ── Artifact preview panel ───────────────────────────────────────────
+function renderArtifact() {
+  const view = effectiveExportView();
+  const isIso = view === "iso";
+  const el = document.getElementById("artifact");
+  const flagOn = state.dir === "C" && state.shareFlag;
+  const url = "floorplan.danbing.app/#c" + (flagOn ? "…&pv=1" : "…");
+
+  el.innerHTML = `
+    <h2>What the recipient / file gets</h2>
+    <p class="art-sub">Live preview of the exported PNG/SVG for the current settings. The share link is shown below it.</p>
+    <div class="art-frame">
+      ${isIso ? sceneIso() : scene2D()}
+      <span class="art-caption">floorplan.${view === "iso" ? "svg" : "svg"} · ${isIso ? "2.5D isometric" : "2D plan"}</span>
+    </div>
+    <p class="art-note">
+      <b>Export view:</b> ${isIso ? "2.5D isometric" : "2D plan"}${state.dir === "B" ? " (picker: " + state.pickB + ")" : " (follows on-screen)"}<br>
+      <b>Share link:</b> <code>${url}</code>${flagOn ? " — opens directly in 3D peek" : ""}<br>
+      <span style="opacity:.8">${flagOn
+        ? "The <code>pv=1</code> flag is additive: links without it (all existing links) load in 2D exactly as before."
+        : "Standard link — recipient opens in 2D and can toggle preview themselves."}</span>
+    </p>`;
+}
+
+// ── Wiring ───────────────────────────────────────────────────────────
+function closeMenus() {
+  document.querySelectorAll(".menu.open, .share-pop.open").forEach(m => m.classList.remove("open"));
+}
+document.addEventListener("click", closeMenus);
+
+function wireActions() {
+  const exportBtn = document.getElementById("btn-export");
+  const exportMenu = document.getElementById("export-menu");
+  exportBtn?.addEventListener("click", (e) => {
+    e.stopPropagation(); const open = exportMenu.classList.contains("open");
+    closeMenus(); if (!open) exportMenu.classList.add("open");
+  });
+  exportMenu?.addEventListener("click", (e) => e.stopPropagation());
+
+  // Export item clicks
+  exportMenu?.querySelectorAll("button[data-x]").forEach(b => {
+    b.addEventListener("click", () => {
+      const kind = b.dataset.x;
+      if (kind === "import") { toast("Import JSON…"); closeMenus(); return; }
+      const view = effectiveExportView();
+      toast(`${kind.toUpperCase()} exported — ${view === "iso" ? "2.5D isometric" : "2D plan"}`);
+      closeMenus();
+    });
+  });
+
+  // Dir B view segmented control
+  document.getElementById("seg-view")?.querySelectorAll("button[data-v]").forEach(b => {
+    b.addEventListener("click", (e) => {
+      e.stopPropagation(); state.pickB = b.dataset.v; renderActions(); renderArtifact();
+      document.getElementById("export-menu")?.classList.add("open");
+    });
+  });
+
+  // Share button
+  const shareBtn = document.getElementById("btn-share");
+  if (state.dir === "C") {
+    const pop = document.getElementById("share-pop");
+    document.getElementById("share-url").textContent =
+      "https://floorplan.danbing.app/#c7xQ…" + (state.shareFlag ? "&pv=1" : "");
+    shareBtn?.addEventListener("click", (e) => {
+      e.stopPropagation(); const open = pop.classList.contains("open");
+      closeMenus(); if (!open) pop.classList.add("open");
+    });
+    pop?.addEventListener("click", (e) => e.stopPropagation());
+    document.getElementById("flag-row")?.addEventListener("click", () => {
+      state.shareFlag = !state.shareFlag; renderActions(); renderArtifact();
+      document.getElementById("share-pop")?.classList.add("open");
+    });
+    document.getElementById("copy-link")?.addEventListener("click", () => {
+      toast(state.shareFlag ? "Link copied — opens in 3D peek" : "Link copied"); closeMenus();
+    });
+  } else {
+    shareBtn?.addEventListener("click", (e) => {
+      e.stopPropagation(); closeMenus();
+      toast(`Link copied — ${state.previewActive ? "on-screen 3D view" : "2D plan"}`);
+    });
+  }
+}
+
+// Preview toggle (rail button + P key)
+function togglePreview() {
+  state.previewActive = !state.previewActive;
+  paintCanvas(); renderActions(); renderArtifact();
+}
+document.getElementById("rail-preview").addEventListener("click", togglePreview);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "p" || e.key === "P") { if (!/input|textarea/i.test(e.target.tagName)) togglePreview(); }
+  if (e.key === "Escape" && state.previewActive) togglePreview();
+});
+
+// Direction tabs
+document.querySelectorAll(".dir-tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".dir-tab").forEach(t => t.classList.remove("is-active"));
+    tab.classList.add("is-active");
+    state.dir = tab.dataset.dir;
+    document.getElementById("dir-blurb").innerHTML = BLURBS[state.dir];
+    renderActions(); renderArtifact();
+  });
+});
+
+// ── Boot ─────────────────────────────────────────────────────────────
+document.getElementById("dir-blurb").innerHTML = BLURBS.A;
+paintCanvas(); renderActions(); renderArtifact();
+</script>
+</body>
+</html>
