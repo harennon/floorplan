@@ -261,6 +261,133 @@
         box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.35);
       }
 
+      /* ── Scope caret + popover (LLD 142) ─────────────────────────────── */
+      /* Wrapper so the popover can be anchored relative to the caret */
+      .preview-scope-wrap {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      /* The caret button: small, sits below #tool-preview, same rail style */
+      #preview-scope-caret {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 0.15rem 0.3rem;
+        background: transparent;
+        border: none;
+        border-radius: 4px;
+        color: var(--muted);
+        font-size: 0.65rem;
+        cursor: pointer;
+        transition: color 0.15s, background 0.15s;
+        line-height: 1;
+      }
+      #preview-scope-caret:hover,
+      #preview-scope-caret[aria-expanded="true"] {
+        color: var(--gold);
+        background: rgba(201, 168, 76, 0.08);
+      }
+
+      /* Scope pill: shows current scope name under #tool-preview */
+      #preview-scope-pill {
+        font-size: 0.58rem;
+        color: var(--gold);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 3.5rem;
+        text-align: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s;
+      }
+      #preview-scope-pill.visible { opacity: 1; }
+
+      /* The popover menu */
+      #preview-scope-popover {
+        position: absolute;
+        /* Open to the right of the tool rail */
+        left: calc(100% + 8px);
+        bottom: 0;
+        z-index: 20;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        padding: 0.3rem 0;
+        min-width: 9rem;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      }
+      #preview-scope-popover[hidden] { display: none; }
+
+      #preview-scope-popover [role="menuitem"] {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        padding: 0.38rem 0.75rem;
+        background: transparent;
+        border: none;
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        text-align: left;
+        cursor: pointer;
+        border-radius: 0;
+        transition: background 0.1s, color 0.1s;
+      }
+      #preview-scope-popover [role="menuitem"]:hover,
+      #preview-scope-popover [role="menuitem"]:focus {
+        background: rgba(201, 168, 76, 0.12);
+        color: var(--gold);
+        outline: none;
+      }
+      #preview-scope-popover [role="menuitem"][aria-current="true"] {
+        color: var(--gold);
+      }
+      #preview-scope-popover [role="menuitem"][aria-current="true"]::before {
+        content: "✓";
+        font-size: 0.7rem;
+        flex-shrink: 0;
+      }
+      #preview-scope-popover [role="menuitem"]:not([aria-current="true"])::before {
+        content: "";
+        display: inline-block;
+        width: 0.7rem;
+        flex-shrink: 0;
+      }
+      #preview-scope-popover .scope-divider {
+        height: 1px;
+        background: var(--hairline);
+        margin: 0.25rem 0.5rem;
+      }
+
+      /* Empty-state overlay: shown when scoped room has no closed walls */
+      #preview-empty {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 100px;
+        padding: 0.45rem 1.1rem;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--muted);
+        pointer-events: none;
+        z-index: 12;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        text-align: center;
+      }
+      #preview-empty[hidden] { display: none; }
+
       /* SVG fills the stage */
       #drawing {
         display: block;
@@ -2226,6 +2353,8 @@
         <canvas id="stage3d" aria-hidden="true"></canvas>
         <!-- Loading indicator shown while the three.js chunk downloads (LLD 130) -->
         <div id="preview-loading" role="status" aria-live="polite" hidden>Loading 3D…</div>
+        <!-- Empty-state overlay: shown when scoped room has no closed walls (LLD 142) -->
+        <div id="preview-empty" role="status" aria-live="polite" hidden>This room has no walls to preview</div>
       </div>
 
       <!-- Grain texture overlay -->
@@ -2279,15 +2408,35 @@
             <path d="M11 4 L15 8 L11 12 M15 8 H6 Q2 8 2 5 Q2 2 6 2 H9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
           </svg>
         </button>
-        <!-- 3D preview toggle (LLD 128) -->
+        <!-- 3D preview toggle + scope caret (LLD 128 / LLD 142) -->
         <div class="tool-rail-sep" aria-hidden="true"></div>
-        <button id="tool-preview" aria-label="3D preview (P)" aria-pressed="false">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 2 L14 5.5 L14 10.5 L8 14 L2 10.5 L2 5.5 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
-            <path d="M8 2 L8 14 M2 5.5 L14 10.5 M14 5.5 L2 10.5" stroke="currentColor" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.5"/>
-          </svg>
-          <span class="tool-key-hint">P</span>
-        </button>
+        <!-- Wrapper enables the popover to be anchored to the preview group -->
+        <div class="preview-scope-wrap">
+          <button id="tool-preview" aria-label="3D preview (P)" aria-pressed="false">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 2 L14 5.5 L14 10.5 L8 14 L2 10.5 L2 5.5 Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+              <path d="M8 2 L8 14 M2 5.5 L14 10.5 M14 5.5 L2 10.5" stroke="currentColor" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.5"/>
+            </svg>
+            <span class="tool-key-hint">P</span>
+          </button>
+          <!-- Scope pill shows the active room name when scoped (hidden when whole-plan) -->
+          <div id="preview-scope-pill" aria-live="polite"></div>
+          <!-- Caret button opens the scope popover -->
+          <button
+            id="preview-scope-caret"
+            aria-label="Choose preview scope"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-controls="preview-scope-popover"
+          >&#9662;</button>
+          <!-- Scope popover menu (populated by JS on open) -->
+          <div
+            id="preview-scope-popover"
+            role="menu"
+            aria-label="Preview scope"
+            hidden
+          ></div>
+        </div>
       </nav>
 
       <!-- Rail collapse toggle (mobile ≤480px); shown only when rail is collapsed -->

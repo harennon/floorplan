@@ -61,18 +61,25 @@ export const model = { symbols: /** @type {Sym[]} */ ([]) };
  * (LLD 128). It is a type constant — not a per-instance field — so old plans
  * that lack a per-instance `z` resolve height from the catalog at render time.
  *
+ * `sill` / `head` (metres, optional) give the bottom and top of an opening's
+ * gap for the 3D WebGL preview (LLD 142). Present only on catalog entries with
+ * `openings:true`. The 3D path reads these when present; the 2.5D fallback
+ * continues to use `z` unchanged.
+ *
  * @type {Record<SymbolType, {label:string, category:SymCategory,
  *   openings?:boolean, circular?:boolean, discrete?:boolean, floorLayer?:boolean,
  *   w:number, h:number,
  *   min_w:number, max_w:number, min_h:number, max_h:number,
- *   z:number,
+ *   z:number, sill?:number, head?:number,
  *   presets?:SymPreset[]}>}
  */
 export const CATALOG = {
   // Openings — width-only; depth pinned to the thin wall marker (min_h===max_h===h).
+  // sill/head (m) give the 3D WebGL gap band (LLD 142). z is kept for the 2.5D fallback.
   door: {
     label: "Door", category: "openings", openings: true, w: 0.81, h: 0.12,
     min_w: 0.61, max_w: 0.91, min_h: 0.12, max_h: 0.12, z: 2.03,
+    sill: 0, head: 2.03,
     presets: [
       { name: "Closet 24\"",   w: 0.61, h: 0.12 },
       { name: "Bath 28\"",     w: 0.71, h: 0.12 },
@@ -85,6 +92,7 @@ export const CATALOG = {
   window: {
     label: "Window", category: "openings", openings: true, w: 0.91, h: 0.12,
     min_w: 0.61, max_w: 2.44, min_h: 0.12, max_h: 0.12, z: 1.20,
+    sill: 0.9, head: 2.1,
     presets: [
       { name: "24\"", w: 0.61, h: 0.12 },
       { name: "32\"", w: 0.81, h: 0.12 },

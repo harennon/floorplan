@@ -255,7 +255,7 @@ export function extrudeFootprint(footprint, z0, z1) {
  *
  * @param {{ rooms: {closed:boolean, verts:{x:number,y:number}[]}[], chain: any[] }} wallsModel
  * @param {{ symbols: {id:string, type:string, x:number, y:number, w:number, h:number, rot:number, color?:string}[] }} symbolsModel
- * @returns {{ kind:"wall"|"furniture"|"rug", footprint:{x:number,y:number}[], z0:number, z1:number, baseColor:string, sortKey:number }[]}
+ * @returns {{ kind:"wall"|"furniture"|"rug"|"opening", footprint:{x:number,y:number}[], z0:number, z1:number, baseColor:string, sortKey:number }[]}
  */
 export function buildItems(wallsModel, symbolsModel) {
   const pal = palette();
@@ -302,7 +302,12 @@ export function buildItems(wallsModel, symbolsModel) {
     if (!cat) continue;
 
     const isRug = !!cat.floorLayer;
-    const z1 = isRug ? 0 : (cat.z ?? 0.75);
+    const isOpening = !!cat.openings;
+
+    // Heights: openings use sill/head for the 3D gap band; fallbacks are safe
+    // for catalog entries that lack these fields (old data or custom catalogs).
+    const z0 = isOpening ? (cat.sill ?? 0) : 0;
+    const z1 = isRug ? 0 : isOpening ? (cat.head ?? cat.z) : (cat.z ?? 0.75);
 
     // Resolve opaque base color
     let baseColor;
@@ -323,10 +328,15 @@ export function buildItems(wallsModel, symbolsModel) {
     for (const p of footprint) { cx += p.x; cy += p.y; }
     cx /= footprint.length; cy /= footprint.length;
 
+    let kind;
+    if (isRug) kind = "rug";
+    else if (isOpening) kind = "opening";
+    else kind = "furniture";
+
     items.push({
-      kind: isRug ? "rug" : "furniture",
+      kind,
       footprint,
-      z0: 0,
+      z0,
       z1,
       baseColor,
       sortKey: cx + cy,
