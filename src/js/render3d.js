@@ -579,6 +579,46 @@ export function dispose() {
   _bounds = null;
 }
 
+// ── Capture API (LLD 136) ─────────────────────────────────────────────────────
+
+/**
+ * True when a live WebGL frame of the current preview can be captured —
+ * renderer exists AND not in the 2.5D-SVG fallback path (i.e. three.js was
+ * imported successfully and the renderer was constructed).
+ * Pure and cheap; lets actions.js route export without importing three.js.
+ * @returns {boolean}
+ */
+export function canCapture() {
+  return !!_renderer;
+}
+
+/**
+ * Render one fresh frame from the current plan and return it as a PNG Blob.
+ * Rebuilds the plan group first so the capture reflects any edits since preview
+ * entry. Calls _renderOnce() then canvas.toBlob() in the same JS task — the
+ * drawing buffer is still valid before the browser's next paint, so we get a
+ * non-blank frame without the always-on cost of preserveDrawingBuffer.
+ * Rejects if the renderer/canvas is absent or if toBlob yields null.
+ * @returns {Promise<Blob>}
+ */
+export async function capturePngBlob() {
+  if (!_renderer || !_canvas || !_scene || !_camera) {
+    throw new Error("render3d: no renderer/canvas — cannot capture");
+  }
+  // Rebuild so the capture reflects the latest plan state.
+  _buildPlanGroup();
+  _renderOnce();
+  return new Promise((resolve, reject) => {
+    _canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error("render3d: canvas.toBlob returned null"));
+      }
+    }, "image/png");
+  });
+}
+
 // ── Test-only introspection (no-op in production paths) ─────────────────────
 
 /** Number of live meshes in the plan group (teardown-leak probe for tests). */

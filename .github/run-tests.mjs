@@ -549,6 +549,107 @@ async function runPreview3dIntegrationTests(browser) {
     browser
   );
 
+  // ── Test 3b: LLD 136 QA fix — boot &pv=1 + no-WebGL → recovery toast survives ─
+  // Regression: pre-fix, previewSetActive(true) fired BEFORE showToast("Opened
+  // shared plan") in the conflict branch, and also the async no-WebGL fallback
+  // toast ("3D unavailable") fired in the very next microtask after
+  // render3d.enter() resolved — overwriting the recovery toast's action button.
+  // This test seeds a different local plan, opens with a &pv=1 share hash of a
+  // second plan in a forced no-WebGL context, and asserts that the conflict-branch
+  // recovery toast is visible WITH its "Keep my last plan instead" action button
+  // (i.e. the "3D unavailable" toast did NOT overwrite it).
+  await runPreviewTest(
+    "LLD 136: boot &pv=1 + conflict + no-WebGL → recovery toast with action button survives",
+    async (browser) => {
+      // Step 1: encode a share hash for the SHARED plan (different from PREVIEW_PLAN).
+      // We must do this in-page because CompressionStream is a browser API.
+      // Boot a throwaway page with no local plan to get access to window.__encodeShareHash.
+      const encodePage = await browser.newPage();
+      let shareHash;
+      try {
+        await encodePage.goto(`http://127.0.0.1:${PORT}${APP_PAGE}`);
+        await encodePage.waitForLoadState("networkidle");
+        shareHash = await encodePage.evaluate(async () => {
+          // A 6×4 room — deliberately different from PREVIEW_PLAN (4×3).
+          const sharedPlan = {
+            schema: 1, app: "floorplan",
+            walls: { rooms: [{ id: "shared", closed: true, verts: [
+              { x: 0, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 4 }, { x: 0, y: 4 },
+            ]}], chain: [] },
+            symbols: { symbols: [] },
+            measurements: [],
+            view: { zoom: 1, panX: 0, panY: 0 },
+            unit: "m",
+          };
+          return window.__encodeShareHash(sharedPlan, { preview: true });
+        });
+      } finally {
+        await encodePage.close();
+      }
+
+      if (!shareHash || !shareHash.includes("&pv=1")) {
+        throw new Error("encodeShareHash did not produce a &pv=1 hash: " + shareHash);
+      }
+
+      // Step 2: open the conflict scenario.
+      // Local plan = PREVIEW_PLAN (4×3 room), shared plan = 6×4 room (different).
+      const page = await browser.newPage();
+      const pageErrors = [];
+      page.on("pageerror", (err) => { pageErrors.push(String(err)); process.stderr.write(`[LLD136 page uncaught] ${err}\n`); });
+      try {
+        // Seed local plan (4×3) so it conflicts with shared (6×4).
+        await page.addInitScript((plan) => {
+          localStorage.setItem("floorplan:plan:v1", JSON.stringify(plan));
+        }, PREVIEW_PLAN);
+        // Force no-WebGL.
+        await page.addInitScript(() => {
+          const orig = HTMLCanvasElement.prototype.getContext;
+          HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+            if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") return null;
+            return orig.call(this, type, ...rest);
+          };
+        });
+
+        await page.goto(`http://127.0.0.1:${PORT}${APP_PAGE}#${shareHash}`);
+        // Allow the async boot (readBootHash + previewOnChange + render3d.enter) to settle.
+        await new Promise(r => setTimeout(r, 800));
+
+        const state = await page.evaluate(() => {
+          const toast = document.getElementById("toast");
+          const actionBtn = toast ? toast.querySelector(".toast-action-btn") : null;
+          return {
+            toastVisible: toast?.classList.contains("toast--visible") || false,
+            toastText: toast?.textContent?.trim() || "",
+            hasAction: !!(actionBtn && !actionBtn.hidden && actionBtn.textContent.trim().length > 0),
+            actionText: actionBtn ? actionBtn.textContent.trim() : "",
+          };
+        });
+
+        // The recovery toast MUST be visible with its action button intact.
+        // Pre-fix: "3D unavailable" overwrote this, and hasAction was false.
+        if (!state.toastVisible) {
+          throw new Error("Boot recovery toast not visible after &pv=1 + conflict + no-WebGL");
+        }
+        if (!/Opened shared plan/i.test(state.toastText)) {
+          throw new Error(`Expected "Opened shared plan" toast, got: ${JSON.stringify(state.toastText)}`);
+        }
+        if (!state.hasAction) {
+          throw new Error(
+            `Recovery toast missing action button — "3D unavailable" toast likely overwrote it. Toast text: ${JSON.stringify(state.toastText)}`
+          );
+        }
+        if (!/Keep my last plan instead/i.test(state.actionText)) {
+          throw new Error(`Action button text unexpected: ${JSON.stringify(state.actionText)}`);
+        }
+
+        if (pageErrors.length) throw new Error("Page errors during boot &pv=1 conflict test: " + pageErrors.join("; "));
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
   // ── Test 4: teardown / context-reuse probe ──────────────────────────────────
   // Toggle preview on→off N cycles; after each exit() the plan group must be
   // fully disposed (__liveGeometryCount === 0), and the renderer/context must be

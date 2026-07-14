@@ -273,6 +273,20 @@ export async function exportPng() {
   }
 }
 
+// ── Download helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Trigger a download of a Blob with the given filename.
+ * Promoted from the private _triggerDownload so callers (actions.js) can
+ * download a Blob without duplicating anchor logic.
+ * @param {Blob} blob
+ * @param {string} filename
+ */
+export function downloadBlob(blob, filename) {
+  const blobUrl = URL.createObjectURL(blob);
+  _triggerDownload(blobUrl, filename);
+}
+
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 function _triggerDownload(blobUrl, filename) {
