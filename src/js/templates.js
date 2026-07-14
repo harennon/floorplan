@@ -15,6 +15,7 @@
  */
 
 import { validatePlan, isEmptyPlan } from "./plan.js";
+import { renderThumbnail } from "./thumbRender.js";
 
 // ── Template plan data ────────────────────────────────────────────────────────
 //
@@ -27,7 +28,6 @@ import { validatePlan, isEmptyPlan } from "./plan.js";
  * @property {string} id           stable slug
  * @property {string} name         display name
  * @property {string} description  one-line card blurb
- * @property {string} thumb        inline SVG markup (decorative preview)
  * @property {import("./plan.js").Plan} plan  a full, valid Plan document
  */
 
@@ -38,19 +38,6 @@ export const TEMPLATES = Object.freeze([
     id: "studio",
     name: "Studio apartment",
     description: "~27 m² open plan with bed, sofa & kitchenette",
-    thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect x="8" y="8" width="104" height="74" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
-      <!-- bed -->
-      <rect x="14" y="13" width="22" height="30" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
-      <rect x="14" y="13" width="22" height="8" rx="1" fill="rgba(201,168,76,0.30)" stroke="none"/>
-      <!-- sofa -->
-      <rect x="42" y="13" width="36" height="16" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
-      <rect x="42" y="13" width="36" height="5" rx="1" fill="rgba(201,168,76,0.28)" stroke="none"/>
-      <!-- table -->
-      <rect x="46" y="34" width="24" height="16" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
-      <!-- fridge (kitchenette) -->
-      <rect x="14" y="66" width="12" height="12" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
-    </svg>`,
     plan: {
       schema: 1,
       app: "floorplan",
@@ -88,25 +75,6 @@ export const TEMPLATES = Object.freeze([
     id: "one-bedroom",
     name: "1-bedroom apartment",
     description: "~55 m² with bedroom, living room & kitchen",
-    thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <!-- bedroom -->
-      <rect x="8" y="8" width="48" height="40" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
-      <!-- living room -->
-      <rect x="56" y="8" width="56" height="40" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
-      <!-- kitchen strip -->
-      <rect x="8" y="48" width="104" height="34" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
-      <!-- bed -->
-      <rect x="13" y="13" width="22" height="28" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
-      <rect x="13" y="13" width="22" height="7" rx="1" fill="rgba(201,168,76,0.28)" stroke="none"/>
-      <!-- sofa -->
-      <rect x="62" y="13" width="36" height="16" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
-      <!-- table -->
-      <rect x="67" y="34" width="24" height="12" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
-      <!-- fridge -->
-      <rect x="13" y="53" width="12" height="12" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
-      <!-- desk -->
-      <rect x="30" y="53" width="20" height="12" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
-    </svg>`,
     plan: {
       schema: 1,
       app: "floorplan",
@@ -167,11 +135,6 @@ export const TEMPLATES = Object.freeze([
     id: "single-room",
     name: "Rectangular room",
     description: "~20 m² blank room — add your own furniture",
-    thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect x="12" y="12" width="96" height="66" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
-      <!-- door hint -->
-      <path d="M 12 66 A 20 20 0 0 1 32 66" stroke="#d9be6e" stroke-width="1" stroke-dasharray="3 2" fill="none" opacity="0.5"/>
-    </svg>`,
     plan: {
       schema: 1,
       app: "floorplan",
@@ -206,16 +169,6 @@ export const TEMPLATES = Object.freeze([
     id: "small-office",
     name: "Small office",
     description: "~15 m² office with desk, chair & storage",
-    thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect x="16" y="12" width="88" height="66" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
-      <!-- desk L-shape suggestion -->
-      <rect x="21" y="17" width="36" height="14" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
-      <rect x="21" y="31" width="14" height="14" rx="1" fill="rgba(201,168,76,0.14)" stroke="#d9be6e" stroke-width="1"/>
-      <!-- chair (circle) -->
-      <circle cx="81" cy="48" r="10" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
-      <!-- table -->
-      <rect x="56" y="30" width="30" height="18" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
-    </svg>`,
     plan: {
       schema: 1,
       app: "floorplan",
@@ -383,7 +336,7 @@ function _renderCards() {
 
     const thumbSpan = document.createElement("span");
     thumbSpan.className = "template-thumb";
-    thumbSpan.innerHTML = t.thumb;
+    thumbSpan.innerHTML = renderThumbnail(t.plan);
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "template-card-name";
