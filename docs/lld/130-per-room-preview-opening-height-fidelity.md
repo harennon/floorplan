@@ -125,11 +125,43 @@ A pure `scopeFilter(wallsModel, symbolsModel, scopeId)` returns a **filtered vie
 
 - `scopeId === "all"` → pass the models through unchanged (exact LLD 128 behaviour).
 - otherwise → `rooms` = the single closed room whose `id === scopeId` (empty if none);
-  `symbols` = the symbols that belong to that room:
-  - **furniture / rug** — included when its center `(sym.x, sym.y)` is inside the room
-    polygon (new pure `pointInRoom` helper in `walls.js`, standard ray-cast).
-  - **openings** — sit on the boundary, so included when near one of the room's walls via
-    the existing `walls.pointNearRoomWall(room, x, y, tol)` (tol ≈ `WALL_M`).
+  `symbols` = the symbols that belong to that room, decided by the **shared membership
+  predicate** described next.
+
+**Reuse the existing membership predicate — don't restate it.** The furniture-vs-opening
+rule this needs is *already* implemented and battle-tested in
+`roomTool.js._carriedSymbolsFor` (lines 265–275):
+
+- **furniture / rug** — belongs when its center `(sym.x, sym.y)` is inside the room polygon
+  (`clearance.pointInRoom(room, x, y)`, the **existing exported** ray-cast helper).
+- **openings** (`CATALOG[sym.type].openings`) — sit on the boundary, so belong when near one
+  of the room's walls via the existing `walls.pointNearRoomWall(room, x, y, WALL_M)`.
+
+To avoid two copies of that rule drifting, **factor the per-symbol test out of
+`_carriedSymbolsFor` into one pure exported predicate** and reuse it in both call sites:
+
+```js
+// clearance.js (already imports CATALOG from symbols.js, WALL_M from walls.js,
+// pointNearRoomWall from walls.js, and defines pointInRoom locally — the natural home)
+export function symbolBelongsToRoom(room, sym) {
+  return CATALOG[sym.type]?.openings
+    ? pointNearRoomWall(room, sym.x, sym.y, WALL_M)
+    : pointInRoom(room, sym.x, sym.y);
+}
+```
+
+`roomTool._carriedSymbolsFor` is refactored to call `symbolBelongsToRoom(room, sym)` per
+symbol (behaviour identical — same predicate, just extracted), and `scopeFilter` filters
+`symbolsModel.symbols` through the same function. One rule, one place.
+
+**Semantics of the reused `clearance.pointInRoom`** (state precisely so the implementer
+does not assume a check that isn't there): it is a plain even-odd ray-cast over `room.verts`
+and does **not** inspect `room.closed`. It returns `false` for a polygon with `< 3` verts (no
+edges straddle the ray), but for an *open* 3+-vert room it would still run the ray-cast against
+whatever verts exist. This is harmless here because `scopeFilter` only ever passes a **closed**
+room (it selects `rooms` from `model.rooms` where the room resolves as closed — see §5), so the
+open/degenerate cases never reach it. Do **not** add an open/`<3`-vert guard inside the shared
+helper for this feature; if such a guard is ever wanted, wrap it at the call site.
 
 `buildItems` and the floor-slab loop are refactored minimally to accept the filtered
 `{rooms}` / `{symbols}` arrays rather than reading `wallsModel.rooms` / `symbolsModel.symbols`
@@ -219,21 +251,37 @@ Reference mockup (behaviour only): boots into preview, `P` toggles —
 
 No change to the `Sym` instance shape, `createSymbol`, `resizeSymbol`, or `corners()`.
 
-### `walls.js` — pure point-in-room helper (new)
+### `clearance.js` — reuse `pointInRoom`, add one shared membership predicate
+
+**No new `pointInRoom`.** `clearance.js` already exports the ray-cast
+`pointInRoom(room, x, y)` (lines 169–183) — reuse it directly; `isoRender.js` can import it
+with no circular-import risk (clearance.js imports only `symbols.js` + `walls.js`).
+Exact semantics to rely on: plain even-odd ray-cast over `room.verts`; **does not** check
+`room.closed`; returns `false` for `< 3` verts; for an open 3+-vert polygon it still runs the
+ray-cast (acceptable — `scopeFilter` only passes closed rooms).
+
+Add the single shared symbol-membership predicate (factored out of
+`roomTool._carriedSymbolsFor`, see Approach §3):
 
 ```js
 /**
- * Ray-cast point-in-polygon test against a room's verts (world metres).
- * Returns false for open / <3-vert rooms. Pure.
+ * True if `sym` belongs to `room`: openings by proximity to the room's walls
+ * (pointNearRoomWall, WALL_M), all other symbols by center-in-polygon
+ * (pointInRoom). Pure. Assumes a closed room (see pointInRoom semantics).
  * @param {Room} room
- * @param {number} x
- * @param {number} y
+ * @param {Sym} sym
  * @returns {boolean}
  */
-export function pointInRoom(room, x, y);
+export function symbolBelongsToRoom(room, sym);
 ```
 
-(`pointNearRoomWall` already exists — reused for opening containment.)
+(`walls.pointNearRoomWall` already exists — used internally by the predicate.)
+
+### `roomTool.js` — reuse the extracted predicate (no behaviour change)
+
+`_carriedSymbolsFor` is refactored to call `clearance.symbolBelongsToRoom(room, sym)` per
+symbol instead of inlining the open-coded `openings ? pointNearRoomWall : pointInRoom` test.
+Identical result; single source for the rule.
 
 ### `preview.js` — add scope state (session-only)
 
@@ -259,7 +307,9 @@ const OPENING_BIAS = 1e-3;
 /**
  * Filter live models to the in-scope subset. Pure.
  * "all" → the models unchanged. A room id → that closed room + the symbols
- * belonging to it (furniture/rug by center-in-room; openings by near-wall).
+ * belonging to it, decided by the shared clearance.symbolBelongsToRoom predicate
+ * (furniture/rug by center-in-room; openings by near-wall). Imports pointInRoom /
+ * symbolBelongsToRoom from clearance.js (no circular-import risk).
  * @returns {{ rooms: Room[], symbols: Sym[] }}
  */
 export function scopeFilter(wallsModel, symbolsModel, scopeId);
@@ -407,11 +457,18 @@ strictly additive on that base — no rewrite. No new runtime dependency, no bui
 
 - **`symbols.js`** — add `sill`/`head` to `door`/`window` `CATALOG`; `corners()` reused for
   opening footprints; `openings` category flag used to route `kind:"opening"`.
-- **`walls.js`** — **new** `pointInRoom(room,x,y)`; existing `pointNearRoomWall`,
-  `roomMetrics`, `WALL_M`, `model.rooms` (ids), `roomCentroids`/geometry reused.
+- **`clearance.js`** — **reuse** existing exported `pointInRoom(room,x,y)` (lines 169–183, NOT
+  a new helper); **add** the shared `symbolBelongsToRoom(room, sym)` predicate factored out of
+  `roomTool._carriedSymbolsFor`. Both imported by `isoRender.scopeFilter` (no circular import —
+  clearance.js imports only symbols.js + walls.js).
+- **`walls.js`** — existing `pointNearRoomWall`, `roomMetrics`, `WALL_M`, `model.rooms` (ids),
+  `roomCentroids`/geometry reused. **No new export** (pointInRoom already lives in clearance.js).
+- **`roomTool.js`** — refactor `_carriedSymbolsFor` to call the extracted
+  `clearance.symbolBelongsToRoom` (behaviour-preserving; removes the duplicated rule).
 - **`isoRender.js`** — extend: `scopeFilter`, `isoBounds`, `kind:"opening"` in `buildItems` +
   `render`, `buildItems(rooms, symbols)` signature, `getScope` in `initIsoRender`. Reuse
-  `extrudeFootprint`, `depthSort`, `shade`, `toOpaqueRgb`, `CATEGORY_BASE`.
+  `extrudeFootprint`, `depthSort`, `shade`, `toOpaqueRgb`, `CATEGORY_BASE`, and
+  `clearance.pointInRoom` / `clearance.symbolBelongsToRoom`.
 - **`preview.js`** — add `getScope`/`setScope` + scope reset on off.
 - **`view.js`** — reuse `worldToScreenIso`, `fitToContent`, `W`/`H`; NO new export.
 - **`units.js`** — `fmtArea`, `areaUnitLabel` for pill labels.
@@ -443,8 +500,12 @@ group, call `render()`, assert on child polygons).
 - `scopeFilter(..., roomId)` returns only that closed room and only the symbols whose center
   is inside it (furniture) or near its walls (openings). A symbol in another room is excluded.
 - Unknown/stale `roomId` → behaves as `"all"` (fail-safe).
-- `pointInRoom` — true for a point inside a rectangular room, false outside and for open/
-  <3-vert rooms.
+- `symbolBelongsToRoom` (shared predicate) — an opening near a room wall belongs; a furniture
+  piece centered inside belongs; one centered outside does not. (Reuses the existing
+  `clearance.pointInRoom`, already covered by clearance tests — no new pointInRoom test needed.)
+- **Regression guard on the extraction:** `roomTool._carriedSymbolsFor` still returns the same
+  carried-symbol ids after refactoring to `symbolBelongsToRoom` (existing roomTool/nudge tests
+  must stay green — behaviour is identical).
 
 ### Unit — item build (openings)
 
