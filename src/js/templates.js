@@ -249,6 +249,161 @@ export const TEMPLATES = Object.freeze([
       unit: "m",
     },
   },
+
+  // ── 5. Gaming room (~12 m²) ───────────────────────────────────────────────
+  {
+    id: "gaming-room",
+    name: "Gaming room",
+    description: "~12 m² battlestation with desk, dual monitors & gaming chair",
+    thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="10" y="10" width="100" height="70" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+      <!-- rug -->
+      <rect x="18" y="18" width="64" height="44" rx="1" fill="rgba(201,168,76,0.05)" stroke="#d9be6e" stroke-width="0.8" stroke-dasharray="3 2"/>
+      <!-- desk -->
+      <rect x="18" y="18" width="52" height="14" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+      <!-- dual monitors -->
+      <rect x="22" y="20" width="14" height="5" rx="1" fill="rgba(201,168,76,0.30)" stroke="none"/>
+      <rect x="40" y="20" width="14" height="5" rx="1" fill="rgba(201,168,76,0.30)" stroke="none"/>
+      <!-- gaming chair -->
+      <rect x="30" y="38" width="18" height="18" rx="3" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    </svg>`,
+    plan: {
+      schema: 1,
+      app: "floorplan",
+      walls: {
+        rooms: [
+          {
+            id: "r0",
+            closed: true,
+            verts: [
+              { x: 0, y: 0 },
+              { x: 4.0, y: 0 },
+              { x: 4.0, y: 3.0 },
+              { x: 0, y: 3.0 },
+            ],
+          },
+        ],
+        chain: [],
+      },
+      symbols: {
+        symbols: [
+          { id: "s0", type: "rug",          x: 2.0,  y: 1.5,  w: 2.44, h: 2.44, rot: 0 },
+          { id: "s1", type: "desk",         x: 1.4,  y: 0.35, w: 1.4,  h: 0.7,  rot: 0 },
+          { id: "s2", type: "monitor",      x: 0.82, y: 0.28, w: 0.62, h: 0.22, rot: 0 },
+          { id: "s3", type: "monitor",      x: 1.58, y: 0.28, w: 0.62, h: 0.22, rot: 0 },
+          { id: "s4", type: "gaming-chair", x: 1.4,  y: 1.16, w: 0.66, h: 0.66, rot: 0 },
+          { id: "s5", type: "door",         x: 3.55, y: 3.0,  w: 0.81, h: 0.12, rot: 0 },
+          { id: "s6", type: "window",       x: 2.0,  y: 0,    w: 1.22, h: 0.12, rot: 0 },
+        ],
+      },
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "m",
+    },
+  },
+
+  // ── 6. Kitchen (~14 m²) ───────────────────────────────────────────────────
+  {
+    id: "kitchen",
+    name: "Kitchen",
+    description: "~14 m² galley kitchen with fridge, stove, sink & dining table",
+    thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="10" y="10" width="100" height="70" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+      <!-- counter run top -->
+      <rect x="15" y="15" width="90" height="14" rx="1" fill="rgba(201,168,76,0.14)" stroke="#d9be6e" stroke-width="1"/>
+      <!-- fridge -->
+      <rect x="17" y="17" width="16" height="10" rx="1" fill="rgba(201,168,76,0.28)" stroke="#d9be6e" stroke-width="0.8"/>
+      <!-- stove -->
+      <rect x="37" y="17" width="16" height="10" rx="1" fill="rgba(201,168,76,0.22)" stroke="#d9be6e" stroke-width="0.8"/>
+      <!-- sink -->
+      <rect x="57" y="17" width="16" height="10" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="0.8"/>
+      <!-- dining table -->
+      <rect x="28" y="48" width="44" height="22" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+    </svg>`,
+    plan: {
+      schema: 1,
+      app: "floorplan",
+      walls: {
+        rooms: [
+          {
+            id: "r0",
+            closed: true,
+            verts: [
+              { x: 0, y: 0 },
+              { x: 5.0, y: 0 },
+              { x: 5.0, y: 2.8 },
+              { x: 0, y: 2.8 },
+            ],
+          },
+        ],
+        chain: [],
+      },
+      symbols: {
+        symbols: [
+          { id: "s0", type: "fridge", x: 0.38, y: 0.405, w: 0.76, h: 0.81, rot: 0 },
+          { id: "s1", type: "stove",  x: 1.52, y: 0.355, w: 0.76, h: 0.71, rot: 0 },
+          { id: "s2", type: "sink",   x: 2.66, y: 0.255, w: 0.76, h: 0.51, rot: 0 },
+          { id: "s3", type: "table",  x: 2.5,  y: 1.95,  w: 1.52, h: 0.90, rot: 0 },
+          { id: "s4", type: "door",   x: 4.55, y: 2.8,   w: 0.81, h: 0.12, rot: 0 },
+          { id: "s5", type: "window", x: 1.25, y: 0,     w: 1.22, h: 0.12, rot: 0 },
+        ],
+      },
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "m",
+    },
+  },
+
+  // ── 7. Cozy living room (~18 m²) ──────────────────────────────────────────
+  {
+    id: "living-room",
+    name: "Cozy living room",
+    description: "~18 m² living room with sofa, armchair, coffee table & TV",
+    thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="10" y="10" width="100" height="70" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+      <!-- rug -->
+      <rect x="20" y="28" width="72" height="38" rx="1" fill="rgba(201,168,76,0.05)" stroke="#d9be6e" stroke-width="0.8" stroke-dasharray="3 2"/>
+      <!-- tv on wall -->
+      <rect x="30" y="15" width="50" height="10" rx="1" fill="rgba(201,168,76,0.22)" stroke="#d9be6e" stroke-width="1"/>
+      <!-- sofa -->
+      <rect x="22" y="50" width="52" height="14" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+      <rect x="22" y="50" width="52" height="5" rx="1" fill="rgba(201,168,76,0.28)" stroke="none"/>
+      <!-- armchair -->
+      <rect x="84" y="46" width="20" height="20" rx="1" fill="rgba(201,168,76,0.15)" stroke="#d9be6e" stroke-width="1"/>
+      <!-- coffee table -->
+      <rect x="38" y="35" width="34" height="14" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+    </svg>`,
+    plan: {
+      schema: 1,
+      app: "floorplan",
+      walls: {
+        rooms: [
+          {
+            id: "r0",
+            closed: true,
+            verts: [
+              { x: 0, y: 0 },
+              { x: 4.5, y: 0 },
+              { x: 4.5, y: 4.0 },
+              { x: 0, y: 4.0 },
+            ],
+          },
+        ],
+        chain: [],
+      },
+      symbols: {
+        symbols: [
+          { id: "s0", type: "rug",          x: 2.25, y: 2.5,  w: 2.44, h: 3.05, rot: 0 },
+          { id: "s1", type: "tv",           x: 2.25, y: 0.2,  w: 1.40, h: 0.40, rot: 0 },
+          { id: "s2", type: "sofa",         x: 1.75, y: 3.45, w: 2.10, h: 0.95, rot: 0 },
+          { id: "s3", type: "coffee-table", x: 1.75, y: 2.3,  w: 1.10, h: 0.55, rot: 0 },
+          { id: "s4", type: "armchair",     x: 3.9,  y: 2.5,  w: 0.80, h: 0.80, rot: 0 },
+          { id: "s5", type: "door",         x: 0.45, y: 4.0,  w: 0.81, h: 0.12, rot: 0 },
+          { id: "s6", type: "window",       x: 2.25, y: 0,    w: 1.52, h: 0.12, rot: 0 },
+        ],
+      },
+      view: { zoom: 1, panX: 0, panY: 0 },
+      unit: "m",
+    },
+  },
 ]);
 
 // ── Overlay state ─────────────────────────────────────────────────────────────

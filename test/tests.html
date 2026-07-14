@@ -8904,9 +8904,9 @@ function _restoreModels(snap) {
 // ─── LLD-43 unit tests ────────────────────────────────────────────────────────
 
 describe("LLD-43 — TEMPLATES metadata integrity", () => {
-  it("has between 3 and 5 templates", () => {
-    if (TEMPLATES.length < 3 || TEMPLATES.length > 5) {
-      throw new Error(`Expected 3–5 templates, got ${TEMPLATES.length}`);
+  it("has between 3 and 8 templates", () => {
+    if (TEMPLATES.length < 3 || TEMPLATES.length > 8) {
+      throw new Error(`Expected 3–8 templates, got ${TEMPLATES.length}`);
     }
   });
 
@@ -8953,6 +8953,16 @@ describe("LLD-43 — TEMPLATES metadata integrity", () => {
     for (const t of TEMPLATES) {
       if (!VALID.includes(t.plan.unit)) {
         throw new Error(`Template '${t.id}' has invalid unit: ${t.plan.unit}`);
+      }
+    }
+  });
+
+  it("every symbol type in every template plan is a known CATALOG key", () => {
+    for (const t of TEMPLATES) {
+      for (const sym of t.plan.symbols.symbols) {
+        if (!(sym.type in CATALOG)) {
+          throw new Error(`Template '${t.id}' symbol '${sym.id}' has unknown type: '${sym.type}'`);
+        }
       }
     }
   });
