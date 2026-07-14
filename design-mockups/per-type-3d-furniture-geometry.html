@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D preview — per-type furniture geometry</title>
+<!--
+  THROWAWAY design mockup (issue #139 / LLD 144).
+  Demonstrates: composed low-poly furniture meshes vs the shipped extruded boxes.
+  three.js is loaded from a CDN here for a self-contained preview ONLY; the real
+  feature reuses the already-bundled, lazy-loaded three.js from render3dEngine.js.
+  Mesh factories below are illustrative of the "primitive composition" approach
+  the LLD would formalize (chair = seat + back + 4 legs, etc.).
+-->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<style>
+  :root {
+    --bg: #14140f; --bg-deep: #100f0b; --ink: #ece7d6; --muted: #8f8a78;
+    --gold: #c9a84c; --gold-soft: rgba(201,168,76,0.55);
+    --line: rgba(201,168,76,0.22); --panel: rgba(28,27,20,0.72);
+    /* per-category base colors, mirrored from isoRender.js CATEGORY_BASE (dark) */
+    --c-living: #b89a60; --c-kitchen: #6ab0b0; --c-bedroom: #9090c0;
+    --c-bath: #5aa8c8; --c-outdoor: #70a870; --c-fallback: #8f8a78;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background:
+      radial-gradient(120% 90% at 50% -10%, #1b1a12 0%, var(--bg) 55%, var(--bg-deep) 100%);
+    color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    /* faint graph-paper / blueprint grid */
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 100% 100%, 28px 28px, 28px 28px;
+    background-blend-mode: normal;
+  }
+  #app {
+    max-width: 1180px; margin: 0 auto; min-height: 100%;
+    display: flex; flex-direction: column; padding: 20px 22px 28px;
+  }
+  #topbar .brand { display: flex; align-items: center; gap: 10px; }
+  #topbar .dot {
+    width: 11px; height: 11px; border-radius: 50%; background: var(--gold);
+    box-shadow: 0 0 0 4px rgba(201,168,76,0.15), 0 0 14px 2px rgba(201,168,76,0.5);
+  }
+  h1 { font-size: 17px; font-weight: 650; letter-spacing: 0.2px; margin: 0; }
+  .sub { margin: 4px 0 0 21px; color: var(--muted); font-size: 12.5px; }
+
+  #controls {
+    display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center;
+    margin: 18px 0 12px; padding: 10px 14px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    backdrop-filter: blur(6px);
+  }
+  .ctl-group { display: flex; align-items: center; gap: 8px; }
+  .ctl-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .seg {
+    appearance: none; border: 1px solid var(--line); background: transparent;
+    color: var(--ink); font: inherit; font-size: 12.5px; padding: 6px 12px;
+    border-radius: 8px; cursor: pointer; transition: background .16s, border-color .16s, color .16s, box-shadow .16s;
+  }
+  .seg:hover { border-color: var(--gold-soft); }
+  .seg.is-on, .seg[aria-pressed="true"] {
+    background: rgba(201,168,76,0.16); border-color: var(--gold);
+    color: #f4ead0; box-shadow: 0 0 0 1px rgba(201,168,76,0.35) inset;
+  }
+  .seg:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+  #stage3d-wrap {
+    position: relative; flex: 1; min-height: 460px;
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    background: linear-gradient(180deg, #16150f 0%, #0e0d09 100%);
+    box-shadow: 0 18px 60px -30px rgba(0,0,0,0.9), 0 0 0 1px rgba(0,0,0,0.3) inset;
+  }
+  #stage3d { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+  #labels { position: absolute; inset: 0; pointer-events: none; }
+  #labels .tag {
+    position: absolute; transform: translate(-50%, -50%);
+    font-size: 10.5px; letter-spacing: .3px; color: #f0e6cc;
+    background: rgba(16,15,11,0.72); border: 1px solid var(--line);
+    padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  }
+  #legend {
+    position: absolute; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap;
+    gap: 6px 14px; max-width: 70%;
+    font-size: 11.5px; color: var(--muted); pointer-events: none;
+  }
+  #legend span { display: inline-flex; align-items: center; gap: 6px; }
+  #legend .sw { width: 12px; height: 12px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(0,0,0,0.35) inset; }
+  .sw.living { background: var(--c-living); } .sw.bedroom { background: var(--c-bedroom); }
+  .sw.bath { background: var(--c-bath); } .sw.kitchen { background: var(--c-kitchen); }
+  .sw.outdoor { background: var(--c-outdoor); }
+  .sw.fallback { background: var(--c-fallback); }
+  #legend .fb { color: var(--gold-soft); }
+
+  #note {
+    margin-top: 16px; padding: 12px 16px; border-radius: 12px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+    font-size: 12.5px;
+  }
+  #note strong { color: var(--ink); } #note b { color: #f4ead0; font-weight: 600; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--gold); }
+
+  @media (max-width: 720px) {
+    #controls { gap: 10px 14px; }
+    #stage3d-wrap { min-height: 60vh; }
+    #legend { max-width: 92%; }
+    .sub { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>3D preview · real furniture geometry</h1>
+    </div>
+    <p class="sub">LLD 144 — a chair should look like a chair. Drag to orbit · scroll to zoom.</p>
+  </header>
+
+  <div id="controls">
+    <div class="ctl-group" role="radiogroup" aria-label="Render mode">
+      <span class="ctl-label">Geometry</span>
+      <button class="seg" data-mode="box" role="radio" aria-checked="false">Boxes (shipped)</button>
+      <button class="seg is-on" data-mode="shape" role="radio" aria-checked="true">Shapes (proposed)</button>
+    </div>
+    <div class="ctl-group" role="radiogroup" aria-label="Fidelity tier">
+      <span class="ctl-label">Fidelity</span>
+      <button class="seg" data-fidelity="silhouette" role="radio" aria-checked="false">A · Silhouette</button>
+      <button class="seg is-on" data-fidelity="detailed" role="radio" aria-checked="true">B · Detailed</button>
+    </div>
+    <div class="ctl-group">
+      <button id="spin-toggle" class="seg is-on" aria-pressed="true">Auto-spin</button>
+    </div>
+  </div>
+
+  <div id="stage3d-wrap">
+    <canvas id="stage3d"></canvas>
+    <div id="labels" aria-hidden="true"></div>
+    <div id="legend">
+      <span><i class="sw living"></i>living / office</span>
+      <span><i class="sw bedroom"></i>bedroom</span>
+      <span><i class="sw bath"></i>bath</span>
+      <span><i class="sw kitchen"></i>kitchen</span>
+      <span><i class="sw outdoor"></i>outdoor</span>
+      <span class="fb"><i class="sw fallback"></i>box fallback (unhandled type)</span>
+    </div>
+  </div>
+
+  <footer id="note">
+    <p><strong>What to decide.</strong> The architecture is settled (hand-built primitive
+    compositions, no asset pipeline). This mockup asks you to pick the <em>fidelity tier</em>:
+    <b>A · Silhouette</b> (fewest primitives — seat + back + legs) or
+    <b>B · Detailed</b> (adds arms, cushions, screens, mattress + pillows). Toggle
+    <b>Boxes</b> to see today's shipped look. Unhandled types (e.g. <span class="mono">cabinet</span>)
+    fall back to a box on purpose.</p>
+  </footer>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+// ── Category colors (mirror isoRender.js CATEGORY_BASE dark) ──────────────────
+const CAT = {
+  living:  0xb89a60, kitchen: 0x6ab0b0, bedroom: 0x9090c0,
+  bath:    0x5aa8c8, outdoor: 0x70a870, fallback: 0x8f8a78,
+};
+
+// ── Scene / camera / renderer ─────────────────────────────────────────────────
+const canvas = document.getElementById("stage3d");
+const wrap   = document.getElementById("stage3d-wrap");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 1000);
+scene.add(new THREE.AmbientLight(0xffffff, 0.82));
+const dir = new THREE.DirectionalLight(0xffffff, 1.5);
+dir.position.set(1, 1.4, 0.8);
+scene.add(dir);
+const dir2 = new THREE.DirectionalLight(0xbfd0e0, 0.35);
+dir2.position.set(-0.8, 0.5, -1);
+scene.add(dir2);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI / 2 - 0.05;
+
+// faint ground grid to echo the graph-paper feel
+const grid = new THREE.GridHelper(30, 30, 0x3a3524, 0x241f16);
+grid.position.y = 0.001;
+scene.add(grid);
+
+let planGroup = new THREE.Group();
+scene.add(planGroup);
+
+function sizeToWrap() {
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+
+// ── Primitive helpers ─────────────────────────────────────────────────────────
+// Convention for factories: build in a LOCAL frame where x = width (w), z = depth
+// (h), y = height, centered on x/z, base at y=0. The layout code scales/places
+// each group. Colors keyed off the item's category color.
+const matCache = new Map();
+function mat(hex, opts = {}) {
+  const key = hex + JSON.stringify(opts);
+  if (matCache.has(key)) return matCache.get(key);
+  const m = new THREE.MeshLambertMaterial({ color: hex, flatShading: true, side: THREE.DoubleSide, ...opts });
+  matCache.set(key, m);
+  return m;
+}
+// A box spanning [x0,x1]×[y0,y1]×[z0,z1] with the given color.
+function slab(x0, x1, y0, y1, z0, z1, hex) {
+  const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0);
+  const m = new THREE.Mesh(g, mat(hex));
+  m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+  return m;
+}
+function tint(hex, f) {
+  const c = new THREE.Color(hex);
+  c.offsetHSL(0, 0, f); // f>0 lighten, f<0 darken
+  return c.getHex();
+}
+// Four legs inset from the footprint edges, from y=0 to y=top.
+function legs(w, d, top, thick, hex, group) {
+  const t = thick, ix = w / 2 - t / 2 - 0.02, iz = d / 2 - t / 2 - 0.02;
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    group.add(slab(sx * ix - t / 2, sx * ix + t / 2, 0, top, sz * iz - t / 2, sz * iz + t / 2, hex));
+  }
+}
+
+// ── Per-type mesh factories (the "primitive composition" proposal) ────────────
+// Signature: (w, d, z, hex, detailed) -> THREE.Group  [w=width, d=depth, z=height]
+const FACTORY = {
+  chair(w, d, z, hex, det) {
+    const g = new THREE.Group();
+    const seatY = z * 0.5, legT = Math.min(w, d) * 0.09;
+    legs(w, d, seatY, legT, tint(hex, -0.06), g);
+    g.add(slab(-w / 2, w / 2, seatY, seatY + z * 0.09, -d / 2, d / 2, hex)); // seat
+    g.add(slab(-w / 2, w / 2, seatY + z * 0.09, z, d / 2 - z * 0.08, d / 2, tint(hex, 0.05))); // back
+    if (det) { // side rails hint
+      g.add(slab(-w / 2, -w / 2 + legT, seatY, seatY + z * 0.28, -d / 2, d / 2, tint(hex, -0.03)));
+      g.add(slab(w / 2 - legT, w / 2, seatY, seatY + z * 0.28, -d / 2, d / 2, tint(hex, -0.03)));
+    }
+    return g;
+  },
+  "gaming-chair"(w, d, z, hex, det) {
+    const g = FACTORY.chair(w, d, z * 0.82, hex, det);
+    // tall winged headrest + racing back
+    g.add(slab(-w / 2, w / 2, z * 0.62, z, d / 2 - z * 0.06, d / 2, tint(hex, 0.08)));
+    if (det) {
+      g.add(slab(-w / 2, -w / 2 + w * 0.14, z * 0.42, z * 0.72, d / 2 - z * 0.06, d / 2, tint(hex, 0.12)));
+      g.add(slab(w / 2 - w * 0.14, w / 2, z * 0.42, z * 0.72, d / 2 - z * 0.06, d / 2, tint(hex, 0.12)));
+    }
+    return g;
+  },
+  sofa(w, d, z, hex, det) {
+    const g = new THREE.Group();
+    const baseTop = z * 0.42, armT = w * 0.11;
+    g.add(slab(-w / 2, w / 2, 0, z * 0.14, -d / 2, d / 2, tint(hex, -0.08))); // plinth
+    g.add(slab(-w / 2, w / 2, 0, baseTop, -d / 2, d / 2, hex)); // base
+    g.add(slab(-w / 2, w / 2, baseTop, z, d / 2 - d * 0.22, d / 2, tint(hex, 0.05))); // backrest
+    g.add(slab(-w / 2, -w / 2 + armT, 0, z * 0.62, -d / 2, d / 2, tint(hex, 0.03))); // L arm
+    g.add(slab(w / 2 - armT, w / 2, 0, z * 0.62, -d / 2, d / 2, tint(hex, 0.03))); // R arm
+    if (det) { // seat cushions
+      const seats = w > 1.9 ? 3 : 2, inner = w - 2 * armT, cw = inner / seats;
+      for (let i = 0; i < seats; i++) {
+        const cx = -inner / 2 + cw * (i + 0.5);
+        g.add(slab(cx - cw / 2 + 0.02, cx + cw / 2 - 0.02, baseTop, baseTop + z * 0.12, -d / 2 + 0.04, d / 2 - d * 0.22, tint(hex, 0.1)));
+      }
+    }
+    return g;
+  },
+  bed(w, d, z, hex, det) {
+    const g = new THREE.Group();
+    const frameTop = z * 0.42;
+    g.add(slab(-w / 2, w / 2, 0, frameTop, -d / 2, d / 2, tint(hex, -0.1))); // frame
+    g.add(slab(-w / 2, w / 2, frameTop, z * 0.85, -d / 2 + 0.03, d / 2 - 0.03, tint(hex, 0.12))); // mattress
+    g.add(slab(-w / 2, w / 2, frameTop, z, d / 2 - 0.06, d / 2, tint(hex, 0.02))); // headboard
+    if (det) { // two pillows at the head
+      for (const sx of [-1, 1]) {
+        g.add(slab(sx * w * 0.02 - w * 0.22, sx * w * 0.02 + w * 0.22, z * 0.85, z * 0.98,
+                   d / 2 - d * 0.28, d / 2 - d * 0.08, tint(hex, 0.2)));
+      }
+    }
+    return g;
+  },
+  bookshelf(w, d, z, hex, det) {
+    const g = new THREE.Group();
+    const t = Math.min(w, z) * 0.06;
+    g.add(slab(-w / 2, w / 2, 0, z, -d / 2, -d / 2 + t, tint(hex, -0.05))); // back panel
+    g.add(slab(-w / 2, -w / 2 + t, 0, z, -d / 2, d / 2, hex)); // L side
+    g.add(slab(w / 2 - t, w / 2, 0, z, -d / 2, d / 2, hex)); // R side
+    const shelves = det ? 4 : 2;
+    for (let i = 0; i <= shelves; i++) {
+      const y = (z * i) / shelves;
+      g.add(slab(-w / 2, w / 2, y, y + t, -d / 2, d / 2, tint(hex, 0.04)));
+    }
+    return g;
+  },
+  desk(w, d, z, hex, det) {
+    const g = new THREE.Group();
+    const topY = z * 0.94, legT = Math.min(w, d) * 0.06;
+    g.add(slab(-w / 2, w / 2, topY, z, -d / 2, d / 2, hex)); // top
+    legs(w, d, topY, legT, tint(hex, -0.08), g);
+    if (det) { // modesty panel + a drawer block
+      g.add(slab(-w / 2 + legT, w / 2 - legT, z * 0.5, topY, -d / 2, -d / 2 + legT, tint(hex, -0.04)));
+      g.add(slab(w / 2 - w * 0.28, w / 2 - legT, z * 0.55, topY, -d / 2 + 0.02, d / 2 - 0.02, tint(hex, 0.03)));
+    }
+    return g;
+  },
+  table(w, d, z, hex, det) {
+    const g = new THREE.Group();
+    const topY = z * 0.92, legT = Math.min(w, d) * 0.07;
+    g.add(slab(-w / 2, w / 2, topY, z, -d / 2, d / 2, hex));
+    legs(w, d, topY, legT, tint(hex, -0.08), g);
+    if (det) g.add(slab(-w / 2 + legT, w / 2 - legT, topY - z * 0.12, topY, -d / 2 + legT, d / 2 - legT, tint(hex, -0.05))); // apron
+    return g;
+  },
+  monitor(w, d, z, hex, det) {
+    const g = new THREE.Group();
+    const screenBot = z * 0.28;
+    g.add(slab(-w * 0.09, w * 0.09, 0, z * 0.05, -d / 2, d / 2, tint(hex, -0.1))); // base
+    g.add(slab(-w * 0.03, w * 0.03, 0, screenBot, -0.02, 0.02, tint(hex, -0.05))); // stem
+    g.add(slab(-w / 2, w / 2, screenBot, z, -0.02, 0.02, tint(hex, -0.15))); // panel back
+    g.add(slab(-w / 2 + 0.01, w / 2 - 0.01, screenBot + 0.01, z - 0.01, 0.02, 0.03,
+               det ? 0x2a3340 : tint(hex, 0.05))); // screen face
+    return g;
+  },
+  tv(w, d, z, hex, det) { // TV on a media stand
+    const g = new THREE.Group();
+    const standTop = z * 0.42;
+    g.add(slab(-w / 2, w / 2, 0, standTop, -d / 2, d / 2, hex)); // stand
+    g.add(slab(-w * 0.44, w * 0.44, standTop, z, -0.02, 0.02, tint(hex, -0.15))); // screen
+    g.add(slab(-w * 0.42, w * 0.42, standTop + 0.02, z - 0.02, 0.02, 0.035, det ? 0x2a3340 : tint(hex, 0.05)));
+    if (det) for (let i = 0; i < 2; i++) // stand drawers
+      g.add(slab(-w / 2 + w * (0.04 + i * 0.5), -w / 2 + w * (0.46 + i * 0.5), z * 0.08, standTop - 0.02, d / 2, d / 2 + 0.005, tint(hex, 0.06)));
+    return g;
+  },
+  toilet(w, d, z, hex, det) {
+    const g = new THREE.Group();
+    g.add(slab(-w / 2, w / 2, 0, z * 0.55, d / 2 - d * 0.32, d / 2, hex)); // tank
+    g.add(slab(-w * 0.42, w * 0.42, 0, z * 0.5, -d / 2, d / 2 - d * 0.28, tint(hex, 0.03))); // bowl body
+    if (det) g.add(slab(-w * 0.44, w * 0.44, z * 0.5, z * 0.56, -d / 2, d / 2 - d * 0.24, tint(hex, 0.12))); // seat/lid
+    return g;
+  },
+};
+
+// Extruded-box fallback (today's shipped look, and the graceful path for
+// unhandled types like cabinet/wardrobe). Matches render3d._makeBoxMesh.
+function boxMesh(w, d, z, hex) {
+  const g = new THREE.Group();
+  g.add(slab(-w / 2, w / 2, 0, z, -d / 2, d / 2, hex));
+  return g;
+}
+
+// ── Roster: dims (w,h,z) from CATALOG in symbols.js. cat picks the color. ─────
+// `unhandled:true` items have no factory → always the box fallback, on purpose.
+const ITEMS = [
+  // Gaming-room scene from the live feedback (2 desks, 2 chairs, monitors, shelf)
+  { type: "desk",         label: "Desk",         w: 1.40, d: 0.70, z: 0.75, cat: "living" },
+  { type: "gaming-chair", label: "Gaming Chair", w: 0.66, d: 0.66, z: 1.20, cat: "living" },
+  { type: "monitor",      label: "Monitor",      w: 0.62, d: 0.22, z: 0.45, cat: "living" },
+  { type: "bookshelf",    label: "Bookshelf",    w: 0.80, d: 0.30, z: 1.80, cat: "living" },
+  // Living
+  { type: "sofa",         label: "Sofa",         w: 2.10, d: 0.95, z: 0.85, cat: "living" },
+  { type: "chair",        label: "Chair",        w: 0.50, d: 0.50, z: 0.90, cat: "living" },
+  { type: "table",        label: "Table",        w: 1.20, d: 0.80, z: 0.75, cat: "living" },
+  { type: "tv",           label: "TV",           w: 1.40, d: 0.40, z: 0.70, cat: "living" },
+  // Bedroom
+  { type: "bed",          label: "Bed (Queen)",  w: 1.52, d: 2.03, z: 0.55, cat: "bedroom" },
+  // Bath
+  { type: "toilet",       label: "Toilet",       w: 0.47, d: 0.72, z: 0.75, cat: "bath" },
+  // Unhandled → graceful box fallback (proves the "no regression" acceptance)
+  { type: "cabinet",      label: "Cabinet (fallback)", w: 0.90, d: 0.45, z: 0.90, cat: "fallback", unhandled: true },
+];
+
+let MODE = "shape";       // "shape" | "box"
+let FIDELITY = "detailed"; // "silhouette" | "detailed"
+const labelsEl = document.getElementById("labels");
+
+function buildScene() {
+  scene.remove(planGroup);
+  planGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  planGroup = new THREE.Group();
+
+  // Lay items on a grid of cells, each 2.6m, on the ground plane.
+  const cell = 2.6, cols = 4;
+  const detailed = FIDELITY === "detailed";
+  labelPins = [];
+  ITEMS.forEach((it, i) => {
+    const col = i % cols, row = (i / cols) | 0;
+    const px = (col - (cols - 1) / 2) * cell;
+    const pz = (row - 1) * cell;
+    const hex = CAT[it.cat] ?? CAT.fallback;
+    let mesh;
+    if (MODE === "box" || it.unhandled || !FACTORY[it.type]) {
+      mesh = boxMesh(it.w, it.d, it.z, hex);
+    } else {
+      mesh = FACTORY[it.type](it.w, it.d, it.z, hex, detailed);
+    }
+    mesh.position.set(px, 0, pz);
+    planGroup.add(mesh);
+    labelPins.push({ x: px, y: it.z + 0.12, z: pz, text: it.label, box: (MODE === "box" || it.unhandled) });
+  });
+  scene.add(planGroup);
+}
+
+// ── HTML labels projected from 3D anchors ─────────────────────────────────────
+let labelPins = [];
+const _v = new THREE.Vector3();
+function updateLabels() {
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  labelsEl.innerHTML = "";
+  for (const p of labelPins) {
+    _v.set(p.x, p.y, p.z).project(camera);
+    if (_v.z > 1) continue;
+    const el = document.createElement("div");
+    el.className = "tag";
+    el.textContent = p.text;
+    el.style.left = ((_v.x * 0.5 + 0.5) * w) + "px";
+    el.style.top = ((-_v.y * 0.5 + 0.5) * h) + "px";
+    if (p.box) el.style.borderColor = "rgba(201,168,76,0.5)";
+    labelsEl.appendChild(el);
+  }
+}
+
+// ── Camera framing ────────────────────────────────────────────────────────────
+function frame() {
+  const box = new THREE.Box3().setFromObject(planGroup);
+  const c = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const diag = size.length() || 8;
+  const dist = (diag / 2) / Math.tan((camera.fov * Math.PI / 180) / 2) * 1.05;
+  const off = new THREE.Vector3(0.9, 0.75, 1).normalize().multiplyScalar(dist);
+  camera.position.copy(c).add(off);
+  camera.near = Math.max(0.1, dist - diag);
+  camera.far = dist + diag * 3;
+  camera.updateProjectionMatrix();
+  controls.target.copy(c);
+  controls.minDistance = diag * 0.2;
+  controls.maxDistance = dist * 3;
+  controls.update();
+}
+
+// ── Loop ──────────────────────────────────────────────────────────────────────
+let spin = true;
+function tick() {
+  requestAnimationFrame(tick);
+  if (spin) planGroup.rotation.y += 0.0018;
+  controls.update();
+  renderer.render(scene, camera);
+  updateLabels();
+}
+
+// ── Wire controls ─────────────────────────────────────────────────────────────
+function wireRadio(attr, setter) {
+  document.querySelectorAll(`[${attr}]`).forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(`[${attr}]`).forEach(b => {
+        b.classList.remove("is-on"); b.setAttribute("aria-checked", "false");
+      });
+      btn.classList.add("is-on"); btn.setAttribute("aria-checked", "true");
+      setter(btn.getAttribute(attr));
+      buildScene();
+    });
+  });
+}
+wireRadio("data-mode", v => { MODE = v; });
+wireRadio("data-fidelity", v => { FIDELITY = v; });
+
+const spinBtn = document.getElementById("spin-toggle");
+spinBtn.addEventListener("click", () => {
+  spin = !spin;
+  spinBtn.classList.toggle("is-on", spin);
+  spinBtn.setAttribute("aria-pressed", String(spin));
+});
+
+window.addEventListener("resize", sizeToWrap);
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+sizeToWrap();
+buildScene();
+frame();
+tick();
+</script>
+</body>
+</html>
+
