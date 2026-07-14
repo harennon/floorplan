@@ -933,6 +933,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (bounds) fitToContent(bounds, vW, vH); else resetView(vW, vH);
         };
         const applyLocal = () => {
+          previewSetActive(false); // LLD 136 §4: pv flag described the shared plan; drop preview
           applyPlan(localPlan);
           historyReset(); // reseed baseline after restore (Edge Case 12)
           render();
