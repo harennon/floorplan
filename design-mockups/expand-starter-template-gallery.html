@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Starter template gallery — 3 new catalog-showcase plans</title>
+<style>
+  /* ── App theme tokens (copied from src/index.html :root, dark theme) ───── */
+  :root {
+    --bg:         #14140f;
+    --bg-deep:    #100f0b;
+    --ink:        #ece7d6;
+    --muted:      #8f8a78;
+    --gold:       #c9a84c;
+    --gold-soft:  rgba(201, 168, 76, 0.55);
+    --panel:      rgba(20, 20, 15, 0.72);
+    --hairline:   rgba(201, 168, 76, 0.18);
+    --font-mono:    "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 700px at 70% -10%, rgba(201,168,76,0.06), transparent 60%),
+      linear-gradient(160deg, var(--bg) 0%, var(--bg-deep) 100%);
+    font-family: var(--font-mono);
+    /* faint graph-paper grid, echoing the app surface */
+    background-attachment: fixed;
+  }
+  .sheet {
+    position: relative;
+    min-height: 100vh;
+    background-image:
+      linear-gradient(rgba(201,168,76,0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(201,168,76,0.045) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  /* ── Mockup intro / harness chrome (not part of the app) ──────────────── */
+  .intro {
+    max-width: 44rem;
+    margin: 0 auto;
+    padding: 2rem 1.5rem 0.5rem;
+  }
+  .intro h1 {
+    font-family: var(--font-display);
+    color: var(--gold);
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin: 0 0 0.4rem;
+  }
+  .intro p {
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.6;
+    margin: 0.3rem 0;
+  }
+  .intro .tag {
+    display: inline-block;
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gold);
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+    margin-top: 0.5rem;
+  }
+  .legend { color: var(--gold-soft); }
+  .new-pill {
+    display: inline-block;
+    font-size: 0.55rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--bg-deep);
+    background: var(--gold);
+    border-radius: 999px;
+    padding: 0.08rem 0.4rem;
+    vertical-align: middle;
+    margin-left: 0.35rem;
+    font-weight: 700;
+  }
+
+  /* ── Gallery panel — styles copied verbatim from src/index.html ────────── */
+  .template-overlay-panel {
+    position: relative;
+    margin: 1.5rem auto 3rem;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem 1.5rem;
+    width: min(90vw, 44rem);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 6px 32px rgba(0,0,0,0.6);
+  }
+  .template-overlay-title {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    color: var(--gold);
+    margin-bottom: 1rem;
+    font-weight: 700;
+    padding-right: 2rem;
+  }
+  .template-overlay-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-size: 1.3rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    transition: color 0.12s;
+  }
+  .template-overlay-close:hover { color: var(--ink); }
+
+  .template-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.75rem;
+  }
+  .template-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.4rem;
+    background: rgba(201,168,76,0.04);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 0.7rem 0.6rem 0.6rem;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s, background 0.15s;
+    font-family: var(--font-mono);
+    color: inherit;
+    position: relative;
+  }
+  .template-card:hover,
+  .template-card:focus-visible {
+    border-color: var(--gold-soft);
+    background: rgba(201,168,76,0.1);
+    outline: none;
+  }
+  .template-thumb {
+    display: block;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+    border-radius: 4px;
+    background: rgba(201,168,76,0.05);
+    border: 1px solid rgba(201,168,76,0.1);
+  }
+  .template-thumb svg { width: 100%; height: 100%; }
+  .template-card-name {
+    font-size: 0.75rem;
+    color: var(--ink);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .template-card-desc {
+    font-size: 0.62rem;
+    color: var(--muted);
+    line-height: 1.35;
+  }
+  @media (max-width: 480px) {
+    .template-overlay-panel { padding: 1rem 1rem 1.2rem; width: min(96vw, 44rem); }
+    .template-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.5rem; }
+    .template-card-name { font-size: 0.7rem; }
+    .template-card-desc { font-size: 0.6rem; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="intro">
+    <h1>Start-from-a-template gallery</h1>
+    <p>The gallery UI, grid, and card renderer already ship (LLD 43) and are
+      <strong>unchanged</strong> by this task. The design work is the 3 new
+      catalog-showcase plans and their hand-authored inline-SVG thumbnails, which must
+      read as part of the existing set. This mockup renders the real gallery panel in
+      the app's dark theme so the new thumbnails (marked <span class="new-pill">new</span>)
+      can be judged against the four originals.</p>
+    <p class="legend">Thumbnail language (kept): 120×90 viewBox, gold room outline on a
+      faint tint, furniture as gold-filled rects/circles, ~0.18 fill for solid pieces and
+      ~0.10 for surfaces. Rugs render as a dashed-border tinted rectangle beneath the
+      furniture.</p>
+    <span class="tag">Issue #136 · LLD 134 · mockup</span>
+  </div>
+
+  <div class="template-overlay-panel">
+    <div class="template-overlay-title">Start from a template</div>
+    <button class="template-overlay-close" aria-label="Close">×</button>
+    <div class="template-grid" role="list" id="grid"></div>
+  </div>
+
+  <div class="intro" style="padding-top:0;">
+    <p class="legend">Proposed card copy for the new plans:</p>
+    <p style="font-size:0.72rem;">
+      • <strong>Gaming room</strong> — "~12 m² battlestation: desk, dual monitors, gaming chair &amp; rug"<br/>
+      • <strong>Kitchen</strong> — "~14 m² kitchen with counter run, fridge, stove, sink &amp; dining table"<br/>
+      • <strong>Cozy living room</strong> — "~22 m² lounge: sofa, armchairs, coffee table, TV &amp; rug"
+    </p>
+  </div>
+</div>
+
+<script>
+  // ── Existing 4 thumbnails (verbatim from templates.js, for context) ─────
+  const studio = `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect x="8" y="8" width="104" height="74" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+    <rect x="14" y="13" width="22" height="30" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="14" y="13" width="22" height="8" rx="1" fill="rgba(201,168,76,0.30)" stroke="none"/>
+    <rect x="42" y="13" width="36" height="16" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="42" y="13" width="36" height="5" rx="1" fill="rgba(201,168,76,0.28)" stroke="none"/>
+    <rect x="46" y="34" width="24" height="16" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="14" y="66" width="12" height="12" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+  </svg>`;
+  const oneBed = `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect x="8" y="8" width="48" height="40" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+    <rect x="56" y="8" width="56" height="40" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+    <rect x="8" y="48" width="104" height="34" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+    <rect x="13" y="13" width="22" height="28" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="13" y="13" width="22" height="7" rx="1" fill="rgba(201,168,76,0.28)" stroke="none"/>
+    <rect x="62" y="13" width="36" height="16" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="67" y="34" width="24" height="12" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="13" y="53" width="12" height="12" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="30" y="53" width="20" height="12" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+  </svg>`;
+  const singleRoom = `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect x="12" y="12" width="96" height="66" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+    <path d="M 12 66 A 20 20 0 0 1 32 66" stroke="#d9be6e" stroke-width="1" stroke-dasharray="3 2" fill="none" opacity="0.5"/>
+  </svg>`;
+  const smallOffice = `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect x="16" y="12" width="88" height="66" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+    <rect x="21" y="17" width="36" height="14" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="21" y="31" width="14" height="14" rx="1" fill="rgba(201,168,76,0.14)" stroke="#d9be6e" stroke-width="1"/>
+    <circle cx="81" cy="48" r="10" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="56" y="30" width="30" height="18" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+  </svg>`;
+
+  // ── NEW 1. Gaming room — desk + dual monitors + gaming chair + rug ──────
+  const gaming = `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect x="20" y="10" width="80" height="70" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+    <!-- rug (floor layer, dashed) -->
+    <rect x="36" y="30" width="48" height="42" rx="2" fill="rgba(201,168,76,0.06)" stroke="#d9be6e" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>
+    <!-- desk against top wall -->
+    <rect x="34" y="15" width="52" height="14" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <!-- dual monitors on desk -->
+    <rect x="42" y="17" width="16" height="6" rx="1" fill="rgba(201,168,76,0.30)" stroke="#d9be6e" stroke-width="0.8"/>
+    <rect x="62" y="17" width="16" height="6" rx="1" fill="rgba(201,168,76,0.30)" stroke="#d9be6e" stroke-width="0.8"/>
+    <!-- gaming chair (racing, chunky) -->
+    <rect x="50" y="40" width="20" height="22" rx="4" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="50" y="40" width="20" height="7" rx="3" fill="rgba(201,168,76,0.30)" stroke="none"/>
+  </svg>`;
+
+  // ── NEW 2. Kitchen — L counter (cabinets) + fridge/stove/sink + table ───
+  const kitchen = `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect x="10" y="10" width="100" height="70" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+    <!-- counter run along top (cabinets) -->
+    <rect x="14" y="14" width="78" height="14" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+    <!-- sink set into counter -->
+    <rect x="30" y="17" width="16" height="8" rx="1" fill="rgba(201,168,76,0.06)" stroke="#d9be6e" stroke-width="0.9"/>
+    <!-- stove set into counter -->
+    <rect x="58" y="16" width="14" height="11" rx="1" fill="rgba(201,168,76,0.20)" stroke="#d9be6e" stroke-width="0.9"/>
+    <circle cx="61.5" cy="19.5" r="1.4" fill="none" stroke="#d9be6e" stroke-width="0.7"/>
+    <circle cx="68.5" cy="19.5" r="1.4" fill="none" stroke="#d9be6e" stroke-width="0.7"/>
+    <circle cx="61.5" cy="24" r="1.4" fill="none" stroke="#d9be6e" stroke-width="0.7"/>
+    <circle cx="68.5" cy="24" r="1.4" fill="none" stroke="#d9be6e" stroke-width="0.7"/>
+    <!-- fridge, end of run -->
+    <rect x="14" y="32" width="16" height="16" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <line x1="14" y1="40" x2="30" y2="40" stroke="#d9be6e" stroke-width="0.7"/>
+    <!-- dining table + 4 chairs -->
+    <rect x="52" y="48" width="34" height="20" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="56" y="41" width="9" height="5" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="0.7"/>
+    <rect x="73" y="41" width="9" height="5" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="0.7"/>
+    <rect x="56" y="70" width="9" height="5" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="0.7"/>
+    <rect x="73" y="70" width="9" height="5" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="0.7"/>
+  </svg>`;
+
+  // ── NEW 3. Cozy living room — sofa + 2 armchairs + coffee table + TV + rug
+  const living = `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect x="8" y="10" width="104" height="70" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
+    <!-- rug under the seating group -->
+    <rect x="30" y="30" width="60" height="34" rx="2" fill="rgba(201,168,76,0.06)" stroke="#d9be6e" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>
+    <!-- sofa against left, facing right -->
+    <rect x="14" y="30" width="14" height="34" rx="1" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="14" y="30" width="5" height="34" rx="1" fill="rgba(201,168,76,0.30)" stroke="none"/>
+    <!-- coffee table, center on rug -->
+    <rect x="48" y="40" width="24" height="14" rx="1" fill="rgba(201,168,76,0.12)" stroke="#d9be6e" stroke-width="1"/>
+    <!-- two armchairs, top & bottom -->
+    <rect x="52" y="24" width="16" height="12" rx="2" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <rect x="52" y="58" width="16" height="12" rx="2" fill="rgba(201,168,76,0.18)" stroke="#d9be6e" stroke-width="1"/>
+    <!-- TV on right wall, facing sofa -->
+    <rect x="98" y="34" width="6" height="26" rx="1" fill="rgba(201,168,76,0.30)" stroke="#d9be6e" stroke-width="1"/>
+  </svg>`;
+
+  const TEMPLATES = [
+    { id:"studio", name:"Studio apartment", desc:"~27 m² open plan with bed, sofa & kitchenette", thumb:studio },
+    { id:"one-bedroom", name:"1-bedroom apartment", desc:"~55 m² with bedroom, living room & kitchen", thumb:oneBed },
+    { id:"single-room", name:"Rectangular room", desc:"~20 m² blank room — add your own furniture", thumb:singleRoom },
+    { id:"small-office", name:"Small office", desc:"~15 m² office with desk, chair & storage", thumb:smallOffice },
+    { id:"gaming-room", name:"Gaming room", desc:"~12 m² battlestation: desk, dual monitors, gaming chair & rug", thumb:gaming, isNew:true },
+    { id:"kitchen", name:"Kitchen", desc:"~14 m² kitchen with counter run, fridge, stove, sink & dining table", thumb:kitchen, isNew:true },
+    { id:"cozy-living-room", name:"Cozy living room", desc:"~22 m² lounge: sofa, armchairs, coffee table, TV & rug", thumb:living, isNew:true },
+  ];
+
+  const grid = document.getElementById("grid");
+  for (const t of TEMPLATES) {
+    const btn = document.createElement("button");
+    btn.className = "template-card";
+    btn.setAttribute("role", "listitem");
+    btn.innerHTML =
+      '<span class="template-thumb">' + t.thumb + '</span>' +
+      '<span class="template-card-name">' + t.name +
+        (t.isNew ? '<span class="new-pill">new</span>' : '') + '</span>' +
+      '<span class="template-card-desc">' + t.desc + '</span>';
+    grid.appendChild(btn);
+  }
+</script>
+</body>
+</html>
+
