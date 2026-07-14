@@ -76,6 +76,7 @@ import { toggleGridSnap } from "./prefs.js";
 import { init as initOnboarding, maybeShow as onboardingMaybeShow, dismiss as onboardingDismiss } from "./onboarding.js";
 import { isActive as previewIsActive, toggle as previewToggle, onChange as previewOnChange } from "./preview.js";
 import { initIsoRender, render as isoRenderFn } from "./isoRender.js";
+import * as render3d from "./render3d.js";
 import * as _wallsModRef from "./walls.js";
 import * as _symbolsModRef from "./symbols.js";
 
@@ -169,9 +170,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnHelp        = document.getElementById("btn-help");
   const helpOverlayEl  = document.getElementById("help-overlay");
 
-  // 3D preview (LLD 128)
-  const gIso         = document.getElementById("iso");
-  const btnPreview   = document.getElementById("tool-preview");
+  // 3D preview (LLD 128 / LLD 130)
+  const gIso            = document.getElementById("iso");
+  const btnPreview      = document.getElementById("tool-preview");
+  const canvas3d        = document.getElementById("stage3d");
+  const previewLoadingEl = document.getElementById("preview-loading");
 
   // Theme toggle button
   const btnThemeToggle = document.getElementById("btn-theme-toggle");
@@ -417,10 +420,34 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // 3D isometric preview (LLD 128): bind model refs + active getter, register last.
+  // 3D isometric preview (LLD 128): bind model refs + active getter for the
+  // WebGL-unavailable fallback painter (no longer in the normal onRender chain).
   if (gIso) {
     initIsoRender(gIso, previewIsActive, _wallsModRef, _symbolsModRef);
   }
+
+  // True 3D WebGL preview (LLD 130): bind canvas + model refs + active getter +
+  // loading element. three.js is lazy-loaded on first enter().
+  if (canvas3d) {
+    render3d.initRender3d(canvas3d, previewIsActive, _wallsModRef, _symbolsModRef, previewLoadingEl);
+  }
+
+  // Expose the 3D renderer module for headless integration tests (LLD 130 Test
+  // Requirements). Introspection-only — the module exports no mutators, so this
+  // handle cannot change plan state; it just lets the Playwright rig call the
+  // read-only probes (webglAvailable / __liveGeometryCount / __hasRenderer) that
+  // drive the real WebGL render/teardown path in the built dist/ app.
+  window.__render3d = render3d;
+
+  // Read-only state snapshot for the read-only-preview regression tests (LLD 130).
+  // Returns a deep-copied snapshot of the persisted 2D view + room verts so the
+  // integration rig can assert that a 3D orbit/zoom gesture and a W×H "Set" during
+  // preview leave BOTH the view and the walls unmutated. Pure read — the returned
+  // object is a copy, so it cannot be used to mutate app state.
+  window.__testState = () => ({
+    zoom: view.zoom, panX: view.panX, panY: view.panY,
+    rooms: wallsModel.rooms.map((r) => ({ verts: r.verts.map((v) => ({ x: v.x, y: v.y })) })),
+  });
 
   // Register post-render hooks
   // Order: wallRender (in _wallRender) → symbolRenderFn → clearanceRenderFn →
@@ -438,7 +465,10 @@ document.addEventListener("DOMContentLoaded", () => {
   onRender(clearancePanelUpdate);
   onRender(dimReposition);
   onRender(loupeReposition);     // loupe content stays aligned after pan/zoom
-  onRender(isoRenderFn);         // iso preview — topmost, last in the chain (LLD 128)
+  // NOTE (LLD 130): isoRenderFn is NO LONGER in the normal onRender chain. The
+  // true-3D WebGL renderer (render3d) owns the preview surface behind the
+  // #tool-preview toggle; isoRender.render() is invoked only on the
+  // WebGL-unavailable fallback path (see previewOnChange wiring below).
 
   // Initialise store (save pill + autosave hook)
   if (savePillEl) {
@@ -509,11 +539,36 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Keep aria-pressed + stage class in sync when preview state changes programmatically
-  previewOnChange(() => {
+  // Single choke point for the 3D renderer side-effects (LLD 130). Every path
+  // that changes preview state — the button click, the P shortcut, the Esc-exit
+  // branch, and any programmatic setActive — converges on previewToggle(), which
+  // fires this onChange listener. Keeping render3d.enter()/exit() ONLY here (not
+  // in the button handler) avoids double-invocation.
+  previewOnChange(async () => {
     _syncPreview();
     scheduleRender();
+    if (previewIsActive()) {
+      const r = await render3d.enter();       // lazy-load + build + frame
+      if (!previewIsActive()) {                // toggled off mid-load (Edge Case 3)
+        render3d.exit();
+        stage?.classList.remove("preview--fallback");
+        return;
+      }
+      if (r && r.ok === false && r.fallback) { // WebGL/import failed → 2.5D fallback
+        stage?.classList.add("preview--fallback");
+        isoRenderFn();                          // paint the 2.5D SVG fallback once
+        showToast("3D unavailable — showing 2.5D preview");
+      } else {
+        stage?.classList.remove("preview--fallback");
+      }
+    } else {
+      render3d.exit();
+      stage?.classList.remove("preview--fallback");
+    }
   });
+
+  // Release the WebGL context on navigation/unload (bfcache / mobile suspend).
+  window.addEventListener("pagehide", () => render3d.dispose());
 
   // ── History (LLD-21) ──────────────────────────────────────────────────────
   // Wire history.reset into actions.js so _confirmReset can call it
@@ -911,5 +966,8 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("resize", () => {
     resize();
     render();
+    // Keep the 3D renderer's canvas + camera aspect in sync while preview is
+    // active (LLD 130 Edge Case 12), otherwise the WebGL output stretches.
+    if (previewIsActive()) render3d.resize();
   });
 });

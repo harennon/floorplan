@@ -185,8 +185,10 @@
       .stage.space-ready { cursor: grab; }
       .stage.panning     { cursor: grabbing; }
 
-      /* ── Isometric preview mode (LLD 128) ─────────────────────────────── */
-      /* When preview is active, hide all 2D layers + chip overlays; show #iso */
+      /* ── 3D / isometric preview mode (LLD 128 / LLD 130) ──────────────── */
+      /* When preview is active, hide all 2D layers + chip overlays. The WebGL
+         canvas (#stage3d) covers the stage on the success path; #iso (the 2.5D
+         SVG fallback) shows only when WebGL is unavailable (preview--fallback). */
       .stage--preview #world,
       .stage--preview #draft,
       .stage--preview #snap,
@@ -195,7 +197,6 @@
       .stage--preview #clearance,
       .stage--preview #measure,
       .stage--preview #symbol-overlay { display: none; }
-      .stage--preview #iso { display: block; }
       /* Hide chip HTML overlays in preview mode. .labels/.dim-labels are CHILDREN
          of #stage, so this must be a descendant selector, not `~` (general-sibling
          never matched — interactive dim-chips leaked over the read-only preview). */
@@ -206,9 +207,51 @@
          read-only preview. The dock handler is additionally guarded in JS. */
       .stage--preview ~ #symbol-dock,
       .stage--preview ~ #symbol-inspector { display: none; }
-      /* #iso is always in the DOM but invisible by default in 2D mode */
+      /* Hide the W×H room-size editor (LLD 130): the .measure aside is a later
+         SIBLING of #stage, so it stays visible in preview otherwise. Setting a
+         size resizes real room verts — the JS guard on _applyWxH() is the
+         load-bearing fix; this just avoids presenting a dead control. */
+      .stage--preview ~ .right-rail .measure-wxh { display: none; }
+
+      /* 3D WebGL canvas (LLD 130) — sibling of #drawing inside #stage. Fills the
+         stage, sits on top by DOM order, opaque, hidden until preview mode.
+         touch-action:none so OrbitControls' pointer/pinch handling isn't fought
+         by the browser's default scroll/zoom. */
+      #stage3d {
+        display: none;
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+      }
+      .stage--preview #stage3d { display: block; }
+
+      /* #iso is always in the DOM but invisible by default in 2D mode, and shown
+         ONLY on the WebGL-unavailable fallback path (both classes present). */
       #iso { display: none; }
-      .stage--preview #iso { display: block; }
+      .stage--preview.preview--fallback #iso { display: block; }
+
+      /* Loading indicator over the stage while the three.js chunk downloads on
+         first preview entry (reuses the toast look). */
+      #preview-loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 100px;
+        padding: 0.45rem 1.1rem;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--ink);
+        pointer-events: none;
+        z-index: 12;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      #preview-loading[hidden] { display: none; }
 
       /* Active-ring accent for the preview button */
       #tool-preview[aria-pressed="true"] {
@@ -2177,6 +2220,12 @@
         <div class="labels" aria-hidden="true"></div>
         <!-- Interactive committed dimension chips (pointer-events:auto on chips) -->
         <div class="dim-labels"></div>
+        <!-- True 3D WebGL preview canvas (LLD 130) — later sibling of #drawing;
+             opaque, shown only in preview mode. Holds no WebGL context until
+             three.js lazily loads on first preview entry. -->
+        <canvas id="stage3d" aria-hidden="true"></canvas>
+        <!-- Loading indicator shown while the three.js chunk downloads (LLD 130) -->
+        <div id="preview-loading" role="status" aria-live="polite" hidden>Loading 3D…</div>
       </div>
 
       <!-- Grain texture overlay -->

@@ -13,6 +13,7 @@ import { model, isRectangle, rectDims, rescaleRectEdge, MIN_SEG_M } from "./wall
 import { roomMetrics } from "./walls.js";
 import { fmtLen, fmtArea, areaUnitLabel, unitLabel, parseLen } from "./units.js";
 import { scheduleRender } from "./surface.js";
+import { isActive as previewIsActive } from "./preview.js";
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -319,6 +320,11 @@ function _refreshWxh() {
  * - Calls scheduleRender() so the canvas, chips, and fields refresh.
  */
 function _applyWxH() {
+  // Read-only 3D preview (LLD 130): the .measure aside is a SIBLING of #stage,
+  // so the .stage--preview CSS hide rules never reach its W×H editor — it stays
+  // visible + interactive. Setting a width here would resize real room verts
+  // (mutates WALLS) during a "view-only" preview. Guard the mutation path.
+  if (previewIsActive()) return;
   if (!_wxhW || !_wxhH) return;
   const room = _getSelectedRect();
   if (!room) return;

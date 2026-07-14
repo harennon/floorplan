@@ -17518,6 +17518,231 @@ describe("LLD 128 — help.js SHORTCUTS has P shortcut", () => {
   });
 });
 
+// ─── LLD 130: True 3D preview via three.js (render3d.js) ─────────────────────
+
+import {
+  buildSceneDescriptors, worldToScene, webglAvailable,
+  initRender3d as initRender3d130, enter as render3dEnter, exit as render3dExit,
+} from "../src/js/render3d.js";
+
+// buildItems, CEILING_M already imported from isoRender.js above (LLD 128 block).
+// _makeRect128 helper + CATALOG128 already defined/imported above.
+
+// ── Unit: buildSceneDescriptors (pure, no three.js, headless) ────────────────
+
+describe("LLD 130 — buildSceneDescriptors", () => {
+  it("closed room + non-rug symbol → wall boxes + furniture box + floor slab", () => {
+    const wallsMod = { rooms: [_makeRect128(0, 0, 4, 3)], chain: [] };
+    const symMod   = { symbols: [{ id: "s1", type: "sofa", x: 2, y: 1.5, w: 2.0, h: 0.90, rot: 0 }] };
+    const items = buildItems(wallsMod, symMod);
+    const { descriptors } = buildSceneDescriptors(items, wallsMod, "#333333");
+
+    const walls = descriptors.filter(d => d.kind === "wall");
+    const furniture = descriptors.filter(d => d.kind === "furniture");
+    const floors = descriptors.filter(d => d.kind === "floor");
+    if (walls.length !== 4) throw new Error(`Expected 4 wall box descriptors, got ${walls.length}`);
+    if (furniture.length !== 1) throw new Error(`Expected 1 furniture descriptor, got ${furniture.length}`);
+    if (floors.length !== 1) throw new Error(`Expected 1 floor slab descriptor, got ${floors.length}`);
+  });
+
+  it("wall descriptors are boxes: flat:false, z0=0, z1=CEILING_M", () => {
+    const wallsMod = { rooms: [_makeRect128(0, 0, 4, 3)], chain: [] };
+    const { descriptors } = buildSceneDescriptors(buildItems(wallsMod, { symbols: [] }), wallsMod, "#333");
+    for (const d of descriptors.filter(x => x.kind === "wall")) {
+      if (d.flat !== false) throw new Error("wall descriptor should have flat:false");
+      if (d.z0 !== 0) throw new Error("wall z0 should be 0");
+      if (d.z1 !== CEILING_M) throw new Error("wall z1 should be CEILING_M");
+    }
+  });
+
+  it("furniture box: flat:false and z1 = catalog z (> 0)", () => {
+    const sym = { id: "s1", type: "sofa", x: 2, y: 2, w: 2.0, h: 0.90, rot: 0 };
+    const items = buildItems({ rooms: [], chain: [] }, { symbols: [sym] });
+    const { descriptors } = buildSceneDescriptors(items, { rooms: [] }, "#333");
+    const f = descriptors.find(d => d.kind === "furniture");
+    if (!f) throw new Error("Expected a furniture descriptor");
+    if (f.flat !== false) throw new Error("furniture should have flat:false");
+    if (f.z1 !== CATALOG128.sofa.z) throw new Error(`furniture z1 should be ${CATALOG128.sofa.z}, got ${f.z1}`);
+    if (!(f.z1 > 0)) throw new Error("furniture z1 should be > 0");
+  });
+
+  it("rug is a flat decal: flat:true and z1 ≈ z0", () => {
+    const sym = { id: "s2", type: "rug", x: 2, y: 2, w: 2.44, h: 3.05, rot: 0 };
+    const items = buildItems({ rooms: [], chain: [] }, { symbols: [sym] });
+    const { descriptors } = buildSceneDescriptors(items, { rooms: [] }, "#333");
+    const rug = descriptors.find(d => d.kind === "rug");
+    if (!rug) throw new Error("Expected a rug descriptor");
+    if (rug.flat !== true) throw new Error("rug should have flat:true");
+    if (Math.abs(rug.z1 - rug.z0) > 1e-6) throw new Error("rug z1 should ≈ z0 (flat)");
+  });
+
+  it("open room contributes no walls and no floor slab; closed one does", () => {
+    const wallsMod = {
+      rooms: [
+        { id: "open", closed: false, verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }] },
+        _makeRect128(5, 5, 9, 8),
+      ],
+      chain: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }],
+    };
+    const { descriptors } = buildSceneDescriptors(buildItems(wallsMod, { symbols: [] }), wallsMod, "#333");
+    const walls = descriptors.filter(d => d.kind === "wall");
+    const floors = descriptors.filter(d => d.kind === "floor");
+    if (walls.length !== 4) throw new Error(`Expected 4 walls (closed room only), got ${walls.length}`);
+    if (floors.length !== 1) throw new Error(`Expected 1 floor slab (closed room only), got ${floors.length}`);
+  });
+
+  it("all descriptor colors are opaque (no rgba)", () => {
+    const wallsMod = { rooms: [_makeRect128(0, 0, 4, 3)], chain: [] };
+    const symMod = { symbols: [{ id: "s1", type: "sofa", x: 2, y: 2, w: 2.0, h: 0.90, rot: 0 }] };
+    const { descriptors } = buildSceneDescriptors(buildItems(wallsMod, symMod), wallsMod, "rgb(51,51,51)");
+    for (const d of descriptors) {
+      if (typeof d.color !== "string" || d.color.includes("rgba")) {
+        throw new Error(`descriptor ${d.kind} color not opaque: ${d.color}`);
+      }
+    }
+  });
+
+  it("two different categories yield different colors", () => {
+    const sofaSym = { id: "s1", type: "sofa", x: 1, y: 1, w: 2.0, h: 0.90, rot: 0 };   // living
+    const fridgeSym = { id: "s2", type: "fridge", x: 3, y: 3, w: 0.76, h: 0.81, rot: 0 }; // kitchen
+    const items = buildItems({ rooms: [], chain: [] }, { symbols: [sofaSym, fridgeSym] });
+    const { descriptors } = buildSceneDescriptors(items, { rooms: [] }, "#333");
+    const sofa = descriptors.find(d => d.kind === "furniture" && d.color);
+    const colors = descriptors.filter(d => d.kind === "furniture").map(d => d.color);
+    if (colors[0] === colors[1]) throw new Error("sofa (living) and fridge (kitchen) should differ in color");
+  });
+
+  it("degenerate footprints are skipped (no descriptor emitted)", () => {
+    // A collinear/<3-corner room emits neither a floor slab nor walls; a
+    // zero-area symbol footprint emits no box.
+    const wallsMod = {
+      rooms: [{ id: "line", closed: true, verts: [{ x: 0, y: 0 }, { x: 1, y: 1 }] }], // 2 verts
+      chain: [],
+    };
+    // A degenerate symbol footprint: a zero-size sofa produces a zero-area quad.
+    const degenerateSym = { id: "z", type: "sofa", x: 2, y: 2, w: 0, h: 0, rot: 0 };
+    const items = buildItems(wallsMod, { symbols: [degenerateSym] });
+    const { descriptors } = buildSceneDescriptors(items, wallsMod, "#333");
+    for (const d of descriptors) {
+      if (d.footprint.length < 3) throw new Error("emitted a descriptor with <3 corners");
+    }
+    if (descriptors.some(d => d.kind === "floor")) throw new Error("degenerate room should not emit a floor slab");
+  });
+
+  it("bounds union all footprint XY with height range [0, max(z1, CEILING_M)]", () => {
+    const wallsMod = { rooms: [_makeRect128(0, 0, 4, 3)], chain: [] };
+    // A wardrobe (z=2.0 < CEILING) and a symbol won't exceed CEILING_M, so maxZ == CEILING_M.
+    const { bounds } = buildSceneDescriptors(buildItems(wallsMod, { symbols: [] }), wallsMod, "#333");
+    if (!bounds) throw new Error("Expected non-null bounds");
+    // Wall quads extend WALL_M/2 beyond the room rectangle; so minX slightly < 0, maxX slightly > 4.
+    if (!(bounds.minX <= 0 && bounds.maxX >= 4)) throw new Error("bounds X did not cover the room");
+    if (!(bounds.minY <= 0 && bounds.maxY >= 3)) throw new Error("bounds Y did not cover the room");
+    if (bounds.minZ !== 0) throw new Error("bounds minZ should be 0");
+    if (bounds.maxZ < CEILING_M - 1e-9) throw new Error("bounds maxZ should be >= CEILING_M");
+  });
+
+  it("empty model → bounds === null and no descriptors", () => {
+    const { descriptors, bounds } = buildSceneDescriptors([], { rooms: [] }, "#333");
+    if (descriptors.length !== 0) throw new Error("Expected no descriptors for empty model");
+    if (bounds !== null) throw new Error("Expected bounds === null for empty model");
+  });
+
+  it("is read-only: does not mutate the walls/symbols models", () => {
+    const wallsMod = { rooms: [_makeRect128(0, 0, 4, 3)], chain: [] };
+    const symMod = { symbols: [{ id: "s1", type: "sofa", x: 2, y: 1.5, w: 2.0, h: 0.90, rot: 0 }] };
+    const before = JSON.stringify({ wallsMod, symMod });
+    buildSceneDescriptors(buildItems(wallsMod, symMod), wallsMod, "#333");
+    const after = JSON.stringify({ wallsMod, symMod });
+    if (before !== after) throw new Error("buildSceneDescriptors/buildItems mutated the input models");
+  });
+});
+
+// ── Unit: worldToScene (pure) ────────────────────────────────────────────────
+
+describe("LLD 130 — worldToScene", () => {
+  it("maps (x,y,z) → {x, y:z, z:y} (y-down world → y-up scene, height→+Y)", () => {
+    const p = worldToScene(3, 5, 2);
+    expect(p.x).toBe(3);
+    expect(p.y).toBe(2); // world height → scene +Y
+    expect(p.z).toBe(5); // world-y (depth) → scene +Z
+  });
+
+  it("ground (wz=0) maps to sceneY = 0", () => {
+    expect(worldToScene(7, 9, 0).y).toBe(0);
+  });
+
+  it("is linear in each argument", () => {
+    const a = worldToScene(0, 0, 0);
+    const bx = worldToScene(2, 0, 0), cx = worldToScene(4, 0, 0);
+    expect(bx.x - a.x).toBeCloseTo(cx.x - bx.x, 9);
+    const by = worldToScene(0, 2, 0), cy = worldToScene(0, 4, 0);
+    expect(by.z - a.z).toBeCloseTo(cy.z - by.z, 9);
+    const bz = worldToScene(0, 0, 2), cz = worldToScene(0, 0, 4);
+    expect(bz.y - a.y).toBeCloseTo(cz.y - bz.y, 9);
+  });
+});
+
+// ── Unit: webglAvailable gate (injectable stub canvas) ───────────────────────
+
+describe("LLD 130 — webglAvailable", () => {
+  it("returns a boolean", () => {
+    const v = webglAvailable();
+    if (typeof v !== "boolean") throw new Error("webglAvailable should return a boolean");
+  });
+
+  it("stub canvas whose getContext returns null → false (no three import needed)", () => {
+    const stub = { getContext: () => null };
+    if (webglAvailable(stub) !== false) throw new Error("Expected false for a null-context canvas");
+  });
+
+  it("stub canvas returning a truthy context → true", () => {
+    const stub = { getContext: () => ({ fake: "gl" }) };
+    if (webglAvailable(stub) !== true) throw new Error("Expected true for a truthy-context canvas");
+  });
+
+  it("accepts a zero-arg factory returning a stub canvas", () => {
+    if (webglAvailable(() => ({ getContext: () => null })) !== false)
+      throw new Error("Expected false via a factory returning a null-context canvas");
+    if (webglAvailable(() => ({ getContext: () => ({}) })) !== true)
+      throw new Error("Expected true via a factory returning a truthy-context canvas");
+  });
+});
+
+// ── Impure smoke: enter() boots without error / falls back cleanly ───────────
+// In the UNIT harness (raw browser, no bundler) the bare "three" specifier in
+// render3dEngine.js cannot resolve, so enter() must resolve to a well-formed
+// fallback result rather than throwing — the LLD's "boots-without-error /
+// falls-back-cleanly" smoke check. It also proves the read-only guarantee: a
+// fallback enter()/exit() never mutates the plan.
+
+describe("LLD 130 — render3d enter()/exit() smoke + read-only", () => {
+  it("enter() resolves to a well-formed result and never throws", async () => {
+    const canvas = document.createElement("canvas");
+    let active = true;
+    initRender3d130(canvas, () => active, { model: { rooms: [], chain: [] } }, { model: { symbols: [] } }, null);
+    const r = await render3dEnter();
+    if (!r || typeof r.ok !== "boolean") throw new Error("enter() should resolve to { ok:boolean, ... }");
+    // If it fell back, it must say so explicitly.
+    if (r.ok === false && r.fallback !== true) throw new Error("a non-ok enter() must set fallback:true");
+    active = false;
+    render3dExit(); // must not throw even if no engine was built
+  });
+
+  it("enter()/exit() leaves the plan models deeply unchanged (read-only)", async () => {
+    const wallsMod = { model: { rooms: [_makeRect128(0, 0, 4, 3)], chain: [] } };
+    const symMod = { model: { symbols: [{ id: "s1", type: "sofa", x: 2, y: 1.5, w: 2.0, h: 0.90, rot: 0 }] } };
+    const before = JSON.stringify({ rooms: wallsMod.model.rooms, symbols: symMod.model.symbols });
+    const canvas = document.createElement("canvas");
+    let active = true;
+    initRender3d130(canvas, () => active, wallsMod, symMod, null);
+    await render3dEnter();
+    active = false;
+    render3dExit();
+    const after = JSON.stringify({ rooms: wallsMod.model.rooms, symbols: symMod.model.symbols });
+    if (before !== after) throw new Error("preview enter/exit mutated the plan models");
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 
