@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en" data-shadow="soft">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>3D preview · contact / soft shadows — mockup</title>
+<!--
+  Mockup for issue #133 — "3D preview: basic contact/soft shadows".
+  The toggle, canvas mount, camera and chrome are all FIXED by LLD 130 (shipped).
+  The only open frontend decision is the CHARACTER of the shadow. This mockup
+  fakes the three.js scene with CSS `preserve-3d` boxes + CSS ground shadows so
+  the three candidate shadow treatments can be compared side-by-side and A/B'd
+  against the shipped "no shadow" baseline. It is a look-and-feel probe, not the
+  real WebGL renderer.
+-->
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800&family=Space+Mono:wght@400;700&display=swap');
+
+:root {
+  --bg:        #14140f;
+  --bg-deep:   #100f0b;
+  --ink:       #ece7d6;
+  --muted:     #8f8a78;
+  --gold:      #c9a84c;
+  --gold-soft: rgba(201,168,76,0.55);
+  --line:      rgba(201,168,76,0.18);
+  --line-hi:   rgba(201,168,76,0.34);
+  --wall:      #b8a05a;
+  --wall-top:  #d9be6e;
+  --sofa:      #7f9bd0;
+  --table:     #c98b6b;
+  --plant:     #8bbf7a;
+  --floor:     #2a271d;
+  /* shadow knobs, driven live by the panel */
+  --sh-opacity: 0.42;
+  --sh-blur:    14px;
+  --sh-dx:      -18px;
+  --sh-dy:      12px;
+  --sh-spread:  1;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Space Mono', monospace;
+  background:
+    radial-gradient(120% 90% at 78% 8%, rgba(201,168,76,0.06), transparent 60%),
+    var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* faint graph-paper texture, echoing the blueprint identity */
+body::before {
+  content: "";
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 32px 32px;
+  opacity: 0.30;
+  mask-image: radial-gradient(130% 100% at 50% 0%, #000 55%, transparent 100%);
+}
+
+#app { position: relative; z-index: 1; max-width: 1120px; margin: 0 auto; padding: 34px 24px 72px; }
+
+/* ── Header ─────────────────────────────────────────────── */
+.eyebrow {
+  font-size: 11px; letter-spacing: 0.32em; text-transform: uppercase;
+  color: var(--gold-soft); display: flex; gap: 10px; align-items: center;
+}
+.eyebrow::before { content:""; width: 26px; height: 1px; background: var(--gold-soft); }
+h1 {
+  font-family: 'Fraunces', serif; font-weight: 800; font-size: clamp(30px, 5vw, 52px);
+  line-height: 1.02; margin: 12px 0 8px; letter-spacing: -0.01em;
+}
+h1 em { font-style: italic; color: var(--gold); }
+.lede { color: var(--muted); font-size: 13.5px; max-width: 62ch; line-height: 1.6; }
+.lede b { color: var(--ink); font-weight: 700; }
+
+/* ── Layout: stage + control column ─────────────────────── */
+.workbench {
+  margin-top: 30px; display: grid; gap: 22px;
+  grid-template-columns: 1fr 300px;
+}
+@media (max-width: 820px) { .workbench { grid-template-columns: 1fr; } }
+
+/* ── Stage (the #stage3d canvas stand-in) ───────────────── */
+.stage {
+  position: relative; border: 1px solid var(--line-hi); border-radius: 14px;
+  aspect-ratio: 16 / 11; overflow: hidden;
+  background:
+    radial-gradient(140% 120% at 30% 0%, #1b1a13, #100f0b 70%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 24px 60px -30px #000;
+}
+/* corner ticks — blueprint chrome */
+.stage .tick { position:absolute; width:14px; height:14px; border:1px solid var(--gold-soft); opacity:.6; }
+.stage .tick.tl{top:10px;left:10px;border-right:0;border-bottom:0}
+.stage .tick.tr{top:10px;right:10px;border-left:0;border-bottom:0}
+.stage .tick.bl{bottom:10px;left:10px;border-right:0;border-top:0}
+.stage .tick.br{bottom:10px;right:10px;border-left:0;border-top:0}
+
+.stage-tag {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--gold-soft); z-index: 6;
+}
+
+/* floating tool-rail preview toggle (fixed by LLD 130 — shown for context) */
+.rail {
+  position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 8px; z-index: 6;
+}
+.rail button {
+  width: 40px; height: 40px; border-radius: 10px; cursor: pointer;
+  background: rgba(20,20,15,0.7); border: 1px solid var(--line-hi);
+  color: var(--muted); font-size: 15px; backdrop-filter: blur(6px);
+  display: grid; place-items: center; transition: .18s;
+}
+.rail button[aria-pressed="true"] {
+  color: var(--bg-deep); background: var(--gold); border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(201,168,76,0.25);
+}
+.rail button:hover { color: var(--ink); border-color: var(--gold-soft); }
+
+/* ── Faux 3D scene (CSS preserve-3d; stand-in for the WebGL render) ── */
+.scene {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  perspective: 900px;
+}
+.floor-plane {
+  position: relative;
+  width: 340px; height: 300px;
+  transform-style: preserve-3d;
+  transform: rotateX(58deg) rotateZ(-38deg);
+  transition: transform .5s cubic-bezier(.4,0,.2,1);
+}
+/* the ground slab */
+.slab {
+  position: absolute; inset: 0; border-radius: 4px;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 39px, rgba(201,168,76,0.06) 39px 40px),
+    repeating-linear-gradient(90deg, transparent 0 39px, rgba(201,168,76,0.06) 39px 40px),
+    var(--floor);
+  border: 1px solid rgba(201,168,76,0.22);
+}
+
+/* a "box" = extruded item. Top face + implied body via ::before side. */
+.box { position: absolute; transform-style: preserve-3d; }
+.box .top {
+  position: absolute; inset: 0; border: 1px solid rgba(0,0,0,0.25);
+  transform: translateZ(var(--h));
+}
+.box .side {
+  position: absolute; left: 0; bottom: 0; height: var(--h); width: 100%;
+  transform-origin: bottom; transform: rotateX(-90deg);
+  filter: brightness(0.72);
+}
+.box .side2 {
+  position: absolute; top: 0; right: 0; width: var(--h); height: 100%;
+  transform-origin: right; transform: rotateY(90deg);
+  filter: brightness(0.55);
+}
+
+/* ── Ground contact shadow — the star of this issue ── */
+/* One shadow decal per box, laid flat on the slab (translateZ ~0). Its look is
+   driven entirely by the --sh-* custom props so the panel can tune it live. */
+.shadow {
+  position: absolute; border-radius: 6px;
+  background: #000;
+  transform: translateZ(0.5px)
+             translate(calc(var(--sh-dx) * var(--i, 1)), calc(var(--sh-dy) * var(--i, 1)))
+             scale(var(--sh-spread));
+  opacity: var(--sh-opacity);
+  filter: blur(var(--sh-blur));
+  transition: opacity .3s, filter .3s, transform .3s;
+}
+/* baseline: no shadows at all (the shipped #124 look) */
+[data-shadow="none"] .shadow { opacity: 0; }
+/* hard: crisp contact, minimal blur, opaque */
+[data-shadow="contact"] { --sh-opacity: 0.55; --sh-blur: 3px; --sh-dx: -8px; --sh-dy: 6px; --sh-spread: 1.02; }
+/* soft: diffuse ground shadow */
+[data-shadow="soft"] { --sh-opacity: 0.40; --sh-blur: 16px; --sh-dx: -20px; --sh-dy: 14px; --sh-spread: 1.08; }
+/* ambient+soft: a wide, very soft occlusion pool under each item, low contrast */
+[data-shadow="ambient"] { --sh-opacity: 0.26; --sh-blur: 30px; --sh-dx: -6px; --sh-dy: 4px; --sh-spread: 1.35; }
+
+/* ── Control column ─────────────────────────────────────── */
+.panel {
+  border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+  background: linear-gradient(180deg, rgba(201,168,76,0.04), transparent);
+  align-self: start;
+}
+.panel h2 {
+  font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px;
+  letter-spacing: .01em; margin-bottom: 3px;
+}
+.panel .sub { font-size: 10.5px; color: var(--muted); letter-spacing: .04em; margin-bottom: 16px; }
+
+.opts { display: grid; gap: 9px; }
+.opt {
+  display: block; cursor: pointer; border: 1px solid var(--line); border-radius: 10px;
+  padding: 11px 12px; transition: .16s; position: relative;
+}
+.opt:hover { border-color: var(--gold-soft); }
+.opt.active { border-color: var(--gold); background: rgba(201,168,76,0.08); }
+.opt input { position: absolute; opacity: 0; }
+.opt .name { font-size: 12.5px; font-weight: 700; color: var(--ink); letter-spacing: .02em; }
+.opt.active .name { color: var(--gold); }
+.opt .desc { font-size: 10.5px; color: var(--muted); line-height: 1.45; margin-top: 3px; }
+.opt .tag {
+  position: absolute; top: 10px; right: 10px; font-size: 8.5px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--bg-deep); background: var(--gold);
+  padding: 2px 6px; border-radius: 5px; font-weight: 700;
+}
+.opt .tag.base { background: var(--muted); }
+
+/* live tuning sliders (contact/soft only) */
+.tuners { margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--line); }
+.tuners.dim { opacity: .38; pointer-events: none; }
+.tuner { margin-bottom: 13px; }
+.tuner label { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); letter-spacing: .04em; margin-bottom: 6px; }
+.tuner label b { color: var(--gold); font-weight: 700; }
+.tuner input[type=range] { width: 100%; accent-color: var(--gold); height: 3px; }
+
+.note { margin-top: 16px; font-size: 10px; color: var(--muted); line-height: 1.55; }
+.note code { color: var(--gold-soft); }
+
+/* perf/spec strip under the stage */
+.spec {
+  margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px;
+}
+.spec .chip {
+  font-size: 10px; letter-spacing: .06em; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px;
+}
+.spec .chip b { color: var(--ink); font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <p class="eyebrow">Floorplan · 3D preview · issue #133</p>
+    <h1>Grounding the boxes with a <em>soft shadow</em></h1>
+    <p class="lede">
+      The shipped 3D preview (LLD 130) lights the plan with ambient + one directional
+      light and <b>no shadows</b> — extruded boxes float, so depth reads poorly. This
+      follow-up adds a single ground contact/soft shadow from that same directional light.
+      The toggle, camera and chrome are all <b>unchanged</b>; the only open decision is the
+      <b>character of the shadow</b>. Pick a direction below and watch the scene update live.
+    </p>
+  </header>
+
+  <div class="workbench">
+    <div>
+      <div class="stage">
+        <span class="tick tl"></span><span class="tick tr"></span>
+        <span class="tick bl"></span><span class="tick br"></span>
+        <div class="stage-tag" id="stageTag">Soft ground shadow</div>
+        <div class="scene">
+          <div class="floor-plane" id="plane">
+            <div class="slab"></div>
+            <!-- boxes + shadow decals injected by script -->
+          </div>
+        </div>
+        <div class="rail">
+          <button title="Select">▦</button>
+          <button title="3D preview (P)" aria-pressed="true">◈</button>
+          <button title="Measure">⟺</button>
+        </div>
+      </div>
+      <div class="spec" id="spec"></div>
+    </div>
+
+    <aside class="panel" id="panel"><!-- options + tuners injected by script --></aside>
+  </div>
+</div>
+<script>
+// ── Faux plan: a few extruded items on the slab (px within the 340×300 plane) ──
+// {x,y,w,d} in plane px; h = extrusion height in px; c = face color.
+const ITEMS = [
+  { x: 12,  y: 12,  w: 316, d: 14,  h: 60, c: 'var(--wall)',  top: 'var(--wall-top)' }, // top wall
+  { x: 12,  y: 12,  w: 14,  d: 276, h: 60, c: 'var(--wall)',  top: 'var(--wall-top)' }, // left wall
+  { x: 314, y: 12,  w: 14,  d: 276, h: 60, c: 'var(--wall)',  top: 'var(--wall-top)' }, // right wall
+  { x: 12,  y: 274, w: 316, d: 14,  h: 60, c: 'var(--wall)',  top: 'var(--wall-top)' }, // bottom wall
+  { x: 40,  y: 150, w: 96,  d: 46,  h: 26, c: 'var(--sofa)',  top: '#a6bce6' },          // sofa
+  { x: 172, y: 130, w: 58,  d: 58,  h: 18, c: 'var(--table)', top: '#e0a888' },          // table
+  { x: 250, y: 60,  w: 40,  d: 40,  h: 44, c: 'var(--plant)', top: '#a8d99a' },          // plant/shelf
+];
+
+const plane = document.getElementById('plane');
+ITEMS.forEach((it, idx) => {
+  // shadow decal (drawn first so it sits under the box body)
+  const sh = document.createElement('div');
+  sh.className = 'shadow';
+  sh.style.cssText =
+    `left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.d}px;` +
+    `--i:${(it.h/60).toFixed(2)};`; // taller items throw a longer offset
+  plane.appendChild(sh);
+
+  // the extruded box
+  const box = document.createElement('div');
+  box.className = 'box';
+  box.style.cssText = `left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.d}px;--h:${it.h}px;`;
+  box.innerHTML =
+    `<div class="side"  style="background:${it.c}"></div>` +
+    `<div class="side2" style="background:${it.c}"></div>` +
+    `<div class="top"   style="background:${it.top}"></div>`;
+  plane.appendChild(box);
+});
+
+// ── Options ────────────────────────────────────────────────────────────────
+const OPTS = [
+  { id:'none',    name:'A · No shadow (shipped)', tag:'BASELINE', base:true,
+    desc:'Today’s look. Boxes float; depth relies on Lambert face shading alone.' },
+  { id:'contact', name:'B · Hard contact',        tag:'CHEAPEST',
+    desc:'Crisp, tight shadow hugging each footprint. Reads as a bright, direct sun. Smallest shadow-map / lowest blur cost.' },
+  { id:'soft',    name:'C · Soft ground (rec.)',  tag:'RECOMMENDED',
+    desc:'Diffuse offset shadow — clear depth read without looking harsh. Matches the calm blueprint tone. PCFSoftShadowMap.' },
+  { id:'ambient', name:'D · Ambient pool',        tag:'SUBTLEST',
+    desc:'Wide, very soft occlusion pool under each item, low contrast. Grounds without a strong light direction.' },
+];
+
+const panel = document.getElementById('panel');
+panel.innerHTML =
+  '<h2>Shadow character</h2>' +
+  '<p class="sub">Live preview · pick one to compare</p>' +
+  '<div class="opts">' +
+  OPTS.map(o =>
+    `<label class="opt" data-id="${o.id}">
+       <span class="tag ${o.base?'base':''}">${o.tag}</span>
+       <input type="radio" name="sh" value="${o.id}">
+       <div class="name">${o.name}</div>
+       <div class="desc">${o.desc}</div>
+     </label>`).join('') +
+  '</div>' +
+  '<div class="tuners" id="tuners">' +
+    tuner('opacity','Darkness','--sh-opacity',0,0.7,0.01) +
+    tuner('blur','Softness (blur px)','--sh-blur',0,40,1) +
+    tuner('dy','Light offset','--sh-dy',0,30,1) +
+  '</div>' +
+  '<p class="note">Cheap by design: a <code>single</code> directional light casts, ' +
+  'map capped at <code>1024²</code>, one <code>bias</code>. No AO, no IBL, no extra lights.</p>';
+
+function tuner(key,label,varName,min,max,step){
+  return `<div class="tuner" data-var="${varName}" data-key="${key}">
+    <label>${label} <b id="v-${key}">–</b></label>
+    <input type="range" min="${min}" max="${max}" step="${step}">
+  </div>`;
+}
+
+// ── State + wiring ───────────────────────────────────────────────────────────
+const root = document.documentElement;
+const tag = document.getElementById('stageTag');
+const tuners = document.getElementById('tuners');
+const TAGTEXT = { none:'No shadow (baseline)', contact:'Hard contact shadow',
+                  soft:'Soft ground shadow', ambient:'Ambient occlusion pool' };
+
+function readVar(name){ return getComputedStyle(root).getPropertyValue(name).trim(); }
+
+function syncSliders(){
+  tuners.querySelectorAll('.tuner').forEach(t => {
+    const v = parseFloat(readVar(t.dataset.var));
+    const inp = t.querySelector('input');
+    inp.value = v;
+    const out = t.querySelector('b');
+    out.textContent = t.dataset.key === 'opacity' ? v.toFixed(2) : Math.round(v)+'px';
+  });
+}
+
+function select(id){
+  root.dataset.shadow = id;
+  panel.querySelectorAll('.opt').forEach(l => l.classList.toggle('active', l.dataset.id === id));
+  panel.querySelector(`.opt[data-id="${id}"] input`).checked = true;
+  tag.textContent = TAGTEXT[id];
+  tuners.classList.toggle('dim', id === 'none');
+  // let the [data-shadow] preset apply before reading the resolved vars
+  requestAnimationFrame(syncSliders);
+  renderSpec(id);
+}
+
+panel.querySelectorAll('.opt input').forEach(inp =>
+  inp.addEventListener('change', () => select(inp.value)));
+
+tuners.querySelectorAll('.tuner input').forEach(inp => {
+  const t = inp.closest('.tuner');
+  inp.addEventListener('input', () => {
+    const key = t.dataset.key;
+    const val = key === 'opacity' ? parseFloat(inp.value) : parseInt(inp.value,10);
+    root.style.setProperty(t.dataset.var, key === 'opacity' ? val : val+'px');
+    t.querySelector('b').textContent = key === 'opacity' ? val.toFixed(2) : val+'px';
+  });
+});
+
+// spec chips under the stage (fake but plausible perf read)
+const spec = document.getElementById('spec');
+function renderSpec(id){
+  const rows = {
+    none:    ['shadow map','—','extra draw','0','feel','floating'],
+    contact: ['shadow map','1024² Basic','extra draw','1 pass','feel','bright / direct'],
+    soft:    ['shadow map','1024² PCFSoft','extra draw','1 pass','feel','calm / grounded'],
+    ambient: ['shadow map','512² blurred','extra draw','1 pass','feel','diffuse / subtle'],
+  }[id];
+  spec.innerHTML =
+    `<span class="chip">single light · <b>castShadow</b></span>` +
+    `<span class="chip">${rows[0]} · <b>${rows[1]}</b></span>` +
+    `<span class="chip">${rows[2]} · <b>${rows[3]}</b></span>` +
+    `<span class="chip">${rows[4]} · <b>${rows[5]}</b></span>`;
+}
+
+// keyboard: arrow between options for quick A/B
+document.addEventListener('keydown', e => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  const i = OPTS.findIndex(o => o.id === root.dataset.shadow);
+  const n = (i + (e.key === 'ArrowRight' ? 1 : OPTS.length - 1)) % OPTS.length;
+  select(OPTS[n].id);
+});
+
+select('soft'); // default to the recommendation
+</script>
+</body>
+</html>
