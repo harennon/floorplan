@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D preview · reset / preset camera angles — mockup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Design tokens lifted verbatim from src/index.html (warm blueprint) */
+      :root {
+        --bg: #14140f;
+        --bg-deep: #100f0b;
+        --ink: #ece7d6;
+        --muted: #8f8a78;
+        --gold: #c9a84c;
+        --gold-soft: rgba(201, 168, 76, 0.55);
+        --panel: rgba(20, 20, 15, 0.72);
+        --hairline: rgba(201, 168, 76, 0.18);
+        --font-ui: "DM Sans", system-ui, sans-serif;
+        --font-mono: "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+        --snap-teal: #7fd0c8;
+      }
+      * , *::before, *::after { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--bg-deep);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        min-height: 100vh;
+      }
+      /* Mockup harness chrome (NOT part of the app) */
+      .doc-head {
+        padding: 1.1rem 1.5rem 0.9rem;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .doc-title {
+        font-family: var(--font-display);
+        color: var(--gold);
+        font-size: 1.15rem;
+        margin: 0 0 0.2rem;
+      }
+      .doc-sub {
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .doc-switch {
+        display: flex;
+        gap: 0.4rem;
+        margin-top: 0.85rem;
+        flex-wrap: wrap;
+      }
+      .doc-switch button {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        padding: 0.4rem 0.85rem;
+        border-radius: 100px;
+        cursor: pointer;
+        transition: color 0.15s, border-color 0.15s;
+      }
+      .doc-switch button[aria-pressed="true"] {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+        background: rgba(201, 168, 76, 0.1);
+      }
+      .doc-note {
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        color: var(--muted);
+        padding: 0.6rem 1.5rem;
+        line-height: 1.55;
+        border-top: 1px solid var(--hairline);
+      }
+      .doc-note b { color: var(--ink); font-weight: 500; }
+      .doc-note kbd {
+        font-family: var(--font-mono);
+        font-size: 0.66rem;
+        background: rgba(201, 168, 76, 0.12);
+        border: 1px solid var(--hairline);
+        border-radius: 4px;
+        padding: 0.02rem 0.32rem;
+        color: var(--gold);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="doc-head">
+      <h1 class="doc-title">3D preview — reset / preset camera angles</h1>
+      <div class="doc-sub">
+        Issue #131 · LLD 143 · three genuinely distinct control directions over the
+        same faux three.js preview stage. Toggle a direction, then hover / click the
+        controls to see states. The scene is a static SVG stand-in for the WebGL render.
+      </div>
+      <div class="doc-switch" id="doc-switch" role="group" aria-label="Design direction">
+        <button data-dir="A" aria-pressed="true">A · View-cube gizmo</button>
+        <button data-dir="B" aria-pressed="false">B · Minimal home + keys</button>
+        <button data-dir="C" aria-pressed="false">C · Preset pill bar</button>
+      </div>
+    </div>
+
+    <div class="stage" id="stage" data-dir="A">
+      <!-- Faux WebGL render: an isometric room in SVG (stands in for #stage3d) -->
+      <svg class="scene3d" id="scene3d" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <!-- floor slab -->
+        <polygon points="330,360 560,300 720,370 470,440" fill="rgba(201,168,76,0.10)" stroke="rgba(201,168,76,0.25)" stroke-width="1"/>
+        <!-- back-left wall -->
+        <polygon points="330,360 330,250 560,190 560,300" fill="#3a3526" stroke="#4a4530" stroke-width="1"/>
+        <!-- back-right wall -->
+        <polygon points="560,300 560,190 720,260 720,370" fill="#2c2819" stroke="#3a3526" stroke-width="1"/>
+        <!-- a sofa box -->
+        <polygon points="390,360 470,343 470,315 390,332" fill="#7a6a3a" stroke="#8f7d45" stroke-width="1"/>
+        <polygon points="470,343 510,352 510,324 470,315" fill="#5f5230" stroke="#8f7d45" stroke-width="1"/>
+        <polygon points="390,332 470,315 510,324 430,341" fill="#96854c" stroke="#8f7d45" stroke-width="1"/>
+        <!-- a table box -->
+        <polygon points="545,392 600,380 600,366 545,378" fill="#6b5f37" stroke="#8f7d45" stroke-width="1"/>
+        <polygon points="600,380 630,386 630,372 600,366" fill="#544a2b" stroke="#8f7d45" stroke-width="1"/>
+        <polygon points="545,378 600,366 630,372 575,384" fill="#8a7a45" stroke="#8f7d45" stroke-width="1"/>
+      </svg>
+      <div class="grain"></div>
+
+      <div class="brand">
+        <div class="brand-name">floorplan</div>
+        <div class="brand-sub">3D preview</div>
+      </div>
+
+      <!-- Mini tool-rail echo — preview toggle shown active -->
+      <nav class="mini-rail" aria-label="Tools (echo)">
+        <button title="Select">▚</button>
+        <button title="Wall">◹</button>
+        <button class="is-preview" title="3D preview (active)">◈</button>
+      </nav>
+
+      <!-- ── Direction A control: view-cube gizmo ── -->
+      <div class="ctl-A gizmo" role="group" aria-label="Camera orientation">
+        <div class="gizmo-cube">
+          <button class="gizmo-face" data-bearing="nw" title="North-west" style="grid-column:1;grid-row:1;">NW</button>
+          <button class="gizmo-face" data-bearing="n"  title="North"      style="grid-column:2;grid-row:1;">N</button>
+          <button class="gizmo-face" data-bearing="ne" title="North-east" style="grid-column:3;grid-row:1;">NE</button>
+          <button class="gizmo-face" data-bearing="w"  title="West"       style="grid-column:1;grid-row:2;">W</button>
+          <button class="gizmo-face gizmo-face--top is-current" data-bearing="reset" title="Default 3⁄4 view">◈</button>
+          <button class="gizmo-face" data-bearing="e"  title="East"       style="grid-column:3;grid-row:2;">E</button>
+          <button class="gizmo-face" data-bearing="sw" title="South-west" style="grid-column:1;grid-row:3;">SW</button>
+          <button class="gizmo-face" data-bearing="top" title="Top-down"  style="grid-column:2;grid-row:3;">TOP</button>
+          <button class="gizmo-face" data-bearing="se" title="South-east" style="grid-column:3;grid-row:3;">SE</button>
+        </div>
+        <button class="gizmo-reset" data-bearing="reset" title="Reset view (Home)">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 2 A6 6 0 1 1 2.5 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <polyline points="2.2,2 2.2,6 6,6" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
+          </svg>
+          Reset
+        </button>
+      </div>
+
+      <!-- ── Direction B control: minimal home button + key hints ── -->
+      <div class="ctl-B home-cluster" role="group" aria-label="Camera">
+        <button class="home-btn" data-bearing="reset" title="Recenter view (Home)">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 7 L8 2 L14 7" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+            <path d="M4 6.5 L4 13 L12 13 L12 6.5" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+          </svg>
+          Recenter
+        </button>
+        <div class="home-keys" aria-hidden="true">
+          <kbd data-bearing="reset" title="Reset view">Home</kbd>
+          <kbd data-bearing="ne" title="Cycle preset angle">1</kbd>
+          <kbd data-bearing="nw" title="Cycle preset angle">2</kbd>
+          <kbd data-bearing="se" title="Cycle preset angle">3</kbd>
+          <kbd data-bearing="top" title="Top-down">4</kbd>
+        </div>
+      </div>
+
+      <!-- ── Direction C control: preset pill bar ── -->
+      <div class="ctl-C preset-bar" role="group" aria-label="Camera presets">
+        <button class="preset-reset" data-bearing="reset" title="Reset to fit-to-bounds default view">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 2 A6 6 0 1 1 2.5 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <polyline points="2.2,2 2.2,6 6,6" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/>
+          </svg>
+          Reset
+        </button>
+        <div class="preset-sep" aria-hidden="true"></div>
+        <button class="is-current" data-bearing="reset" title="Default three-quarter">3⁄4</button>
+        <button data-bearing="ne" title="North-east">NE</button>
+        <button data-bearing="nw" title="North-west">NW</button>
+        <button data-bearing="se" title="South-east">SE</button>
+        <button data-bearing="top" title="Top-down">Top</button>
+      </div>
+
+      <div class="toast" id="toast">View reset</div>
+    </div>
+
+    <div class="doc-note" id="doc-note"></div>
+    <style>
+      /* ── Faux preview stage ────────────────────────────────────────────── */
+      .stage {
+        position: relative;
+        width: 100%;
+        height: 560px;
+        overflow: hidden;
+        background:
+          radial-gradient(ellipse 90% 80% at 50% 45%, var(--bg) 0%, var(--bg-deep) 100%);
+        touch-action: none;
+        user-select: none;
+      }
+      /* Fake WebGL render — an isometric room drawn in SVG so the mockup is
+         self-contained. Stands in for the three.js <canvas id="stage3d">. */
+      .scene3d {
+        position: absolute;
+        inset: 0;
+        display: block;
+        transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+        transform-origin: 50% 50%;
+      }
+      .grain {
+        position: absolute; inset: 0; pointer-events: none;
+        mix-blend-mode: overlay; opacity: 0.04;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+        background-size: 200px 200px;
+      }
+      .brand { position: absolute; top: 1.1rem; left: 1.2rem; pointer-events: none; }
+      .brand-name { font-family: var(--font-display); font-weight: 700; color: var(--gold); font-size: 1rem; }
+      .brand-sub { font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+
+      .mini-rail {
+        position: absolute; left: 1.2rem; top: 50%; transform: translateY(-50%);
+        display: flex; flex-direction: column; gap: 0.15rem;
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 8px; padding: 0.4rem 0.3rem; backdrop-filter: blur(8px);
+      }
+      .mini-rail button {
+        background: transparent; border: 1px solid transparent; color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.7rem; width: 2.2rem; height: 2.2rem;
+        border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      }
+      .mini-rail button.is-preview {
+        color: var(--gold); background: rgba(201,168,76,0.1);
+        border-color: var(--gold-soft); box-shadow: 0 0 0 2px rgba(201,168,76,0.35);
+      }
+
+      .toast {
+        position: absolute; bottom: 4.5rem; left: 50%;
+        transform: translateX(-50%) translateY(0.5rem);
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 100px; padding: 0.4rem 1rem;
+        font-family: var(--font-mono); font-size: 0.7rem; color: var(--ink);
+        opacity: 0; transition: opacity 0.2s, transform 0.2s; pointer-events: none;
+        backdrop-filter: blur(8px); white-space: nowrap;
+      }
+      .toast.toast--visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      /* Hide all direction control clusters unless their direction is active */
+      .stage[data-dir="A"] .ctl-B,
+      .stage[data-dir="A"] .ctl-C,
+      .stage[data-dir="B"] .ctl-A,
+      .stage[data-dir="B"] .ctl-C,
+      .stage[data-dir="C"] .ctl-A,
+      .stage[data-dir="C"] .ctl-B { display: none !important; }
+
+      /* ── Direction A: view-cube gizmo (top-right corner) ───────────────── */
+      /* A compact orientation gizmo: a small 3D-ish cube whose faces are
+         clickable presets, wrapped by a ring segment that is the reset. Echoes
+         CAD/Blender navigation cubes but sized + toned to the blueprint chrome. */
+      .gizmo {
+        position: absolute; top: 1.2rem; right: 1.2rem;
+        display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+      }
+      .gizmo-cube {
+        position: relative; width: 84px; height: 84px;
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 10px; backdrop-filter: blur(8px);
+        display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr;
+        padding: 6px; gap: 2px;
+      }
+      /* Eight bearing hot-zones around a central "top-down" face */
+      .gizmo-face {
+        border: 1px solid transparent; border-radius: 4px;
+        color: var(--muted); font-family: var(--font-mono); font-size: 0.5rem;
+        display: flex; align-items: center; justify-content: center; cursor: pointer;
+        transition: color 0.12s, background 0.12s, border-color 0.12s;
+      }
+      .gizmo-face:hover { color: var(--gold); background: rgba(201,168,76,0.12); border-color: var(--gold-soft); }
+      .gizmo-face--top {
+        grid-column: 2; grid-row: 2;
+        border-color: var(--hairline); color: var(--ink);
+        background: rgba(201,168,76,0.06);
+      }
+      .gizmo-face--top:hover { color: var(--gold); }
+      .gizmo-face.is-current { color: var(--gold); border-color: var(--gold-soft); background: rgba(201,168,76,0.16); }
+      .gizmo-reset {
+        background: var(--panel); border: 1px solid var(--hairline);
+        color: var(--muted); font-family: var(--font-mono); font-size: 0.62rem;
+        letter-spacing: 0.05em; padding: 0.28rem 0.7rem; border-radius: 100px;
+        cursor: pointer; display: flex; align-items: center; gap: 0.35rem;
+        backdrop-filter: blur(8px); transition: color 0.12s, border-color 0.12s;
+      }
+      .gizmo-reset:hover { color: var(--gold); border-color: var(--gold-soft); }
+
+      /* ── Direction B: minimal home button + key hints ──────────────────── */
+      /* Bottom-right, next to where the HUD lives. Single primary "recenter"
+         button (the fit-to-bounds reset = render3d.frame()), plus a discoverable
+         keycap row that mirrors the app's existing keyboard-first ethos. */
+      .home-cluster {
+        position: absolute; right: 1.2rem;
+        bottom: calc(1.2rem + env(safe-area-inset-bottom, 0px));
+        display: flex; flex-direction: column; align-items: flex-end; gap: 0.4rem;
+      }
+      .home-btn {
+        background: var(--panel); border: 1px solid var(--hairline);
+        color: var(--ink); font-family: var(--font-mono); font-size: 0.72rem;
+        padding: 0.5rem 0.85rem; border-radius: 8px; cursor: pointer;
+        display: flex; align-items: center; gap: 0.45rem;
+        backdrop-filter: blur(8px); transition: color 0.12s, border-color 0.12s;
+      }
+      .home-btn:hover { color: var(--gold); border-color: var(--gold-soft); }
+      .home-btn svg { display: block; }
+      .home-keys { display: flex; gap: 0.25rem; }
+      .home-keys kbd {
+        font-family: var(--font-mono); font-size: 0.6rem; color: var(--muted);
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 5px; padding: 0.15rem 0.4rem; min-width: 1.5rem; text-align: center;
+        cursor: pointer; transition: color 0.12s, border-color 0.12s;
+      }
+      .home-keys kbd:hover { color: var(--gold); border-color: var(--gold-soft); }
+
+      /* ── Direction C: preset pill bar (bottom-center) ──────────────────── */
+      /* A single floating segmented pill: Reset on the left (accented), a
+         hairline divider, then the bearing presets. Reads like the unit-toggle
+         / dock idiom the app already uses; strong "current view" indication. */
+      .preset-bar {
+        position: absolute; bottom: calc(1.4rem + env(safe-area-inset-bottom, 0px));
+        left: 50%; transform: translateX(-50%);
+        display: flex; align-items: stretch; gap: 0.15rem;
+        background: var(--panel); border: 1px solid var(--hairline);
+        border-radius: 100px; padding: 0.28rem 0.32rem; backdrop-filter: blur(10px);
+      }
+      .preset-bar button {
+        background: transparent; border: 1px solid transparent; color: var(--muted);
+        font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.03em;
+        padding: 0.3rem 0.7rem; border-radius: 100px; cursor: pointer;
+        display: flex; align-items: center; gap: 0.35rem;
+        transition: color 0.12s, border-color 0.12s, background 0.12s;
+      }
+      .preset-bar button:hover:not(.is-current) { color: var(--ink); }
+      .preset-bar button.is-current { color: var(--gold); background: rgba(201,168,76,0.14); border-color: var(--gold-soft); }
+      .preset-bar .preset-reset { color: var(--gold); }
+      .preset-bar .preset-reset:hover { background: rgba(201,168,76,0.14); border-color: var(--gold-soft); }
+      .preset-bar .preset-sep { width: 1px; background: var(--hairline); margin: 0.15rem 0.15rem; }
+      @media (max-width: 560px) {
+        .preset-bar button { padding: 0.3rem 0.55rem; font-size: 0.62rem; }
+      }
+    </style>
+
+    <script>
+      const stage = document.getElementById("stage");
+      const scene = document.getElementById("scene3d");
+      const toast = document.getElementById("toast");
+      const note = document.getElementById("doc-note");
+
+      // Faux camera bearings → a CSS transform on the SVG scene. This only fakes
+      // the visual result of re-pointing the orbit camera; the real build calls
+      // render3d.frame() (reset) or sets OrbitControls azimuth/polar for a
+      // preset, with a short eased tween.
+      const BEARINGS = {
+        reset: { t: "rotate(0deg) scale(1)",                  label: "Default ¾ view" },
+        ne:    { t: "translateX(4%) scale(1.02)",             label: "North-east" },
+        nw:    { t: "scaleX(-1) translateX(4%) scale(1.02)",  label: "North-west" },
+        se:    { t: "translateY(3%) scale(1.06)",             label: "South-east" },
+        sw:    { t: "scaleX(-1) scale(1.06)",                 label: "South-west" },
+        n:     { t: "scale(0.94)",                            label: "North" },
+        e:     { t: "skewX(-6deg)",                           label: "East" },
+        w:     { t: "skewX(6deg)",                            label: "West" },
+        top:   { t: "perspective(600px) rotateX(58deg) scale(0.9)", label: "Top-down" },
+      };
+
+      let toastTimer = null;
+      function flashToast(msg) {
+        toast.textContent = msg;
+        toast.classList.add("toast--visible");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove("toast--visible"), 1400);
+      }
+
+      function applyBearing(bearing) {
+        const b = BEARINGS[bearing] || BEARINGS.reset;
+        scene.style.transform = b.t;
+        // Highlight the current bearing in gizmo faces + preset pills.
+        document.querySelectorAll(".gizmo-face, .preset-bar button").forEach((el) => {
+          el.classList.toggle("is-current", el.dataset.bearing === bearing);
+        });
+        flashToast(bearing === "reset" ? "View reset" : b.label);
+      }
+
+      // Delegate clicks from any control (gizmo faces, home button, keys, pills).
+      stage.addEventListener("click", (e) => {
+        const t = e.target.closest("[data-bearing]");
+        if (!t) return;
+        applyBearing(t.dataset.bearing);
+      });
+
+      // Home key resets — the binding Direction B proposes (demo-only here).
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "Home") applyBearing("reset");
+      });
+
+      const NOTES = {
+        A: "<b>Direction A — View-cube gizmo (top-right).</b> A compact 3×3 orientation cube: the eight edge faces are one-click preset bearings (NE/NW/SE/SW/N/E/W/Top), the center face and the pill below both trigger <b>reset</b> (fit-to-bounds = <code>render3d.frame()</code>). Current bearing is gold-ringed. Most capable, most chrome; instantly familiar to anyone who has used a CAD / Blender nav-cube. Cost: an always-on ~84px widget floating over the render.",
+        B: "<b>Direction B — Minimal home + keys (bottom-right).</b> One primary <b>Recenter</b> button does the reset; a discreet keycap row (<kbd>Home</kbd> reset, <kbd>1–4</kbd> preset angles) advertises the keyboard path without adding buttons. Lowest chrome, best fit for the app's keyboard-first, minimal-chrome ethos, and the smallest build (reset-only is the #131 core; presets ride along as keycaps). Cost: presets are less discoverable than explicit buttons.",
+        C: "<b>Direction C — Preset pill bar (bottom-center).</b> A single floating segmented pill in the app's unit-toggle idiom: accented <b>Reset</b> on the left, a hairline divider, then bearing presets (¾ / NE / NW / SE / Top) with an unmistakable gold 'current view' segment. Balanced: presets fully discoverable, current angle obvious, moderate chrome, centered so it never fights the corner HUD or tool rail.",
+      };
+      function setDir(dir) {
+        stage.dataset.dir = dir;
+        document.querySelectorAll("#doc-switch button").forEach((b) =>
+          b.setAttribute("aria-pressed", String(b.dataset.dir === dir)));
+        note.innerHTML = NOTES[dir];
+        applyBearing("reset");
+      }
+      document.getElementById("doc-switch").addEventListener("click", (e) => {
+        const b = e.target.closest("button");
+        if (b) setDir(b.dataset.dir);
+      });
+      setDir("A");
+    </script>
+  </body>
+</html>
