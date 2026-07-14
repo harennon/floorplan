@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Per-room preview + opening fidelity · floorplan mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;700&family=Libre+Baskerville:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg:#14140f; --bg-deep:#100f0b; --ink:#ece7d6; --muted:#8f8a78;
+  --gold:#c9a84c; --gold-soft:rgba(201,168,76,.55);
+  --panel:rgba(20,20,15,.72); --hairline:rgba(201,168,76,.18);
+  --grid-fine:rgba(201,168,76,.055); --grid-major:rgba(201,168,76,.14);
+  --wall-line:#d9be6e; --room-fill:rgba(201,168,76,.07); --snap-teal:#7fd0c8;
+  --font-ui:"DM Sans",system-ui,sans-serif; --font-mono:"DM Mono",monospace;
+  --font-display:"Libre Baskerville",Georgia,serif;
+}
+*,*::before,*::after{box-sizing:border-box;}
+html,body{margin:0;height:100%;}
+body{
+  font-family:var(--font-ui); color:var(--ink); background:var(--bg-deep);
+  padding:28px 22px 60px; line-height:1.5;
+}
+.doc{max-width:1180px;margin:0 auto;}
+h1{font-family:var(--font-display); font-weight:700; font-size:1.5rem; margin:0 0 4px;}
+.sub{color:var(--muted); font-size:.9rem; margin:0 0 22px;}
+.sub code{font-family:var(--font-mono); color:var(--gold);}
+h2{font-family:var(--font-display); font-weight:700; font-size:1.05rem; color:var(--gold);
+  margin:34px 0 10px; padding-bottom:6px; border-bottom:1px solid var(--hairline);}
+h3{font-size:.82rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted);
+  margin:18px 0 8px; font-weight:700;}
+p{margin:0 0 10px; font-size:.92rem;}
+.note{font-size:.82rem; color:var(--muted);}
+/* frame that mimics the app stage */
+.stage{
+  position:relative; border:1px solid var(--hairline); border-radius:10px;
+  background:radial-gradient(ellipse 90% 80% at 50% 45%, var(--bg) 0%, var(--bg-deep) 100%);
+  overflow:hidden; height:440px;
+}
+.stage svg{display:block; width:100%; height:100%;}
+.opt-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:18px;}
+@media(max-width:900px){.opt-grid{grid-template-columns:1fr;}}
+.card{border:1px solid var(--hairline); border-radius:10px; overflow:hidden; background:var(--panel);}
+.card .stage{border:none; border-radius:0; height:300px;}
+.card-body{padding:12px 14px;}
+.card-body h4{margin:0 0 4px; font-size:.95rem;}
+.card-body .tag{display:inline-block; font-family:var(--font-mono); font-size:.68rem;
+  color:var(--gold); border:1px solid var(--gold-soft); border-radius:999px;
+  padding:1px 8px; margin-bottom:8px;}
+.card-body p{font-size:.82rem; color:var(--muted); margin:0;}
+.rec{border-color:var(--snap-teal);}
+.rec .tag{color:var(--snap-teal); border-color:var(--snap-teal);}
+
+/* ── faux tool rail (left) ── */
+.rail{position:absolute; left:14px; top:50%; transform:translateY(-50%);
+  display:flex; flex-direction:column; gap:6px; padding:6px;
+  background:var(--panel); border:1px solid var(--hairline); border-radius:12px;
+  backdrop-filter:blur(6px); z-index:6;}
+.rail button{width:34px; height:34px; display:flex; align-items:center; justify-content:center;
+  background:transparent; border:1px solid transparent; border-radius:8px;
+  color:var(--muted); cursor:pointer; position:relative;}
+.rail button:hover{color:var(--ink); border-color:var(--hairline);}
+.rail button[aria-pressed="true"]{background:var(--gold); color:var(--bg-deep);
+  box-shadow:0 0 0 2px var(--gold-soft);}
+.rail .sep{height:1px; background:var(--hairline); margin:2px 4px;}
+.rail .hint{position:absolute; right:2px; bottom:1px; font-family:var(--font-mono);
+  font-size:.5rem; opacity:.6;}
+
+/* ── scope popover (Option A) ── */
+.scope-pop{position:absolute; left:60px; top:50%; transform:translateY(-50%);
+  width:184px; background:var(--panel); border:1px solid var(--hairline);
+  border-radius:12px; padding:10px; backdrop-filter:blur(8px); z-index:7;
+  box-shadow:0 8px 24px rgba(0,0,0,.4);}
+.scope-pop .ph{font-size:.68rem; text-transform:uppercase; letter-spacing:.08em;
+  color:var(--muted); margin:0 0 8px; font-weight:700;}
+.scope-row{display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px;
+  cursor:pointer; font-size:.82rem; color:var(--ink);}
+.scope-row:hover{background:rgba(201,168,76,.09);}
+.scope-row.active{background:var(--gold); color:var(--bg-deep); font-weight:700;}
+.scope-row .sw{width:12px; height:12px; border-radius:3px; flex:none;}
+.scope-row .meta{margin-left:auto; font-family:var(--font-mono); font-size:.68rem; opacity:.7;}
+.scope-sep{height:1px; background:var(--hairline); margin:6px 2px;}
+
+/* ── room hotspots (Option B) ── */
+.hotspot{cursor:pointer;}
+.hotspot .hs-label{font-family:var(--font-mono); font-size:11px; fill:var(--ink);}
+
+/* ── top scope bar (Option C) ── */
+.scopebar{position:absolute; top:14px; left:50%; transform:translateX(-50%);
+  display:flex; gap:6px; background:var(--panel); border:1px solid var(--hairline);
+  border-radius:999px; padding:5px 6px; backdrop-filter:blur(8px); z-index:6;}
+.scopebar button{font-family:var(--font-ui); font-size:.78rem; color:var(--muted);
+  background:transparent; border:none; border-radius:999px; padding:4px 12px; cursor:pointer;}
+.scopebar button:hover{color:var(--ink);}
+.scopebar button.active{background:var(--gold); color:var(--bg-deep); font-weight:700;}
+
+/* ── empty state ── */
+.empty{position:absolute; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center; gap:6px; color:var(--muted);}
+.empty .glyph{width:56px; height:56px; opacity:.5;}
+.empty .t{font-family:var(--font-display); font-size:1rem; color:var(--ink);}
+.empty .d{font-size:.82rem; max-width:260px;}
+
+/* ── opening legend / section diagram ── */
+.legend{position:absolute; right:14px; bottom:14px; background:var(--panel);
+  border:1px solid var(--hairline); border-radius:10px; padding:10px 12px;
+  font-size:.74rem; color:var(--muted); z-index:6; min-width:150px;}
+.legend .lr{display:flex; align-items:center; gap:8px; margin:3px 0;}
+.legend .lr b{color:var(--ink); font-weight:700;}
+.legend .k{width:14px; height:10px; border-radius:2px; flex:none;}
+table.cat{width:100%; border-collapse:collapse; font-size:.82rem; margin-top:4px;}
+table.cat th,table.cat td{text-align:left; padding:6px 10px; border-bottom:1px solid var(--hairline);}
+table.cat th{color:var(--muted); font-weight:700; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em;}
+table.cat td{font-family:var(--font-mono); color:var(--ink);}
+table.cat td:first-child{font-family:var(--font-ui);}
+.pill{display:inline-block; font-family:var(--font-mono); font-size:.68rem; color:var(--snap-teal);
+  border:1px solid var(--snap-teal); border-radius:999px; padding:1px 8px;}
+</style>
+</head>
+<body>
+<div class="doc">
+<h1>Per-room preview scoping + opening height fidelity</h1>
+<p class="sub">LLD 132 · builds on the whole-plan preview (<code>#101</code> / LLD 128 / LLD 130). Two frontend questions: (1) how a user scopes the preview to <b>one room</b>, and (2) how doors &amp; windows now read as <b>openings at the right height</b> rather than solid slabs.</p>
+
+<h2>Part 1 — Per-room scoping: three entry-point options</h2>
+<p>The preview toggle (<code>P</code>) already exists in the tool rail. Whole-plan preview stays the default. These three options differ only in <em>how you narrow to a single room</em>. Pick one.</p>
+<div class="opt-grid" id="opt-grid"></div>
+
+<h2>Part 2 — Opening height fidelity</h2>
+<p>Doors and windows gain <code>sill</code>/<code>head</code> height bands from the catalog. The renderer cuts the opening out of the wall at that vertical band, so a window floats in <code>[0.9, 2.1]m</code> and a door is a floor-to-head gap. This is data + renderer paired — no dead fields.</p>
+<div id="fidelity"></div>
+
+<h2>Design recommendation</h2>
+<div id="rec"></div>
+</div>
+<script>
+// ── Isometric projection (mirrors view.worldToScreenIso: θ=30°, KZ scaled) ──
+const NS="http://www.w3.org/2000/svg";
+const TH=Math.PI/6, KZ=26, SCALE=34; // px per metre-ish for the mockup
+function iso(wx,wy,wz,ox,oy){
+  const ix=(wx-wy)*Math.cos(TH)*SCALE;
+  const iy=(wx+wy)*Math.sin(TH)*SCALE - wz*KZ;
+  return {x:ox+ix, y:oy+iy};
+}
+function el(tag,attrs){const e=document.createElementNS(NS,tag);
+  for(const k in attrs) e.setAttribute(k,attrs[k]); return e;}
+function shade(hex,f){
+  const n=parseInt(hex.slice(1),16);
+  let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  r=Math.min(255,r*f)|0; g=Math.min(255,g*f)|0; b=Math.min(255,b*f)|0;
+  return `rgb(${r},${g},${b})`;
+}
+// draw one extruded box (footprint = 4 world pts) between z0..z1
+function box(g,fp,z0,z1,base,ox,oy){
+  const b=fp.map(p=>iso(p.x,p.y,z0,ox,oy));
+  const t=fp.map(p=>iso(p.x,p.y,z1,ox,oy));
+  // side faces (only camera-facing: normal·(1,1)>0), then top
+  const cx=(fp[0].x+fp[1].x+fp[2].x+fp[3].x)/4, cy=(fp[0].y+fp[1].y+fp[2].y+fp[3].y)/4;
+  for(let i=0;i<4;i++){
+    const j=(i+1)%4, ax=fp[i].x,ay=fp[i].y,bx=fp[j].x,by=fp[j].y;
+    let nx=by-ay, ny=-(bx-ax);
+    const mx=(ax+bx)/2-cx, my=(ay+by)/2-cy;
+    if(nx*mx+ny*my<0){nx=-nx;ny=-ny;}
+    if(nx+ny<=0) continue;
+    const role=(nx-ny)>=0?0.58:0.72;
+    const pts=[b[i],b[j],t[j],t[i]];
+    g.appendChild(el("polygon",{points:pts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "),fill:shade(base,role)}));
+  }
+  g.appendChild(el("polygon",{points:t.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "),fill:shade(base,1)}));
+}
+
+// ── Sample two-room plan (world metres) ──
+// Room A (living) sits left, Room B (bedroom) sits right, sharing a wall.
+const WALL=0.1, CEIL=2.4;
+const ROOMS=[
+  {id:"w0", name:"Living Room", color:"#c9a84c", verts:[{x:0,y:0},{x:4,y:0},{x:4,y:3.4},{x:0,y:3.4}]},
+  {id:"w1", name:"Bedroom",     color:"#a098c8", verts:[{x:4,y:0.6},{x:7,y:0.6},{x:7,y:3.4},{x:4,y:3.4}]},
+];
+// openings placed on a specific wall edge of a room, param t along edge (0..1), width w
+const OPENINGS=[
+  {room:"w0", edge:0, t:0.55, w:0.9,  kind:"door",   sill:0,   head:2.03}, // front door
+  {room:"w0", edge:3, t:0.5,  w:1.5,  kind:"window", sill:0.9, head:2.1},  // left window
+  {room:"w1", edge:1, t:0.5,  w:1.2,  kind:"window", sill:0.9, head:2.1},  // right window
+  {room:"w0", edge:1, t:0.5,  w:0.9,  kind:"door",   sill:0,   head:2.03}, // interior door to bedroom
+];
+const FURN=[
+  {room:"w0", x:1.1, y:2.4, w:2.0, h:0.9, z:0.85, color:"#b89a60"}, // sofa
+  {room:"w0", x:2.9, y:1.0, w:0.6, h:0.6, z:1.2,  color:"#8ab0b0"}, // chair
+  {room:"w1", x:5.5, y:2.4, w:1.5, h:2.0, z:0.55, color:"#9090c0"}, // bed
+];
+const OPEN_COLOR="#c9a84c";
+
+// Build a wall edge as segments, cutting gaps for openings, each segment a box.
+// For an opening we emit: sill box [0..sill] + header box [head..CEIL] + side jambs.
+function wallEdge(room, i, g, ox, oy, dim){
+  const v=room.verts, a=v[i], b=v[(i+1)%v.length];
+  const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy);
+  const ux=dx/len, uy=dy/len, nx=-uy*WALL/2, ny=ux*WALL/2;
+  // collect openings on this edge, sorted by t
+  const ops=OPENINGS.filter(o=>o.room===room.id && o.edge===i)
+    .map(o=>{const c=o.t*len; return {...o, s0:c-o.w/2, s1:c+o.w/2};})
+    .sort((p,q)=>p.s0-q.s0);
+  const quad=(s0,s1)=>{
+    const pa={x:a.x+ux*s0,y:a.y+uy*s0}, pb={x:a.x+ux*s1,y:a.y+uy*s1};
+    return [{x:pa.x+nx,y:pa.y+ny},{x:pb.x+nx,y:pb.y+ny},{x:pb.x-nx,y:pb.y-ny},{x:pa.x-nx,y:pa.y-ny}];
+  };
+  const baseCol = dim ? "#4a463a" : room.color;
+  // BEFORE mode (LLD 128): wall is one solid box; each opening is a colored slab 0→z.
+  if(window.RENDER_MODE==="before"){
+    box(g, quad(0,len), 0, CEIL, baseCol, ox, oy);
+    for(const o of ops){
+      const z=o.kind==="door"?2.03:1.20;
+      box(g, quad(o.s0,o.s1), 0, z, dim?"#5a5240":(o.kind==="door"?"#c0a870":"#5aa8c8"), ox, oy);
+    }
+    return;
+  }
+  let cursor=0;
+  for(const o of ops){
+    if(o.s0>cursor) box(g, quad(cursor,o.s0), 0, CEIL, baseCol, ox, oy); // solid before
+    // sill piece under a window
+    if(o.sill>0) box(g, quad(o.s0,o.s1), 0, o.sill, baseCol, ox, oy);
+    // header above opening
+    if(o.head<CEIL) box(g, quad(o.s0,o.s1), o.head, CEIL, baseCol, ox, oy);
+    // the opening void — draw a subtle frame outline so it reads as a hole
+    const fp=quad(o.s0,o.s1);
+    const bt=fp.map(p=>iso(p.x,p.y,o.sill,ox,oy)), tp=fp.map(p=>iso(p.x,p.y,o.head,ox,oy));
+    const frameCol = dim?"#6a6450": (o.kind==="door"?"#e0b64f":"#7fd0c8");
+    // opening reveal: draw the inner face darker so gap has depth
+    g.appendChild(el("polygon",{points:[bt[1],bt[2],tp[2],tp[1]].map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "),fill:"rgba(16,15,11,.55)"}));
+    [[bt[1],tp[1]],[bt[2],tp[2]],[tp[1],tp[2]],[bt[1],bt[2]]].forEach(([p,q])=>{
+      g.appendChild(el("line",{x1:p.x,y1:p.y,x2:q.x,y2:q.y,stroke:frameCol,"stroke-width":dim?1:1.6,"stroke-opacity":dim?.4:.95}));
+    });
+    cursor=o.s1;
+  }
+  if(cursor<len) box(g, quad(cursor,len), 0, CEIL, baseCol, ox, oy);
+}
+
+// Render the whole scene into an <svg>. scope = null (whole plan) or a room id.
+// When scoped, non-scope rooms/furniture are dimmed (ghosted) OR hidden per `mode`.
+function renderScene(svg, scope, opts){
+  opts=opts||{};
+  window.RENDER_MODE = opts.mode || "after";
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  const box_=svg.viewBox.baseVal;
+  const ox=box_.width*0.5, oy=box_.height*0.30;
+  const g=el("g",{});
+  svg.appendChild(g);
+  // floor slabs first (furthest back)
+  for(const r of ROOMS){
+    const dim = scope && r.id!==scope;
+    if(dim && opts.hide) continue;
+    const pts=r.verts.map(v=>iso(v.x,v.y,0,ox,oy));
+    g.appendChild(el("polygon",{points:pts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "),
+      fill: dim?"rgba(201,168,76,.03)":"rgba(201,168,76,.10)",
+      stroke: (scope===r.id)?"var(--snap-teal)":"none","stroke-width":1.4,"stroke-dasharray":"4 3"}));
+  }
+  // collect drawable units with a depth key = centroid (wx+wy), sort back-to-front
+  const units=[];
+  for(const r of ROOMS){
+    const dim = scope && r.id!==scope;
+    if(dim && opts.hide) continue;
+    for(let i=0;i<r.verts.length;i++){
+      const a=r.verts[i], b=r.verts[(i+1)%r.verts.length];
+      units.push({key:(a.x+b.x+a.y+b.y)/2, fn:()=>wallEdge(r,i,g,ox,oy,dim)});
+    }
+  }
+  for(const f of FURN){
+    const dim = scope && f.room!==scope;
+    if(dim && opts.hide) continue;
+    const fp=[{x:f.x-f.w/2,y:f.y-f.h/2},{x:f.x+f.w/2,y:f.y-f.h/2},{x:f.x+f.w/2,y:f.y+f.h/2},{x:f.x-f.w/2,y:f.y+f.h/2}];
+    units.push({key:f.x+f.y, fn:()=>box(g,fp,0,f.z, dim?"#3f3c33":f.color, ox,oy)});
+  }
+  units.sort((p,q)=>p.key-q.key).forEach(u=>u.fn());
+}
+
+// tiny reusable faux tool-rail (with preview pressed)
+function railHTML(){
+  return `<div class="rail">
+    <button aria-label="Select">V<span class="hint">V</span></button>
+    <button aria-label="Wall">W<span class="hint">W</span></button>
+    <div class="sep"></div>
+    <button aria-pressed="true" aria-label="3D preview" title="3D preview"
+      style="font-family:var(--font-mono);font-size:.6rem;">3D<span class="hint">P</span></button>
+  </div>`;
+}
+
+// ── Option A: scope popover attached to the preview button ──
+function buildOptionA(){
+  const card=el("div",{class:"card"});
+  card.innerHTML=`
+    <div class="stage" style="height:300px;">
+      ${railHTML()}
+      <div class="scope-pop">
+        <p class="ph">Preview scope</p>
+        <div class="scope-row" data-scope="all"><span class="sw" style="background:linear-gradient(135deg,#c9a84c,#a098c8)"></span>Whole plan<span class="meta">2 rooms</span></div>
+        <div class="scope-sep"></div>
+        <div class="scope-row active" data-scope="w0"><span class="sw" style="background:#c9a84c"></span>Living Room<span class="meta">13.6 m²</span></div>
+        <div class="scope-row" data-scope="w1"><span class="sw" style="background:#a098c8"></span>Bedroom<span class="meta">8.4 m²</span></div>
+      </div>
+      <svg viewBox="0 0 380 300"></svg>
+    </div>
+    <div class="card-body">
+      <span class="tag">Option A</span>
+      <h4>Scope popover on the toggle</h4>
+      <p>Long-press / click a caret on the preview button opens a room list. "Whole plan" stays the top default. Isolated room renders solid; others hidden.</p>
+    </div>`;
+  const svg=card.querySelector("svg");
+  const rows=card.querySelectorAll(".scope-row");
+  function pick(scope){
+    rows.forEach(r=>r.classList.toggle("active", r.dataset.scope===scope));
+    renderScene(svg, scope==="all"?null:scope, {hide:true});
+  }
+  rows.forEach(r=>r.addEventListener("click",()=>pick(r.dataset.scope)));
+  pick("w0");
+  return card;
+}
+
+// ── Option B: click a room floor in the 3D scene to isolate it ──
+function buildOptionB(){
+  const card=el("div",{class:"card"});
+  card.innerHTML=`
+    <div class="stage" style="height:300px;">
+      ${railHTML()}
+      <svg viewBox="0 0 380 300"></svg>
+      <div class="legend" style="left:14px;right:auto;bottom:14px;">
+        <div class="lr"><b id="b-state">Whole plan</b></div>
+        <div class="lr">Click a room to isolate</div>
+        <div class="lr">Click empty ground to reset</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <span class="tag">Option B</span>
+      <h4>Tap a room in the scene</h4>
+      <p>No new chrome. Hovering a floor slab highlights it; clicking isolates that room (others ghost out). Direct-manipulation, but discoverability leans on the hint.</p>
+    </div>`;
+  const svg=card.querySelector("svg");
+  const st=card.querySelector("#b-state");
+  let scope=null;
+  function draw(){ renderScene(svg, scope, {hide:false}); attachHot(); }
+  function attachHot(){
+    svg.querySelectorAll("polygon").forEach(()=>{});
+    // overlay invisible clickable floor polys on top for hit-testing
+    const box_=svg.viewBox.baseVal, ox=box_.width*0.5, oy=box_.height*0.30;
+    ROOMS.forEach(r=>{
+      const pts=r.verts.map(v=>iso(v.x,v.y,0,ox,oy));
+      const hot=el("polygon",{points:pts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "),
+        fill:"transparent",class:"hotspot"});
+      hot.addEventListener("mouseenter",()=>hot.setAttribute("fill","rgba(127,208,200,.12)"));
+      hot.addEventListener("mouseleave",()=>hot.setAttribute("fill","transparent"));
+      hot.addEventListener("click",e=>{e.stopPropagation(); scope=r.id; st.textContent=r.name; draw();});
+      svg.firstChild.appendChild(hot);
+    });
+  }
+  svg.addEventListener("click",()=>{scope=null; st.textContent="Whole plan"; draw();});
+  draw();
+  return card;
+}
+
+// ── Option C: segmented scope bar pinned to the top of the preview ──
+function buildOptionC(){
+  const card=el("div",{class:"card"});
+  card.innerHTML=`
+    <div class="stage" style="height:300px;">
+      ${railHTML()}
+      <div class="scopebar">
+        <button class="active" data-scope="all">All</button>
+        <button data-scope="w0">Living</button>
+        <button data-scope="w1">Bedroom</button>
+      </div>
+      <svg viewBox="0 0 380 300"></svg>
+    </div>
+    <div class="card-body">
+      <span class="tag">Option C</span>
+      <h4>Segmented scope bar</h4>
+      <p>A pill bar appears at the top only while previewing. Always-visible, one tap to switch, reads like the room list. Costs vertical chrome over the scene.</p>
+    </div>`;
+  const svg=card.querySelector("svg");
+  const btns=card.querySelectorAll(".scopebar button");
+  function pick(scope){
+    btns.forEach(b=>b.classList.toggle("active", b.dataset.scope===scope));
+    renderScene(svg, scope==="all"?null:scope, {hide:true});
+  }
+  btns.forEach(b=>b.addEventListener("click",()=>pick(b.dataset.scope)));
+  pick("all");
+  return card;
+}
+
+document.getElementById("opt-grid").append(buildOptionA(),buildOptionB(),buildOptionC());
+
+// ── Part 2: opening fidelity — before/after + legend ──
+function buildFidelity(){
+  const wrap=document.getElementById("fidelity");
+  wrap.innerHTML=`
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+      <span class="note">Renderer mode:</span>
+      <div class="scopebar" style="position:static;transform:none;">
+        <button data-fx="0">Before — solid slabs (LLD 128)</button>
+        <button class="active" data-fx="1">After — sill/head cutouts (this LLD)</button>
+      </div>
+      <span class="pill" id="fx-note">windows float in [0.9, 2.1]m</span>
+    </div>
+    <div class="stage">
+      <svg viewBox="0 0 760 420"></svg>
+      <div class="legend">
+        <div class="lr"><span class="k" style="background:#c9a84c"></span><b>Wall</b> · 0 – 2.4m</div>
+        <div class="lr"><span class="k" style="background:#7fd0c8"></span><b>Window</b> · 0.9 – 2.1m</div>
+        <div class="lr"><span class="k" style="background:#e0b64f"></span><b>Door</b> · 0 – 2.03m</div>
+      </div>
+    </div>
+    <p class="note" style="margin-top:8px;">Same plan, whole-plan scope. "Before" extrudes every opening as a solid box floor→z (a window is a 1.2m stub). "After" reads <code>sill</code>/<code>head</code> from the catalog and cuts a real gap: door = floor-to-head void, window = void floating above a sill course, with a header above both.</p>`;
+  const svg=wrap.querySelector("svg");
+  const btns=wrap.querySelectorAll("[data-fx]");
+  const note=wrap.querySelector("#fx-note");
+  function draw(fx){
+    btns.forEach(b=>b.classList.toggle("active", b.dataset.fx===fx));
+    note.textContent = fx==="1" ? "windows float in [0.9, 2.1]m" : "window = solid 1.2m slab";
+    renderScene(svg, null, {hide:false, mode: fx==="1"?"after":"before"});
+  }
+  btns.forEach(b=>b.addEventListener("click",()=>draw(b.dataset.fx)));
+  draw("1");
+}
+buildFidelity();
+
+// ── Recommendation + empty state + catalog table ──
+function buildRec(){
+  const wrap=document.getElementById("rec");
+  wrap.innerHTML=`
+    <p><b style="color:var(--snap-teal)">Recommended: Option A (scope popover on the toggle).</b>
+    It keeps the toggle the single preview entry point (no new top chrome, unlike C),
+    it is discoverable (unlike B's tap-to-isolate), and the room list doubles as an
+    at-a-glance area readout. Whole-plan preview stays the top item, so the foundation
+    behaviour is one click away and unchanged. B's tap-a-room can be layered on later as
+    a bonus once the popover ships.</p>
+    <h3>Framing &amp; empty state</h3>
+    <div class="opt-grid" style="grid-template-columns:1fr 1fr;">
+      <div class="card">
+        <div class="stage" style="height:240px;"><svg id="rec-scene" viewBox="0 0 380 240"></svg></div>
+        <div class="card-body"><h4>Room-scoped framing</h4><p>Scoped view re-fits the camera to that room's bounds (~10% margin) so an isolated room fills the frame instead of sitting in a corner.</p></div>
+      </div>
+      <div class="card">
+        <div class="stage" style="height:240px;">
+          <div class="empty">
+            <svg class="glyph" viewBox="0 0 48 48" fill="none"><path d="M24 4 L44 15 L44 33 L24 44 L4 33 L4 15 Z" stroke="var(--gold)" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="3 3"/><path d="M24 4 L24 44 M4 15 L44 33 M44 15 L4 33" stroke="var(--gold)" stroke-width="0.8" opacity=".4"/></svg>
+            <div class="t">Nothing to preview yet</div>
+            <div class="d">This room has no closed walls. Draw a closed room in 2D, then preview it here.</div>
+          </div>
+        </div>
+        <div class="card-body"><h4>Empty state</h4><p>Shown when the scoped room has no closed walls (or the whole plan is empty). No crash, no blank canvas — a nudge back to the 2D editor.</p></div>
+      </div>
+    </div>
+    <h3>Catalog opening-height fields (data + renderer paired)</h3>
+    <table class="cat">
+      <tr><th>Type</th><th>z (leaf)</th><th>sill</th><th>head</th><th>Reads as</th></tr>
+      <tr><td>door</td><td>2.03</td><td>0</td><td>2.03</td><td>floor-to-head void + header</td></tr>
+      <tr><td>window</td><td>1.20</td><td>0.9</td><td>2.1</td><td>void floating in [0.9, 2.1] + sill course + header</td></tr>
+    </table>
+    <p class="note">New <code>sill</code>/<code>head</code> fields are catalog constants (not per-instance), so they round-trip through localStorage / share hash / JSON export for free — old plans resolve them from the catalog on load, exactly like <code>z</code> did in LLD 128. Default window sill is <b>0.9m</b>, not 0.</p>`;
+  const svg=wrap.querySelector("#rec-scene");
+  renderScene(svg, "w0", {hide:true});
+}
+buildRec();
+</script>
+</body>
+</html>
