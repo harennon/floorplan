@@ -578,6 +578,77 @@ export function computeClearances(sym, world) {
   return results;
 }
 
+// ── Per-room preview scoping (LLD 142) ───────────────────────────────────────
+
+/**
+ * Tolerance for the on-wall test: an opening is considered hosted on an edge
+ * if its center's perpendicular distance to the edge centerline is within
+ * WALL_M/2 + this value. 0.05 m = 5 cm, well above FP noise but below
+ * furniture-placement distances.
+ */
+const ON_WALL_EPS = 0.05;
+
+/**
+ * True if a symbol belongs to a room for preview scoping purposes.
+ *
+ * - Non-opening symbols: center strictly inside the room polygon (pointInRoom).
+ * - Openings (CATALOG[sym.type].openings === true): center inside OR hosted on
+ *   one of the room's wall edges within WALL_M/2 + ON_WALL_EPS (openings sit
+ *   ON the boundary, so a strict interior test would miss them).
+ *
+ * Pure; no global reads. Salvaged from PR #134.
+ *
+ * @param {import("./walls.js").Room} room
+ * @param {import("./symbols.js").Sym} sym
+ * @returns {boolean}
+ */
+export function symbolBelongsToRoom(room, sym) {
+  if (!room.closed || room.verts.length < 2) return false;
+
+  const cx = sym.x;
+  const cy = sym.y;
+
+  if (pointInRoom(room, cx, cy)) return true;
+
+  const cat = CATALOG[sym.type];
+  if (!cat || !cat.openings) return false;
+
+  // Opening: check if the center lies on one of the room's wall edges
+  const halfWall = WALL_M / 2 + ON_WALL_EPS;
+  const verts = room.verts;
+  const n = verts.length;
+
+  for (let i = 0; i < n; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % n];
+    const edgeDx = b.x - a.x;
+    const edgeDy = b.y - a.y;
+    const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
+    if (edgeLen < 1e-9) continue;
+
+    // Unit along-edge direction and unit normal
+    const tx = edgeDx / edgeLen;
+    const ty = edgeDy / edgeLen;
+    // Normal perpendicular to edge (one of the two perpendiculars — magnitude is
+    // what matters for the distance test, so use either sign)
+    const nx = -ty;
+    const ny = tx;
+
+    // Project center relative to edge start
+    const relX = cx - a.x;
+    const relY = cy - a.y;
+    const along = relX * tx + relY * ty;
+    const perp  = Math.abs(relX * nx + relY * ny);
+
+    // Within the edge's t-span and within halfWall distance of the centerline
+    if (along >= -halfWall && along <= edgeLen + halfWall && perp <= halfWall) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Return the worst ClrStatus across a list of Clearance objects.
  * "bad" > "tight" > "ok"; returns "ok" for an empty list.

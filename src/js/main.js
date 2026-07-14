@@ -74,7 +74,7 @@ import { model as measurementsModel } from "./measurements.js";
 import { init as initLoupe, setViewModule as loupeSetViewModule, reposition as loupeReposition } from "./loupe.js";
 import { toggleGridSnap } from "./prefs.js";
 import { init as initOnboarding, maybeShow as onboardingMaybeShow, dismiss as onboardingDismiss } from "./onboarding.js";
-import { isActive as previewIsActive, toggle as previewToggle, onChange as previewOnChange } from "./preview.js";
+import { isActive as previewIsActive, toggle as previewToggle, onChange as previewOnChange, getScope as previewGetScope, setScope as previewSetScope } from "./preview.js";
 import { initIsoRender, render as isoRenderFn } from "./isoRender.js";
 import * as render3d from "./render3d.js";
 import * as _wallsModRef from "./walls.js";
@@ -170,11 +170,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnHelp        = document.getElementById("btn-help");
   const helpOverlayEl  = document.getElementById("help-overlay");
 
-  // 3D preview (LLD 128 / LLD 130)
+  // 3D preview (LLD 128 / LLD 130 / LLD 142)
   const gIso            = document.getElementById("iso");
   const btnPreview      = document.getElementById("tool-preview");
   const canvas3d        = document.getElementById("stage3d");
   const previewLoadingEl = document.getElementById("preview-loading");
+  const previewEmptyEl   = document.getElementById("preview-empty");
+  const scopeCaretBtn    = document.getElementById("preview-scope-caret");
+  const scopePopoverEl   = document.getElementById("preview-scope-popover");
+  const scopePillEl      = document.getElementById("preview-scope-pill");
 
   // Theme toggle button
   const btnThemeToggle = document.getElementById("btn-theme-toggle");
@@ -438,6 +442,128 @@ document.addEventListener("DOMContentLoaded", () => {
   // read-only probes (webglAvailable / __liveGeometryCount / __hasRenderer) that
   // drive the real WebGL render/teardown path in the built dist/ app.
   window.__render3d = render3d;
+  // Also expose preview module probes for integration tests (LLD 142).
+  window.__preview = { getScope: previewGetScope, setScope: previewSetScope };
+
+  // ── Scope popover wiring (LLD 142) ─────────────────────────────────────────
+
+  /** Update the scope pill text and visibility. */
+  function _updateScopePill() {
+    if (!scopePillEl) return;
+    const scope = previewGetScope();
+    if (scope === null || !previewIsActive()) {
+      scopePillEl.textContent = "";
+      scopePillEl.classList.remove("visible");
+    } else {
+      const room = wallsModel.rooms.find(r => r.id === scope);
+      const idx = wallsModel.rooms.indexOf(room);
+      const label = room?.name || (idx >= 0 ? `Room ${idx + 1}` : scope);
+      scopePillEl.textContent = label;
+      scopePillEl.classList.add("visible");
+    }
+  }
+
+  /** Close the scope popover. */
+  function _closeScopePopover() {
+    if (!scopePopoverEl || !scopeCaretBtn) return;
+    scopePopoverEl.hidden = true;
+    scopeCaretBtn.setAttribute("aria-expanded", "false");
+  }
+
+  /** Open the scope popover, populating it from current closed rooms. */
+  function _openScopePopover() {
+    if (!scopePopoverEl || !scopeCaretBtn) return;
+
+    // Ensure preview is active — opening the caret enters preview if needed
+    if (!previewIsActive()) {
+      previewToggle();
+      _syncPreview();
+      scheduleRender();
+    }
+
+    // Populate menu items
+    scopePopoverEl.innerHTML = "";
+    const currentScope = previewGetScope();
+
+    function _makeMenuItem(label, scopeValue) {
+      const btn = document.createElement("button");
+      btn.setAttribute("role", "menuitem");
+      btn.setAttribute("aria-current", scopeValue === currentScope ? "true" : "false");
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        previewSetScope(scopeValue);
+        _closeScopePopover();
+      });
+      btn.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          const items = Array.from(scopePopoverEl.querySelectorAll('[role="menuitem"]'));
+          const idx = items.indexOf(btn);
+          if (idx < items.length - 1) items[idx + 1].focus();
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          const items = Array.from(scopePopoverEl.querySelectorAll('[role="menuitem"]'));
+          const idx = items.indexOf(btn);
+          if (idx > 0) items[idx - 1].focus();
+        } else if (e.key === "Escape") {
+          e.stopPropagation(); // don't also exit preview (EC13)
+          _closeScopePopover();
+          scopeCaretBtn.focus();
+        }
+      });
+      return btn;
+    }
+
+    scopePopoverEl.appendChild(_makeMenuItem("Whole plan", null));
+
+    const closedRooms = wallsModel.rooms.filter(r => r.closed);
+    if (closedRooms.length > 0) {
+      const divider = document.createElement("div");
+      divider.className = "scope-divider";
+      divider.setAttribute("aria-hidden", "true");
+      scopePopoverEl.appendChild(divider);
+
+      closedRooms.forEach((room, i) => {
+        const allClosed = wallsModel.rooms.filter(r => r.closed);
+        const idx = allClosed.indexOf(room);
+        const label = room.name || `Room ${idx + 1}`;
+        scopePopoverEl.appendChild(_makeMenuItem(label, room.id));
+      });
+    }
+
+    scopePopoverEl.hidden = false;
+    scopeCaretBtn.setAttribute("aria-expanded", "true");
+
+    // Focus first item
+    const firstItem = scopePopoverEl.querySelector('[role="menuitem"]');
+    if (firstItem) firstItem.focus();
+  }
+
+  if (scopeCaretBtn) {
+    scopeCaretBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (scopePopoverEl && !scopePopoverEl.hidden) {
+        _closeScopePopover();
+      } else {
+        _openScopePopover();
+      }
+    });
+  }
+
+  // Close popover on outside click
+  document.addEventListener("click", (e) => {
+    if (!scopePopoverEl || scopePopoverEl.hidden) return;
+    if (scopePopoverEl.contains(e.target) || (scopeCaretBtn && scopeCaretBtn.contains(e.target))) return;
+    _closeScopePopover();
+  });
+
+  /** Update the empty-state overlay based on render3d emptiness. */
+  function _updateEmptyState() {
+    if (!previewEmptyEl) return;
+    const scope = previewGetScope();
+    // Only show empty state when scoped and there's nothing to render
+    previewEmptyEl.hidden = !(previewIsActive() && scope !== null && render3d.__isEmpty());
+  }
 
   // Read-only state snapshot for the read-only-preview regression tests (LLD 130).
   // Returns a deep-copied snapshot of the persisted 2D view + room verts so the
@@ -539,32 +665,59 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Single choke point for the 3D renderer side-effects (LLD 130). Every path
-  // that changes preview state — the button click, the P shortcut, the Esc-exit
-  // branch, and any programmatic setActive — converges on previewToggle(), which
-  // fires this onChange listener. Keeping render3d.enter()/exit() ONLY here (not
-  // in the button handler) avoids double-invocation.
+  // Single choke point for the 3D renderer side-effects (LLD 130 / LLD 142).
+  // Every path that changes preview state — the button click, the P shortcut,
+  // the Esc-exit branch, scope changes, and any programmatic setActive —
+  // converges on the onChange listeners. The dispatch logic:
+  //   active-edge → enter() / exit()
+  //   scope-edge while active → rebuild()
+  // Track previous values to detect edges.
+  let _prevActive = previewIsActive();
+  let _prevScope = previewGetScope();
+
   previewOnChange(async () => {
+    const active = previewIsActive();
+    const scope = previewGetScope();
+    const activeEdge = active !== _prevActive;
+    const scopeEdge = scope !== _prevScope;
+    _prevActive = active;
+    _prevScope = scope;
+
+    // Close the popover if preview turned off
+    if (!active) _closeScopePopover();
+
     _syncPreview();
     scheduleRender();
-    if (previewIsActive()) {
-      const r = await render3d.enter();       // lazy-load + build + frame
-      if (!previewIsActive()) {                // toggled off mid-load (Edge Case 3)
+
+    if (activeEdge) {
+      if (active) {
+        const r = await render3d.enter();       // lazy-load + build + frame
+        if (!previewIsActive()) {                // toggled off mid-load (Edge Case 3)
+          render3d.exit();
+          stage?.classList.remove("preview--fallback");
+          _updateScopePill();
+          _updateEmptyState();
+          return;
+        }
+        if (r && r.ok === false && r.fallback) { // WebGL/import failed → 2.5D fallback
+          stage?.classList.add("preview--fallback");
+          isoRenderFn();                          // paint the 2.5D SVG fallback once
+          showToast("3D unavailable — showing 2.5D preview");
+        } else {
+          stage?.classList.remove("preview--fallback");
+        }
+        _updateEmptyState();
+      } else {
         render3d.exit();
         stage?.classList.remove("preview--fallback");
-        return;
       }
-      if (r && r.ok === false && r.fallback) { // WebGL/import failed → 2.5D fallback
-        stage?.classList.add("preview--fallback");
-        isoRenderFn();                          // paint the 2.5D SVG fallback once
-        showToast("3D unavailable — showing 2.5D preview");
-      } else {
-        stage?.classList.remove("preview--fallback");
-      }
-    } else {
-      render3d.exit();
-      stage?.classList.remove("preview--fallback");
+    } else if (scopeEdge && active) {
+      // Scope changed while preview is active: rebuild without full re-entry
+      render3d.rebuild();
+      _updateEmptyState();
     }
+
+    _updateScopePill();
   });
 
   // Release the WebGL context on navigation/unload (bfcache / mobile suspend).

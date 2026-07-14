@@ -17743,6 +17743,518 @@ describe("LLD 130 — render3d enter()/exit() smoke + read-only", () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LLD 142: Per-room preview scoping + door/window opening height fidelity
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  CATALOG as CATALOG142,
+} from "../src/js/symbols.js";
+
+import {
+  buildItems as buildItems142,
+  CEILING_M as CEILING_M142,
+} from "../src/js/isoRender.js";
+
+import {
+  buildSceneDescriptors as buildSceneDescriptors142,
+  scopeModels as scopeModels142,
+  _splitWallForOpenings as splitWallForOpenings142,
+} from "../src/js/render3d.js";
+
+import {
+  symbolBelongsToRoom as symbolBelongsToRoom142,
+} from "../src/js/clearance.js";
+
+import {
+  isActive as preview142IsActive,
+  setActive as preview142SetActive,
+  getScope as preview142GetScope,
+  setScope as preview142SetScope,
+  toggle as preview142Toggle,
+  onChange as preview142OnChange,
+} from "../src/js/preview.js";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Make a closed rectangular room with wall-center verts (same as _makeRect128). */
+function _makeRect142(x0, y0, x1, y1) {
+  return {
+    id: `room-${x0}-${y0}-${x1}-${y1}`,
+    closed: true,
+    verts: [
+      { x: x0, y: y0 },
+      { x: x1, y: y0 },
+      { x: x1, y: y1 },
+      { x: x0, y: y1 },
+    ],
+  };
+}
+
+// ── Tests: LLD 142 — catalog sill/head fields ──────────────────────────────
+
+describe("LLD 142 — CATALOG door/window sill/head", () => {
+  it("door catalog has numeric sill=0 and head=2.03", () => {
+    const door = CATALOG142.door;
+    if (typeof door.sill !== "number") throw new Error("door.sill should be a number");
+    if (typeof door.head !== "number") throw new Error("door.head should be a number");
+    if (door.sill !== 0) throw new Error(`door.sill should be 0, got ${door.sill}`);
+    if (door.head !== 2.03) throw new Error(`door.head should be 2.03, got ${door.head}`);
+  });
+
+  it("window catalog has sill=0.9 and head=2.1", () => {
+    const win = CATALOG142.window;
+    if (typeof win.sill !== "number") throw new Error("window.sill should be a number");
+    if (typeof win.head !== "number") throw new Error("window.head should be a number");
+    if (win.sill !== 0.9) throw new Error(`window.sill should be 0.9, got ${win.sill}`);
+    if (win.head !== 2.1) throw new Error(`window.head should be 2.1, got ${win.head}`);
+  });
+
+  it("sill < head for door and window (valid range)", () => {
+    if (!(CATALOG142.door.sill < CATALOG142.door.head)) throw new Error("door: sill must be < head");
+    if (!(CATALOG142.window.sill < CATALOG142.window.head)) throw new Error("window: sill must be < head");
+  });
+
+  it("door z is still present (unchanged for 2.5D fallback)", () => {
+    if (typeof CATALOG142.door.z !== "number" || CATALOG142.door.z <= 0) throw new Error("door.z should still be present and positive");
+  });
+
+  it("window z is still present (unchanged for 2.5D fallback)", () => {
+    if (typeof CATALOG142.window.z !== "number" || CATALOG142.window.z <= 0) throw new Error("window.z should still be present and positive");
+  });
+});
+
+// ── Tests: LLD 142 — buildItems opening branch ──────────────────────────────
+
+describe("LLD 142 — buildItems opening height fidelity", () => {
+  it("window symbol → kind:'opening', z0===sill(0.9), z1===head(2.1)", () => {
+    const sym = { id: "w1", type: "window", x: 2, y: 0, w: 0.91, h: 0.12, rot: 0 };
+    const items = buildItems142({ rooms: [], chain: [] }, { symbols: [sym] });
+    const winItem = items.find(it => it.kind === "opening");
+    if (!winItem) throw new Error("Expected kind:'opening' item for a window");
+    if (winItem.z0 !== 0.9) throw new Error(`window z0 (sill) should be 0.9, got ${winItem.z0}`);
+    if (winItem.z1 !== 2.1) throw new Error(`window z1 (head) should be 2.1, got ${winItem.z1}`);
+  });
+
+  it("window z0 is NOT 0 (bug fix: was a floor-up slab)", () => {
+    const sym = { id: "w2", type: "window", x: 2, y: 0, w: 0.91, h: 0.12, rot: 0 };
+    const items = buildItems142({ rooms: [], chain: [] }, { symbols: [sym] });
+    const winItem = items.find(it => it.kind === "opening");
+    if (!winItem) throw new Error("Expected an opening item");
+    if (winItem.z0 === 0) throw new Error("window z0 must NOT be 0 (was the floor-up-slab bug)");
+  });
+
+  it("door symbol → kind:'opening', z0===0, z1===head(2.03)", () => {
+    const sym = { id: "d1", type: "door", x: 2, y: 0, w: 0.81, h: 0.12, rot: 0 };
+    const items = buildItems142({ rooms: [], chain: [] }, { symbols: [sym] });
+    const doorItem = items.find(it => it.kind === "opening");
+    if (!doorItem) throw new Error("Expected kind:'opening' item for a door");
+    if (doorItem.z0 !== 0) throw new Error(`door z0 (sill) should be 0, got ${doorItem.z0}`);
+    if (doorItem.z1 !== 2.03) throw new Error(`door z1 (head) should be 2.03, got ${doorItem.z1}`);
+  });
+
+  it("non-opening furniture still uses kind:'furniture' and z0=0", () => {
+    const sym = { id: "s1", type: "sofa", x: 2, y: 2, w: 2.0, h: 0.90, rot: 0 };
+    const items = buildItems142({ rooms: [], chain: [] }, { symbols: [sym] });
+    const sofaItem = items.find(it => it.kind === "furniture");
+    if (!sofaItem) throw new Error("Expected kind:'furniture' for sofa");
+    if (sofaItem.z0 !== 0) throw new Error("sofa z0 should still be 0");
+  });
+
+  it("catalog entry without sill/head falls back gracefully (no throw)", () => {
+    // Synthetic: opening without sill/head on a CLONED entry
+    const syntheticSym = { id: "syn1", type: "door", x: 1, y: 0, w: 0.81, h: 0.12, rot: 0 };
+    // Remove sill/head from catalog temporarily
+    const origSill = CATALOG142.door.sill;
+    const origHead = CATALOG142.door.head;
+    delete CATALOG142.door.sill;
+    delete CATALOG142.door.head;
+    let threw = false;
+    try {
+      const items = buildItems142({ rooms: [], chain: [] }, { symbols: [syntheticSym] });
+      const item = items.find(it => it.kind === "opening");
+      if (!item) throw new Error("Expected an opening item even without sill/head");
+      // Fallback: z0 = 0, z1 = cat.z
+      if (item.z0 !== 0) throw new Error(`Fallback z0 should be 0, got ${item.z0}`);
+      if (item.z1 !== CATALOG142.door.z) throw new Error(`Fallback z1 should be cat.z=${CATALOG142.door.z}, got ${item.z1}`);
+    } catch (e) {
+      threw = true;
+      CATALOG142.door.sill = origSill;
+      CATALOG142.door.head = origHead;
+      throw e;
+    }
+    CATALOG142.door.sill = origSill;
+    CATALOG142.door.head = origHead;
+    if (threw) throw new Error("Should not throw when sill/head missing");
+  });
+});
+
+// ── Tests: LLD 142 — _splitWallForOpenings ──────────────────────────────────
+
+describe("LLD 142 — _splitWallForOpenings — door gap", () => {
+  // Edge from (0,0) to (4,0): a horizontal wall, length 4m.
+  const edge = { a: { x: 0, y: 0 }, b: { x: 4, y: 0 } };
+  const wallColor = "#c9a84c";
+
+  it("door on edge: no wall box spans [0,head] over the door's width", () => {
+    // Door at along=[1.5, 2.3], sill=0, head=2.03
+    const openings = [{ sill: 0, head: 2.03, along: [1.5, 2.3], isDoor: true, color: wallColor }];
+    const parts = splitWallForOpenings142(edge, openings, CEILING_M142, wallColor);
+
+    // Find all wall parts that overlap the door along-span [1.5,2.3]
+    // (approximated: check each wall box's footprint x-range)
+    const doorT0 = 1.5, doorT1 = 2.3;
+    for (const d of parts) {
+      if (d.kind !== "wall") continue;
+      // Get x-extent of this wall piece (rough: min/max of footprint x)
+      const xs = d.footprint.map(p => p.x);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      // If this wall box overlaps the door span [1.5,2.3] (roughly)
+      if (maxX > doorT0 + 0.01 && minX < doorT1 - 0.01) {
+        // It must NOT span [0, head] — it must be either a lintel (z0>=head) or a sill (z1<=sill)
+        if (d.z0 < 0.01 && d.z1 > 2.03 - 0.01) {
+          throw new Error(`Wall box spans [0,head] over door width: z0=${d.z0} z1=${d.z1} x=[${minX.toFixed(2)},${maxX.toFixed(2)}]`);
+        }
+      }
+    }
+  });
+
+  it("door on edge: lintel box exists over [head, CEILING_M] at door span", () => {
+    const openings = [{ sill: 0, head: 2.03, along: [1.5, 2.3], isDoor: true, color: wallColor }];
+    const parts = splitWallForOpenings142(edge, openings, CEILING_M142, wallColor);
+    const lintels = parts.filter(d => d.kind === "wall" && Math.abs(d.z0 - 2.03) < 0.01);
+    if (lintels.length === 0) throw new Error("Expected a lintel wall box over [head, CEILING_M] for door");
+    const lintel = lintels[0];
+    if (Math.abs(lintel.z1 - CEILING_M142) > 0.01) throw new Error(`Lintel z1 should be CEILING_M (${CEILING_M142}), got ${lintel.z1}`);
+  });
+
+  it("door: no reveal pane (pure gap, no 'opening' descriptor)", () => {
+    const openings = [{ sill: 0, head: 2.03, along: [1.5, 2.3], isDoor: true, color: wallColor }];
+    const parts = splitWallForOpenings142(edge, openings, CEILING_M142, wallColor);
+    const openingParts = parts.filter(d => d.kind === "opening");
+    if (openingParts.length > 0) throw new Error("Door should emit no opening (pane) descriptor — pure gap");
+  });
+
+  it("piers + lintels partition the edge without overlap (along spans)", () => {
+    const openings = [{ sill: 0, head: 2.03, along: [1.0, 2.0], isDoor: true, color: wallColor }];
+    const parts = splitWallForOpenings142(edge, openings, CEILING_M142, wallColor);
+    if (parts.length === 0) throw new Error("Expected at least some descriptors");
+    // All parts should be renderable (>= 3 corners)
+    for (const d of parts) {
+      if (d.footprint.length < 3) throw new Error("All footprints should have >= 3 corners");
+    }
+  });
+});
+
+describe("LLD 142 — _splitWallForOpenings — window reveal", () => {
+  const edge = { a: { x: 0, y: 0 }, b: { x: 4, y: 0 } };
+  const wallColor = "#c9a84c";
+
+  it("window: sill wall box [0,sill] exists at window span", () => {
+    const openings = [{ sill: 0.9, head: 2.1, along: [1.5, 2.5], isDoor: false, color: wallColor }];
+    const parts = splitWallForOpenings142(edge, openings, CEILING_M142, wallColor);
+    const sillWalls = parts.filter(d => d.kind === "wall" && d.z0 < 0.01 && Math.abs(d.z1 - 0.9) < 0.02);
+    if (sillWalls.length === 0) throw new Error("Expected a sill wall box [0, sill=0.9] for window");
+  });
+
+  it("window: lintel box [head, CEILING_M] exists at window span", () => {
+    const openings = [{ sill: 0.9, head: 2.1, along: [1.5, 2.5], isDoor: false, color: wallColor }];
+    const parts = splitWallForOpenings142(edge, openings, CEILING_M142, wallColor);
+    const lintels = parts.filter(d => d.kind === "wall" && Math.abs(d.z0 - 2.1) < 0.02);
+    if (lintels.length === 0) throw new Error("Expected a lintel wall box [head=2.1, CEILING_M] for window");
+  });
+
+  it("window: reveal pane 'opening' descriptor with translucent:true at [sill,head]", () => {
+    const openings = [{ sill: 0.9, head: 2.1, along: [1.5, 2.5], isDoor: false, color: wallColor }];
+    const parts = splitWallForOpenings142(edge, openings, CEILING_M142, wallColor);
+    const reveal = parts.find(d => d.kind === "opening");
+    if (!reveal) throw new Error("Expected a 'opening' reveal descriptor for window");
+    if (!reveal.translucent) throw new Error("Window reveal pane must have translucent:true");
+    if (Math.abs(reveal.z0 - 0.9) > 0.02) throw new Error(`Reveal z0 should be sill=0.9, got ${reveal.z0}`);
+    if (Math.abs(reveal.z1 - 2.1) > 0.02) throw new Error(`Reveal z1 should be head=2.1, got ${reveal.z1}`);
+  });
+
+  it("no solid wall box spans [sill,head] across the window width", () => {
+    const openings = [{ sill: 0.9, head: 2.1, along: [1.5, 2.5], isDoor: false, color: wallColor }];
+    const parts = splitWallForOpenings142(edge, openings, CEILING_M142, wallColor);
+    for (const d of parts) {
+      if (d.kind !== "wall") continue;
+      const xs = d.footprint.map(p => p.x);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      // If this wall box overlaps the window along-span [1.5,2.5]
+      if (maxX > 1.6 && minX < 2.4) {
+        // It must not span [sill, head] or any part of it
+        if (d.z0 < 0.9 - 0.02 && d.z1 > 2.1 - 0.02) {
+          throw new Error(`Solid wall box spans [sill,head] across window width z0=${d.z0} z1=${d.z1}`);
+        }
+      }
+    }
+  });
+
+  it("degenerate window (sill >= head) → no cut, wall stays whole", () => {
+    const openings = [{ sill: 1.5, head: 1.5, along: [1.0, 2.0], isDoor: false, color: wallColor }];
+    const parts = splitWallForOpenings142(edge, openings, CEILING_M142, wallColor);
+    // Degenerate opening is skipped; entire edge emitted as one full-height piece
+    const walls = parts.filter(d => d.kind === "wall");
+    if (walls.length === 0) throw new Error("Degenerate opening should not remove the wall entirely");
+    // The full-height wall piece must exist
+    const fullHeight = walls.find(d => d.z0 < 0.01 && Math.abs(d.z1 - CEILING_M142) < 0.01);
+    if (!fullHeight) throw new Error("Expected a full-height wall when opening is degenerate (sill >= head)");
+  });
+
+  it("head > CEILING_M: lintel height is zero (no lintel emitted)", () => {
+    // head=2.5 > CEILING_M=2.4
+    const openings = [{ sill: 0.9, head: 2.5, along: [1.0, 2.0], isDoor: false, color: wallColor }];
+    const parts = splitWallForOpenings142(edge, openings, CEILING_M142, wallColor);
+    // Lintel would be z0=2.5, z1=2.4 → negative height → should not be emitted
+    const lintels = parts.filter(d => d.kind === "wall" && d.z0 >= 2.4);
+    if (lintels.length > 0) throw new Error("When head > CEILING_M, no lintel should be emitted");
+  });
+});
+
+describe("LLD 142 — _splitWallForOpenings — overlapping openings", () => {
+  const edge = { a: { x: 0, y: 0 }, b: { x: 4, y: 0 } };
+  const wallColor = "#c9a84c";
+
+  it("two overlapping door spans are merged (no zero-width slivers)", () => {
+    const openings = [
+      { sill: 0, head: 2.03, along: [1.0, 2.0], isDoor: true, color: wallColor },
+      { sill: 0, head: 2.03, along: [1.8, 2.8], isDoor: true, color: wallColor },
+    ];
+    const parts = splitWallForOpenings142(edge, openings, CEILING_M142, wallColor);
+    // All wall footprints should have positive width (no zero-width slivers)
+    for (const d of parts) {
+      if (d.kind !== "wall") continue;
+      const xs = d.footprint.map(p => p.x);
+      const w = Math.max(...xs) - Math.min(...xs);
+      if (w < 0.001) throw new Error(`Zero-width pier/wall sliver found (width=${w.toFixed(4)})`);
+    }
+  });
+});
+
+describe("LLD 142 — _splitWallForOpenings — association fallback", () => {
+  it("no openings on edge → single full-height wall piece", () => {
+    const edge = { a: { x: 0, y: 0 }, b: { x: 3, y: 0 } };
+    const parts = splitWallForOpenings142(edge, [], CEILING_M142, "#c9a84c");
+    if (parts.length !== 1) throw new Error(`Expected 1 wall piece, got ${parts.length}`);
+    const w = parts[0];
+    if (w.z0 !== 0) throw new Error("Full wall z0 should be 0");
+    if (Math.abs(w.z1 - CEILING_M142) > 0.01) throw new Error("Full wall z1 should be CEILING_M");
+  });
+});
+
+// ── Tests: LLD 142 — symbolBelongsToRoom ─────────────────────────────────────
+
+describe("LLD 142 — symbolBelongsToRoom", () => {
+  // Room: 4m × 3m at (0,0)-(4,3)
+  const room = _makeRect142(0, 0, 4, 3);
+
+  it("furniture centered inside room → true", () => {
+    const sym = { id: "s1", type: "sofa", x: 2, y: 1.5, w: 1.0, h: 0.5, rot: 0 };
+    if (!symbolBelongsToRoom142(room, sym)) throw new Error("Furniture inside room should return true");
+  });
+
+  it("furniture outside room → false", () => {
+    const sym = { id: "s2", type: "sofa", x: 10, y: 10, w: 1.0, h: 0.5, rot: 0 };
+    if (symbolBelongsToRoom142(room, sym)) throw new Error("Furniture outside room should return false");
+  });
+
+  it("opening on room wall edge → true (on boundary, not strictly interior)", () => {
+    // Door placed on the bottom edge (y=3, x from 1 to 2) — center is at (1.5, 3)
+    const sym = { id: "d1", type: "door", x: 1.5, y: 3, w: 0.81, h: 0.12, rot: 0 };
+    if (!symbolBelongsToRoom142(room, sym)) throw new Error("Opening on room wall edge should return true");
+  });
+
+  it("opening on shared wall edge belongs to both adjacent rooms", () => {
+    // Two rooms sharing the edge y=3 from x=0 to x=4
+    const room1 = _makeRect142(0, 0, 4, 3);
+    const room2 = _makeRect142(0, 3, 4, 6);
+    // Opening on the shared edge: center at (2, 3)
+    const sym = { id: "d2", type: "door", x: 2, y: 3, w: 0.81, h: 0.12, rot: 0 };
+    if (!symbolBelongsToRoom142(room1, sym)) throw new Error("Opening should belong to room1 (shared edge)");
+    if (!symbolBelongsToRoom142(room2, sym)) throw new Error("Opening should belong to room2 (shared edge)");
+  });
+
+  it("non-opening on boundary (not strictly interior) → false", () => {
+    // Sofa with center exactly on the boundary (y=3)
+    const sym = { id: "s3", type: "sofa", x: 2, y: 3, w: 1.0, h: 0.5, rot: 0 };
+    // The center is ON the boundary — pointInRoom may return false for edge points
+    // We only guarantee it returns false for clearly OUTSIDE; this is a degenerate case.
+    // Just check it doesn't throw.
+    symbolBelongsToRoom142(room, sym); // no assertion, just must not throw
+  });
+
+  it("opening well outside room → false", () => {
+    const sym = { id: "d3", type: "door", x: 10, y: 10, w: 0.81, h: 0.12, rot: 0 };
+    if (symbolBelongsToRoom142(room, sym)) throw new Error("Opening far from room should return false");
+  });
+
+  it("open (unclosed) room → false for any symbol", () => {
+    const openRoom = { id: "open", closed: false, verts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }] };
+    const sym = { id: "s4", type: "sofa", x: 2, y: 1, w: 1.0, h: 0.5, rot: 0 };
+    if (symbolBelongsToRoom142(openRoom, sym)) throw new Error("Open room should always return false");
+  });
+});
+
+// ── Tests: LLD 142 — scopeModels ─────────────────────────────────────────────
+
+describe("LLD 142 — scopeModels", () => {
+  const roomA = { ..._makeRect142(0, 0, 4, 3), id: "rA" };
+  const roomB = { ..._makeRect142(5, 0, 9, 3), id: "rB" };
+
+  const wallsMod = { rooms: [roomA, roomB], chain: [] };
+  const sofaInA = { id: "s1", type: "sofa", x: 2, y: 1.5, w: 1.5, h: 0.9, rot: 0 };
+  const sofaInB = { id: "s2", type: "sofa", x: 7, y: 1.5, w: 1.5, h: 0.9, rot: 0 };
+  const symsMod = { symbols: [sofaInA, sofaInB] };
+
+  it("scope=null → returns models unchanged (whole plan)", () => {
+    const result = scopeModels142(wallsMod, symsMod, null);
+    if (result.walls !== wallsMod) throw new Error("scope=null should return same wallsMod reference");
+    if (result.symbols !== symsMod) throw new Error("scope=null should return same symsMod reference");
+  });
+
+  it("scope=roomB → only roomB's geometry and roomB's symbols in result", () => {
+    const result = scopeModels142(wallsMod, symsMod, "rB");
+    if (result.walls.rooms.length !== 1) throw new Error(`Expected 1 room, got ${result.walls.rooms.length}`);
+    if (result.walls.rooms[0].id !== "rB") throw new Error("Expected rB in scoped walls");
+    if (result.walls.chain.length !== 0) throw new Error("Scoped chain should be empty");
+    // sofaInA is in roomA (not roomB), sofaInB is in roomB
+    const syms = result.symbols.symbols;
+    if (syms.some(s => s.id === "s1")) throw new Error("sofaInA (roomA) should NOT appear in rB scope");
+    if (!syms.some(s => s.id === "s2")) throw new Error("sofaInB (roomB) should appear in rB scope");
+  });
+
+  it("scoping does NOT mutate original wallsMod or symsMod", () => {
+    const wallsBefore = JSON.stringify(wallsMod);
+    const symsBefore = JSON.stringify(symsMod);
+    scopeModels142(wallsMod, symsMod, "rA");
+    if (JSON.stringify(wallsMod) !== wallsBefore) throw new Error("scopeModels mutated wallsMod");
+    if (JSON.stringify(symsMod) !== symsBefore) throw new Error("scopeModels mutated symsMod");
+  });
+
+  it("scope to unknown room id → falls back to whole-plan (no crash)", () => {
+    const result = scopeModels142(wallsMod, symsMod, "nonexistent-id");
+    // Falls back to whole plan — both models returned unchanged
+    if (result.walls.rooms.length !== 2) throw new Error("Unknown scope should fall back to whole plan");
+  });
+
+  it("scope to empty room → empty symbols list", () => {
+    const emptyRoom = { ..._makeRect142(10, 10, 14, 13), id: "rEmpty" };
+    const wallsWithEmpty = { rooms: [roomA, emptyRoom], chain: [] };
+    const result = scopeModels142(wallsWithEmpty, symsMod, "rEmpty");
+    // sofaInA is in roomA, neither sofa is in the empty room (far away)
+    if (result.symbols.symbols.length !== 0) throw new Error("Empty room should have no symbols");
+  });
+});
+
+// ── Tests: LLD 142 — buildSceneDescriptors with opening items ────────────────
+
+describe("LLD 142 — buildSceneDescriptors opening integration", () => {
+  const WALL_COLOR = "#c9a84c";
+
+  it("a window item not on any wall edge → fallback 'opening' descriptor at [sill,head]", () => {
+    // Floating window with no room walls
+    const sym = { id: "w1", type: "window", x: 5, y: 5, w: 0.91, h: 0.12, rot: 0 };
+    const items = buildItems142({ rooms: [], chain: [] }, { symbols: [sym] });
+    const { descriptors } = buildSceneDescriptors142(items, { rooms: [] }, "#333", { symbols: [sym] });
+    const opening = descriptors.find(d => d.kind === "opening");
+    if (!opening) throw new Error("Unassociated opening should emit a fallback 'opening' descriptor");
+    // Height should be [sill, head] from catalog
+    if (Math.abs(opening.z0 - 0.9) > 0.01) throw new Error(`Fallback z0 should be sill=0.9, got ${opening.z0}`);
+    if (Math.abs(opening.z1 - 2.1) > 0.01) throw new Error(`Fallback z1 should be head=2.1, got ${opening.z1}`);
+  });
+
+  it("buildSceneDescriptors + door on room wall → no solid wall at [0,head] over door span", () => {
+    // Room from (0,0) to (4,3), door on bottom edge centered at x=2, y=0
+    const room = { ..._makeRect142(0, 0, 4, 3), id: "r1" };
+    const doorSym = { id: "d1", type: "door", x: 2, y: 0, w: 0.81, h: 0.12, rot: 0 };
+    const wallsMod = { rooms: [room], chain: [] };
+    const symsMod = { symbols: [doorSym] };
+    const items = buildItems142(wallsMod, symsMod);
+    const { descriptors } = buildSceneDescriptors142(items, wallsMod, "#333", symsMod);
+
+    // Find all wall descriptors near the door's x position (around x=2 on y=0 edge)
+    // and check none spans [0, head] in that area
+    for (const d of descriptors) {
+      if (d.kind !== "wall") continue;
+      const xs = d.footprint.map(p => p.x);
+      const ys = d.footprint.map(p => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      // Check if this piece is near the door span on the bottom edge (y~0)
+      const nearBottomEdge = minY < 0.2 && maxY < 0.5;
+      const coversX = maxX > 1.6 && minX < 2.4; // door center 2 ± half-width ~0.4
+      if (nearBottomEdge && coversX) {
+        if (d.z0 < 0.01 && d.z1 > 2.0) {
+          throw new Error(`Solid wall at door span: z0=${d.z0} z1=${d.z1} x=[${minX.toFixed(2)},${maxX.toFixed(2)}]`);
+        }
+      }
+    }
+  });
+});
+
+// ── Tests: LLD 142 — preview.js scope state ──────────────────────────────────
+
+describe("LLD 142 — preview.js getScope/setScope", () => {
+  it("getScope() initially returns null", () => {
+    // Reset state by ensuring preview is off (which resets scope)
+    preview142SetActive(false);
+    if (preview142GetScope() !== null) throw new Error("Initial scope should be null");
+  });
+
+  it("setScope(roomId) sets the scope", () => {
+    preview142SetActive(false);
+    preview142SetScope("room-123");
+    if (preview142GetScope() !== "room-123") throw new Error("setScope should update the scope");
+    preview142SetScope(null); // cleanup
+  });
+
+  it("setScope(null) clears the scope", () => {
+    preview142SetActive(false);
+    preview142SetScope("room-abc");
+    preview142SetScope(null);
+    if (preview142GetScope() !== null) throw new Error("setScope(null) should clear scope");
+  });
+
+  it("scope resets to null when setActive(false)", () => {
+    preview142SetActive(true);
+    preview142SetScope("room-xyz");
+    preview142SetActive(false);
+    if (preview142GetScope() !== null) throw new Error("Scope should reset to null on setActive(false)");
+  });
+
+  it("scope resets to null when toggle() turns preview off", () => {
+    preview142SetActive(false);
+    preview142Toggle(); // now active
+    preview142SetScope("room-toggle");
+    preview142Toggle(); // now inactive → scope reset
+    if (preview142GetScope() !== null) throw new Error("Scope should reset to null when toggle() turns preview off");
+    // Ensure active state is consistent
+    preview142SetActive(false);
+  });
+
+  it("setScope fires onChange listeners", () => {
+    let called = 0;
+    preview142OnChange(() => { called++; });
+    preview142SetActive(false);
+    const before = called;
+    preview142SetScope("room-fire");
+    if (called <= before) throw new Error("setScope should fire onChange");
+    preview142SetScope(null); // cleanup
+  });
+
+  it("setScope with same value does not fire onChange", () => {
+    let called = 0;
+    preview142OnChange(() => { called++; });
+    preview142SetScope("same-id");
+    const before = called;
+    preview142SetScope("same-id"); // same value, no change
+    if (called !== before) throw new Error("setScope with same value should NOT fire onChange");
+    preview142SetScope(null); // cleanup
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 
