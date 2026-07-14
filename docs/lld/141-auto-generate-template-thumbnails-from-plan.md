@@ -58,11 +58,26 @@ fills+hatch are short enough that `thumbRender` builds them directly (the same r
 > NB: `symbolRender` builds real SVG DOM nodes (`createElementNS`), while `thumbRender`
 > emits a markup **string**. The cleanest reuse is a `project(worldX, worldY) -> {x,y}`
 > function plus a tiny node-appending target. Since the glyph recipes call
-> `parent.appendChild(document.createElementNS(...))`, `thumbRender` builds its symbol
-> layer as a detached `<g>` DOM node, runs the shared helper against it, then serialises
-> via `XMLSerializer`/`outerHTML` and concatenates into the fragment string. This keeps
-> ONE copy of the glyph recipes. If serialising a detached node proves awkward in the
-> headless test env, that is the trigger to fall back to Option B (see below).
+> `parent.appendChild(document.createElementNS(...))`, `thumbRender` builds its **entire
+> furniture pass** as a single detached `<g>` DOM node and appends into it per symbol in
+> paint order — for each non-floor symbol it appends the footprint `<polygon>` first, then
+> calls `appendSymbolInterior(g, sym, cs, p, project, ppm)` to append that symbol's glyph
+> on top — then serialises the whole group **once** via `XMLSerializer.serializeToString`
+> and concatenates it after the floor-layer string prefix. This keeps ONE copy of the glyph
+> recipes.
+>
+> **Paint-order composition (resolves the batching concern).** Stacking is preserved
+> because footprints and glyphs share one DOM group and are appended in document order:
+> `footprint(A) → glyph(A) → footprint(B) → glyph(B) → …`. Since footprint(B) is appended
+> *after* glyph(A), it can never paint over glyph(A) — SVG paints in document order and
+> footprints/glyphs of the same symbol are adjacent. The only content built as raw strings
+> is the floor layer (room fills, walls, rugs), which is always below all furniture, so the
+> string-prefix-then-serialised-group concatenation reproduces the export paint order
+> exactly. Openings (doors/windows) are non-floor symbols and flow through the same per-
+> symbol footprint-then-glyph loop, so they too stay correctly ordered.
+>
+> If serialising a detached node proves awkward in the headless test env, that is the
+> trigger to fall back to Option B (see below).
 
 **Paint order matches export** (`exportImg.js`): room fills + walls → rugs (floor layer) →
 furniture footprints+glyphs → openings (doors/windows). Openings are ordinary symbols in
@@ -74,13 +89,39 @@ glyph comes from the shared interior helper.
 are rebuilt on gallery open (`_renderCards`), thumbnails reflect whatever theme is active
 then. (Live re-theme of an already-open gallery is out of scope.)
 
-**Fit-to-box.** viewBox is expressed in **world metres**: `viewBox="ox oy wM hM"` where
-`ox = minX - margin`, `oy = minY - margin`, and `wM`/`hM` span content + margin. Combined
-with `preserveAspectRatio="xMidYMid meet"` and the existing CSS
-`.template-thumb { aspect-ratio: 4/3 }` box, any plan proportion is centered and
-letterboxed into the card without distortion — no per-template tuning. Stroke widths use
-`vector-effect="non-scaling-stroke"` so wall and glyph line weights stay crisp regardless
-of how much the plan is scaled to fit.
+**Fit-to-box — project to a fixed pixel space, exactly like `exportImg.js`.** This is the
+critical coordinate-space decision. The reused `_renderInterior` glyph recipes contain
+**absolute pixel literals** (pillow inset `-sh/2 + 4`, handle-dot `r="1.5"`, drain
+`Math.max(2, sw*0.04)`, hatch `Math.max(8, …)`, etc.). Those are only correct when
+1 world unit maps to ~40–96 **pixels** — i.e. when the projector emits pixel coordinates
+at a live/export-like scale. A world-**metre** viewBox with `ppm=1` would turn `+4` into
++4 metres and `r="1.5"` into a 1.5 m circle; `non-scaling-stroke` cannot fix that (it
+rescales stroke width only, never geometry). So `thumbRender` projects to a **fixed
+pixel space** and emits a **pixel viewBox**, mirroring `exportImg.buildExportSvg`:
+
+```
+const PX_PER_M = 96;                        // == EXPORT_PX_PER_M sensibility
+const ox = bounds.minX - marginM;
+const oy = bounds.minY - marginM;
+const wM = (bounds.maxX - bounds.minX) + 2*marginM;
+const hM = (bounds.maxY - bounds.minY) + 2*marginM;
+const W  = wM * PX_PER_M, H = hM * PX_PER_M;         // pixel extents
+const project = (wx, wy) => ({ x: (wx - ox) * PX_PER_M, y: (wy - oy) * PX_PER_M });
+// viewBox = "0 0 W H"; ppm passed to appendSymbolInterior = PX_PER_M
+```
+
+With `viewBox="0 0 W H"` (pixels) the glyph literals and the `ppm`-proportional parts are
+**both** correct, because `project` + `ppm=PX_PER_M` reproduce the same ~96 px/m
+relationship the recipes were tuned against. `preserveAspectRatio="xMidYMid meet"` plus the
+existing CSS `.template-thumb { aspect-ratio: 4/3 }` box then centers and letterboxes any
+plan proportion into the card without distortion — no per-template tuning.
+
+**Stroke crispness.** Because the pixel viewBox is scaled down into the small card by
+`meet`, wall/glyph stroke widths would shrink with it. Apply
+`vector-effect="non-scaling-stroke"` to wall and glyph strokes so line *weights* stay crisp
+at any fit scale. This is safe now: with a pixel viewBox `non-scaling-stroke` only overrides
+stroke width — glyph *geometry* is already correct in pixel space, so nothing depends on it
+to correct coordinates (the failure mode the review flagged).
 
 **Fallback (flag, don't silently switch).** If wiring the projector through the interior
 recipes proves heavier than expected (e.g. the detached-node serialisation is awkward, or
@@ -100,7 +141,7 @@ PNG/SVG export, minus every textual/interactive affordance:
 | Room fill | `room.color \|\| palette().roomFill` | Closed rooms with ≥3 verts. |
 | Wall body | `palette().wallBody`, width `WALL_M` | `non-scaling-stroke`. |
 | Wall centerline | `palette().wallLine`, 1.5px | `non-scaling-stroke`. |
-| Rug (floor layer) | dashed edge + hatch | Same recipe as `exportImg.js` rug pass. |
+| Rug (floor layer) | `sym.color \|\| rgba(palette().symInkRgb,0.12)` + hatch | `exportImg.js` rug recipe, but palette-derived default fill (no hardcoded hex — see edge case 10). |
 | Furniture footprint | `sym.color \|\| palette().symFill` + `symStroke` | Rotated box via `corners(sym)`. |
 | Furniture glyph | shared `appendSymbolInterior` | Option A detail. |
 | Opening (door/window) | shared glyph (marker line + door arc) | Openings carry no fill label. |
@@ -109,9 +150,11 @@ PNG/SVG export, minus every textual/interactive affordance:
 length labels, symbol type-text labels, the grid, snap glyphs, selection boxes, rotate
 handles, ghosts, and measurement lines.
 
-**Framing.** `preserveAspectRatio="xMidYMid meet"` + world-metre viewBox with a small
-world-space margin (reuse `MARGIN_M = 0.5` sensibility, may shrink to taste). A wide plan
-letterboxes top/bottom; a tall plan letterboxes left/right. No plan-specific code.
+**Framing.** `preserveAspectRatio="xMidYMid meet"` + a **pixel** viewBox (`0 0 W H`, where
+`W/H = (content+margin) × PX_PER_M`), with a small world-space margin (reuse `MARGIN_M = 0.5`
+sensibility, may shrink to taste). Projecting to pixel space is what lets the reused glyph
+recipes' pixel literals stay correct (see Fit-to-box). A wide plan letterboxes top/bottom;
+a tall plan letterboxes left/right. No plan-specific code.
 
 **Accessibility.** The generated `<svg>` carries `aria-hidden="true"` (matching the
 current hand-authored thumbs); the card's `aria-label` (name + description) already
@@ -151,16 +194,19 @@ export function renderThumbnail(plan, opts) { /* … */ }
 function planBounds(plan) { /* … */ }
 ```
 
-The emitted root element:
+The emitted root element (pixel viewBox — see Fit-to-box for why pixels, not metres):
 
 ```
 <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true"
-     viewBox="ox oy wM hM" preserveAspectRatio="xMidYMid meet">
+     viewBox="0 0 W H" preserveAspectRatio="xMidYMid meet">
   …fills, walls, rugs, furniture+glyphs, openings…
 </svg>
 ```
 
-(Width/height come from the CSS box — `.template-thumb svg { width:100%; height:100% }`.)
+where `W = ((maxX-minX) + 2·marginM) · PX_PER_M` and `H = ((maxY-minY) + 2·marginM) · PX_PER_M`.
+The world origin (`minX-marginM`, `minY-marginM`) is folded into the `project` function, not
+the viewBox, exactly as `exportImg.buildExportSvg` does. (Rendered width/height come from
+the CSS box — `.template-thumb svg { width:100%; height:100% }`.)
 
 ### `src/js/symbolRender.js` (edit — pure extraction)
 
@@ -227,8 +273,15 @@ perturbed by — whatever the user currently has drawn. This is the key differen
    quoting matches `exportImg.js` (double-quoted attributes, no JSON.stringify). No user
    text is injected (labels are omitted), so no XML-escaping of dynamic strings is needed.
 10. **Theme = light**: colors come from `palette()`, so a light-theme gallery yields
-    light-theme thumbnails automatically. No hardcoded hex (unlike the old `thumb` SVGs,
-    which were dark-only).
+    light-theme thumbnails automatically — no hardcoded hex in the wall/room/furniture/glyph
+    layers (unlike the old `thumb` SVGs, which were dark-only). **One deliberate exception to
+    reconcile:** the `exportImg.js` rug pass this LLD mirrors uses a hardcoded
+    `rgba(120,100,70,0.18)` fallback when `sym.color` is unset (exportImg.js L157). Rather
+    than copy that literal, `thumbRender` derives the rug default from the palette —
+    `sym.color || \`rgba(${p.symInkRgb},0.12)\`` — matching the *live* rug recipe in
+    `symbolRender._renderRug` (L134), which is already theme-driven. This keeps the "no
+    hardcoded color" property true for thumbnails and is a thumbnail-local choice (it does
+    not change `exportImg.js`).
 
 ## Dependencies
 
@@ -263,8 +316,13 @@ with the surrounding suites.
    assert there is no `<text` element in the output.
 4. **Empty plan**: `renderThumbnail({…walls:{rooms:[],chain:[]}, symbols:{symbols:[]}…})`
    returns a valid non-empty `<svg` string (placeholder branch), does not throw.
-5. **Fit invariants**: viewBox width/height are positive and the viewBox origin reflects
-   `minX - margin` for a known plan (proportion/margin sanity).
+5. **Fit invariants (pixel viewBox)**: parse the `viewBox` attribute and assert it is
+   `0 0 W H` with `W > 0` and `H > 0`, and that the aspect ratio `W/H` matches the plan's
+   content-plus-margin aspect ratio `((maxX-minX)+2·marginM)/((maxY-minY)+2·marginM)` within
+   a small tolerance (proportion sanity). Do **not** assert the origin is `minX-margin` — the
+   origin is folded into the `project` function, not the viewBox (the viewBox origin is
+   `0 0`, matching `exportImg`). Optionally assert a known interior element lands at a
+   plausible pixel coordinate to confirm the world→pixel projection, rather than a metre one.
 
 **Regression:**
 6. **Existing suite still green** — run the full `test/tests.html`; the `symbolRender`
