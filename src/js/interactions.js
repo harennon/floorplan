@@ -16,6 +16,7 @@ import { view, zoomAbout, resetView, clampZoom, screenToWorld, BASE_PX_PER_M } f
 import { setCursorScreen } from "./hud.js";
 import { scheduleRender, W, H } from "./surface.js";
 import { effectiveDrawPoint, dragThreshold } from "./pointerEnv.js";
+import { isActive as previewIsActive } from "./preview.js";
 
 // ─── Draw hooks (injected by main.js; no static wall import) ─────────────────
 
@@ -340,6 +341,11 @@ function _onPointerMove(e) {
   }
 
   if (_dragging) {
+    // Read-only 3D preview (LLD 130): #stage3d is a CHILD of #stage, so an
+    // OrbitControls left-drag bubbles here. The camera owns that gesture; the
+    // 2D view (which IS persisted plan state) must not pan. Mirror the
+    // draw/select/measure hook guards.
+    if (previewIsActive()) return;
     const dx = e.clientX - _lastX;
     const dy = e.clientY - _lastY;
     view.panX += dx;
@@ -436,6 +442,10 @@ function _seedPinch() {
 
 function _handlePinch() {
   if (_pointers.size < 2) return;
+  // Read-only 3D preview (LLD 130): a two-finger pinch over #stage3d bubbles to
+  // the stage. OrbitControls owns pinch-zoom for the camera; the persisted 2D
+  // view must not zoom/pan. (Touch analogue of the _onWheel guard.)
+  if (previewIsActive()) return;
   const [a, b] = [..._pointers.values()];
   const d = _dist(a, b);
   const midX = (a.clientX + b.clientX) / 2;
@@ -470,6 +480,9 @@ function _dist(a, b) {
 
 function _onWheel(e) {
   e.preventDefault();
+  // Read-only 3D preview (LLD 130): a wheel over #stage3d bubbles to the stage.
+  // OrbitControls owns zoom for the camera; the persisted 2D view must not zoom.
+  if (previewIsActive()) return;
   _dismissHint();
 
   // Normalize delta across browsers / trackpad / line / page modes.

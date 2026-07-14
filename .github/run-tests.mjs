@@ -194,6 +194,25 @@ async function runIntegrationTest(name, fn, browser) {
   }
 }
 
+// ── LLD 130 preview integration counters ──────────────────────────────────────
+
+const PREVIEW_SUITE = "LLD 130 3D preview integration";
+const previewFailures = [];
+let previewTotal = 0;
+let previewPassed = 0;
+
+async function runPreviewTest(name, fn, browser) {
+  previewTotal++;
+  try {
+    await fn(browser);
+    previewPassed++;
+    process.stdout.write(`  PASS: ${name}\n`);
+  } catch (err) {
+    previewFailures.push({ suite: PREVIEW_SUITE, name, error: String(err) });
+    process.stderr.write(`  FAIL: ${name}\n    ${err}\n`);
+  }
+}
+
 async function runWxhIntegrationTests(browser) {
   process.stdout.write(`\n${INTEGRATION_SUITE}\n`);
 
@@ -348,6 +367,335 @@ async function runWxhIntegrationTests(browser) {
   );
 }
 
+// ── Integration tests (LLD 130 — true 3D preview) ─────────────────────────────
+//
+// These drive the SHIPPED dist/ build (APP_PAGE), exercising the real WebGL
+// render/teardown path that the bundler-less unit harness (test/tests.html)
+// cannot reach — `import("three")` resolves only in the built bundle, so the
+// unit `enter()` smoke tests only hit the import-failed fallback branch. This is
+// the coverage gap that let the floor/rug back-face culling bug slip through, so
+// these tests own the real GL path.
+//
+// main.js exposes `window.__render3d` (introspection-only, no mutators) so we can
+// call the read-only probes webglAvailable() / __liveGeometryCount() /
+// __hasRenderer() in-page.
+//
+// A 4×3 closed room + a sofa so the scene has extruded boxes AND a floor slab
+// (the exact geometry the floor-culling fix concerns).
+const PREVIEW_PLAN = {
+  schema: 1, app: "floorplan",
+  walls: { rooms: [{ id: "prev", closed: true, verts: [
+    { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+  ]}], chain: [] },
+  symbols: { symbols: [{ id: "s0", type: "sofa", x: 2, y: 1.5, w: 2.0, h: 0.9, rot: 0 }] },
+  measurements: [],
+  view: { zoom: 1, panX: 0, panY: 0 },
+  unit: "m",
+};
+
+/**
+ * Open the built app with PREVIEW_PLAN seeded. Optionally force WebGL
+ * unavailable BEFORE any app code runs (addInitScript patches HTMLCanvasElement
+ * .getContext to return null for webgl/webgl2), so render3d's webglAvailable()
+ * gate takes the fallback path. Returns { page, threeRequests } where
+ * threeRequests logs every fetch of the lazy three chunk.
+ */
+async function openPreviewApp(browser, { forceNoWebgl = false } = {}) {
+  const page = await browser.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => { pageErrors.push(String(err)); process.stderr.write(`[preview page uncaught] ${err}\n`); });
+
+  const threeRequests = [];
+  page.on("request", (req) => {
+    const url = req.url();
+    if (/render3dEngine|three/i.test(url) && url.endsWith(".js")) {
+      threeRequests.push(url.split("/").pop());
+    }
+  });
+
+  await page.addInitScript((plan) => {
+    localStorage.setItem("floorplan:plan:v1", JSON.stringify(plan));
+  }, PREVIEW_PLAN);
+
+  if (forceNoWebgl) {
+    await page.addInitScript(() => {
+      const orig = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+        if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") return null;
+        return orig.call(this, type, ...rest);
+      };
+    });
+  }
+
+  await page.goto(`http://127.0.0.1:${PORT}${APP_PAGE}`);
+  await page.waitForLoadState("networkidle");
+  page._pageErrors = pageErrors; // stash for assertions
+  return { page, threeRequests };
+}
+
+async function runPreview3dIntegrationTests(browser) {
+  process.stdout.write(`\n${PREVIEW_SUITE}\n`);
+
+  // ── Test 1: default load does NOT fetch three.js (proves lazy-load) ─────────
+  await runPreviewTest(
+    "default load (no preview entered) does not fetch the three.js lazy chunk",
+    async (browser) => {
+      const { page, threeRequests } = await openPreviewApp(browser);
+      try {
+        // Give any stray eager fetch a chance to appear.
+        await new Promise(r => setTimeout(r, 400));
+        if (threeRequests.length !== 0) {
+          throw new Error(`three chunk fetched on default load: ${threeRequests.join(", ")}`);
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 2: preview entry — WebGL-or-fallback branch ────────────────────────
+  // Branches on in-page webglAvailable() so it's robust whether or not CI
+  // Chromium has a GL context. The WebGL branch is what empirically exercises
+  // the floor/rug DoubleSide fix (the scene actually renders).
+  await runPreviewTest(
+    "preview entry shows the 3D canvas (WebGL) or the 2.5D fallback (+toast), no errors",
+    async (browser) => {
+      const { page, threeRequests } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+
+        await page.click("#tool-preview");
+        // Allow the lazy import + scene build (WebGL branch) to settle.
+        await new Promise(r => setTimeout(r, 1500));
+
+        const state = await page.evaluate(() => {
+          const stage = document.getElementById("stage");
+          const c = document.getElementById("stage3d");
+          const iso = document.getElementById("iso");
+          const toast = document.getElementById("toast");
+          return {
+            stagePreview: stage?.classList.contains("stage--preview"),
+            fallback: stage?.classList.contains("preview--fallback"),
+            canvasVisible: c && getComputedStyle(c).display !== "none",
+            isoVisible: iso && getComputedStyle(iso).display !== "none",
+            toastVisible: toast?.classList.contains("toast--visible"),
+            toastText: toast?.textContent || "",
+          };
+        });
+
+        if (!state.stagePreview) throw new Error(".stage--preview not set after preview entry");
+
+        if (webglOK) {
+          // Real 3D path.
+          if (!state.canvasVisible) throw new Error("WebGL available but #stage3d not visible");
+          if (state.fallback) throw new Error("WebGL available but preview--fallback was set");
+          if (threeRequests.length === 0) throw new Error("WebGL path but three chunk was never fetched");
+          if (page._pageErrors.length) throw new Error("Page errors on WebGL entry: " + page._pageErrors.join("; "));
+          process.stdout.write(`    (ran WebGL branch — three chunk fetched: ${threeRequests.join(", ")})\n`);
+        } else {
+          // Fallback path.
+          if (!state.fallback) throw new Error("WebGL unavailable but preview--fallback not set");
+          if (!state.isoVisible) throw new Error("Fallback path but #iso not visible");
+          if (!state.toastVisible || !/3D unavailable/i.test(state.toastText)) {
+            throw new Error("Fallback path but the '3D unavailable' toast was not shown: " + JSON.stringify(state.toastText));
+          }
+          process.stdout.write(`    (ran fallback branch — no GL context in this Chromium)\n`);
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 3: forced fallback — WebGL unavailable → 2.5D #iso + toast, no error ─
+  await runPreviewTest(
+    "forced WebGL-unavailable → 2.5D #iso group shows with preview--fallback + toast",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser, { forceNoWebgl: true });
+      try {
+        // Confirm the gate really reports unavailable with the getContext patch.
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (webglOK) throw new Error("forceNoWebgl patch failed — webglAvailable() still true");
+
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 600));
+
+        const state = await page.evaluate(() => {
+          const stage = document.getElementById("stage");
+          const iso = document.getElementById("iso");
+          const toast = document.getElementById("toast");
+          return {
+            fallback: stage?.classList.contains("preview--fallback"),
+            isoVisible: iso && getComputedStyle(iso).display !== "none",
+            isoPolys: iso ? iso.querySelectorAll("polygon").length : 0,
+            toastVisible: toast?.classList.contains("toast--visible"),
+            toastText: toast?.textContent || "",
+          };
+        });
+
+        if (!state.fallback) throw new Error("preview--fallback class not set on forced-no-WebGL path");
+        if (!state.isoVisible) throw new Error("#iso not visible on fallback path");
+        if (state.isoPolys === 0) throw new Error("#iso has no polygons — 2.5D painter did not run");
+        if (!state.toastVisible || !/3D unavailable/i.test(state.toastText)) {
+          throw new Error("'3D unavailable' toast not shown on fallback: " + JSON.stringify(state.toastText));
+        }
+        if (page._pageErrors.length) throw new Error("Page errors on fallback entry: " + page._pageErrors.join("; "));
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 4: teardown / context-reuse probe ──────────────────────────────────
+  // Toggle preview on→off N cycles; after each exit() the plan group must be
+  // fully disposed (__liveGeometryCount === 0), and the renderer/context must be
+  // reused, not recreated (__hasRenderer stays true). This is the leak/reuse
+  // guard the probe hooks exist for. WebGL-only (skips cleanly on no-GL CI).
+  await runPreviewTest(
+    "teardown: N on/off cycles leave 0 live geometries and reuse the WebGL renderer",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (!webglOK) {
+          process.stdout.write(`    (skipped — no GL context; teardown probe needs a real renderer)\n`);
+          return;
+        }
+
+        const counts = [];
+        for (let i = 0; i < 3; i++) {
+          await page.click("#tool-preview");               // ON
+          await new Promise(r => setTimeout(r, 900));       // lazy import (1st) + build
+          const live = await page.evaluate(() => window.__render3d.__liveGeometryCount());
+          await page.click("#tool-preview");               // OFF
+          await new Promise(r => setTimeout(r, 250));
+          const afterExit = await page.evaluate(() => ({
+            live: window.__render3d.__liveGeometryCount(),
+            hasRenderer: window.__render3d.__hasRenderer(),
+          }));
+          counts.push({ cycle: i, liveWhileOn: live, ...afterExit });
+        }
+
+        for (const c of counts) {
+          if (!(c.liveWhileOn > 0)) throw new Error(`cycle ${c.cycle}: expected live geometries while preview ON, got ${c.liveWhileOn}`);
+          if (c.live !== 0) throw new Error(`cycle ${c.cycle}: geometry leak — ${c.live} live after exit()`);
+          if (!c.hasRenderer) throw new Error(`cycle ${c.cycle}: renderer was destroyed (should be reused for cheap re-entry)`);
+        }
+        if (page._pageErrors.length) throw new Error("Page errors during teardown cycles: " + page._pageErrors.join("; "));
+        process.stdout.write(`    (ran WebGL teardown probe over ${counts.length} cycles — no leak, renderer reused)\n`);
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 5: read-only — 3D orbit/zoom must NOT mutate the persisted 2D view ──
+  // QA BLOCKING bug: #stage3d is a CHILD of #stage, so an OrbitControls drag +
+  // wheel bubble to the stage's own pan/zoom listeners and mutate the persisted
+  // view.{zoom,panX,panY} (survives reload). Assert the view is byte-identical
+  // before/after a real drag + wheel gesture on the canvas during preview.
+  await runPreviewTest(
+    "read-only: drag + wheel over #stage3d during preview does not mutate view.{zoom,panX,panY}",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+
+        const before = await page.evaluate(() => {
+          const s = window.__testState();
+          return { zoom: s.zoom, panX: s.panX, panY: s.panY };
+        });
+
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, webglOK ? 1200 : 400));
+
+        // Real bubbling gestures on the canvas: a left-drag (pan) + a wheel (zoom).
+        const box = await page.evaluate(() => {
+          const c = document.getElementById("stage3d");
+          const r = c.getBoundingClientRect();
+          return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+        });
+        await page.mouse.move(box.cx, box.cy);
+        await page.mouse.down();
+        await page.mouse.move(box.cx + 120, box.cy + 90, { steps: 8 });
+        await page.mouse.move(box.cx - 60, box.cy + 30, { steps: 4 });
+        await page.mouse.up();
+        await page.mouse.wheel(0, -400); // zoom gesture
+        await page.mouse.wheel(0, 250);
+        await new Promise(r => setTimeout(r, 300));
+
+        const after = await page.evaluate(() => {
+          const s = window.__testState();
+          return { zoom: s.zoom, panX: s.panX, panY: s.panY };
+        });
+
+        if (before.zoom !== after.zoom || before.panX !== after.panX || before.panY !== after.panY) {
+          throw new Error(
+            `preview orbit/zoom mutated the 2D view: before=${JSON.stringify(before)} after=${JSON.stringify(after)}`
+          );
+        }
+        if (page._pageErrors.length) throw new Error("Page errors during view read-only test: " + page._pageErrors.join("; "));
+        process.stdout.write(`    (${webglOK ? "WebGL" : "fallback"} branch — view unchanged after drag+wheel)\n`);
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 6: read-only — W×H "Set" is inert during preview (no wall mutation) ─
+  // QA BLOCKING bug: the .measure W×H editor is a SIBLING of #stage, so it stays
+  // interactive during preview; typing a width + Set resized real room verts.
+  // Select the rectangular room (W×H editor appears), enter preview, attempt to
+  // set W, exit, and assert the room verts are byte-identical.
+  await runPreviewTest(
+    "read-only: W×H Set during preview does not resize room verts",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        // Select the room so the W×H editor renders. Click an EMPTY corner of the
+        // 4×3 room — world (0.5,0.5) → px (20,20) at zoom=1, pan=0 — not the room
+        // centre, which is occupied by the sofa (spans x∈[1,3], y∈[1.05,1.95]).
+        await page.click("#tool-select");
+        await page.click("#stage", { position: { x: 20, y: 20 } });
+        await page.waitForSelector(".measure-wxh:not([hidden])", { timeout: 5000 });
+
+        const before = await page.evaluate(() => window.__testState().rooms);
+
+        // Enter preview, then attempt the W×H mutation via the real DOM controls.
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 800));
+
+        // The CSS hides the block in preview; force-drive the fields regardless so
+        // the JS guard on _applyWxH() is what's under test (not just the CSS).
+        await page.evaluate(() => {
+          const w = document.querySelector(".measure-wxh-w");
+          const apply = document.querySelector(".measure-wxh-apply");
+          if (w) { w.value = "9"; w.dispatchEvent(new Event("input", { bubbles: true })); }
+          if (apply) apply.click();
+        });
+        await new Promise(r => setTimeout(r, 300));
+
+        const after = await page.evaluate(() => window.__testState().rooms);
+
+        if (JSON.stringify(before) !== JSON.stringify(after)) {
+          throw new Error(
+            `W×H Set during preview resized room verts: before=${JSON.stringify(before)} after=${JSON.stringify(after)}`
+          );
+        }
+        if (page._pageErrors.length) throw new Error("Page errors during W×H read-only test: " + page._pageErrors.join("; "));
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const server = await serve();
@@ -376,9 +724,23 @@ process.stdout.write(`${intIcon}  ${integrationPassed}/${integrationTotal} integ
 if (integrationFailures.length > 0) process.stdout.write(` (${integrationFailures.length} failed)\n`);
 else process.stdout.write("\n");
 
+// ── Run integration tests (LLD 130 3D preview) ───────────────────────────────
+await runPreview3dIntegrationTests(browser);
+
+const prevIcon = previewFailures.length === 0 ? "PASS" : "FAIL";
+process.stdout.write(`${prevIcon}  ${previewPassed}/${previewTotal} preview integration tests passed`);
+if (previewFailures.length > 0) process.stdout.write(` (${previewFailures.length} failed)\n`);
+else process.stdout.write("\n");
+
+if (previewFailures.length > 0) {
+  for (const f of previewFailures) {
+    process.stderr.write(`  - ${f.suite}\n      ${f.name}\n      ${f.error}\n`);
+  }
+}
+
 // ── Teardown ──────────────────────────────────────────────────────────────────
 await browser.close();
 server.close();
 
-const anyFailed = failed > 0 || integrationFailures.length > 0;
+const anyFailed = failed > 0 || integrationFailures.length > 0 || previewFailures.length > 0;
 if (anyFailed) process.exit(1);

@@ -18,7 +18,7 @@
 
 import { chromium } from "playwright";
 import { createServer } from "http";
-import { readFile } from "fs/promises";
+import { readFile, readdir } from "fs/promises";
 import { existsSync } from "fs";
 import { extname, join } from "path";
 import { fileURLToPath } from "url";
@@ -56,6 +56,34 @@ if (!assetRef) {
 // Vite content-hashes emitted chunks: assets/<name>-<hash>.<ext>
 if (!/assets\/[^"]*-[A-Za-z0-9_-]{8,}\.(?:js|css)/.test(assetRef[0])) {
   fail(`bundled asset is not content-hashed (${assetRef[0]}) — unexpected build output.`);
+}
+
+// ── Check 2b: three.js is lazy-loaded, NOT in the eager entry graph (LLD 130) ──
+// three.js (~150 KB gz) must land in a SEPARATE lazy chunk that is dynamically
+// import()-ed on first preview entry, never fetched on the default editor load.
+// We detect the three chunk by a three-internal token the app code never uses
+// (BufferGeometry), then assert (a) it exists in a distinct assets/ chunk and
+// (b) the entry HTML's eager <script>/modulepreload set does NOT include it.
+const ASSETS_DIR = join(ROOT_DIR, "dist", "assets");
+const THREE_TOKEN = "BufferGeometry"; // three-internal class; app code never references it
+const jsFiles = (await readdir(ASSETS_DIR)).filter((f) => f.endsWith(".js"));
+const threeChunks = [];
+for (const f of jsFiles) {
+  const src = await readFile(join(ASSETS_DIR, f), "utf8");
+  if (src.includes(THREE_TOKEN)) threeChunks.push(f);
+}
+if (threeChunks.length === 0) {
+  fail(`no lazy three chunk found (no assets/*.js contains ${THREE_TOKEN}) — three may not be bundled, or the marker changed.`);
+}
+if (threeChunks.length > 1) {
+  fail(`three appears in multiple chunks (${threeChunks.join(", ")}) — expected a single lazy chunk.`);
+}
+// The entry HTML's eager module graph = its <script src> + any <link rel=modulepreload>.
+const eagerRefs = html.match(/(?:src|href)="\.?\/?assets\/[^"]+\.js"/g) || [];
+for (const chunk of threeChunks) {
+  if (eagerRefs.some((ref) => ref.includes(chunk))) {
+    fail(`three chunk ${chunk} is eagerly referenced by dist/index.html — it must load only via dynamic import() on preview entry.`);
+  }
 }
 
 // ── Check 3: built page boots headless with zero errors ───────────────────────
@@ -98,4 +126,4 @@ if (errors.length > 0) fail(`built page logged ${errors.length} error(s):\n  ${e
 if (!hasStage) fail(`built page missing #stage — app did not render.`);
 if (!hasTools) fail(`built page missing #tool-select — app did not render.`);
 
-process.stdout.write(`PASS  build smoke: dist/ boots clean, hashed bundle ${assetRef[0]}\n`);
+process.stdout.write(`PASS  build smoke: dist/ boots clean, hashed bundle ${assetRef[0]}, three lazy-chunked (${threeChunks[0]})\n`);
