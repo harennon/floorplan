@@ -1,0 +1,450 @@
+# LLD 130: Per-room preview scoping + door/window opening height fidelity
+
+Parent: #101 · Order 2 of 4 · Effort: medium · Depends on: LLD 128 (whole-plan 2.5D preview)
+
+## Scope
+
+The second increment of the 3D-preview feature (#101). It layers **fidelity + scoping**
+on top of the shipped whole-plan renderer (LLD 128, `isoRender.js`), **without rewriting
+it**. Two paired deliverables land together (no dead data):
+
+**In scope**
+
+1. **Opening height fidelity (data + renderer, paired):**
+   - Add optional **`sill`/`head`** height fields (metres from floor) to the `door`/`window`
+     `CATALOG` entries in `symbols.js` — e.g. door `sill:0`, `head:2.03`; window `sill:0.9`,
+     `head:2.1`. Existing `z` (leaf height) stays; `sill`/`head` are additive.
+   - Render doors/windows as **recessed dark reveals** cut into the extruded wall at the
+     correct vertical band (`sill`→`head`), consumed in the *same* increment. The opening
+     is no longer a flush colored panel (LLD 128 §Edge Case 5) but reads as a wall-with-a-hole.
+
+2. **Per-room preview scoping:**
+   - A **top-center segmented scope pill** lets the user preview one room's extruded volume
+     (with its openings + contained furniture) instead of the whole plan. "All" remains the
+     default and preserves the LLD 128 whole-plan behaviour exactly.
+   - Scoping is a **projection filter over existing geometry** — the 2D `walls.model` /
+     `symbols.model` stay the single source of truth. No state fork, no per-room duplication.
+
+3. **Preview polish:**
+   - Sensible framing on entering preview / switching scope (reuse `view.fitToContent`).
+   - A clear **empty state** (previewing a room with no walls, or an empty plan).
+
+**Explicitly OUT of scope (guards)**
+
+- Still extruded colored boxes + flat 3-shade faces only. NO textures, materials, lighting,
+  shadows, gradients-as-lighting, 3D models, orbit/first-person camera, or camera rotation
+  UI. (Orbit camera is #124, gated; lighting is #112 — do NOT pull either in.)
+- Still read-only; the 2D editor remains the single source of truth.
+- NO new runtime dependency and NO build-step change.
+- Preview still does NOT appear in PNG/SVG export or the share link (that is a separate
+  follow-up, #123 — this ships *before* it).
+- NO per-room ceiling override (single `CEILING_M` still governs wall height).
+
+## Approach
+
+Everything below is **additive to the shipped `isoRender.js`** — no renderer rewrite. The
+two new behaviours plug into the existing `buildItems` → `depthSort` → `render` pipeline.
+
+### 1. Opening height data on the catalog (additive, like `z`)
+
+Add two optional constants to the `door`/`window` `CATALOG` entries — same "type constant,
+not plan data" pattern LLD 128 used for `z`, so back-compat stays a non-event:
+
+| type | `sill` (m) | `head` (m) |
+|---|---|---|
+| door | 0 | 2.03 |
+| window | 0.9 | 2.1 |
+
+`z` (existing leaf height) is left in place for compatibility but is **superseded for
+openings** by `[sill, head]` in the renderer. Fields are optional in the typedef; the
+renderer defaults absent values (`sill ?? 0`, `head ?? cat.z`) so a future opening type
+that omits them still renders.
+
+### 2. Opening treatment — recessed dark reveal (not a boolean cut)
+
+Frontend decision **B(a)**: an opening is painted as a **recessed dark reveal** over its
+wall, not as a see-through gap (a true gap risks reading as a dropped polygon). We do **no**
+2D polygon boolean subtraction — the wall box is still drawn full-height; the reveal is a
+second item painted **on top of** the wall, spanning only the `[sill, head]` z-band, in a
+dark recess color. The wall above a door (lintel) and above/below a window (spandrel/sill
+wall) stay visible because the wall box underneath is untouched — so it reads as
+wall-with-an-opening.
+
+Mechanically, in `buildItems` an `openings`-category symbol becomes
+`kind:"opening"` (instead of a normal furniture box):
+
+- `z0 = cat.sill ?? 0`, `z1 = cat.head ?? cat.z`.
+- `baseColor` = an **opaque dark recess color** derived from the theme (a heavily-darkened
+  neutral, e.g. `shade(wallBase, 0.4)` composited opaque), NOT the `openings` category color.
+- `sortKey = centroid(wx+wy) + OPENING_BIAS` where `OPENING_BIAS` is a tiny positive value
+  (e.g. `1e-3`). The opening footprint's centroid sits on the wall centerline, so its raw
+  depth ties the wall; the bias guarantees the reveal paints **just after** (over) its wall
+  in `depthSort`.
+
+`render` handles `kind:"opening"` by calling the **existing** `extrudeFootprint(footprint,
+sill, head)` and filling its faces with recess shades (top/left/right darkened further than
+a normal box). No new geometry primitive. This reuses the shipped extrusion + painter path.
+
+> The per-object centroid sort limitation from LLD 128 §4 still applies; the bias only fixes
+> the opening-vs-its-own-wall tie, which is the case the cutout test asserts.
+
+### 3. Per-room scoping — a projection filter, not a state fork
+
+Scope is session-only state in `preview.js`: `_scope` is `"all"` (default) or a `room.id`.
+A pure `scopeFilter(wallsModel, symbolsModel, scopeId)` returns a **filtered view**
+`{ rooms, symbols }` that `render` feeds into the *existing* floor-slab loop and
+`buildItems`. The live models are never mutated or copied per-room.
+
+- `scopeId === "all"` → pass the models through unchanged (exact LLD 128 behaviour).
+- otherwise → `rooms` = the single closed room whose `id === scopeId` (empty if none);
+  `symbols` = the symbols that belong to that room:
+  - **furniture / rug** — included when its center `(sym.x, sym.y)` is inside the room
+    polygon (new pure `pointInRoom` helper in `walls.js`, standard ray-cast).
+  - **openings** — sit on the boundary, so included when near one of the room's walls via
+    the existing `walls.pointNearRoomWall(room, x, y, tol)` (tol ≈ `WALL_M`).
+
+`buildItems` and the floor-slab loop are refactored minimally to accept the filtered
+`{rooms}` / `{symbols}` arrays rather than reading `wallsModel.rooms` / `symbolsModel.symbols`
+directly — a one-line indirection so scoping is a filter, not a branch inside the builder.
+
+### 4. Framing + empty state
+
+- **Framing:** on entering preview and on every scope change, `main.js` computes the
+  **folded-world AABB** of the in-scope geometry (a pure `isoBounds(items)` helper that folds
+  each footprint corner at z0 and z1 via the iso projection math, without pan/zoom) and calls
+  the existing `view.fitToContent(bounds, W, H)`. Because `worldToScreenIso` feeds *folded*
+  coordinates through `worldToScreen`, fitting to folded bounds frames the iso scene
+  correctly and reuses the shipped fit logic. Returning to "All" reframes to the whole plan.
+- **Empty state:** when the in-scope filter yields no wall geometry (empty plan, or a scope
+  that no longer resolves to a closed room), `render` appends a single centered SVG `<text>`
+  hint (e.g. "No walls to preview") to `#iso` and returns. No crash, no boxes.
+
+### 5. Scope integrity guards
+
+- Scope resets to `"all"` whenever preview is turned **off**, and on load.
+- If `_scope` points at a room id that no longer exists / is no longer closed (deleted,
+  un-closed), `render`/the pill rebuild treat it as `"all"` (fail-safe), so a stale scope
+  never blanks the preview.
+
+## Frontend Design
+
+Both decisions are execution calls on the visual language already set by LLD 128 / #121 — no
+new brand decision. Settled: **A(a) top-center scope pill + B(a) recessed dark reveal.**
+
+### A. Scope switcher — top-center segmented pill
+
+- A **segmented pill** (`#preview-scope`) shown only while preview is active, positioned
+  **top-center** of the stage (consistent with the view-mode chrome established in #121).
+  Hidden entirely in 2D mode (same `.stage--preview` gating already used for other overlays).
+- One segment per **closed room** plus a leading **"All"** segment. Each room segment shows
+  the room's name/index and its **area label**, e.g. `All | Bedroom 12.2 m² | Living/Kitchen
+  22.3 m²`. Area comes from `walls.roomMetrics(room).area` formatted with `units.fmtArea` +
+  `areaUnitLabel()`; rooms have no name field today, so label = `Room N` by index (1-based,
+  in `model.rooms` order) — keep it that simple, no new name state.
+- The active segment uses the same solid-gold `aria-pressed="true"` treatment as the tool
+  rail buttons. The whole control is a `role="group"` of buttons; each segment is a
+  `<button aria-pressed>` with `aria-label="Preview {label}"`.
+- **Overflow:** with the typical handful of rooms this fits comfortably. The pill is
+  horizontally scrollable (`overflow-x:auto`, momentum scroll) for the rare ~6+ room case —
+  no truncation, no dropdown. This is the accepted tradeoff from the decision.
+- The pill is **rebuilt** each time preview is entered and whenever the room set changes
+  while active (rooms can only change via the 2D editor, which is suppressed in preview, so
+  in practice it is built once per preview session).
+
+### B. Opening treatment — recessed dark reveal
+
+- Doors/windows render as a **recessed dark reveal** at the correct `[sill, head]` band (see
+  Approach §2). A window shows wall below the sill and above the head; a door shows the
+  lintel wall above it — so the opening reads unambiguously as intentional, never as a
+  missing polygon.
+- Recess color is a theme-derived opaque dark neutral so it reads as shadow/depth in both
+  light and dark themes. No lighting model — just precomputed darker flat shades, exactly
+  like the existing 3-shade boxes.
+
+### Interaction contract (extends LLD 128)
+
+- Clicking a scope segment sets `preview.setScope(id)`, refits the view, and re-renders. The
+  `P`/`Esc`/tool-suppression behaviour from LLD 128 is unchanged.
+- Entering preview builds the pill and frames the whole plan (scope defaults to "All").
+- Exiting preview hides the pill and resets scope to "All".
+- No new keyboard shortcut for scope (mouse/touch on the pill only) — keeps the shortcut
+  surface unchanged.
+
+Reference mockup (behaviour only): boots into preview, `P` toggles —
+`https://harennon.github.io/floorplan/per-room-preview-opening-height-fidelity.html`
+
+## Interfaces / Types
+
+### `symbols.js` — catalog opening-height fields
+
+`door` and `window` `CATALOG` entries gain optional `sill`/`head` (metres). Typedef extended:
+
+```js
+/** @type {Record<SymbolType, { ...existing..., z:number, sill?:number, head?:number }>} */
+// door:   { ..., z: 2.03, sill: 0,   head: 2.03 }
+// window: { ..., z: 1.20, sill: 0.9, head: 2.10 }
+```
+
+No change to the `Sym` instance shape, `createSymbol`, `resizeSymbol`, or `corners()`.
+
+### `walls.js` — pure point-in-room helper (new)
+
+```js
+/**
+ * Ray-cast point-in-polygon test against a room's verts (world metres).
+ * Returns false for open / <3-vert rooms. Pure.
+ * @param {Room} room
+ * @param {number} x
+ * @param {number} y
+ * @returns {boolean}
+ */
+export function pointInRoom(room, x, y);
+```
+
+(`pointNearRoomWall` already exists — reused for opening containment.)
+
+### `preview.js` — add scope state (session-only)
+
+Extends the shipped module; existing `isActive`/`setActive`/`toggle`/`onChange` unchanged.
+
+```js
+/** @returns {"all"|string} current scope: "all" or a room id */
+export function getScope();
+/** @param {"all"|string} scopeId  set scope; fires onChange if changed */
+export function setScope(scopeId);
+```
+
+`setActive(false)` / `toggle()`-to-off must reset `_scope = "all"`. `_scope` is NOT persisted
+(transient, like `_active`).
+
+### `isoRender.js` — additive changes (NO rewrite)
+
+```js
+/** Tiny sort bias so an opening reveal paints just over its own wall. */
+const OPENING_BIAS = 1e-3;
+
+/**
+ * Filter live models to the in-scope subset. Pure.
+ * "all" → the models unchanged. A room id → that closed room + the symbols
+ * belonging to it (furniture/rug by center-in-room; openings by near-wall).
+ * @returns {{ rooms: Room[], symbols: Sym[] }}
+ */
+export function scopeFilter(wallsModel, symbolsModel, scopeId);
+
+/**
+ * Folded-world AABB of the in-scope geometry for framing (pure, no pan/zoom).
+ * Folds each footprint corner at z0 and z1 with the iso math and returns
+ * { minX, minY, maxX, maxY } in folded-world metres for view.fitToContent.
+ * @returns {{minX,minY,maxX,maxY}|null}  null when empty
+ */
+export function isoBounds(scopedRooms, scopedSymbols);
+```
+
+`buildItems` signature changes to accept the **filtered arrays** rather than reading the
+models directly:
+
+```js
+// before: buildItems(wallsModel, symbolsModel)
+// after:  buildItems(rooms, symbols)   // rooms: Room[]; symbols: Sym[]
+```
+
+Inside `buildItems`, `openings`-category symbols now emit `kind:"opening"` with
+`z0=cat.sill ?? 0`, `z1=cat.head ?? cat.z`, the dark recess `baseColor`, and
+`sortKey = centroid + OPENING_BIAS`. `render` gains a `case "opening"` that extrudes
+`[sill,head]` and fills with recess shades; the wall box beneath is unchanged.
+
+`render` computes `const { rooms, symbols } = scopeFilter(_wallsMod.model, _symbolsMod.model,
+getScope())`, draws floor slabs from `rooms`, boxes from `buildItems(rooms, symbols)`, and the
+empty-state `<text>` when `rooms` has no drawable geometry. A new `getScope` getter is passed
+into `initIsoRender`.
+
+### `main.js` wiring (mirrors LLD 128 preview wiring)
+
+- Pass `preview.getScope` into `initIsoRender(gIso, previewIsActive, previewGetScope,
+  _wallsModRef, _symbolsModRef)`.
+- Build/refresh the scope pill in `_syncPreview()` when preview turns on; clear it when off.
+- Pill segment click → `preview.setScope(id)` → refit via `isoBounds` + `view.fitToContent`
+  → `scheduleRender()`.
+- On preview enter (and on scope change) call the refit helper.
+
+### `index.html`
+
+- New top-center `<div id="preview-scope" role="group" aria-label="Preview scope"></div>`
+  (segments built by `main.js`), gated visible only under `.stage--preview`.
+- CSS: pill container (top-center, scrollable), segment button + active `aria-pressed` style
+  reusing tool-rail tokens; recess color custom property if theme-driven.
+
+### `help.js`
+
+No change — no new keyboard shortcut is added this cut.
+
+## State Model
+
+### Persisted plan state — back-compat (critical, same win as LLD 128)
+
+The only new persisted-surface change is `sill`/`head` on the **catalog** (`CATALOG.door`,
+`CATALOG.window`), which is **code, not plan data**. The serialized plan shape
+(`walls`, `symbols[].{id,type,x,y,w,h,rot,color?}`, `measurements`, `view`, `unit`) is
+**unchanged**. Consequently:
+
+- **localStorage / JSON export (`buildPlan`/`validatePlan`/`serializePlan`):** no schema
+  change, no `PLAN_SCHEMA` bump, no new `validatePlan` normalisation. Old and new plans
+  validate byte-identically.
+- **Share hash (`buildCompact`/`parseCompact`):** unchanged. `sill`/`head` are never written
+  or read; the existing "omit `w`/`h` at catalog default" logic is untouched.
+- **Old plans (no `sill`/`head` anywhere — they never had it):** resolve opening heights from
+  the catalog at render time. This satisfies the "old plans load on defaults, optional-additive"
+  acceptance criterion trivially, in the strongest form (the new fields live on the catalog
+  definition, so absent data resolves to the default by construction).
+
+This mirrors LLD 128 exactly: because heights are type constants, **no serialization path
+changes**. The acceptance criterion "new opening-height fields round-trip through
+localStorage, share hash, and JSON export with old plans loading on defaults" is met because
+there is nothing new to serialize — a round-trip test asserts the symbol shape stays free of
+`sill`/`head`.
+
+### Session-only view state
+
+- `preview._active` — existing (LLD 128), transient, reset on load.
+- `preview._scope` — **new**, `"all" | <roomId>`, transient. Reset to `"all"` on preview-off
+  and on load. Never serialized.
+- The scope pill DOM + `.stage--preview` gating are derived from these; no other new state.
+
+### In-memory vs computed (per render)
+
+- **Source of truth:** `walls.model`, `symbols.model` — never mutated or forked by scoping.
+- **Computed each `render()`:** `scopeFilter` result (`{rooms, symbols}`), the item list
+  (incl. `kind:"opening"` items), depth sort, projected faces, and recess/box shades. The
+  framing AABB (`isoBounds`) is computed on preview-enter and scope-change only. No cached 3D
+  state; preview is a pure function of the current plan + scope + camera constants + view.
+
+## Edge Cases
+
+1. **Old plan with no `sill`/`head`.** By construction there is no per-instance opening
+   height; the renderer resolves `[cat.sill ?? 0, cat.head ?? cat.z]`. No migration.
+2. **Opening on a wall not part of any closed room** (e.g. a door dropped on an open
+   polyline). In "All" it renders on nothing behind it (LLD 128 already omits open walls) —
+   the reveal box just floats at its band; acceptable and rare. In a room scope it is
+   excluded unless `pointNearRoomWall` matches a wall of the scoped room.
+3. **Window sill above floor / head below ceiling.** The wall box is full-height
+   (`0..CEILING_M`); the reveal spans only `[sill, head]`, so the spandrel wall above and
+   the sill wall below stay painted. This is the intended "reads as a window" behaviour.
+4. **Door head above the wall / opening taller than `CEILING_M`.** Reveal is clamped for
+   drawing to `min(head, CEILING_M)` so it never pokes above the wall top (openings are in
+   walls). Furniture is NOT clamped (LLD 128 §Edge Case 8 unchanged).
+5. **Scope = room with no walls / empty plan.** `scopeFilter` returns empty `rooms`; `render`
+   draws the empty-state `<text>` hint and no boxes. No crash.
+6. **Stale scope id** (scoped room deleted or un-closed via 2D then re-entering preview, or a
+   loaded plan). `scopeFilter`/pill treat an unresolved id as `"all"` (fail-safe); the pill
+   rebuild drops the missing segment.
+7. **Furniture straddling two rooms / on a shared wall.** Assigned by **center point**
+   (`pointInRoom(sym.x, sym.y)`) — a single deterministic owner; a piece whose center is
+   outside all rooms appears only in "All". Documented, simple.
+8. **Rug spanning a room boundary.** Same center-point rule; a rug centered in the scoped
+   room is included and still drawn as a flat decal (LLD 128 §Edge Case 4 unchanged).
+9. **Rotated opening.** `corners(sym)` already returns the rotated footprint; the reveal
+   extrudes those rotated corners exactly like a normal box (LLD 128 §Edge Case 6).
+10. **Single-room plan.** Pill shows `All | Room 1`; both frame the same geometry — harmless
+    and consistent, no special-casing.
+11. **Theme switch while previewing.** Recess + box shades derive from the live palette at
+    render time, so `onThemeChange` → `scheduleRender()` re-derives them (LLD 128 §Edge Case 13).
+12. **Zoom/pan while scoped.** Framing is applied once on scope change; subsequent manual
+    zoom/pan works through `worldToScreenIso`'s reuse of `worldToScreen` exactly as in LLD 128
+    — no separate camera state.
+13. **Opening depth-sort vs its wall.** `OPENING_BIAS` guarantees the reveal paints just after
+    its co-centroid wall; the general long-wall mis-order limitation (LLD 128 §4) is unchanged
+    and not addressed here.
+
+## Dependencies
+
+**Hard dependency: LLD 128 must be shipped** (whole-plan `isoRender.js`, `preview.js`,
+`view.worldToScreenIso`, the `#iso` group, `#tool-preview`, `.stage--preview`). This LLD is
+strictly additive on that base — no rewrite. No new runtime dependency, no build-step change.
+
+- **`symbols.js`** — add `sill`/`head` to `door`/`window` `CATALOG`; `corners()` reused for
+  opening footprints; `openings` category flag used to route `kind:"opening"`.
+- **`walls.js`** — **new** `pointInRoom(room,x,y)`; existing `pointNearRoomWall`,
+  `roomMetrics`, `WALL_M`, `model.rooms` (ids), `roomCentroids`/geometry reused.
+- **`isoRender.js`** — extend: `scopeFilter`, `isoBounds`, `kind:"opening"` in `buildItems` +
+  `render`, `buildItems(rooms, symbols)` signature, `getScope` in `initIsoRender`. Reuse
+  `extrudeFootprint`, `depthSort`, `shade`, `toOpaqueRgb`, `CATEGORY_BASE`.
+- **`preview.js`** — add `getScope`/`setScope` + scope reset on off.
+- **`view.js`** — reuse `worldToScreenIso`, `fitToContent`, `W`/`H`; NO new export.
+- **`units.js`** — `fmtArea`, `areaUnitLabel` for pill labels.
+- **`main.js`** — pass `getScope` to `initIsoRender`; build/refresh scope pill; wire segment
+  clicks + refit; reset scope on preview off.
+- **`index.html`** — `#preview-scope` container + CSS (top-center, scrollable, active state,
+  recess color).
+- **`plan.js`** — referenced only to confirm NO change (back-compat non-event).
+- **`help.js`** — no change (no new shortcut).
+
+Independent of #123 (export/share inclusion — this ships before it), #124 (orbit camera,
+gated), and #112 (lighting — explicitly not pulled in).
+
+## Test Requirements
+
+Added to `test/tests.html` in the existing `describe`/`it`/`expect` harness. Pure functions
+tested directly; SVG-structural tests follow the LLD 61 / 128 render pattern (detached `#iso`
+group, call `render()`, assert on child polygons).
+
+### Unit — opening height data
+
+- `CATALOG.door` and `CATALOG.window` have finite `sill`/`head` with `0 <= sill < head`.
+- `createSymbol("door", …)` output is unchanged (no `sill`/`head`/`z` on the instance) — the
+  instance shape did not grow.
+
+### Unit — scope filter (pure)
+
+- `scopeFilter(walls, symbols, "all")` returns the models' rooms/symbols unchanged.
+- `scopeFilter(..., roomId)` returns only that closed room and only the symbols whose center
+  is inside it (furniture) or near its walls (openings). A symbol in another room is excluded.
+- Unknown/stale `roomId` → behaves as `"all"` (fail-safe).
+- `pointInRoom` — true for a point inside a rectangular room, false outside and for open/
+  <3-vert rooms.
+
+### Unit — item build (openings)
+
+- `buildItems([room],[door])` emits the door as `kind:"opening"` with `z0=sill`, `z1=head`
+  (from catalog), not a normal furniture box.
+- Opening `baseColor` is opaque and darker than the `openings` category color (recess).
+- Opening `sortKey` exceeds its co-located wall's key (bias applied) so it sorts after.
+- Non-opening furniture still builds as before (regression guard on the refactored signature).
+
+### SVG-structural — renderer (LLD 61/128 pattern)
+
+- **Scoping:** a two-room plan rendered with scope = room A yields `#iso` polygons for only
+  room A's walls/floor/contents; room B's geometry is absent. Scope = "all" yields both
+  (regression: matches LLD 128 whole-plan output).
+- **Cutout geometry / height band:** a wall with a window produces a recess reveal whose
+  projected polygon occupies the expected **vertical band** — assert the reveal's top-face
+  vertices project higher (smaller screen y) than its bottom-face vertices, and that the band
+  corresponds to `[sill, head]` (e.g. reveal bottom is above the wall base because
+  `sill > 0`). Assert the reveal paints **after** its wall in child order.
+- **Door band:** a door reveal's bottom sits at the floor (`sill = 0`) and its top below the
+  wall top (`head < CEILING_M`) — the lintel wall remains painted above it.
+- **Empty state:** scope with no walls (or empty plan) renders the `<text>` hint and no box
+  polygons.
+- **Whole-plan unaffected:** preview OFF leaves `#iso` empty; "All" scope reproduces the
+  LLD 128 face counts (no regression).
+
+### Integration — back-compat round-trip (acceptance)
+
+- A plan saved before this change validates via `validatePlan` and previews using catalog
+  opening heights (no error).
+- Round-trip through all three transports (`buildPlan`/`serializePlan`,
+  `buildCompact`/`parseCompact`/`validatePlan`, localStorage write/read) produces a plan whose
+  symbol shape is unchanged — no `sill`/`head` leaked into serialization.
+
+### Behavioral — scope state / read-only
+
+- `preview.setScope(id)` flips `getScope()` and fires `onChange`; turning preview off resets
+  scope to `"all"`.
+- Entering preview + switching scope + exiting leaves `walls.model` and `symbols.model` deeply
+  equal to their pre-toggle snapshots (no mutation — scoping is a filter).
+- The 2D editing path and the LLD 128 whole-plan preview are unaffected (existing tests still
+  pass).
+
+### Not tested (out of scope)
+
+Export/share inclusion of the preview (#123), orbit camera (#124), lighting (#112), per-room
+ceiling override.
