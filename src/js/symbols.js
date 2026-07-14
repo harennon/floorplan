@@ -57,17 +57,22 @@ export const model = { symbols: /** @type {Sym[]} */ ([]) };
  * (IKEA, West Elm, Article, CB2; GE/Samsung/LG/Whirlpool; ISPA mattress sizes;
  * DIN/US door leaves) so the catalog only offers furniture that actually exists.
  *
+ * `z` (metres) is the extrusion height used by the isometric preview renderer
+ * (LLD 128). It is a type constant — not a per-instance field — so old plans
+ * that lack a per-instance `z` resolve height from the catalog at render time.
+ *
  * @type {Record<SymbolType, {label:string, category:SymCategory,
  *   openings?:boolean, circular?:boolean, discrete?:boolean, floorLayer?:boolean,
  *   w:number, h:number,
  *   min_w:number, max_w:number, min_h:number, max_h:number,
+ *   z:number,
  *   presets?:SymPreset[]}>}
  */
 export const CATALOG = {
   // Openings — width-only; depth pinned to the thin wall marker (min_h===max_h===h).
   door: {
     label: "Door", category: "openings", openings: true, w: 0.81, h: 0.12,
-    min_w: 0.61, max_w: 0.91, min_h: 0.12, max_h: 0.12,
+    min_w: 0.61, max_w: 0.91, min_h: 0.12, max_h: 0.12, z: 2.03,
     presets: [
       { name: "Closet 24\"",   w: 0.61, h: 0.12 },
       { name: "Bath 28\"",     w: 0.71, h: 0.12 },
@@ -79,7 +84,7 @@ export const CATALOG = {
   },
   window: {
     label: "Window", category: "openings", openings: true, w: 0.91, h: 0.12,
-    min_w: 0.61, max_w: 2.44, min_h: 0.12, max_h: 0.12,
+    min_w: 0.61, max_w: 2.44, min_h: 0.12, max_h: 0.12, z: 1.20,
     presets: [
       { name: "24\"", w: 0.61, h: 0.12 },
       { name: "32\"", w: 0.81, h: 0.12 },
@@ -94,7 +99,7 @@ export const CATALOG = {
   // Living
   sofa: {
     label: "Sofa", category: "living", w: 2.00, h: 0.90,
-    min_w: 1.50, max_w: 3.50, min_h: 0.85, max_h: 1.65,
+    min_w: 1.50, max_w: 3.50, min_h: 0.85, max_h: 1.65, z: 0.85,
     presets: [
       { name: "Loveseat", w: 1.65, h: 0.90 },
       { name: "3-seat",   w: 2.10, h: 0.95 },
@@ -103,7 +108,7 @@ export const CATALOG = {
   },
   table: {
     label: "Table", category: "living", w: 1.20, h: 0.80,
-    min_w: 0.40, max_w: 2.40, min_h: 0.40, max_h: 1.10,
+    min_w: 0.40, max_w: 2.40, min_h: 0.40, max_h: 1.10, z: 0.75,
     presets: [
       { name: "Side",      w: 0.50, h: 0.50 },
       { name: "Utility",   w: 0.75, h: 0.75 },
@@ -112,11 +117,11 @@ export const CATALOG = {
       { name: "Dining 8",  w: 1.98, h: 1.00 },
     ],
   },
-  chair:     { label: "Chair",     category: "living", w: 0.50, h: 0.50, min_w: 0.43, max_w: 0.55, min_h: 0.45, max_h: 0.62 },
-  desk:      { label: "Desk",      category: "living", w: 1.40, h: 0.70, min_w: 1.00, max_w: 1.80, min_h: 0.60, max_h: 0.80 },
+  chair:     { label: "Chair",     category: "living", w: 0.50, h: 0.50, min_w: 0.43, max_w: 0.55, min_h: 0.45, max_h: 0.62, z: 0.90 },
+  desk:      { label: "Desk",      category: "living", w: 1.40, h: 0.70, min_w: 1.00, max_w: 1.80, min_h: 0.60, max_h: 0.80, z: 0.75 },
   tv: {
     label: "TV", category: "living", w: 1.20, h: 0.40,
-    min_w: 0.90, max_w: 2.00, min_h: 0.35, max_h: 0.50,
+    min_w: 0.90, max_w: 2.00, min_h: 0.35, max_h: 0.50, z: 0.70,
     presets: [
       { name: "43\" stand", w: 1.20, h: 0.40 },
       { name: "55\" stand", w: 1.40, h: 0.40 },
@@ -127,17 +132,17 @@ export const CATALOG = {
   },
   bookshelf: {
     label: "Bookshelf", category: "living", w: 0.80, h: 0.30,
-    min_w: 0.40, max_w: 1.60, min_h: 0.28, max_h: 0.40,
+    min_w: 0.40, max_w: 1.60, min_h: 0.28, max_h: 0.40, z: 1.80,
     presets: [
       { name: "Narrow", w: 0.40, h: 0.28 },
       { name: "Wide",   w: 0.80, h: 0.28 },
     ],
   },
-  armchair:     { label: "Armchair",     category: "living", w: 0.80, h: 0.80, min_w: 0.65, max_w: 1.10, min_h: 0.68, max_h: 1.00 },
-  "coffee-table": { label: "Coffee Table", category: "living", w: 1.10, h: 0.55, min_w: 0.90, max_w: 1.50, min_h: 0.40, max_h: 0.78 },
+  armchair:     { label: "Armchair",     category: "living", w: 0.80, h: 0.80, min_w: 0.65, max_w: 1.10, min_h: 0.68, max_h: 1.00, z: 0.90 },
+  "coffee-table": { label: "Coffee Table", category: "living", w: 1.10, h: 0.55, min_w: 0.90, max_w: 1.50, min_h: 0.40, max_h: 0.78, z: 0.45 },
   "dining-table-round": {
     label: "Round Dining Table", category: "living", circular: true, w: 1.20, h: 1.20,
-    min_w: 0.60, max_w: 1.83, min_h: 0.60, max_h: 1.83,
+    min_w: 0.60, max_w: 1.83, min_h: 0.60, max_h: 1.83, z: 0.75,
     presets: [
       { name: "Seats 2", w: 0.70, h: 0.70 },
       { name: "Seats 4", w: 1.00, h: 1.00 },
@@ -147,7 +152,7 @@ export const CATALOG = {
   },
   monitor: {
     label: "Monitor", category: "living", w: 0.60, h: 0.22,
-    min_w: 0.45, max_w: 0.85, min_h: 0.18, max_h: 0.28,
+    min_w: 0.45, max_w: 0.85, min_h: 0.18, max_h: 0.28, z: 0.45,
     presets: [
       { name: "24\"",           w: 0.54, h: 0.20 },
       { name: "27\"",           w: 0.62, h: 0.22 },
@@ -157,7 +162,7 @@ export const CATALOG = {
   },
   "gaming-chair": {
     label: "Gaming Chair", category: "living", w: 0.66, h: 0.66,
-    min_w: 0.55, max_w: 0.80, min_h: 0.55, max_h: 0.82,
+    min_w: 0.55, max_w: 0.80, min_h: 0.55, max_h: 0.82, z: 1.20,
     presets: [
       { name: "Task",       w: 0.60, h: 0.60 },
       { name: "Racing",     w: 0.66, h: 0.66 },
@@ -168,7 +173,7 @@ export const CATALOG = {
   // Kitchen — appliance widths snap to imperial rungs (24/30/33/36 in).
   fridge: {
     label: "Fridge", category: "kitchen", discrete: true, w: 0.76, h: 0.81,
-    min_w: 0.55, max_w: 0.91, min_h: 0.58, max_h: 0.91,
+    min_w: 0.55, max_w: 0.91, min_h: 0.58, max_h: 0.91, z: 1.70,
     presets: [
       { name: "24\" compact", w: 0.61, h: 0.81 },
       { name: "30\"",         w: 0.76, h: 0.81 },
@@ -178,7 +183,7 @@ export const CATALOG = {
   },
   stove: {
     label: "Stove", category: "kitchen", discrete: true, w: 0.76, h: 0.71,
-    min_w: 0.61, max_w: 0.91, min_h: 0.66, max_h: 0.74,
+    min_w: 0.61, max_w: 0.91, min_h: 0.66, max_h: 0.74, z: 0.90,
     presets: [
       { name: "24\"", w: 0.61, h: 0.71 },
       { name: "30\"", w: 0.76, h: 0.71 },
@@ -187,7 +192,7 @@ export const CATALOG = {
   },
   sink: {
     label: "Sink", category: "kitchen", w: 0.76, h: 0.51,
-    min_w: 0.61, max_w: 0.91, min_h: 0.46, max_h: 0.56,
+    min_w: 0.61, max_w: 0.91, min_h: 0.46, max_h: 0.56, z: 0.90,
     presets: [
       { name: "24\"",        w: 0.61, h: 0.51 },
       { name: "30\"",        w: 0.76, h: 0.51 },
@@ -196,7 +201,7 @@ export const CATALOG = {
   },
   washer: {
     label: "Washer", category: "kitchen", discrete: true, w: 0.69, h: 0.76,
-    min_w: 0.60, max_w: 0.70, min_h: 0.65, max_h: 0.86,
+    min_w: 0.60, max_w: 0.70, min_h: 0.65, max_h: 0.86, z: 0.85,
     presets: [
       { name: "24\" compact",  w: 0.61, h: 0.65 },
       { name: "27\" standard", w: 0.69, h: 0.76 },
@@ -206,7 +211,7 @@ export const CATALOG = {
   // Bedroom
   bed: {
     label: "Bed", category: "bedroom", discrete: true, w: 1.52, h: 2.03,
-    min_w: 0.97, max_w: 1.93, min_h: 1.91, max_h: 2.13,
+    min_w: 0.97, max_w: 1.93, min_h: 1.91, max_h: 2.13, z: 0.55,
     presets: [
       { name: "Twin",     w: 0.97, h: 1.91 },
       { name: "Twin XL",  w: 0.97, h: 2.03 },
@@ -218,28 +223,28 @@ export const CATALOG = {
   },
   wardrobe: {
     label: "Wardrobe", category: "bedroom", w: 1.00, h: 0.58,
-    min_w: 0.50, max_w: 1.50, min_h: 0.50, max_h: 0.60,
+    min_w: 0.50, max_w: 1.50, min_h: 0.50, max_h: 0.60, z: 2.00,
     presets: [
       { name: "1-door",  w: 0.50, h: 0.58 },
       { name: "2-door",  w: 1.00, h: 0.58 },
       { name: "3-door",  w: 1.50, h: 0.58 },
     ],
   },
-  nightstand: { label: "Nightstand", category: "bedroom", w: 0.45, h: 0.40, min_w: 0.40, max_w: 0.60, min_h: 0.34, max_h: 0.45 },
+  nightstand: { label: "Nightstand", category: "bedroom", w: 0.45, h: 0.40, min_w: 0.40, max_w: 0.60, min_h: 0.34, max_h: 0.45, z: 0.50 },
   dresser: {
     label: "Dresser", category: "bedroom", w: 1.00, h: 0.48,
-    min_w: 0.78, max_w: 1.60, min_h: 0.46, max_h: 0.50,
+    min_w: 0.78, max_w: 1.60, min_h: 0.46, max_h: 0.50, z: 0.80,
     presets: [
       { name: "3-drawer", w: 0.80, h: 0.48 },
       { name: "6-drawer", w: 1.60, h: 0.48 },
     ],
   },
-  cabinet: { label: "Cabinet", category: "bedroom", w: 0.90, h: 0.45, min_w: 0.80, max_w: 1.80, min_h: 0.40, max_h: 0.52 },
+  cabinet: { label: "Cabinet", category: "bedroom", w: 0.90, h: 0.45, min_w: 0.80, max_w: 1.80, min_h: 0.40, max_h: 0.52, z: 0.90 },
 
   // Bath
   toilet: {
     label: "Toilet", category: "bath", w: 0.47, h: 0.72,
-    min_w: 0.35, max_w: 0.53, min_h: 0.69, max_h: 0.79,
+    min_w: 0.35, max_w: 0.53, min_h: 0.69, max_h: 0.79, z: 0.75,
     presets: [
       { name: "Round-front", w: 0.46, h: 0.70 },
       { name: "Elongated",   w: 0.47, h: 0.73 },
@@ -247,7 +252,7 @@ export const CATALOG = {
   },
   bathtub: {
     label: "Bathtub", category: "bath", w: 1.70, h: 0.76,
-    min_w: 1.37, max_w: 1.83, min_h: 0.76, max_h: 0.81,
+    min_w: 1.37, max_w: 1.83, min_h: 0.76, max_h: 0.81, z: 0.55,
     presets: [
       { name: "54\"", w: 1.37, h: 0.76 },
       { name: "60\"", w: 1.52, h: 0.76 },
@@ -260,17 +265,17 @@ export const CATALOG = {
   // parasol footprint is the market-umbrella canopy circle (w===h; kept symmetric).
   "patio-table": {
     label: "Patio Table", category: "outdoor", w: 0.90, h: 0.90,
-    min_w: 0.60, max_w: 1.83, min_h: 0.60, max_h: 1.00,
+    min_w: 0.60, max_w: 1.83, min_h: 0.60, max_h: 1.00, z: 0.75,
     presets: [
       { name: "Bistro 24\"", w: 0.61, h: 0.61 },
       { name: "4-seat 36\"", w: 0.91, h: 0.91 },
       { name: "6-seat 72\"", w: 1.83, h: 0.91 },
     ],
   },
-  "patio-chair": { label: "Patio Chair", category: "outdoor", w: 0.60, h: 0.65, min_w: 0.50, max_w: 0.80, min_h: 0.55, max_h: 0.90 },
+  "patio-chair": { label: "Patio Chair", category: "outdoor", w: 0.60, h: 0.65, min_w: 0.50, max_w: 0.80, min_h: 0.55, max_h: 0.90, z: 0.90 },
   parasol: {
     label: "Parasol", category: "outdoor", w: 2.74, h: 2.74,
-    min_w: 1.83, max_w: 3.35, min_h: 1.83, max_h: 3.35,
+    min_w: 1.83, max_w: 3.35, min_h: 1.83, max_h: 3.35, z: 2.40,
     presets: [
       { name: "6 ft",   w: 1.83, h: 1.83 },
       { name: "7.5 ft", w: 2.29, h: 2.29 },
@@ -281,7 +286,7 @@ export const CATALOG = {
   },
   planter: {
     label: "Planter", category: "outdoor", w: 0.50, h: 0.50,
-    min_w: 0.25, max_w: 1.00, min_h: 0.25, max_h: 0.60,
+    min_w: 0.25, max_w: 1.00, min_h: 0.25, max_h: 0.60, z: 0.50,
     presets: [
       { name: "Small pot",  w: 0.30, h: 0.30 },
       { name: "Medium pot", w: 0.45, h: 0.45 },
@@ -294,7 +299,7 @@ export const CATALOG = {
   rug: {
     label: "Rug", category: "living", floorLayer: true,
     w: 2.44, h: 3.05,                       // 8×10 ft default
-    min_w: 0.61, max_w: 3.66, min_h: 0.91, max_h: 3.66,
+    min_w: 0.61, max_w: 3.66, min_h: 0.91, max_h: 3.66, z: 0.01,
     presets: [
       { name: "Runner 2.5×8", w: 0.76, h: 2.44 },
       { name: "5×8",          w: 1.52, h: 2.44 },
