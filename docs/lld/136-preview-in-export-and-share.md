@@ -34,8 +34,13 @@ question):
 - No new export formats beyond the existing PNG/SVG.
 - No persistence of preview state to the plan/localStorage — preview stays session-only;
   `pv` lives only in the transient share URL.
-- No hi-resolution/upscaled export of the 3D view (PNG captures at the on-screen canvas
-  backing-store resolution). Future work.
+- No hi-resolution/upscaled export of the 3D view. PNG captures at the **on-screen canvas
+  backing-store resolution** — i.e. the CSS box size × `setPixelRatio` (capped at 2 in LLD
+  130). This scales with the current window, so it is typically **lower resolution** than the
+  existing 2D PNG (which rasterizes at `EXPORT_PX_PER_M = 96` × the 2× print scale): a small
+  viewport yields a small 3D image. Accepted for this small effort; hi-res off-screen capture
+  is future work. The captured file uses the **same download name as the existing PNG export
+  (`floorplan.png`)** — no new naming.
 
 ## Approach
 
@@ -66,8 +71,11 @@ blank capture with render-then-read, flip the renderer to `preserveDrawingBuffer
 
 - **PNG**: `previewIsActive() && render3d.canCapture()` → download the captured 3D PNG;
   otherwise the existing `exportPng()` (flat 2D plan, unchanged).
-- **SVG**: always `exportSvg()` (flat plan). If `previewIsActive()`, also show a one-time
-  toast: *"SVG exports the 2D plan — use PNG for the 3D view."*
+- **SVG**: always `exportSvg()` (flat plan). If `previewIsActive()`, also show a **session-
+  scoped one-time** toast: *"SVG exports the 2D plan — use PNG for the 3D view."* "One-time"
+  = once per page load / session, tracked by a module-level boolean in `actions.js`. Do
+  **not** persist it to localStorage — consistent with "preview state is session-only, no
+  localStorage change" (Scope, State Model).
 
 ### 2. SVG-of-preview: suppress (recommended) vs. iso-fallback (rejected)
 
@@ -99,10 +107,56 @@ Do **not** alter the plan hash schema; the flag is appended text only.
 
 ### 4. Boot: open directly into preview
 
-`main.js` boot restore reads the flag and, after the plan is applied and rendered, calls
-`preview.setActive(true)` when `pv` is set. That converges on the existing
-`previewOnChange` choke point (LLD 130), which lazy-loads three.js, builds, and frames — or
-falls back to the 2.5D SVG if WebGL is unavailable. No new preview-entry code path.
+`main.js` boot restore reads the flag and, after a **hash** plan is applied and rendered,
+calls `preview.setActive(true)`. That converges on the existing `previewOnChange` choke
+point (LLD 130), which lazy-loads three.js, builds, and frames — or falls back to the 2.5D
+SVG if WebGL is unavailable. No new preview-entry code path.
+
+**Which of the 5 boot branches honor `pv`** (`main.js` boot IIFE, current lines ~903–962).
+Preview is a property of the *shared plan*, so it activates on every branch that ends up
+displaying the **hash** plan, and stays off on branches that display the **local** plan:
+
+| Branch (hash × local) | Displays | Enter preview on `pv=1`? |
+| --- | --- | --- |
+| Identical (hash == local) | local (== hash) | **Yes** — plan shown is the shared plan |
+| Conflict → `applyShared()` (default) | hash | **Yes** |
+| Conflict → `applyLocal()` ("Keep my last plan instead") | local | **No** — see below |
+| Hash-only | hash | **Yes** |
+| Local-only | local | No (`pv` cannot be set — there is no hash) |
+| Empty | default | No |
+
+Implementation note: because three of these branches (identical, conflict-`applyShared`,
+hash-only) must all enter preview, do it in **one place** after the branch selection rather
+than duplicating a call per branch — e.g. set a local `enterPreview` boolean in each hash-
+displaying branch and, at the end of the IIFE, `if (enterPreview && preview) preview.setActive(true)`
+once the plan is applied and `render()` has run.
+
+**Conflict "Keep my last plan instead" (`applyLocal`) drops preview.** This path replaces
+the shared plan with the user's own last plan; the `pv` flag described the *shared* plan, so
+honoring it would open the user's local plan in a 3D view they never asked for. Do **not**
+enter preview on this path. Note the conflict branch currently `return`s early after wiring
+the toast (line ~934) — the single end-of-IIFE `setActive` call above will not run for it, so
+`applyShared` must trigger preview entry inline before that `return` (or the early `return`
+must be restructured); either way `applyLocal`'s toast callback never enters preview.
+
+**`preview` flag must be scoped outside the `try`.** `readBootHash()` now returns
+`{ plan, preview }` **and still throws** on an undecodable blob (Edge Case 5). The current
+code does `hashPlan = await readBootHash()` inside `try` and continues in the `catch`.
+Because every downstream branch (and the `catch`) needs to read the flag, declare it at IIFE
+scope with a safe default, e.g.:
+
+```js
+let hashPlan = null;
+let hashPreview = false;                 // default; readable in catch + all branches
+try {
+  const boot = await readBootHash();
+  hashPlan = boot.plan;
+  hashPreview = boot.preview;
+} catch {
+  showToast("That share link couldn't be opened.");
+  // hashPreview stays false → no preview entry
+}
+```
 
 ## Interfaces / Types
 
@@ -141,7 +195,12 @@ export async function encodeShareHash(plan: Plan, opts: { preview: boolean }): P
 
 /** CHANGED return type. Now returns both the decoded plan and boot flags.
  *  { plan: null, preview: false } when no hash. Still THROWS on a present-but-
- *  undecodable plan blob (caller toasts). Strips hash after reading, as today. */
+ *  undecodable plan blob (caller toasts). Strips hash after reading, as today.
+ *
+ *  CALLER CONTRACT (main.js): because this both returns an object AND can throw,
+ *  the caller must declare the `preview` flag OUTSIDE the try/catch with a safe
+ *  default (false) so the catch path and every boot branch can read it. See
+ *  Approach §4 for the exact boot wiring. */
 export async function readBootHash(): Promise<{ plan: Plan | null, preview: boolean }>
 ```
 
@@ -159,9 +218,14 @@ export async function readBootHash(): Promise<{ plan: Plan | null, preview: bool
 - **`pv` flag** — exists **only** in a share URL at build/read time. Derived from
   `previewIsActive()` when encoding; consumed once at boot then discarded (the whole hash is
   stripped by `readBootHash`, as today). Not stored anywhere.
-- **Share-URL cache** (`actions.js`) — the pre-computed URL now depends on preview state, so
-  a preview toggle must invalidate it. Wire `preview.onChange` to the existing cache
-  invalidation so the next Share click reflects the current `pv`.
+- **Share-URL cache** (`actions.js`) — **left untouched by preview state.** The existing
+  cache keeps storing only the *plan-hash* URL (no `pv`). Because `&pv=1` is a pure
+  synchronous string suffix, `_onShare` appends it at copy time from `previewIsActive()`:
+  `url = previewIsActive() ? cachedUrl + "&pv=1" : cachedUrl`. This is simpler than
+  invalidating + async-rebuilding the cache on every toggle, and it removes any Safari
+  user-activation risk on a toggle-then-immediate-Share (the synchronous cached path stays
+  valid). **No `preview.onChange` → cache-invalidation wiring is added.** (The async path in
+  `_onShare` appends the same suffix after building the fresh URL.)
 - **Captured PNG** — transient Blob, downloaded and discarded; object URL revoked as in the
   existing download helper.
 
@@ -181,14 +245,21 @@ export async function readBootHash(): Promise<{ plan: Plan | null, preview: bool
    ignored, no preview entry.
 7. **`&pv=1` recipient without WebGL** — boot enters preview; `render3d.enter()` returns the
    fallback result and the existing handler paints the 2.5D SVG. Recipient still gets a peek.
-8. **Share clicked while in preview** — URL carries `&pv=1`; cache was invalidated on the
-   preview toggle so the copied link is current (Safari synchronous-copy path preserved).
+8. **Share clicked while in preview** — `_onShare` appends `&pv=1` from `previewIsActive()`
+   at copy time onto the cached plan-hash URL, so the copied link is current without any
+   cache invalidation on toggle (Safari synchronous-copy path preserved).
 9. **`toBlob` returns null** — `capturePngBlob` rejects → `actions.js` catch → "Couldn't
    export PNG — try SVG" toast (matches existing PNG-failure UX).
 10. **Multiple `&` in hash** (defensive/hand-edited) — split on the **first** `&`; parse the
     remainder as `&`-joined pairs; ignore anything unrecognized.
 11. **Undo/redo, autosave, history** — untouched; neither the flag nor the capture mutates
     the model (read-only guarantee from LLD 128/130 holds).
+12. **PNG export after leaving preview** — LLD 130 intentionally keeps the renderer alive
+    after `exit()` for cheap re-entry, so `canCapture()` (renderer exists AND not fallback)
+    stays **true** post-exit. Correctness therefore relies on the **`previewIsActive() &&
+    canCapture()`** AND in `actions.js`: with preview inactive the first conjunct is false, so
+    PNG routes to the flat 2D `exportPng()`. The routing MUST keep both conjuncts —
+    `canCapture()` alone is not a sufficient gate.
 
 ## Dependencies
 
