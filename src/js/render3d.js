@@ -971,3 +971,10 @@ export function __hasRenderer() {
 export function __isEmpty() {
   return _bounds === null;
 }
+
+/** Return a copy of the current scene bounds (reframe-probe for integration tests). */
+export function __getBounds() {
+  if (!_bounds) return null;
+  return { minX: _bounds.minX, minY: _bounds.minY, maxX: _bounds.maxX, maxY: _bounds.maxY,
+           minZ: _bounds.minZ, maxZ: _bounds.maxZ };
+}

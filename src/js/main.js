@@ -456,7 +456,9 @@ document.addEventListener("DOMContentLoaded", () => {
       scopePillEl.classList.remove("visible");
     } else {
       const room = wallsModel.rooms.find(r => r.id === scope);
-      const idx = wallsModel.rooms.indexOf(room);
+      // Use index among closed rooms — matches the popover labeling (LLD 142 fix).
+      const closedRooms = wallsModel.rooms.filter(r => r.closed);
+      const idx = closedRooms.indexOf(room);
       const label = room?.name || (idx >= 0 ? `Room ${idx + 1}` : scope);
       scopePillEl.textContent = label;
       scopePillEl.classList.add("visible");
@@ -523,9 +525,7 @@ document.addEventListener("DOMContentLoaded", () => {
       divider.setAttribute("aria-hidden", "true");
       scopePopoverEl.appendChild(divider);
 
-      closedRooms.forEach((room, i) => {
-        const allClosed = wallsModel.rooms.filter(r => r.closed);
-        const idx = allClosed.indexOf(room);
+      closedRooms.forEach((room, idx) => {
         const label = room.name || `Room ${idx + 1}`;
         scopePopoverEl.appendChild(_makeMenuItem(label, room.id));
       });
