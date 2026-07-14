@@ -92,21 +92,66 @@ export async function buildShareUrl() {
 }
 
 /**
- * Read location.hash on boot; returns decoded Plan or null.
- * - Returns null when no hash is present.
- * - Returns the decoded Plan when the hash is valid.
+ * Split a raw hash (no leading '#') into the plan blob and parsed flag pairs.
+ * Legacy hashes with no '&' return the whole string as planHash and flags={}.
+ * Never throws.
+ * @param {string} rawHash  (without leading '#')
+ * @returns {{ planHash: string, flags: { pv?: boolean } }}
+ */
+export function parseHashParts(rawHash) {
+  if (!rawHash) return { planHash: "", flags: {} };
+  const ampIdx = rawHash.indexOf("&");
+  if (ampIdx === -1) {
+    return { planHash: rawHash, flags: {} };
+  }
+  const planHash = rawHash.slice(0, ampIdx);
+  const flagStr = rawHash.slice(ampIdx + 1); // everything after the first '&'
+  const flags = {};
+  for (const part of flagStr.split("&")) {
+    const eqIdx = part.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = part.slice(0, eqIdx);
+    const val = part.slice(eqIdx + 1);
+    if (key === "pv") flags.pv = val === "1";
+  }
+  return { planHash, flags };
+}
+
+/**
+ * Build the full hash string for a plan, appending '&pv=1' when preview is on.
+ * Reuses encodePlanToHash for the plan blob.
+ * @param {import("./plan.js").Plan} plan
+ * @param {{ preview: boolean }} opts
+ * @returns {Promise<string>}
+ */
+export async function encodeShareHash(plan, opts) {
+  const planBlob = await encodePlanToHash(plan);
+  if (opts && opts.preview) {
+    return planBlob + "&pv=1";
+  }
+  return planBlob;
+}
+
+/**
+ * Read location.hash on boot; returns decoded Plan (or null) and preview flag.
+ * - Returns { plan: null, preview: false } when no hash is present.
+ * - Returns { plan, preview } when the hash is valid.
  * - Throws an error when a hash IS present but cannot be decoded (malformed/truncated).
  *   Callers should catch this to show a "couldn't be opened" toast.
  * Strips the hash after reading in all cases so a later reload does not
  * re-trigger the share path.
- * @returns {Promise<import("./plan.js").Plan|null>}
+ *
+ * CALLER CONTRACT (main.js): because this both returns an object AND can throw,
+ * the caller must declare the `preview` flag OUTSIDE the try/catch with a safe
+ * default (false) so the catch path and every boot branch can read it.
+ * @returns {Promise<{ plan: import("./plan.js").Plan | null, preview: boolean }>}
  */
 export async function readBootHash() {
   const raw = location.hash;
-  if (!raw || raw.length <= 1) return null;
+  if (!raw || raw.length <= 1) return { plan: null, preview: false };
 
   // Strip leading '#'
-  const hash = raw.slice(1);
+  const rawHash = raw.slice(1);
 
   // Clear the hash from URL (without page reload)
   try {
@@ -115,12 +160,13 @@ export async function readBootHash() {
     // ignore (some environments don't support history API)
   }
 
-  const plan = await decodeHashToPlan(hash);
+  const { planHash, flags } = parseHashParts(rawHash);
+  const plan = await decodeHashToPlan(planHash);
   if (plan === null) {
     // Hash was present but undecodable — signal to caller to show a toast
     throw new Error("share-hash-decode-failed");
   }
-  return plan;
+  return { plan, preview: flags.pv === true };
 }
 
 // ── Private: CompressionStream helpers ───────────────────────────────────────

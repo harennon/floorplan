@@ -7,7 +7,7 @@
 
 import { buildPlan } from "./plan.js";
 import { encodePlanToHash } from "./share.js";
-import { exportSvg, exportPng } from "./exportImg.js";
+import { exportSvg, exportPng, downloadBlob } from "./exportImg.js";
 import { exportJson, importJson, setToastCallback } from "./exportJson.js";
 import { clearLocal, saveNow } from "./store.js";
 import { hydrate as hydrateWalls } from "./walls.js";
@@ -15,6 +15,8 @@ import { hydrate as hydrateSymbols } from "./symbols.js";
 import { resetView } from "./view.js";
 import { render, onRender } from "./surface.js";
 import * as surface from "./surface.js";
+import { isActive as previewIsActive } from "./preview.js";
+import { canCapture, capturePngBlob } from "./render3d.js";
 
 // history is wired in after init() via setHistoryReset()
 let _historyReset = null;
@@ -38,6 +40,12 @@ let _openTemplates = null;
 export function setOpenTemplates(fn) {
   _openTemplates = fn;
 }
+
+/**
+ * Session-scoped flag: SVG-in-preview nudge shown at most once per page load.
+ * Not persisted to localStorage (preview state is session-only).
+ */
+let _svgPreviewNudgeSent = false;
 
 /** Cached encoded hash for synchronous clipboard copy (Safari user-activation). */
 let _cachedHashUrl = null;
@@ -217,13 +225,18 @@ async function _onShare() {
   // The cache is invalidated on every render (via the onRender hook) and
   // rebuilt asynchronously in the background, so _cachedHashUrl is current
   // as long as the plan has not changed since the last background rebuild.
+  // Per LLD 136 State Model: _cachedHashUrl stores only the plan-hash URL
+  // (no pv). Append &pv=1 at copy time from previewIsActive() — synchronous,
+  // no cache invalidation needed on every preview toggle.
   if (_cachedHashUrl && !_cacheStale) {
-    _copyUrl(_cachedHashUrl);
+    const url = previewIsActive() ? _cachedHashUrl + "&pv=1" : _cachedHashUrl;
+    _copyUrl(url);
   } else {
     // Async path: compute now (cache was stale or not yet built)
     try {
       const url = await _buildAndCacheUrl();
-      _copyUrl(url);
+      const finalUrl = previewIsActive() ? url + "&pv=1" : url;
+      _copyUrl(finalUrl);
     } catch {
       showToast("Couldn't build share link");
     }
@@ -309,12 +322,29 @@ async function _onExportAction(e) {
   const action = e.currentTarget.dataset.action;
 
   if (action === "export-png") {
-    try {
-      await exportPng();
-    } catch {
-      showToast("Couldn't export PNG — try SVG");
+    // Route: when preview is active and the WebGL renderer has a live frame,
+    // capture the 3D view; otherwise fall back to the flat 2D plan export.
+    if (previewIsActive() && canCapture()) {
+      try {
+        const blob = await capturePngBlob();
+        downloadBlob(blob, "floorplan.png");
+      } catch {
+        showToast("Couldn't export PNG — try SVG");
+      }
+    } else {
+      try {
+        await exportPng();
+      } catch {
+        showToast("Couldn't export PNG — try SVG");
+      }
     }
   } else if (action === "export-svg") {
+    // SVG always exports the flat 2D plan (WebGL scene cannot be vector-serialised).
+    // Show a one-time session nudge when the user is in preview mode.
+    if (previewIsActive() && !_svgPreviewNudgeSent) {
+      _svgPreviewNudgeSent = true;
+      showToast("SVG exports the 2D plan — use PNG for the 3D view");
+    }
     exportSvg();
   } else if (action === "export-json") {
     exportJson();

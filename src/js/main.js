@@ -74,7 +74,7 @@ import { model as measurementsModel } from "./measurements.js";
 import { init as initLoupe, setViewModule as loupeSetViewModule, reposition as loupeReposition } from "./loupe.js";
 import { toggleGridSnap } from "./prefs.js";
 import { init as initOnboarding, maybeShow as onboardingMaybeShow, dismiss as onboardingDismiss } from "./onboarding.js";
-import { isActive as previewIsActive, toggle as previewToggle, onChange as previewOnChange } from "./preview.js";
+import { isActive as previewIsActive, setActive as previewSetActive, toggle as previewToggle, onChange as previewOnChange } from "./preview.js";
 import { initIsoRender, render as isoRenderFn } from "./isoRender.js";
 import * as render3d from "./render3d.js";
 import * as _wallsModRef from "./walls.js";
@@ -891,14 +891,25 @@ document.addEventListener("DOMContentLoaded", () => {
   // ── Boot restore (LLD 16) ──────────────────────────────────────────────────
   // readBootHash() is async, so we do all boot-restore work in an async IIFE.
   (async () => {
+    // LLD 136: hashPreview must be scoped OUTSIDE the try so every branch
+    // (including the catch and all conflict sub-branches) can read it.
     let hashPlan = null;
+    let hashPreview = false; // safe default; readable in catch + all branches
     try {
-      hashPlan = await readBootHash();
+      const boot = await readBootHash();
+      hashPlan = boot.plan;
+      hashPreview = boot.preview;
     } catch {
       showToast("That share link couldn't be opened.");
+      // hashPreview stays false → no preview entry
     }
 
     const localPlan = loadLocal();
+
+    // LLD 136: tracks whether the plan ultimately displayed is the hash (shared) plan.
+    // Set to true in every branch that applies the hash plan; the single
+    // setActive(true) call at the end avoids duplicating per-branch logic.
+    let enterPreview = false;
 
     if (hashPlan && localPlan) {
       // Both present: check if they differ
@@ -906,11 +917,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const localSer = serializePlan(localPlan);
 
       if (hashSer === localSer) {
-        // Identical: treat as local restore (no banner)
+        // Identical: treat as local restore (no banner); plan shown == hash plan
         applyPlan(localPlan);
         historyReset(); // reseed baseline after restore (Edge Case 12)
         if (toastEl) showToast("Restored your last plan");
         render();
+        enterPreview = hashPreview; // plan shown IS the shared plan
       } else {
         // Conflict: hash present AND differs from local. A present hash is explicit
         // user intent — auto-open the shared plan, offer a one-tap undo to local.
@@ -927,11 +939,19 @@ document.addEventListener("DOMContentLoaded", () => {
         };
         applyShared();
         render();
+        // LLD 136: applyShared path — enter preview before the early return.
+        // previewSetActive(true) fires the previewOnChange choke point (wired
+        // below), which does the full lazy-load + build + fallback sequence.
+        // applyLocal path ("Keep my last plan instead") — the pv flag described
+        // the shared plan; do NOT enter preview for the user's own local plan.
+        if (hashPreview) {
+          previewSetActive(true);
+        }
         showToast("Opened shared plan", {
           label: "Keep my last plan instead",
           onClick: applyLocal,
         });
-        return;
+        return; // early return: conflict branch manages its own flow
       }
     } else if (hashPlan) {
       // Only hash plan: apply with fit-to-content
@@ -945,12 +965,14 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (toastEl) showToast("Opened shared plan");
       render();
+      enterPreview = hashPreview;
     } else if (localPlan) {
-      // Only local plan: restore verbatim (view included)
+      // Only local plan: restore verbatim (view included). No hash → pv cannot be set.
       applyPlan(localPlan);
       historyReset(); // reseed baseline after restore (Edge Case 12)
       if (toastEl) showToast("Restored your last plan");
       render();
+      // enterPreview stays false (no hash, pv cannot be set)
     } else {
       // Empty start: use default frame
       resetView(vW, vH);
@@ -959,6 +981,14 @@ document.addEventListener("DOMContentLoaded", () => {
       if (onboardingEl && coachWallEl && coachTmplEl && coachDismiss) {
         onboardingMaybeShow();
       }
+      // enterPreview stays false (no plan, no hash)
+    }
+
+    // LLD 136: single end-of-IIFE preview entry for all hash-displaying branches.
+    // Does not run for the early-return conflict branch (handled inline above) or
+    // when enterPreview is false (local-only, empty-start, or hash-preview=false).
+    if (enterPreview) {
+      previewSetActive(true);
     }
   })();
 
