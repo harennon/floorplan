@@ -8904,9 +8904,9 @@ function _restoreModels(snap) {
 // ─── LLD-43 unit tests ────────────────────────────────────────────────────────
 
 describe("LLD-43 — TEMPLATES metadata integrity", () => {
-  it("has between 3 and 5 templates", () => {
-    if (TEMPLATES.length < 3 || TEMPLATES.length > 5) {
-      throw new Error(`Expected 3–5 templates, got ${TEMPLATES.length}`);
+  it("has at least 4 templates", () => {
+    if (TEMPLATES.length < 4) {
+      throw new Error(`Expected at least 4 templates, got ${TEMPLATES.length}`);
     }
   });
 
@@ -9037,6 +9037,37 @@ describe("LLD-43 — template round-trip: serialize → re-validate succeeds", (
       const s1 = serializePlan(plan);
       const s2 = serializePlan(validatePlan(t.plan));
       if (s1 !== s2) throw new Error(`Unstable serializePlan for template '${t.id}'`);
+    }
+  });
+});
+
+describe("LLD-43 — compact-codec round-trip for each template", () => {
+  it("validatePlan(parseCompact(buildCompact(validatePlan(t.plan)))) succeeds for each template", () => {
+    for (const t of TEMPLATES) {
+      const plan1 = validatePlan(t.plan);
+      if (!plan1) throw new Error(`First validatePlan null for '${t.id}'`);
+      const compact = buildCompact(plan1);
+      const parsed  = parseCompact(compact);
+      if (!parsed) throw new Error(`parseCompact returned null for '${t.id}'`);
+      const plan2 = validatePlan(parsed);
+      if (!plan2) throw new Error(`Re-validatePlan after compact round-trip failed for '${t.id}'`);
+    }
+  });
+
+  it("compact round-trip preserves room and symbol counts for each template", () => {
+    for (const t of TEMPLATES) {
+      const plan1 = validatePlan(t.plan);
+      if (!plan1) throw new Error(`validatePlan null for '${t.id}'`);
+      const plan2 = validatePlan(parseCompact(buildCompact(plan1)));
+      if (!plan2) throw new Error(`Compact round-trip failed for '${t.id}'`);
+      if (plan2.walls.rooms.length !== plan1.walls.rooms.length) {
+        throw new Error(`Room count mismatch after compact round-trip for '${t.id}': ` +
+          `expected ${plan1.walls.rooms.length}, got ${plan2.walls.rooms.length}`);
+      }
+      if (plan2.symbols.symbols.length !== plan1.symbols.symbols.length) {
+        throw new Error(`Symbol count mismatch after compact round-trip for '${t.id}': ` +
+          `expected ${plan1.symbols.symbols.length}, got ${plan2.symbols.symbols.length}`);
+      }
     }
   });
 });
