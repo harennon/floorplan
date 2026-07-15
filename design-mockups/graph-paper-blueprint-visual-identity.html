@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en" data-dir="cyanotype">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>floorplan — graph-paper / blueprint identity</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=DM+Mono:wght@400;500&family=Libre+Baskerville:wght@400;700&family=Space+Grotesk:wght@400;500;700&display=swap"
+    rel="stylesheet"
+  />
+  <style>
+    /* ===================================================================
+       DIRECTION SWITCHER + SHELL  (mockup-only chrome)
+       =================================================================== */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: "DM Sans", system-ui, sans-serif;
+      background: #0c0c0f;
+      color: #eee;
+      overflow: hidden;
+    }
+    .switcher {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+      display: flex; align-items: center; gap: 0.6rem;
+      padding: 0.55rem 1rem;
+      background: #16161c;
+      border-bottom: 1px solid #2a2a33;
+      font-size: 0.8rem;
+    }
+    .switcher b { font-weight: 700; letter-spacing: 0.02em; }
+    .switcher .muted { color: #8a8a96; font-size: 0.72rem; }
+    .switcher .spacer { flex: 1; }
+    .switcher button {
+      font-family: "DM Mono", monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      padding: 0.4rem 0.85rem;
+      border-radius: 100px;
+      border: 1px solid #33333f;
+      background: #1e1e26;
+      color: #b7b7c2;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .switcher button:hover { border-color: #55556a; color: #fff; }
+    .switcher button.on {
+      background: #c9a84c; color: #16161c; border-color: #c9a84c; font-weight: 500;
+    }
+    .switcher .state-btn { background: transparent; }
+
+    /* Stage host fills below the switcher */
+    .host {
+      position: fixed; inset: 46px 0 0 0;
+    }
+
+    /* ===================================================================
+       DESIGN TOKENS — one palette block per direction.
+       All three are graph-paper/blueprint interpretations of the danbing
+       gold-on-dark language. They differ in ground color, ink, grid
+       treatment, and wall styling.
+       =================================================================== */
+
+    /* ---- A · CYANOTYPE — true blueprint: white ink on cyan-blue ground.
+       Matches the danbing floorplan portfolio card (blueprint-blue #16283a
+       with gold line art) but pushed to a classic architectural blueprint. */
+    [data-dir="cyanotype"] {
+      --bg:        #12314b;
+      --bg-deep:   #0d2438;
+      --ink:       #eaf4ff;
+      --muted:     #7fa6c4;
+      --accent:    #d8b451;              /* danbing gold — reserved for brand + active */
+      --accent-soft: rgba(216,180,81,0.55);
+      --grid-fine:  rgba(226,240,255,0.09);
+      --grid-major: rgba(226,240,255,0.20);
+      --grid-axis:  rgba(226,240,255,0.42);
+      --wall-body:  rgba(234,244,255,0.10);
+      --wall-line:  #eaf4ff;             /* white blueprint ink */
+      --wall-hi:    #ffffff;
+      --room-fill:  rgba(234,244,255,0.05);
+      --dim-ink:    #a9cbe6;
+      --dim-line:   rgba(169,203,230,0.75);
+      --sym-stroke: #cfe4f7;
+      --sym-fill:   rgba(207,228,247,0.08);
+      --sym-sel:    #d8b451;
+      --snap:       #7fe0d2;
+      --panel:      rgba(13,36,56,0.78);
+      --panel-solid:#0f2a41;
+      --hairline:   rgba(226,240,255,0.20);
+      --vignette:   rgba(6,20,32,0.55);
+      --font-brand: "Libre Baskerville", Georgia, serif;
+      --font-ui:    "DM Sans", system-ui, sans-serif;
+      --font-mono:  "DM Mono", monospace;
+      --wall-cap:   round;
+      --paper-tex:  0;                    /* no paper grain; blueprint is smooth */
+    }
+
+    /* ---- B · DRAFT PAD — warm engineering graph paper: sepia ink on
+       cream/tan paper with visible grain. The most "notebook sketch" feel;
+       closest to floorplancreator competitors but with personality. */
+    [data-dir="draft"] {
+      --bg:        #f2e9d2;
+      --bg-deep:   #e6d9ba;
+      --ink:       #3b3016;
+      --muted:     #8a7a54;
+      --accent:    #b5451f;              /* red drafting pencil — the "ink" accent */
+      --accent-soft: rgba(181,69,31,0.5);
+      --grid-fine:  rgba(90,70,40,0.10);
+      --grid-major: rgba(90,70,40,0.22);
+      --grid-axis:  rgba(90,70,40,0.42);
+      --wall-body:  rgba(59,48,22,0.14);
+      --wall-line:  #3b3016;             /* graphite/sepia */
+      --wall-hi:    #1f1808;
+      --room-fill:  rgba(59,48,22,0.055);
+      --dim-ink:    #8a5a20;
+      --dim-line:   rgba(138,90,32,0.7);
+      --sym-stroke: #5a4a28;
+      --sym-fill:   rgba(90,74,40,0.07);
+      --sym-sel:    #b5451f;
+      --snap:       #2f8f86;
+      --panel:      rgba(246,240,224,0.86);
+      --panel-solid:#f6f0e0;
+      --hairline:   rgba(90,70,40,0.28);
+      --vignette:   rgba(120,96,50,0.14);
+      --font-brand: "Libre Baskerville", Georgia, serif;
+      --font-ui:    "DM Sans", system-ui, sans-serif;
+      --font-mono:  "DM Mono", monospace;
+      --wall-cap:   round;
+      --paper-tex:  1;                    /* fibrous paper grain overlay */
+    }
+
+    /* ---- C · STUDIO — the current warm-blueprint direction, refined:
+       gold ink on near-black, Space Grotesk for a modern-utility voice.
+       This is the evolution of what ships today. */
+    [data-dir="studio"] {
+      --bg:        #17170f;
+      --bg-deep:   #100f0a;
+      --ink:       #efe9d6;
+      --muted:     #948d76;
+      --accent:    #d8bd6a;
+      --accent-soft: rgba(216,189,106,0.55);
+      --grid-fine:  rgba(216,189,106,0.06);
+      --grid-major: rgba(216,189,106,0.15);
+      --grid-axis:  rgba(216,189,106,0.34);
+      --wall-body:  rgba(216,189,106,0.28);
+      --wall-line:  #e0c672;
+      --wall-hi:    #f2dd8e;
+      --room-fill:  rgba(216,189,106,0.07);
+      --dim-ink:    #b8ad86;
+      --dim-line:   rgba(184,173,134,0.6);
+      --sym-stroke: #e0c672;
+      --sym-fill:   rgba(216,189,106,0.12);
+      --sym-sel:    #f2dd8e;
+      --snap:       #7fd0c8;
+      --panel:      rgba(20,20,14,0.74);
+      --panel-solid:#1a1912;
+      --hairline:   rgba(216,189,106,0.20);
+      --vignette:   rgba(6,6,3,0.6);
+      --font-brand: "Space Grotesk", sans-serif;
+      --font-ui:    "Space Grotesk", system-ui, sans-serif;
+      --font-mono:  "DM Mono", monospace;
+      --wall-cap:   butt;
+      --paper-tex:  0;
+    }
+
+    /* Light-mode nudge (mockup demo of the toggle) applies a brighter ground
+       per direction without changing ink relationships drastically. */
+    [data-light="1"][data-dir="cyanotype"] { --bg:#1c4368; --bg-deep:#173a5c; --vignette:rgba(10,30,48,0.35); }
+    [data-light="1"][data-dir="draft"]     { --bg:#faf3e0; --bg-deep:#f0e6cc; }
+    [data-light="1"][data-dir="studio"]    { --bg:#f3ecda; --bg-deep:#e7dcc2; --ink:#3a3020; --muted:#8a7c60; --wall-line:#6b5836; --wall-hi:#4f4022; --grid-fine:rgba(120,96,50,0.07); --grid-major:rgba(120,96,50,0.16); --grid-axis:rgba(120,96,50,0.36); --panel:rgba(248,242,228,0.85); --panel-solid:#f6f0e0; --hairline:rgba(120,96,50,0.22); --dim-ink:#8a7c60; }
+  </style>
+
+  <style>
+    /* ===================================================================
+       APP SHELL — layout is identical across directions; only tokens differ.
+       Layered: stage (SVG) → grain → floating chrome (position:absolute).
+       =================================================================== */
+    .app {
+      position: absolute; inset: 0;
+      font-family: var(--font-ui);
+      color: var(--ink);
+      background: var(--bg-deep);
+      overflow: hidden;
+    }
+    .stage {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 92% 82% at 50% 46%, var(--bg) 0%, var(--bg-deep) 100%);
+    }
+    /* Vignette to seat the "table" ground */
+    .stage::after {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background: radial-gradient(ellipse 78% 70% at 50% 50%, transparent 55%, var(--vignette) 100%);
+    }
+    .drawing { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+    /* Grid tiers */
+    .grid-fine  { stroke: var(--grid-fine);  stroke-width: 1;   }
+    .grid-major { stroke: var(--grid-major); stroke-width: 1;   }
+    .grid-axis  { stroke: var(--grid-axis);  stroke-width: 1.4; }
+
+    /* Paper grain (only Draft Pad sets --paper-tex:1 → shown via opacity) */
+    .grain {
+      position: absolute; inset: 0; pointer-events: none;
+      mix-blend-mode: multiply; opacity: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size: 220px 220px;
+    }
+    [data-dir="draft"] .grain { opacity: 0.06; }
+
+    /* ── Walls ─────────────────────────────────────────────────────────── */
+    .wall-body { stroke: var(--wall-body); fill: none; stroke-linejoin: round; stroke-linecap: round; }
+    .wall-line { stroke: var(--wall-line); fill: none; stroke-linejoin: round; }
+    .room-fill { fill: var(--room-fill); }
+    .node-dot  { fill: var(--wall-line); }
+    .node-ring { fill: none; stroke: var(--wall-line); }
+
+    /* ── Dimensions ────────────────────────────────────────────────────── */
+    .dim-line { stroke: var(--dim-line); stroke-width: 1; }
+    .dim-tick { stroke: var(--dim-line); stroke-width: 1; }
+
+    /* ── Symbols (furniture / door / window) ───────────────────────────── */
+    .sym-stroke { stroke: var(--sym-stroke); fill: var(--sym-fill); stroke-linejoin: round; }
+    .sym-thin   { stroke: var(--sym-stroke); fill: none; }
+    /* Selected symbol: gold/accent selection frame */
+    .sym-sel .sym-stroke { stroke: var(--sym-sel); stroke-width: 2; }
+    .sel-frame { fill: none; stroke: var(--sym-sel); stroke-dasharray: 4 3; }
+    .sel-handle { fill: var(--panel-solid); stroke: var(--sym-sel); }
+    .snap-dot { fill: var(--snap); }
+
+    /* SVG chip labels — rendered in-SVG so they track slice-scaling exactly */
+    .svg-chip-bg { fill: var(--panel-solid); stroke: var(--hairline); }
+    .svg-chip-tx { font-family: var(--font-mono); font-size: 13px; font-weight: 500; fill: var(--dim-ink); }
+    .svg-sym-tx  { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); letter-spacing: 0.4px; }
+  </style>
+
+  <style>
+    /* ── Floating chrome ───────────────────────────────────────────────── */
+    .chrome { position: absolute; }
+
+    /* Brand — top left */
+    .brand { top: 1.1rem; left: 1.2rem; pointer-events: none; user-select: none; }
+    .brand-name {
+      font-family: var(--font-brand); font-size: 1.15rem; font-weight: 700;
+      color: var(--accent); line-height: 1.1;
+    }
+    [data-dir="studio"] .brand-name { letter-spacing: -0.01em; }
+    .brand-sub {
+      font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted);
+      letter-spacing: 0.14em; text-transform: uppercase; margin-top: 2px;
+    }
+
+    /* Tool rail — left edge, vertical */
+    .tool-rail {
+      top: 50%; left: 1.2rem; transform: translateY(-50%);
+      display: flex; flex-direction: column; gap: 0.35rem;
+      background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: 12px; padding: 0.4rem;
+      backdrop-filter: blur(10px);
+    }
+    .tool-rail button {
+      width: 2.3rem; height: 2.3rem; display: grid; place-items: center;
+      border: 1px solid transparent; border-radius: 8px;
+      background: transparent; color: var(--muted); cursor: pointer;
+      transition: all 0.14s; position: relative;
+    }
+    .tool-rail button svg { width: 17px; height: 17px; }
+    .tool-rail button:hover { color: var(--ink); background: rgba(127,127,127,0.08); }
+    .tool-rail button.active {
+      color: var(--accent); border-color: var(--accent-soft);
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+    }
+    .tool-sep { height: 1px; background: var(--hairline); margin: 0.2rem 0.3rem; }
+    .tool-key {
+      position: absolute; bottom: 2px; right: 3px; font-family: var(--font-mono);
+      font-size: 0.5rem; color: var(--muted); opacity: 0.7;
+    }
+
+    /* Actions cluster — top right */
+    .actions { top: 1.1rem; right: 1.2rem; display: flex; gap: 0.35rem; }
+    .actions button, .pill {
+      font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.03em;
+      color: var(--muted); background: var(--panel);
+      border: 1px solid var(--hairline); border-radius: 100px;
+      padding: 0.38rem 0.8rem; cursor: pointer; backdrop-filter: blur(10px);
+      transition: all 0.14s; display: inline-flex; align-items: center; gap: 0.35rem;
+    }
+    .actions button:hover { color: var(--accent); border-color: var(--accent-soft); }
+    .actions .icon-only { padding: 0.38rem 0.5rem; }
+    .actions button svg { width: 13px; height: 13px; }
+    .save-pill { color: var(--accent); }
+    .save-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+    /* Unit toggle — below actions */
+    .units { top: 3.4rem; right: 1.2rem; display: flex; gap: 0.25rem; }
+    .units button {
+      font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.06em;
+      color: var(--muted); background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: 100px; padding: 0.28rem 0.6rem; cursor: pointer; backdrop-filter: blur(10px);
+    }
+    .units button.on { color: var(--accent); border-color: var(--accent-soft); }
+
+    /* Right rail — measure + clearance inspectors */
+    .right-rail {
+      top: 6rem; right: 1.2rem; width: 224px;
+      display: flex; flex-direction: column; gap: 0.6rem;
+    }
+    .panel {
+      background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: 12px; backdrop-filter: blur(10px); overflow: hidden;
+    }
+    .panel-head {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--hairline);
+    }
+    .panel-head .label {
+      font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .panel-head .big {
+      margin-left: auto; font-family: var(--font-brand); font-size: 1.15rem;
+      color: var(--accent); font-weight: 700;
+    }
+    .panel-body { padding: 0.5rem 0.75rem 0.7rem; }
+    .row {
+      display: flex; align-items: center; justify-content: space-between;
+      font-family: var(--font-mono); font-size: 0.72rem; padding: 0.22rem 0;
+      color: var(--muted);
+    }
+    .row .rname { color: var(--ink); }
+    .row .swatch { width: 9px; height: 9px; border-radius: 2px; margin-right: 0.4rem; display: inline-block; }
+    .row.total { border-top: 1px dashed var(--hairline); margin-top: 0.3rem; padding-top: 0.4rem; }
+    .row.total b { color: var(--accent); }
+
+    .clr-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .clr-status { font-family: var(--font-mono); font-size: 0.72rem; }
+    .clr-item {
+      display: flex; align-items: center; gap: 0.45rem;
+      font-family: var(--font-mono); font-size: 0.7rem; color: var(--ink); padding: 0.22rem 0;
+    }
+    .clr-item .sub { color: var(--muted); margin-left: auto; }
+
+    /* Zoom cluster — bottom left */
+    .zoom { bottom: 1.2rem; left: 1.2rem; display: flex; flex-direction: column; gap: 0.25rem; }
+    .zoom button {
+      width: 2.2rem; height: 2.2rem; display: grid; place-items: center;
+      font-family: var(--font-mono); font-size: 0.9rem; color: var(--ink);
+      background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px;
+      cursor: pointer; backdrop-filter: blur(10px); transition: all 0.14s;
+    }
+    .zoom button:hover { color: var(--accent); border-color: var(--accent-soft); }
+    .zoom .sm { font-size: 0.55rem; letter-spacing: 0.05em; }
+
+    /* HUD — bottom right */
+    .hud { bottom: 1.2rem; right: 1.2rem; display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; }
+    .hud-cell {
+      font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted);
+      background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: 6px; padding: 0.22rem 0.55rem; backdrop-filter: blur(10px);
+      white-space: nowrap; cursor: default;
+    }
+    .hud-cell b { color: var(--ink); font-weight: 500; }
+    .hud-cell.chip { cursor: pointer; }
+    .hud-cell.chip:hover { border-color: var(--accent-soft); }
+    .hud-cell.chip b { color: var(--accent); }
+
+    /* Center hint toast */
+    .hint {
+      bottom: 30%; left: 50%; transform: translateX(-50%);
+      font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+      background: var(--panel); border: 1px solid var(--hairline);
+      border-radius: 100px; padding: 0.4rem 1rem; backdrop-filter: blur(10px);
+      pointer-events: none;
+    }
+    .hint b { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="switcher">
+    <b>floorplan</b>
+    <span class="muted">graph-paper / blueprint identity — pick a direction</span>
+    <div class="spacer"></div>
+    <button data-dir="cyanotype" class="on">A · Cyanotype</button>
+    <button data-dir="draft">B · Draft Pad</button>
+    <button data-dir="studio">C · Studio</button>
+    <span class="muted" style="margin:0 .4rem">|</span>
+    <button class="state-btn" data-state="select">Toggle selection</button>
+    <button class="state-btn" data-state="light">Toggle light</button>
+  </div>
+
+  <div class="host">
+    <div class="app" id="app">
+      <div class="stage">
+        <svg class="drawing" id="drawing" viewBox="0 0 1000 620" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <!-- Grid: fine 40px, major every 5 → 200px, plus axis lines -->
+          <g id="grid"></g>
+
+          <!-- Room fill (a studio: L-shaped main + alcove) -->
+          <polygon class="room-fill" points="300,150 720,150 720,470 300,470" />
+
+          <!-- Wall bodies (thick translucent) then crisp ink lines on top -->
+          <g stroke-width="10">
+            <polygon class="wall-body" points="300,150 720,150 720,470 300,470" />
+          </g>
+          <g stroke-width="2.5">
+            <polygon class="wall-line" points="300,150 720,150 720,470 300,470"
+                     style="stroke-linecap: var(--wall-cap);" />
+            <!-- interior partition with door gap -->
+            <path class="wall-line" d="M540,150 V300 M540,360 V470" />
+          </g>
+
+          <!-- Door leaf + swing arc in the gap -->
+          <g class="sym-thin" stroke-width="1.6">
+            <path d="M540,360 h-48" />
+            <path d="M492,360 A48,48 0 0 1 540,312" opacity="0.75" />
+          </g>
+
+          <!-- Window on top wall (double line) -->
+          <g class="sym-thin" stroke-width="1.4">
+            <path d="M380,150 h96 M380,146 h96 M380,154 h96" />
+          </g>
+
+          <!-- Furniture: sofa (selected in select-state), bed, table -->
+          <g id="sofa" transform="translate(340,380)">
+            <rect class="sym-stroke" x="0" y="0" width="150" height="60" rx="6" stroke-width="1.6" />
+            <rect class="sym-thin" x="8" y="8" width="134" height="30" rx="4" stroke-width="1.2" />
+          </g>
+          <g transform="translate(600,190)">
+            <rect class="sym-stroke" x="0" y="0" width="90" height="130" rx="4" stroke-width="1.6" />
+            <rect class="sym-thin" x="8" y="8" width="74" height="34" rx="3" stroke-width="1.2" />
+          </g>
+          <g transform="translate(345,200)">
+            <circle class="sym-stroke" cx="45" cy="45" r="45" stroke-width="1.6" />
+            <circle class="sym-thin" cx="45" cy="45" r="30" stroke-width="1.2" />
+          </g>
+
+          <!-- Dimension line along the bottom wall -->
+          <g>
+            <path class="dim-line" d="M300,500 H720" />
+            <path class="dim-tick" d="M300,492 V508 M720,492 V508" />
+          </g>
+          <!-- Vertical dimension on right -->
+          <g>
+            <path class="dim-line" d="M752,150 V470" />
+            <path class="dim-tick" d="M744,150 H760 M744,470 H760" />
+          </g>
+
+          <!-- Node dots at wall corners -->
+          <g>
+            <circle class="node-dot" cx="300" cy="150" r="3.5" />
+            <circle class="node-dot" cx="720" cy="150" r="3.5" />
+            <circle class="node-dot" cx="720" cy="470" r="3.5" />
+            <circle class="node-dot" cx="300" cy="470" r="3.5" />
+          </g>
+
+          <!-- Selection frame + handles for the sofa (shown in select state) -->
+          <g id="selection" style="display:none">
+            <rect class="sel-frame" x="335" y="375" width="160" height="70" stroke-width="1.4" />
+            <rect class="sel-handle" x="331" y="371" width="8" height="8" stroke-width="1.2" />
+            <rect class="sel-handle" x="491" y="371" width="8" height="8" stroke-width="1.2" />
+            <rect class="sel-handle" x="331" y="441" width="8" height="8" stroke-width="1.2" />
+            <rect class="sel-handle" x="491" y="441" width="8" height="8" stroke-width="1.2" />
+            <!-- snap indicator -->
+            <circle class="snap-dot" cx="540" cy="470" r="5" />
+          </g>
+        </svg>
+      </div>
+
+      <div class="grain"></div>
+
+      <!-- Brand -->
+      <div class="chrome brand">
+        <div class="brand-name">floorplan</div>
+        <div class="brand-sub" id="brand-sub">cyanotype</div>
+      </div>
+
+      <!-- Tool rail -->
+      <nav class="chrome tool-rail" aria-label="Drawing tools">
+        <button title="Select (V)"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 2l10 5-4 1.4L7.5 13z"/></svg><span class="tool-key">V</span></button>
+        <button class="active" title="Draw wall (W)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 13L13 3M11 3h2v2"/></svg><span class="tool-key">W</span></button>
+        <button title="Add furniture (F)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="6" width="11" height="6" rx="1"/><path d="M4 6V4.5A1.5 1.5 0 015.5 3h5A1.5 1.5 0 0112 4.5V6"/></svg><span class="tool-key">F</span></button>
+        <button title="Measure (M)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 10l4 4 8-8-4-4z"/><path d="M6 10l1-1M8 8l1-1M10 6l1-1" stroke-width="1"/></svg><span class="tool-key">M</span></button>
+        <div class="tool-sep"></div>
+        <button title="3D preview (P)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 1.5l6 3.2v6.6L8 14.5 2 11.3V4.7z"/><path d="M2 4.7L8 8l6-3.3M8 8v6.5"/></svg><span class="tool-key">P</span></button>
+      </nav>
+
+      <!-- Actions cluster -->
+      <div class="chrome actions" aria-label="Plan actions">
+        <span class="pill save-pill"><span class="dot"></span>Saved</span>
+        <button class="icon-only" title="Share link"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="11" cy="3" r="2"/><circle cx="3" cy="7" r="2"/><circle cx="11" cy="11" r="2"/><path d="M4.7 6L9.3 4M4.7 8l4.6 2"/></svg></button>
+        <button title="Export"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M7 1v8M4 5l3 3 3-3M2 11h10"/></svg>Export</button>
+        <button class="icon-only" title="Theme">◐</button>
+      </div>
+
+      <!-- Unit toggle -->
+      <div class="chrome units" role="group" aria-label="Units">
+        <button class="on">IMPERIAL</button>
+        <button>METRIC</button>
+      </div>
+
+      <!-- Right rail: measure + clearance -->
+      <div class="chrome right-rail">
+        <section class="panel">
+          <div class="panel-head">
+            <span class="label">Floor Area</span>
+            <span class="big">182 ft²</span>
+          </div>
+          <div class="panel-body">
+            <div class="row"><span><span class="swatch" style="background:var(--wall-line)"></span><span class="rname">Living</span></span><span>132 ft²</span></div>
+            <div class="row"><span><span class="swatch" style="background:var(--dim-ink)"></span><span class="rname">Alcove</span></span><span>50 ft²</span></div>
+            <div class="row total"><span>Perimeter</span><b>58′ 4″</b></div>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <span class="label">Clearance</span>
+            <span class="clr-dot" style="background:var(--snap); margin-left:auto"></span>
+            <span class="clr-status" style="color:var(--snap)">OK</span>
+          </div>
+          <div class="panel-body">
+            <div class="clr-item"><span class="clr-dot" style="background:var(--snap)"></span>Sofa → wall<span class="sub">2′ 6″</span></div>
+            <div class="clr-item"><span class="clr-dot" style="background:var(--accent)"></span>Bed → table<span class="sub">1′ 8″ tight</span></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Zoom cluster -->
+      <div class="chrome zoom" aria-label="Zoom">
+        <button title="Zoom in">+</button>
+        <button title="Zoom out">−</button>
+        <button class="sm" title="Reset">RESET</button>
+        <button class="sm" title="Help">?</button>
+      </div>
+
+      <!-- HUD -->
+      <div class="chrome hud">
+        <div class="hud-cell chip">Snap&nbsp;<b>On</b></div>
+        <div class="hud-cell chip">Grid&nbsp;<b>Auto</b></div>
+        <div class="hud-cell">Scale&nbsp;<b>1″ = 1′</b></div>
+        <div class="hud-cell">Zoom&nbsp;<b>100%</b></div>
+      </div>
+
+      <!-- Center hint -->
+      <div class="chrome hint" id="hint">Click to place the next wall point · <b>Enter</b> to close the room</div>
+    </div>
+  </div>
+
+  <script>
+    const NS = "http://www.w3.org/2000/svg";
+
+    // ── Build the grid: fine every 40, major every 200, axis at center ──
+    (function buildGrid() {
+      const g = document.getElementById("grid");
+      const W = 1000, H = 620, step = 40, majorEvery = 5;
+      const cx = 500, cy = 310; // axis origin
+      function line(x1, y1, x2, y2, cls) {
+        const l = document.createElementNS(NS, "line");
+        l.setAttribute("x1", x1); l.setAttribute("y1", y1);
+        l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+        l.setAttribute("class", cls);
+        g.appendChild(l);
+      }
+      for (let x = 0; x <= W; x += step) {
+        const idx = Math.round((x - cx) / step);
+        const cls = idx === 0 ? "grid-axis" : (idx % majorEvery === 0 ? "grid-major" : "grid-fine");
+        line(x, 0, x, H, cls);
+      }
+      for (let y = 0; y <= H; y += step) {
+        const idx = Math.round((y - cy) / step);
+        const cls = idx === 0 ? "grid-axis" : (idx % majorEvery === 0 ? "grid-major" : "grid-fine");
+        line(0, y, W, y, cls);
+      }
+    })();
+
+    // ── Dimension + symbol label chips (rendered IN the SVG so they track
+    //    the slice-cropped scaling exactly, mirroring how the real app draws
+    //    dim chips into .dim-labels but pinned to world coordinates). ──
+    const svg = document.getElementById("drawing");
+    const dimChips = [
+      { x: 510, y: 500, txt: "24′ 0″" },
+      { x: 752, y: 310, txt: "18′ 0″" },
+    ];
+    const symLabels = [
+      { x: 415, y: 415, txt: "SOFA · 5′×2′" },
+      { x: 645, y: 340, txt: "BED · 3′×4.5′" },
+      { x: 390, y: 305, txt: "TABLE" },
+      { x: 428, y: 138, txt: "WINDOW 4′" },
+    ];
+    function svgEl(tag, attrs) {
+      const e = document.createElementNS(NS, tag);
+      for (const k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    }
+    (function placeChips() {
+      dimChips.forEach(c => {
+        const w = c.txt.length * 8 + 12, h = 18;
+        svg.appendChild(svgEl("rect", { class: "svg-chip-bg", x: c.x - w/2, y: c.y - h/2, width: w, height: h, rx: 4, "stroke-width": 1 }));
+        const t = svgEl("text", { class: "svg-chip-tx", x: c.x, y: c.y + 4, "text-anchor": "middle" });
+        t.textContent = c.txt; svg.appendChild(t);
+      });
+      symLabels.forEach(c => {
+        const t = svgEl("text", { class: "svg-sym-tx", x: c.x, y: c.y, "text-anchor": "middle" });
+        t.textContent = c.txt; svg.appendChild(t);
+      });
+    })();
+
+    // ── Direction switcher ──
+    const html = document.documentElement;
+    const subEl = document.getElementById("brand-sub");
+    const subLabels = { cyanotype: "cyanotype", draft: "engineer's draft", studio: "warm blueprint" };
+    document.querySelectorAll(".switcher [data-dir]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const dir = btn.dataset.dir;
+        html.dataset.dir = dir;
+        subEl.textContent = subLabels[dir];
+        document.querySelectorAll(".switcher [data-dir]").forEach(b => b.classList.toggle("on", b === btn));
+      });
+    });
+
+    // ── State toggles ──
+    let selOn = false, lightOn = false;
+    document.querySelector('[data-state="select"]').addEventListener("click", () => {
+      selOn = !selOn;
+      document.getElementById("selection").style.display = selOn ? "block" : "none";
+      document.getElementById("sofa").classList.toggle("sym-sel", selOn);
+      document.getElementById("hint").textContent = selOn ? "" : "Click to place the next wall point";
+      document.getElementById("hint").style.display = selOn ? "none" : "block";
+    });
+    document.querySelector('[data-state="light"]').addEventListener("click", () => {
+      lightOn = !lightOn;
+      if (lightOn) html.dataset.light = "1"; else html.removeAttribute("data-light");
+    });
+  </script>
+</body>
+</html>
