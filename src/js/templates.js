@@ -15,6 +15,8 @@
  */
 
 import { validatePlan, isEmptyPlan } from "./plan.js";
+import { polygonArea } from "./walls.js";
+import { fmtArea, areaUnitLabel, onChange as onUnitChange } from "./units.js";
 
 // ── Template plan data ────────────────────────────────────────────────────────
 //
@@ -37,7 +39,7 @@ export const TEMPLATES = Object.freeze([
   {
     id: "studio",
     name: "Studio apartment",
-    description: "~27 m² open plan with bed, sofa & kitchenette",
+    description: "Open plan with bed, sofa & kitchenette",
     thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <rect x="8" y="8" width="104" height="74" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
       <!-- bed -->
@@ -87,7 +89,7 @@ export const TEMPLATES = Object.freeze([
   {
     id: "one-bedroom",
     name: "1-bedroom apartment",
-    description: "~55 m² with bedroom, living room & kitchen",
+    description: "Bedroom, living room & kitchen",
     thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <!-- bedroom -->
       <rect x="8" y="8" width="48" height="40" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
@@ -166,7 +168,7 @@ export const TEMPLATES = Object.freeze([
   {
     id: "single-room",
     name: "Rectangular room",
-    description: "~20 m² blank room — add your own furniture",
+    description: "Blank room — add your own furniture",
     thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <rect x="12" y="12" width="96" height="66" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
       <!-- door hint -->
@@ -205,7 +207,7 @@ export const TEMPLATES = Object.freeze([
   {
     id: "small-office",
     name: "Small office",
-    description: "~15 m² office with desk, chair & storage",
+    description: "Office with desk, chair & storage",
     thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <rect x="16" y="12" width="88" height="66" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
       <!-- desk L-shape suggestion -->
@@ -251,6 +253,24 @@ export const TEMPLATES = Object.freeze([
   },
 ]);
 
+// ── Area helper ───────────────────────────────────────────────────────────────
+
+/**
+ * Total floor area (m²) of a template's plan: sum of polygonArea over
+ * closed rooms. Mirrors measure.js's HUD total (non-closed rooms contribute 0).
+ * @param {import("./plan.js").Plan} plan
+ * @returns {number} area in m²
+ */
+export function _templateAreaM2(plan) {
+  let total = 0;
+  for (const room of plan.walls.rooms) {
+    if (room.closed) {
+      total += polygonArea(room.verts);
+    }
+  }
+  return total;
+}
+
 // ── Overlay state ─────────────────────────────────────────────────────────────
 
 let _open       = false;
@@ -293,6 +313,9 @@ export function init(refs) {
 
   // Render cards from TEMPLATES data
   _renderCards();
+
+  // Re-render cards when display unit toggles so badges stay consistent with HUD
+  onUnitChange(_renderCards);
 
   // Close button
   _closeBtnEl?.addEventListener("click", close);
@@ -375,11 +398,14 @@ function _renderCards() {
   if (!_gridEl) return;
   _gridEl.innerHTML = "";
   for (const t of TEMPLATES) {
+    const areaM2 = _templateAreaM2(t.plan);
+    const areaText = fmtArea(areaM2) + " " + areaUnitLabel();
+
     const btn = document.createElement("button");
     btn.className = "template-card";
     btn.setAttribute("role", "listitem");
     btn.dataset.templateId = t.id;
-    btn.setAttribute("aria-label", t.name + " — " + t.description);
+    btn.setAttribute("aria-label", t.name + " — " + t.description + " — " + areaText);
 
     const thumbSpan = document.createElement("span");
     thumbSpan.className = "template-thumb";
@@ -389,12 +415,17 @@ function _renderCards() {
     nameSpan.className = "template-card-name";
     nameSpan.textContent = t.name;
 
+    const areaSpan = document.createElement("span");
+    areaSpan.className = "template-card-area";
+    areaSpan.textContent = areaText;
+
     const descSpan = document.createElement("span");
     descSpan.className = "template-card-desc";
     descSpan.textContent = t.description;
 
     btn.appendChild(thumbSpan);
     btn.appendChild(nameSpan);
+    btn.appendChild(areaSpan);
     btn.appendChild(descSpan);
 
     btn.addEventListener("click", () => applyTemplate(t.id));

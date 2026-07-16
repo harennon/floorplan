@@ -119,6 +119,8 @@ import {
   view, pxPerM, worldToScreen, screenToWorld, clampZoom, zoomAbout, resetView,
 } from "../src/js/view.js";
 
+import { _templateAreaM2 } from "../src/js/templates.js";
+
 import {
   M_PER_FT, fmtLen, unitLabel, unit, setUnit,
   M2_PER_FT2, parseLen, fmtArea, areaUnitLabel,
@@ -17740,6 +17742,192 @@ describe("LLD 130 — render3d enter()/exit() smoke + read-only", () => {
     render3dExit();
     const after = JSON.stringify({ rooms: wallsMod.model.rooms, symbols: symMod.model.symbols });
     if (before !== after) throw new Error("preview enter/exit mutated the plan models");
+  });
+});
+
+// ─── LLD 137: template card live area badge ───────────────────────────────────
+
+describe("LLD 137 — _templateAreaM2: single-room studio", () => {
+  it("sums polygonArea for a single closed room (studio 5.5×4.9 = 26.95 m²)", () => {
+    const studioPlan = TEMPLATES.find(t => t.id === "studio").plan;
+    const area = _templateAreaM2(studioPlan);
+    expect(area).toBeCloseTo(26.95, 6);
+  });
+
+  it("matches summing polygonArea over closed rooms directly", () => {
+    const studioPlan = TEMPLATES.find(t => t.id === "studio").plan;
+    let expected = 0;
+    for (const room of studioPlan.walls.rooms) {
+      if (room.closed) {
+        // Inline shoelace to cross-check
+        const v = room.verts;
+        const n = v.length;
+        let s = 0;
+        for (let i = 0; i < n; i++) {
+          const j = (i + 1) % n;
+          s += v[i].x * v[j].y - v[j].x * v[i].y;
+        }
+        expected += Math.abs(s) / 2;
+      }
+    }
+    expect(_templateAreaM2(studioPlan)).toBeCloseTo(expected, 10);
+  });
+});
+
+describe("LLD 137 — _templateAreaM2: multi-room one-bedroom", () => {
+  it("sums all three rooms (~52.5 m², not ~55 m²)", () => {
+    const obPlan = TEMPLATES.find(t => t.id === "one-bedroom").plan;
+    const area = _templateAreaM2(obPlan);
+    // 3.5×3.5 + 4.0×3.5 + 7.5×3.5 = 12.25 + 14.0 + 26.25 = 52.5
+    expect(area).toBeCloseTo(52.5, 6);
+  });
+
+  it("area does not equal the old hard-coded ~55 figure (drift fix)", () => {
+    const obPlan = TEMPLATES.find(t => t.id === "one-bedroom").plan;
+    const area = _templateAreaM2(obPlan);
+    if (Math.abs(area - 55) < 1) {
+      throw new Error(`Expected area far from 55 (was ${area}), old drift figure should be gone`);
+    }
+  });
+});
+
+describe("LLD 137 — _templateAreaM2: non-closed rooms contribute 0", () => {
+  it("skips rooms with closed:false", () => {
+    const fakePlan = {
+      walls: {
+        rooms: [
+          { id: "r0", closed: false, verts: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }] },
+        ],
+      },
+    };
+    expect(_templateAreaM2(fakePlan)).toBe(0);
+  });
+
+  it("closed room + non-closed room → only closed contributes", () => {
+    const fakePlan = {
+      walls: {
+        rooms: [
+          { id: "r0", closed: true,  verts: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 3 }, { x: 0, y: 3 }] },
+          { id: "r1", closed: false, verts: [{ x: 5, y: 0 }, { x: 9, y: 0 }, { x: 9, y: 5 }, { x: 5, y: 5 }] },
+        ],
+      },
+    };
+    // Only r0: 2×3 = 6 m²
+    expect(_templateAreaM2(fakePlan)).toBeCloseTo(6, 10);
+  });
+});
+
+describe("LLD 137 — descriptions: no hard-coded area figures", () => {
+  it("no template description contains '~' (hard-coded tilde prefix)", () => {
+    for (const t of TEMPLATES) {
+      if (t.description.includes("~")) {
+        throw new Error(`Template "${t.id}" description still contains "~": ${t.description}`);
+      }
+    }
+  });
+
+  it("no template description contains 'm²' area unit", () => {
+    for (const t of TEMPLATES) {
+      if (t.description.includes("m²")) {
+        throw new Error(`Template "${t.id}" description still contains "m²": ${t.description}`);
+      }
+    }
+  });
+});
+
+describe("LLD 137 — DOM badge: each card gets .template-card-area span", () => {
+  it("each .template-card contains exactly one .template-card-area span", () => {
+    // Set up a fresh grid element
+    const grid = document.createElement("div");
+    grid.className = "template-grid";
+    // Minimal stubs for injected callbacks
+    initTemplates({
+      overlay:  document.createElement("div"),
+      grid,
+      closeBtn: document.createElement("button"),
+      apply:    () => {},
+      isEmpty:  () => true,
+      toast:    () => {},
+    });
+    const cards = grid.querySelectorAll(".template-card");
+    if (cards.length !== TEMPLATES.length) {
+      throw new Error(`Expected ${TEMPLATES.length} cards, got ${cards.length}`);
+    }
+    for (const card of cards) {
+      const badges = card.querySelectorAll(".template-card-area");
+      if (badges.length !== 1) {
+        throw new Error(`Card "${card.dataset.templateId}" has ${badges.length} .template-card-area spans, expected 1`);
+      }
+    }
+  });
+
+  it("badge text matches fmtArea + areaUnitLabel for the current unit (ft default)", () => {
+    const grid = document.createElement("div");
+    // setUnit("ft") is the default; ensure we're in ft mode
+    setUnit("ft");
+    initTemplates({
+      overlay:  document.createElement("div"),
+      grid,
+      closeBtn: document.createElement("button"),
+      apply:    () => {},
+      isEmpty:  () => true,
+      toast:    () => {},
+    });
+    for (const t of TEMPLATES) {
+      const card = grid.querySelector(`[data-template-id="${t.id}"]`);
+      const badge = card.querySelector(".template-card-area");
+      const expectedText = fmtArea(_templateAreaM2(t.plan)) + " " + areaUnitLabel();
+      if (badge.textContent !== expectedText) {
+        throw new Error(`Template "${t.id}": badge="${badge.textContent}" expected="${expectedText}"`);
+      }
+    }
+  });
+
+  it("badges update when unit toggles to m", () => {
+    const grid = document.createElement("div");
+    setUnit("ft");
+    initTemplates({
+      overlay:  document.createElement("div"),
+      grid,
+      closeBtn: document.createElement("button"),
+      apply:    () => {},
+      isEmpty:  () => true,
+      toast:    () => {},
+    });
+
+    // Toggle to metres
+    setUnit("m");
+    for (const t of TEMPLATES) {
+      const card = grid.querySelector(`[data-template-id="${t.id}"]`);
+      const badge = card.querySelector(".template-card-area");
+      const expectedText = fmtArea(_templateAreaM2(t.plan)) + " " + areaUnitLabel();
+      if (badge.textContent !== expectedText) {
+        throw new Error(`After setUnit("m"), template "${t.id}": badge="${badge.textContent}" expected="${expectedText}"`);
+      }
+    }
+    // Reset to ft to avoid polluting other tests
+    setUnit("ft");
+  });
+
+  it("aria-label includes the area text", () => {
+    const grid = document.createElement("div");
+    setUnit("ft");
+    initTemplates({
+      overlay:  document.createElement("div"),
+      grid,
+      closeBtn: document.createElement("button"),
+      apply:    () => {},
+      isEmpty:  () => true,
+      toast:    () => {},
+    });
+    for (const t of TEMPLATES) {
+      const card = grid.querySelector(`[data-template-id="${t.id}"]`);
+      const label = card.getAttribute("aria-label");
+      const areaText = fmtArea(_templateAreaM2(t.plan)) + " " + areaUnitLabel();
+      if (!label.includes(areaText)) {
+        throw new Error(`Template "${t.id}" aria-label missing area "${areaText}": ${label}`);
+      }
+    }
   });
 });
 
