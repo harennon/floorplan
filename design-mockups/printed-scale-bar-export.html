@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Printed scale bar — export mockup (LLD 149)</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&family=Libre+Baskerville:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-ui: "DM Sans", system-ui, sans-serif;
+    --font-mono: "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+    /* page chrome (this mockup harness, not the exported artifact) */
+    --page-bg: #0d0d0a;
+    --page-ink: #ece7d6;
+    --page-muted: #8f8a78;
+    --page-gold: #c9a84c;
+    --page-hair: rgba(201,168,76,0.18);
+    --page-panel: #16160f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--page-bg);
+    color: var(--page-ink);
+    font-family: var(--font-ui);
+    line-height: 1.5;
+    padding: 40px 32px 80px;
+  }
+  header.intro { max-width: 920px; margin: 0 auto 8px; }
+  header.intro h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 26px;
+    letter-spacing: 0.01em;
+    margin: 0 0 6px;
+  }
+  header.intro p { color: var(--page-muted); font-size: 14px; margin: 0 0 4px; max-width: 70ch; }
+  header.intro code {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--page-gold);
+    background: rgba(201,168,76,0.08);
+    padding: 1px 5px; border-radius: 4px;
+  }
+
+  /* ── Toolbar (mockup controls) ─────────────────────────────── */
+  .toolbar {
+    max-width: 920px; margin: 20px auto 28px;
+    display: flex; flex-wrap: wrap; gap: 20px 28px; align-items: center;
+    padding: 14px 18px;
+    border: 1px solid var(--page-hair);
+    border-radius: 10px;
+    background: var(--page-panel);
+  }
+  .toolbar .grp { display: flex; align-items: center; gap: 8px; }
+  .toolbar .lbl {
+    font-family: var(--font-mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--page-muted);
+  }
+  .seg { display: inline-flex; border: 1px solid var(--page-hair); border-radius: 7px; overflow: hidden; }
+  .seg button {
+    font-family: var(--font-mono); font-size: 12.5px;
+    background: transparent; color: var(--page-muted);
+    border: none; padding: 6px 12px; cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .seg button + button { border-left: 1px solid var(--page-hair); }
+  .seg button:hover { color: var(--page-ink); }
+  .seg button.on { background: var(--page-gold); color: #14140f; font-weight: 500; }
+
+  /* ── Export preview frame ──────────────────────────────────── */
+  .stage { max-width: 920px; margin: 0 auto; }
+  .caption-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin: 24px 0 10px;
+  }
+  .caption-row h2 { font-size: 15px; font-weight: 600; margin: 0; }
+  .caption-row .note { font-size: 12.5px; color: var(--page-muted); font-family: var(--font-mono); }
+  .export-shell {
+    border: 1px solid var(--page-hair);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+  }
+  .export-shell svg { display: block; width: 100%; height: auto; }
+  .legend {
+    max-width: 920px; margin: 26px auto 0;
+    font-size: 13px; color: var(--page-muted);
+    border-top: 1px solid var(--page-hair); padding-top: 16px;
+  }
+  .legend strong { color: var(--page-ink); font-weight: 600; }
+  .legend ul { margin: 8px 0 0; padding-left: 20px; }
+  .legend li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<header class="intro">
+  <h1>Printed scale bar — export artifact</h1>
+  <p>The exported PNG/SVG is what a user actually sends. Floorplan's wedge is <em>to-scale</em>
+  measuring, so a forwarded plan needs a scale reference to be read off. This adds a labeled
+  scale bar to <code>buildExportSvg()</code> in a bottom margin band — reusing
+  <code>EXPORT_PX_PER_M</code> (96) and <code>fmtLen</code>/<code>unitLabel</code>.</p>
+  <p>Everything below is a live SVG rendered at <code>EXPORT_PX_PER_M = 96</code>, exactly as the
+  export module would emit it. Toggle the controls to compare the three scale-bar <strong>styles</strong>,
+  both <strong>units</strong>, both <strong>themes</strong>, and the empty-plan fallback.</p>
+</header>
+
+<div class="toolbar">
+  <div class="grp">
+    <span class="lbl">Style</span>
+    <div class="seg" id="seg-style">
+      <button data-style="ladder" class="on">A · Ruler ladder</button>
+      <button data-style="barbell">B · Barbell</button>
+      <button data-style="checker">C · Checker bar</button>
+    </div>
+  </div>
+  <div class="grp">
+    <span class="lbl">Unit</span>
+    <div class="seg" id="seg-unit">
+      <button data-unit="m" class="on">m</button>
+      <button data-unit="ft">ft</button>
+    </div>
+  </div>
+  <div class="grp">
+    <span class="lbl">Theme</span>
+    <div class="seg" id="seg-theme">
+      <button data-theme="dark" class="on">Dark</button>
+      <button data-theme="light">Light (paper)</button>
+    </div>
+  </div>
+  <div class="grp">
+    <span class="lbl">Plan</span>
+    <div class="seg" id="seg-plan">
+      <button data-plan="studio" class="on">Studio</button>
+      <button data-plan="wide">Wide L-room</button>
+      <button data-plan="empty">Empty</button>
+    </div>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="caption-row">
+    <h2 id="cap-title">Studio · 4.2 × 3.0 m</h2>
+    <span class="note" id="cap-note">SVG @ 96 px/m — scale bar in bottom band</span>
+  </div>
+  <div class="export-shell" id="shell"></div>
+</div>
+
+<div class="legend">
+  <strong>How the scale bar is chosen &amp; placed</strong>
+  <ul>
+    <li><strong>Round length pick:</strong> metric snaps to <code>1 m</code> (or 2 m / 5 m if the
+      plan is very wide); imperial snaps to <code>1 ft</code> / <code>3 ft</code> / <code>10 ft</code>.
+      The bar's pixel width is exactly <em>realLength × 96</em>, so a ruler laid on the print reads true.</li>
+    <li><strong>Margin band:</strong> the SVG height grows by a fixed band (≈ 0.55 m) below the
+      existing <code>MARGIN_M</code> content margin, so the bar never overlaps walls, symbols, or
+      dimension labels regardless of plan size.</li>
+    <li><strong>Empty plan:</strong> renders against the default 5 × 5 m frame; the bar is still
+      drawn (a <code>1 m</code> reference) so the SVG is always valid.</li>
+    <li><strong>Testable invariant:</strong> the emitted bar element's pixel length ===
+      labeled real-world length × <code>EXPORT_PX_PER_M</code>.</li>
+  </ul>
+</div>
+
+<script>
+// ── Constants mirrored from src/js/exportImg.js ─────────────────────────────
+const PX_PER_M = 96;
+const MARGIN_M = 0.5;
+const M_PER_FT = 0.3048;
+const FONT = '"DM Mono","Courier New",monospace';
+
+// ── Palettes (concrete strings, mirror theme.js) ────────────────────────────
+const PALETTE = {
+  dark: {
+    bg: "#14140f", roomFill: "rgba(201,168,76,0.07)", wallBody: "rgba(201,168,76,0.30)",
+    wallLine: "#d9be6e", symFill: "rgba(201,168,76,0.12)", symStroke: "#d9be6e",
+    dim: "#8f8a78", ink: "#ece7d6", bar: "#d9be6e", barText: "#ece7d6",
+    band: "rgba(201,168,76,0.045)", bandLine: "rgba(201,168,76,0.20)",
+  },
+  light: {
+    bg: "#f3ecda", roomFill: "rgba(107,88,54,0.07)", wallBody: "rgba(107,88,54,0.30)",
+    wallLine: "#6b5836", symFill: "rgba(107,88,54,0.12)", symStroke: "#6b5836",
+    dim: "#8a7c60", ink: "#3a3020", bar: "#6b5836", barText: "#3a3020",
+    band: "rgba(120,96,50,0.06)", bandLine: "rgba(120,96,50,0.22)",
+  },
+};
+
+// ── Sample plans (world metres) ─────────────────────────────────────────────
+const PLANS = {
+  studio: {
+    title: "Studio · 4.2 × 3.0 m",
+    rooms: [{ closed: true, verts: [{x:0,y:0},{x:4.2,y:0},{x:4.2,y:3},{x:0,y:3}] }],
+    symbols: [
+      { x:1.0, y:2.2, w:1.8, h:0.9, label:"sofa" },
+      { x:3.4, y:0.6, w:0.7, h:1.4, label:"bed" },
+      { x:3.5, y:2.4, w:0.7, h:0.7, label:"desk" },
+    ],
+  },
+  wide: {
+    title: "Wide L-room · 8.0 × 5.0 m",
+    rooms: [{ closed: true, verts: [
+      {x:0,y:0},{x:8,y:0},{x:8,y:5},{x:3,y:5},{x:3,y:2.6},{x:0,y:2.6}] }],
+    symbols: [
+      { x:1.3, y:1.1, w:2.2, h:1.0, label:"sofa" },
+      { x:6.3, y:1.0, w:1.4, h:1.4, label:"table" },
+      { x:6.2, y:3.8, w:1.6, h:0.8, label:"tv unit" },
+    ],
+  },
+  empty: { title: "Empty plan · default 5 × 5 m frame", rooms: [], symbols: [] },
+};
+
+// ── "Round real-world length" picker ────────────────────────────────────────
+// Choose a bar length that is a nice number in the active unit AND occupies a
+// comfortable fraction (roughly 15–33%) of the export width.
+function pickBarLength(contentWm, unit) {
+  const targetPx = contentWm * PX_PER_M * 0.25; // aim ~25% of width
+  if (unit === "m") {
+    const stepsM = [0.5, 1, 2, 3, 5, 10, 20];
+    return chooseStep(stepsM, targetPx, PX_PER_M) ;
+  }
+  // imperial: nice foot values, converted to metres for pixel sizing
+  const stepsFt = [1, 3, 5, 10, 20, 50];
+  const best = chooseStep(stepsFt, targetPx, PX_PER_M * M_PER_FT);
+  return best;
+}
+function chooseStep(steps, targetPx, pxPerStepUnit) {
+  let best = steps[0];
+  for (const s of steps) {
+    if (s * pxPerStepUnit <= targetPx) best = s; else break;
+  }
+  return best;
+}
+
+// ── Scale-bar renderers. Each returns SVG placed inside the bottom band. ─────
+// x0,y = left/baseline of the bar (export px). barPx = pixel length. label = text.
+// c = palette.
+function barLadder(x0, y, barPx, label, c) {
+  // Ruler: a horizontal rule with tick marks and end caps; label centered above.
+  const ticks = 4; // subdivisions
+  let s = "";
+  s += `<line x1="${x0}" y1="${y}" x2="${x0+barPx}" y2="${y}" stroke="${c.bar}" stroke-width="2"/>`;
+  for (let i=0;i<=ticks;i++){
+    const tx = x0 + (barPx*i/ticks);
+    const h = (i===0||i===ticks) ? 8 : 5;
+    s += `<line x1="${tx}" y1="${y-h}" x2="${tx}" y2="${y}" stroke="${c.bar}" stroke-width="1.5"/>`;
+  }
+  s += `<text x="${x0+barPx/2}" y="${y-13}" font-family='${FONT}' font-size="12" fill="${c.barText}" text-anchor="middle">${label}</text>`;
+  s += `<text x="${x0}" y="${y+15}" font-family='${FONT}' font-size="9" fill="${c.dim}" text-anchor="start">0</text>`;
+  return s;
+}
+function barBarbell(x0, y, barPx, label, c) {
+  // Dumbbell: a rule capped by short verticals at each end; label to the right.
+  let s = "";
+  s += `<line x1="${x0}" y1="${y}" x2="${x0+barPx}" y2="${y}" stroke="${c.bar}" stroke-width="2"/>`;
+  s += `<line x1="${x0}" y1="${y-6}" x2="${x0}" y2="${y+6}" stroke="${c.bar}" stroke-width="2"/>`;
+  s += `<line x1="${x0+barPx}" y1="${y-6}" x2="${x0+barPx}" y2="${y+6}" stroke="${c.bar}" stroke-width="2"/>`;
+  s += `<text x="${x0+barPx+10}" y="${y}" font-family='${FONT}' font-size="12" fill="${c.barText}" text-anchor="start" dominant-baseline="middle">${label}</text>`;
+  return s;
+}
+function barChecker(x0, y, barPx, label, c) {
+  // Cartographic checker bar: alternating filled/empty cells, label centered above.
+  const cells = 4;
+  const cw = barPx / cells;
+  const h = 7;
+  let s = "";
+  s += `<rect x="${x0}" y="${y-h}" width="${barPx}" height="${h}" fill="none" stroke="${c.bar}" stroke-width="1.5"/>`;
+  for (let i=0;i<cells;i++){
+    if (i%2===0){
+      s += `<rect x="${x0+i*cw}" y="${y-h}" width="${cw}" height="${h}" fill="${c.bar}"/>`;
+    }
+  }
+  s += `<text x="${x0+barPx/2}" y="${y-h-6}" font-family='${FONT}' font-size="12" fill="${c.barText}" text-anchor="middle">${label}</text>`;
+  return s;
+}
+const BAR_RENDERERS = { ladder: barLadder, barbell: barBarbell, checker: barChecker };
+
+// Band height reserved below content for the scale bar (world metres).
+const BAND_M = 0.55;
+
+function fmtLen(m, unit){ return unit==="ft" ? (m/M_PER_FT).toFixed(1) : m.toFixed(2); }
+function fmtWhole(v){ return Number.isInteger(v) ? String(v) : v.toFixed(1); }
+
+function contentBounds(plan){
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for (const r of plan.rooms) for (const v of r.verts){
+    minX=Math.min(minX,v.x); minY=Math.min(minY,v.y);
+    maxX=Math.max(maxX,v.x); maxY=Math.max(maxY,v.y);
+  }
+  for (const s of plan.symbols){
+    minX=Math.min(minX,s.x-s.w/2); minY=Math.min(minY,s.y-s.h/2);
+    maxX=Math.max(maxX,s.x+s.w/2); maxY=Math.max(maxY,s.y+s.h/2);
+  }
+  if (!isFinite(minX)) return null;
+  return {minX,minY,maxX,maxY};
+}
+
+function buildSvg(plan, unit, theme, style){
+  const c = PALETTE[theme];
+  const b = contentBounds(plan);
+  let wM,hM,originX,originY;
+  if (!b){ wM=5; hM=5; originX=0; originY=0; }
+  else {
+    originX=b.minX-MARGIN_M; originY=b.minY-MARGIN_M;
+    wM=(b.maxX-b.minX)+2*MARGIN_M; hM=(b.maxY-b.minY)+2*MARGIN_M;
+  }
+  const W = wM*PX_PER_M;
+  const contentH = hM*PX_PER_M;
+  const bandH = BAND_M*PX_PER_M;
+  const H = contentH + bandH;
+  const wx = x => (x-originX)*PX_PER_M;
+  const wy = y => (y-originY)*PX_PER_M;
+
+  let body = "";
+  // rooms
+  for (const r of plan.rooms){
+    const pts = r.verts.map(v=>`${wx(v.x)},${wy(v.y)}`).join(" ");
+    body += `<polygon points="${pts}" fill="${c.roomFill}" stroke="none"/>`;
+    body += `<polygon points="${pts}" fill="none" stroke="${c.wallBody}" stroke-width="${Math.max(6,0.12*PX_PER_M)}" stroke-linejoin="round"/>`;
+    body += `<polygon points="${pts}" fill="none" stroke="${c.wallLine}" stroke-width="1.5" stroke-linejoin="round"/>`;
+    // one dimension label per edge (bottom-most edge label sits near the band —
+    // shows the band keeps clear of it)
+    const n=r.verts.length;
+    for (let i=0;i<n;i++){
+      const a=r.verts[i], d=r.verts[(i+1)%n];
+      const len=Math.hypot(d.x-a.x,d.y-a.y);
+      const mx=wx((a.x+d.x)/2), my=wy((a.y+d.y)/2);
+      body += `<text x="${mx}" y="${my}" font-family='${FONT}' font-size="10" fill="${c.dim}" text-anchor="middle" dominant-baseline="middle">${fmtLen(len,unit)} ${unit}</text>`;
+    }
+  }
+  // symbols
+  for (const s of plan.symbols){
+    const x=wx(s.x-s.w/2), y=wy(s.y-s.h/2);
+    body += `<rect x="${x}" y="${y}" width="${s.w*PX_PER_M}" height="${s.h*PX_PER_M}" fill="${c.symFill}" stroke="${c.symStroke}" stroke-width="1.5"/>`;
+    body += `<text x="${wx(s.x)}" y="${wy(s.y)}" font-family='${FONT}' font-size="9" fill="${c.dim}" text-anchor="middle" dominant-baseline="middle">${s.label}</text>`;
+  }
+
+  // ── scale-bar band ──
+  const barLenM = pickBarLength(wM, unit);
+  const barPx = unit==="m" ? barLenM*PX_PER_M : barLenM*M_PER_FT*PX_PER_M;
+  const label = unit==="m" ? `${fmtWhole(barLenM)} m` : `${fmtWhole(barLenM)} ft`;
+  const bandTop = contentH;
+  const barX = 0.5*PX_PER_M;                 // left-aligned, MARGIN_M in from edge
+  const barY = bandTop + bandH*0.62;         // baseline within band
+  let band = "";
+  band += `<rect x="0" y="${bandTop}" width="${W}" height="${bandH}" fill="${c.band}"/>`;
+  band += `<line x1="0" y1="${bandTop}" x2="${W}" y2="${bandTop}" stroke="${c.bandLine}" stroke-width="1"/>`;
+  band += BAR_RENDERERS[style](barX, barY, barPx, label, c);
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+    + `<rect width="${W}" height="${H}" fill="${c.bg}"/>`
+    + body + band + `</svg>`;
+}
+
+// ── State + wiring ──────────────────────────────────────────────────────────
+const state = { style:"ladder", unit:"m", theme:"dark", plan:"studio" };
+const shell = document.getElementById("shell");
+const capTitle = document.getElementById("cap-title");
+const capNote = document.getElementById("cap-note");
+
+function render(){
+  const plan = PLANS[state.plan];
+  shell.innerHTML = buildSvg(plan, state.unit, state.theme, state.style);
+  capTitle.textContent = plan.title;
+  capNote.textContent = `SVG @ 96 px/m · ${state.theme} · scale bar in bottom band`;
+  document.documentElement.dataset.theme = state.theme;
+}
+
+function wireSeg(id, key){
+  const seg = document.getElementById(id);
+  seg.addEventListener("click", e=>{
+    const btn = e.target.closest("button"); if(!btn) return;
+    state[key] = btn.dataset[key];
+    seg.querySelectorAll("button").forEach(x=>x.classList.remove("on"));
+    btn.classList.add("on");
+    render();
+  });
+}
+wireSeg("seg-style","style");
+wireSeg("seg-unit","unit");
+wireSeg("seg-theme","theme");
+wireSeg("seg-plan","plan");
+render();
+</script>
+</body>
+</html>
+
