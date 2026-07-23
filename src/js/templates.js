@@ -256,7 +256,7 @@ export const TEMPLATES = Object.freeze([
   {
     id: "gaming-room",
     name: "Gaming room",
-    description: "~11 m² battlestation with desk, dual monitors & gaming chair",
+    description: "Battlestation with desk, dual monitors & gaming chair",
     thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <rect x="8" y="8" width="104" height="74" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
       <!-- rug (floor layer) -->
@@ -307,7 +307,7 @@ export const TEMPLATES = Object.freeze([
   {
     id: "kitchen",
     name: "Kitchen",
-    description: "~11 m² work-triangle kitchen with appliances & dining table",
+    description: "Work-triangle kitchen with appliances & dining table",
     thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <rect x="8" y="8" width="104" height="74" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
       <!-- fridge -->
@@ -365,7 +365,7 @@ export const TEMPLATES = Object.freeze([
   {
     id: "cozy-living-room",
     name: "Cozy living room",
-    description: "~15 m² conversation group with sofa, armchair & TV",
+    description: "Conversation group with sofa, armchair & TV",
     thumb: `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <rect x="8" y="8" width="104" height="74" fill="rgba(201,168,76,0.07)" stroke="#d9be6e" stroke-width="1.5"/>
       <!-- rug (floor layer) -->
