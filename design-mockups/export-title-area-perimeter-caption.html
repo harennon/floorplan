@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Export caption band — mockup</title>
+<style>
+  :root {
+    --page-bg: #0c0c09;
+    --page-ink: #ece7d6;
+    --page-muted: #8f8a78;
+    --page-line: rgba(201,168,76,0.18);
+    --gold: #d9be6e;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--page-bg);
+    color: var(--page-ink);
+    font-family: "DM Mono", ui-monospace, "SFMono-Regular", "Courier New", monospace;
+    line-height: 1.5;
+    padding: 28px clamp(16px, 4vw, 48px) 64px;
+  }
+  .pageHead { max-width: 960px; margin: 0 auto 8px; }
+  .pageHead h1 {
+    font-size: 18px; font-weight: 500; letter-spacing: 0.02em;
+    margin: 0 0 8px; color: var(--gold);
+  }
+  .pageHead p { margin: 0 0 18px; color: var(--page-muted); font-size: 13px; max-width: 72ch; }
+  code {
+    background: rgba(201,168,76,0.10); color: var(--gold);
+    padding: 1px 5px; border-radius: 3px; font-size: 0.92em;
+  }
+  .controls { display: flex; flex-wrap: wrap; gap: 18px; margin-bottom: 6px; }
+  .ctlGroup {
+    display: inline-flex; border: 1px solid var(--page-line);
+    border-radius: 8px; overflow: hidden;
+  }
+  .ctl {
+    appearance: none; border: none; background: transparent;
+    color: var(--page-muted); font: inherit; font-size: 12px;
+    padding: 7px 13px; cursor: pointer; transition: background 0.15s, color 0.15s;
+    border-right: 1px solid var(--page-line);
+  }
+  .ctl:last-child { border-right: none; }
+  .ctl:hover { color: var(--page-ink); background: rgba(201,168,76,0.06); }
+  .ctl.is-on { background: rgba(201,168,76,0.16); color: var(--gold); }
+  .ctl:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+
+  .board {
+    max-width: 1200px; margin: 24px auto 0;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px;
+  }
+  @media (max-width: 1024px) { .board { grid-template-columns: 1fr; max-width: 640px; } }
+
+  .optCol { display: flex; flex-direction: column; }
+  .optTitle {
+    font-size: 14px; font-weight: 500; margin: 0 0 6px; color: var(--page-ink);
+    letter-spacing: 0.01em;
+  }
+  .optNote { font-size: 12px; color: var(--page-muted); margin: 0 0 14px; min-height: 3em; }
+  .frame {
+    border: 1px solid var(--page-line); border-radius: 10px; overflow: hidden;
+    background: #14140f; box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+  }
+  .frame svg { display: block; width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<header class="pageHead">
+  <h1>Exported plan — title &amp; area/perimeter caption</h1>
+  <p>
+    A caption band renders in a top margin above the geometry, inside the exported
+    SVG/PNG itself. Values come from the same source as the live HUD
+    (<code>walls.polygonArea</code> + <code>perimeter</code>), formatted with the
+    existing unit helpers. Toggle units and options to preview each state. These are
+    faithful re-creations of the SVG the exporter would emit.
+  </p>
+  <div class="controls">
+    <div class="ctlGroup" role="group" aria-label="Units">
+      <button id="btn-ft" class="ctl is-on" data-unit="ft">Imperial (ft)</button>
+      <button id="btn-m" class="ctl" data-unit="m">Metric (m)</button>
+    </div>
+    <div class="ctlGroup" role="group" aria-label="Theme">
+      <button id="btn-dark" class="ctl is-on" data-theme="dark">Dark</button>
+      <button id="btn-light" class="ctl" data-theme="light">Light</button>
+    </div>
+    <div class="ctlGroup" role="group" aria-label="Plan state">
+      <button id="btn-normal" class="ctl is-on" data-state="normal">Normal plan</button>
+      <button id="btn-open" class="ctl" data-state="open">Open shape only</button>
+      <button id="btn-empty" class="ctl" data-state="empty">Empty plan</button>
+    </div>
+  </div>
+</header>
+
+<main class="board">
+  <section class="optCol">
+    <h2 class="optTitle">Option A — Split caption</h2>
+    <p class="optNote">
+      Title left, metrics right on one baseline. Feels like a drawing title-block
+      / blueprint stamp. Compact vertical footprint.
+    </p>
+    <div class="frame" id="frameA"></div>
+  </section>
+
+  <section class="optCol">
+    <h2 class="optTitle">Option B — Centered stack</h2>
+    <p class="optNote">
+      Centered title with a metrics sub-line beneath. Reads as a caption/label;
+      symmetric, good for square exports and social sharing.
+    </p>
+    <div class="frame" id="frameB"></div>
+  </section>
+
+  <section class="optCol">
+    <h2 class="optTitle">Option C — Left stamp + rule</h2>
+    <p class="optNote">
+      Left-aligned title with metric chips beneath and a hairline rule separating
+      band from geometry. Most explicit band boundary; pairs with a bottom scale bar.
+    </p>
+    <div class="frame" id="frameC"></div>
+  </section>
+</main>
+
+<script id="mockup-script">
+/* ── Palettes (mirror src/js/theme.js concrete values) ──────────────────── */
+const PALETTES = {
+  dark: {
+    bg: "#14140f", ink: "#ece7d6", muted: "#8f8a78", gold: "#d9be6e",
+    wallBody: "rgba(201,168,76,0.30)", wallLine: "#d9be6e",
+    roomFill: "rgba(201,168,76,0.07)", dim: "#8f8a78",
+    bandRule: "rgba(201,168,76,0.22)", chipBg: "rgba(201,168,76,0.10)",
+  },
+  light: {
+    bg: "#f7f4ea", ink: "#2c2a20", muted: "#6f6a58", gold: "#8a6d1f",
+    wallBody: "rgba(138,109,31,0.30)", wallLine: "#8a6d1f",
+    roomFill: "rgba(138,109,31,0.06)", dim: "#6f6a58",
+    bandRule: "rgba(138,109,31,0.24)", chipBg: "rgba(138,109,31,0.09)",
+  },
+};
+
+/* ── Unit helpers (mirror src/js/units.js) ──────────────────────────────── */
+const M_PER_FT = 0.3048;
+const M2_PER_FT2 = M_PER_FT * M_PER_FT;
+function fmtLen(m, unit) { return unit === "ft" ? (m / M_PER_FT).toFixed(1) : m.toFixed(2); }
+function fmtArea(m2, unit) { return unit === "ft" ? (m2 / M2_PER_FT2).toFixed(1) : m2.toFixed(2); }
+function unitLabel(unit) { return unit; }
+function areaUnitLabel(unit) { return unit === "ft" ? "ft²" : "m²"; }
+
+/* ── Geometry (mirror walls.polygonArea + perimeter) ────────────────────── */
+function polygonArea(verts) {
+  const n = verts.length; if (n < 3) return 0;
+  let s = 0;
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n; s += verts[i].x * verts[j].y - verts[j].x * verts[i].y; }
+  return Math.abs(s) / 2;
+}
+function edgeLen(a, b) { return Math.hypot(b.x - a.x, b.y - a.y); }
+function perimeter(verts, closed) {
+  let t = 0;
+  for (let i = 0; i < verts.length - 1; i++) t += edgeLen(verts[i], verts[i + 1]);
+  if (closed && verts.length >= 2) t += edgeLen(verts[verts.length - 1], verts[0]);
+  return t;
+}
+
+/* ── Sample plans (world metres) ────────────────────────────────────────── */
+const PLANS = {
+  // An L-shaped studio: one closed living area + a closed bedroom rectangle.
+  normal: {
+    rooms: [
+      { closed: true, verts: [ {x:0,y:0}, {x:6.1,y:0}, {x:6.1,y:2.9}, {x:3.6,y:2.9}, {x:3.6,y:5.2}, {x:0,y:5.2} ] },
+      { closed: true, verts: [ {x:6.1,y:0}, {x:9.2,y:0}, {x:9.2,y:2.9}, {x:6.1,y:2.9} ] },
+    ],
+  },
+  // Only an open polyline — no enclosed area. Caption should show a placeholder.
+  open: {
+    rooms: [ { closed: false, verts: [ {x:0,y:0}, {x:4,y:0}, {x:4,y:3} ] } ],
+  },
+  // Nothing drawn.
+  empty: { rooms: [] },
+};
+
+/* ── Caption model: title + area/perimeter, sourced like the HUD ────────── */
+function captionData(plan, unit) {
+  const closed = plan.rooms.filter(r => r.closed && r.verts.length >= 3);
+  let totalArea = 0, totalPerim = 0;
+  for (const r of closed) { totalArea += polygonArea(r.verts); totalPerim += perimeter(r.verts, true); }
+  const hasArea = closed.length > 0 && totalArea > 1e-6;
+  return {
+    title: "Floor plan",
+    hasArea,
+    areaText: hasArea ? `${fmtArea(totalArea, unit)} ${areaUnitLabel(unit)}` : null,
+    perimText: hasArea ? `${fmtLen(totalPerim, unit)} ${unitLabel(unit)}` : null,
+    placeholder: "Sketch",
+  };
+}
+
+const EXPORT_PX_PER_M = 96;
+const MARGIN_M = 0.5;
+
+/* Geometry bounds (mirror contentBounds) over all room verts. */
+function contentBounds(plan) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const r of plan.rooms) for (const v of r.verts) {
+    minX = Math.min(minX, v.x); minY = Math.min(minY, v.y);
+    maxX = Math.max(maxX, v.x); maxY = Math.max(maxY, v.y);
+  }
+  return isFinite(minX) ? { minX, minY, maxX, maxY } : null;
+}
+
+function esc(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+/* Emit geometry: room fill + wall body + centerline + per-edge dimension labels. */
+function geometrySvg(plan, p, wx, wy, unit) {
+  const wallPx = Math.max(6, 0.12 * EXPORT_PX_PER_M);
+  let body = "";
+  for (const room of plan.rooms) {
+    const pts = room.verts; if (!pts.length) continue;
+    const ptsStr = pts.map(v => `${wx(v.x)},${wy(v.y)}`).join(" ");
+    if (room.closed && pts.length >= 3)
+      body += `<polygon points="${ptsStr}" fill="${p.roomFill}" stroke="none"/>`;
+    const tag = room.closed ? "polygon" : "polyline";
+    if (pts.length >= 2) {
+      body += `<${tag} points="${ptsStr}" fill="none" stroke="${p.wallBody}" stroke-width="${wallPx}" stroke-linejoin="round" stroke-linecap="round"/>`;
+      body += `<${tag} points="${ptsStr}" fill="none" stroke="${p.wallLine}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    }
+    const n = pts.length, edgeCount = room.closed ? n : n - 1;
+    for (let i = 0; i < edgeCount; i++) {
+      const a = pts[i], b = pts[room.closed ? (i + 1) % n : i + 1];
+      const len = edgeLen(a, b); if (len < 1e-6) continue;
+      const mx = wx((a.x + b.x) / 2), my = wy((a.y + b.y) / 2);
+      body += `<text x="${mx}" y="${my}" font-size="10" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${esc(fmtLen(len, unit) + " " + unitLabel(unit))}</text>`;
+    }
+  }
+  return body;
+}
+
+/* ── Band layout ─────────────────────────────────────────────────────────
+   The reusable "band" idea: the exported SVG reserves a fixed-height margin
+   band at the top (caption) — and later the bottom (scale bar) — separate from
+   the geometry region. Geometry is translated down by the top band height so
+   nothing overlaps. Each option below draws the SAME caption data into that
+   band with a different composition. Band height is in export px.            */
+const CAP_BAND_H = 64; // top caption band height, export px
+
+/* Option A — split: title left, metrics right, single baseline. */
+function captionBandA(cap, p, W) {
+  const cy = CAP_BAND_H / 2;
+  let s = "";
+  s += `<text x="20" y="${cy}" font-size="20" font-weight="500" fill="${p.gold}" dominant-baseline="middle">${esc(cap.title)}</text>`;
+  if (cap.hasArea) {
+    const metrics = `${cap.areaText}  ·  ${cap.perimText}`;
+    s += `<text x="${W - 20}" y="${cy}" font-size="14" fill="${p.ink}" text-anchor="end" dominant-baseline="middle">${esc(metrics)}</text>`;
+  } else {
+    s += `<text x="${W - 20}" y="${cy}" font-size="13" fill="${p.dim}" text-anchor="end" dominant-baseline="middle">${esc("— not enclosed —")}</text>`;
+  }
+  return s;
+}
+
+/* Option B — centered stack: title over metrics sub-line. */
+function captionBandB(cap, p, W) {
+  const cx = W / 2;
+  let s = "";
+  s += `<text x="${cx}" y="26" font-size="20" font-weight="500" fill="${p.gold}" text-anchor="middle" dominant-baseline="middle">${esc(cap.title)}</text>`;
+  const sub = cap.hasArea ? `Area ${cap.areaText}   ·   Perimeter ${cap.perimText}` : "— no enclosed area —";
+  const col = cap.hasArea ? p.ink : p.dim;
+  s += `<text x="${cx}" y="48" font-size="13" fill="${col}" text-anchor="middle" dominant-baseline="middle">${esc(sub)}</text>`;
+  return s;
+}
+
+/* Option C — left stamp + labelled metric chips + hairline rule. */
+function captionBandC(cap, p, W) {
+  let s = "";
+  s += `<text x="20" y="26" font-size="19" font-weight="500" fill="${p.gold}" dominant-baseline="middle">${esc(cap.title)}</text>`;
+  if (cap.hasArea) {
+    s += chip(20, 38, "AREA", cap.areaText, p);
+    s += chip(150, 38, "PERIMETER", cap.perimText, p);
+  } else {
+    s += `<text x="20" y="46" font-size="12" fill="${p.dim}" dominant-baseline="middle">${esc("Open sketch — enclose a room to show area")}</text>`;
+  }
+  // hairline rule at band bottom, separating caption from geometry
+  s += `<line x1="0" y1="${CAP_BAND_H}" x2="${W}" y2="${CAP_BAND_H}" stroke="${p.bandRule}" stroke-width="1"/>`;
+  return s;
+}
+
+function chip(x, y, label, value, p) {
+  return `<text x="${x}" y="${y}" font-size="9" fill="${p.dim}" letter-spacing="0.08em">${esc(label)}</text>`
+       + `<text x="${x}" y="${y + 15}" font-size="14" fill="${p.ink}">${esc(value)}</text>`;
+}
+
+/* ── Full export SVG: caption band + geometry region ─────────────────────
+   Layout: total height = CAP_BAND_H + geometryH. Geometry is drawn inside a
+   <g transform="translate(0, CAP_BAND_H)"> so it lives below the band and can
+   never overlap the caption. When the caption is omitted (empty plan) the
+   band collapses to 0.                                                       */
+function buildExportSvg(plan, unit, themeKey, bandFn) {
+  const p = PALETTES[themeKey];
+  const cap = captionData(plan, unit);
+  const bounds = contentBounds(plan);
+
+  // Include the band only when there is a title worth showing.
+  const showBand = true; // fixed title "Floor plan" always present in v1
+  const bandH = showBand ? CAP_BAND_H : 0;
+
+  let wM, hM, originX, originY;
+  if (!bounds) { wM = 5; hM = 5; originX = 0; originY = 0; }
+  else {
+    originX = bounds.minX - MARGIN_M; originY = bounds.minY - MARGIN_M;
+    wM = (bounds.maxX - bounds.minX) + 2 * MARGIN_M;
+    hM = (bounds.maxY - bounds.minY) + 2 * MARGIN_M;
+  }
+  const W = wM * EXPORT_PX_PER_M;
+  const geomH = hM * EXPORT_PX_PER_M;
+  const H = geomH + bandH;
+
+  const wx = (x) => (x - originX) * EXPORT_PX_PER_M;
+  const wy = (y) => (y - originY) * EXPORT_PX_PER_M;
+
+  const band = showBand ? bandFn(cap, p, W) : "";
+  const geom = geometrySvg(plan, p, wx, wy, unit);
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family='"DM Mono","Courier New",monospace'>`,
+    `<rect width="${W}" height="${H}" fill="${p.bg}"/>`,
+    band,
+    `<g transform="translate(0 ${bandH})">${geom}</g>`,
+    `</svg>`,
+  ].join("");
+}
+
+/* ── State + render ─────────────────────────────────────────────────────── */
+const state = { unit: "ft", theme: "dark", plan: "normal" };
+const OPTIONS = [
+  { id: "frameA", fn: captionBandA },
+  { id: "frameB", fn: captionBandB },
+  { id: "frameC", fn: captionBandC },
+];
+
+function render() {
+  const plan = PLANS[state.plan];
+  for (const o of OPTIONS) {
+    document.getElementById(o.id).innerHTML =
+      buildExportSvg(plan, state.unit, state.theme, o.fn);
+  }
+}
+
+/* ── Wire controls ──────────────────────────────────────────────────────── */
+function wireGroup(ids, key, apply) {
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener("click", () => {
+      ids.forEach(x => document.getElementById(x).classList.remove("is-on"));
+      el.classList.add("is-on");
+      apply(el);
+      render();
+    });
+  });
+}
+wireGroup(["btn-ft", "btn-m"], "unit", el => state.unit = el.dataset.unit);
+wireGroup(["btn-dark", "btn-light"], "theme", el => state.theme = el.dataset.theme);
+wireGroup(["btn-normal", "btn-open", "btn-empty"], "plan", el => state.plan = el.dataset.state);
+
+render();
+</script>
+</body>
+</html>
