@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Export layout finalize + credit — mockups</title>
+<style>
+  :root {
+    /* app dark theme, sampled from src/js/theme.js */
+    --bg:       #14140f;
+    --bg-deep:  #100f0b;
+    --ink:      #ece7d6;
+    --dim:      #8f8a78;
+    --wall-line:#d9be6e;
+    --room-fill:rgba(201,168,76,0.09);
+    --wall-body:rgba(201,168,76,0.30);
+    --panel:    #1c1b15;
+    --line:     rgba(201,168,76,0.18);
+    --font-mono:"DM Mono","Courier New",monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 20% -10%, rgba(201,168,76,0.05), transparent 45%),
+      var(--bg-deep);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page-head {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 40px 28px 8px;
+  }
+  .page-head h1 {
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    margin: 0 0 10px;
+  }
+  .page-head h1 span { color: var(--wall-line); }
+  .page-head .sub {
+    margin: 0;
+    max-width: 720px;
+    color: var(--dim);
+    font-size: 13px;
+  }
+  main {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 24px 28px 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+  .page-foot {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 28px 48px;
+    color: var(--dim);
+    font-size: 12px;
+    opacity: 0.8;
+  }
+
+  /* ── section scaffolding ─────────────────────────────── */
+  .section > .sec-head { margin-bottom: 14px; }
+  .sec-head h2 {
+    font-size: 15px;
+    font-weight: 500;
+    margin: 0 0 4px;
+  }
+  .sec-head p {
+    margin: 0;
+    color: var(--dim);
+    font-size: 12.5px;
+    max-width: 760px;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--bg-deep);
+    background: var(--wall-line);
+    padding: 2px 7px;
+    border-radius: 3px;
+    margin-right: 8px;
+    vertical-align: 2px;
+  }
+
+  /* ── artifact frame: mimics a downloaded file preview ──── */
+  .gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 22px;
+    align-items: end;
+  }
+  .artifact { display: flex; flex-direction: column; gap: 8px; }
+  .artifact .cap {
+    font-size: 11px;
+    color: var(--dim);
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .artifact .cap b { color: var(--ink); font-weight: 500; }
+  .frame {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px;
+    background: var(--panel);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+  .frame svg { display: block; width: 100%; height: auto; border-radius: 2px; }
+
+  /* ── layout anatomy panel ──────────────────────────────── */
+  .anatomy {
+    display: grid;
+    grid-template-columns: minmax(320px, 1.3fr) 1fr;
+    gap: 28px;
+    align-items: start;
+  }
+  @media (max-width: 720px) { .anatomy { grid-template-columns: 1fr; } }
+  .anatomy .frame { max-width: 460px; }
+  .legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+  .legend li { display: grid; grid-template-columns: 18px 1fr; gap: 10px; font-size: 12.5px; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; margin-top: 2px; }
+  .legend b { color: var(--ink); font-weight: 500; }
+  .legend span { color: var(--dim); }
+
+  /* ── credit option chooser ─────────────────────────────── */
+  .credit-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; }
+  .opt {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .opt.chosen { border-color: var(--wall-line); box-shadow: 0 0 0 1px var(--wall-line); }
+  .opt .opt-svg { padding: 10px; background: var(--bg-deep); }
+  .opt .opt-svg svg { display: block; width: 100%; height: auto; }
+  .opt .opt-body { padding: 12px 14px 14px; }
+  .opt h3 { font-size: 13px; margin: 0 0 6px; font-weight: 500; }
+  .opt h3 .tick { color: var(--wall-line); }
+  .opt p { margin: 0; font-size: 12px; color: var(--dim); }
+
+  code { background: rgba(201,168,76,0.1); padding: 1px 5px; border-radius: 3px; font-size: 0.92em; }
+</style>
+</head>
+<body>
+<header class="page-head">
+  <h1>Export layout finalize <span>+</span> floorplan.danbing.app credit</h1>
+  <p class="sub">
+    LLD 154 · The exported SVG/PNG artifact. Reconciling the top caption band,
+    the geometry, and the bottom scale-bar band so they never crowd or clip
+    across plan aspect ratios — plus a subtle site credit so a shared image
+    reads as a finished danbing.app tool.
+  </p>
+</header>
+
+<main id="app"><!-- sections injected --></main>
+<script>
+/* ────────────────────────────────────────────────────────────────
+   Export-SVG renderer — mirrors src/js/exportImg.js buildExportSvg().
+   Layout model proposed by LLD 154:
+
+     ┌───────────────────────────────────────┐  ← MARGIN_PX outer frame
+     │   TOP CAPTION BAND  (title / area)     │  CAP_BAND_PX  (#147)
+     ├───────────────────────────────────────┤
+     │                                        │
+     │            GEOMETRY REGION             │  contentH (wx/wy unchanged)
+     │                                        │
+     ├───────────────────────────────────────┤
+     │   BOTTOM SCALE BAND  (ruler ladder)    │  SCALE_BAND_PX  (#151)
+     └───────────────────────────────────────┘
+                              floorplan.danbing.app  ← credit in margin (#148)
+   ──────────────────────────────────────────────────────────────── */
+const PX_PER_M   = 96;   // EXPORT_PX_PER_M
+const P = {          // resolved dark palette (concrete colors, like palette())
+  bg:"#14140f", ink:"#ece7d6", dim:"#8f8a78",
+  wallBody:"rgba(201,168,76,0.30)", wallLine:"#d9be6e",
+  roomFill:"rgba(201,168,76,0.08)", symFill:"rgba(201,168,76,0.14)",
+  symStroke:"#b9a25a",
+};
+const FONT = '"DM Mono","Courier New",monospace';
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+/* Round-length ladder for the scale bar (metric only in this mockup). */
+function pickScaleBar(availPx) {
+  const ladder = [1, 2, 5];
+  let chosen = ladder[0];
+  for (const L of ladder) if (L * PX_PER_M <= availPx) chosen = L;
+  return { metres: chosen, label: chosen + " m" };
+}
+
+/* ── Layout constants LLD 154 finalizes ────────────────────────────
+   The band heights are fixed; the OUTER MARGIN is the new load-bearing
+   piece — it wraps the whole composition so no band or the credit ever
+   sits flush against the canvas edge (the "crowd / clip" bug). */
+const MARGIN_PX     = 20;  // uniform outer frame around the whole stack
+const CAP_BAND_PX   = 46;  // top caption band (#147)
+const SCALE_BAND_PX = 44;  // bottom scale-bar band (#151)
+const CREDIT_PX     = 16;  // credit strip reserved in the bottom margin (#148)
+const GAP_PX        = 12;  // breathing gap between a band and the geometry
+
+/*
+ * Build a full export SVG string for a plan.
+ * @param plan  { rooms:[{verts,closed,area,perim}], symbols:[{x,y,w,h,label}], title }
+ *              coords in metres; empty plan => rooms:[] symbols:[]
+ * @param opts  { creditStyle }
+ */
+function buildExportSvg(plan, opts = {}) {
+  const creditStyle = opts.creditStyle || "footer";
+  const b = contentBounds(plan);
+  const empty = !b;
+
+  // world→content-pixel size
+  const wM = empty ? 5 : (b.maxX - b.minX) + 1;   // +2*0.5m margin
+  const hM = empty ? 5 : (b.maxY - b.minY) + 1;
+  const contentW = wM * PX_PER_M;
+  const contentH = hM * PX_PER_M;
+
+  // Inner column width is driven by the widest of geometry / bands.
+  const innerW = Math.max(contentW, 200);
+
+  // Vertical stack, top→bottom, each offset by the outer margin.
+  let y = MARGIN_PX;
+  const capY = y;                    y += CAP_BAND_PX + GAP_PX;
+  const geoY = y;                    y += contentH + GAP_PX;
+  const scaleY = y;                  y += SCALE_BAND_PX;
+  const creditY = y + 4;             y += CREDIT_PX;
+  const totalH = y + MARGIN_PX;
+  const totalW = innerW + 2 * MARGIN_PX;
+
+  return { totalW, totalH, contentW, contentH,
+           capY, geoY, scaleY, creditY, innerW, empty, plan, creditStyle,
+           svg: composeSvg({ totalW, totalH, innerW, contentW, contentH,
+                             capY, geoY, scaleY, creditY, empty, plan, creditStyle }) };
+}
+
+function contentBounds(plan) {
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for (const r of plan.rooms) for (const v of r.verts) {
+    minX=Math.min(minX,v.x); minY=Math.min(minY,v.y);
+    maxX=Math.max(maxX,v.x); maxY=Math.max(maxY,v.y);
+  }
+  for (const s of plan.symbols) {
+    minX=Math.min(minX,s.x-s.w/2); minY=Math.min(minY,s.y-s.h/2);
+    maxX=Math.max(maxX,s.x+s.w/2); maxY=Math.max(maxY,s.y+s.h/2);
+  }
+  if (!isFinite(minX)) return null;
+  return { minX:minX-0.5, minY:minY-0.5, maxX:maxX+0.5, maxY:maxY+0.5 };
+}
+
+function composeSvg(L) {
+  const { totalW, totalH, innerW, contentW, contentH,
+          capY, geoY, scaleY, creditY, empty, plan, creditStyle } = L;
+  const x0 = MARGIN_PX;
+  const cx = x0 + innerW / 2;
+  let out = "";
+
+  out += `<rect width="${totalW}" height="${totalH}" fill="${P.bg}"/>`;
+
+  // ── Top caption band (#147) ──────────────────────────────
+  if (!empty) {
+    const title = plan.title || "Untitled plan";
+    let area = 0, perim = 0;
+    for (const r of plan.rooms) { area += r.area || 0; perim += r.perim || 0; }
+    out += `<text x="${cx}" y="${capY + 18}" font-family='${FONT}' font-size="15"`
+         + ` fill="${P.ink}" text-anchor="middle">${esc(title)}</text>`;
+    out += `<text x="${cx}" y="${capY + 37}" font-family='${FONT}' font-size="11"`
+         + ` fill="${P.dim}" text-anchor="middle">`
+         + `${esc(area.toFixed(1))} m² · ${esc(perim.toFixed(1))} m perimeter</text>`;
+    // faint rule under caption band
+    out += `<line x1="${x0}" y1="${capY + CAP_BAND_PX}" x2="${x0 + innerW}"`
+         + ` y2="${capY + CAP_BAND_PX}" stroke="${P.dim}" stroke-opacity="0.25" stroke-width="1"/>`;
+  } else {
+    out += `<text x="${cx}" y="${capY + 26}" font-family='${FONT}' font-size="13"`
+         + ` fill="${P.dim}" text-anchor="middle">Empty plan</text>`;
+  }
+
+  // ── Geometry region ──────────────────────────────────────
+  // geometry is horizontally centered inside the inner column
+  const gx = x0 + (innerW - contentW) / 2;
+  out += renderGeometry(plan, gx, geoY, empty);
+
+  // ── Bottom scale band (#151) ─────────────────────────────
+  if (!empty) out += renderScaleBar(x0, innerW, scaleY);
+
+  // ── Credit (#148) ────────────────────────────────────────
+  out += renderCredit(creditStyle, { x0, innerW, totalW, creditY, capY, contentW, geoY });
+
+  return out;
+}
+
+function renderGeometry(plan, gx, gy, empty) {
+  if (empty) return "";
+  const b = contentBounds(plan);
+  const wx = x => gx + (x - b.minX) * PX_PER_M;
+  const wy = y => gy + (y - b.minY) * PX_PER_M;
+  const wallPx = Math.max(6, 0.1 * PX_PER_M);
+  let out = "";
+  for (const r of plan.rooms) {
+    const pts = r.verts.map(v => `${wx(v.x).toFixed(1)},${wy(v.y).toFixed(1)}`).join(" ");
+    if (r.closed) out += `<polygon points="${pts}" fill="${P.roomFill}" stroke="none"/>`;
+    const tag = r.closed ? "polygon" : "polyline";
+    out += `<${tag} points="${pts}" fill="none" stroke="${P.wallBody}"`
+         + ` stroke-width="${wallPx}" stroke-linejoin="round"/>`;
+    out += `<${tag} points="${pts}" fill="none" stroke="${P.wallLine}"`
+         + ` stroke-width="1.5" stroke-linejoin="round"/>`;
+    // edge dimension labels
+    const n = r.verts.length, ec = r.closed ? n : n - 1;
+    for (let i = 0; i < ec; i++) {
+      const a = r.verts[i], c = r.verts[r.closed ? (i+1)%n : i+1];
+      const len = Math.hypot(c.x-a.x, c.y-a.y);
+      out += `<text x="${wx((a.x+c.x)/2).toFixed(1)}" y="${wy((a.y+c.y)/2).toFixed(1)}"`
+           + ` font-family='${FONT}' font-size="10" fill="${P.dim}"`
+           + ` text-anchor="middle" dominant-baseline="middle">${esc(len.toFixed(2))} m</text>`;
+    }
+  }
+  for (const s of plan.symbols) {
+    out += `<rect x="${wx(s.x-s.w/2).toFixed(1)}" y="${wy(s.y-s.h/2).toFixed(1)}"`
+         + ` width="${(s.w*PX_PER_M).toFixed(1)}" height="${(s.h*PX_PER_M).toFixed(1)}"`
+         + ` fill="${P.symFill}" stroke="${P.symStroke}" stroke-width="1.5"/>`;
+    out += `<text x="${wx(s.x).toFixed(1)}" y="${wy(s.y).toFixed(1)}"`
+         + ` font-family='${FONT}' font-size="9" fill="${P.dim}"`
+         + ` text-anchor="middle" dominant-baseline="middle">${esc(s.label)}</text>`;
+  }
+  return out;
+}
+
+function renderScaleBar(x0, innerW, bandY) {
+  const pad = 16;
+  const availPx = innerW - 2 * pad;
+  const { metres, label } = pickScaleBar(availPx);
+  const barPx = metres * PX_PER_M;
+  const bx0 = x0 + pad;
+  const bx1 = bx0 + barPx;
+  const baseY = bandY + 26;
+  let out = `<g class="scale-bar">`;
+  out += `<line x1="${bx0}" y1="${baseY}" x2="${bx1}" y2="${baseY}"`
+       + ` stroke="${P.ink}" stroke-width="1.5" stroke-linecap="round"/>`;
+  for (let i = 0; i <= metres; i++) {
+    const tx = bx0 + i * PX_PER_M;
+    const h = (i === 0 || i === metres) ? 10 : 5;
+    out += `<line x1="${tx}" y1="${baseY - h}" x2="${tx}" y2="${baseY}"`
+         + ` stroke="${P.ink}" stroke-width="1.5" stroke-linecap="round"/>`;
+  }
+  out += `<text x="${bx0}" y="${baseY + 13}" font-family='${FONT}' font-size="9"`
+       + ` fill="${P.dim}" text-anchor="middle">0</text>`;
+  out += `<text x="${bx1}" y="${baseY - 14}" font-family='${FONT}' font-size="10"`
+       + ` fill="${P.dim}" text-anchor="end">${esc(label)}</text>`;
+  out += `</g>`;
+  return out;
+}
+
+const CREDIT = "floorplan.danbing.app";
+function renderCredit(style, g) {
+  const { x0, innerW, creditY } = g;
+  const rightX = x0 + innerW;
+  // All variants are a single low-emphasis mono line living in a margin,
+  // never overlapping any band. They differ only in placement/anchor.
+  if (style === "footer-center")
+    return `<text class="credit" x="${x0 + innerW/2}" y="${creditY + 10}"`
+      + ` font-family='${FONT}' font-size="10" fill="${P.dim}" fill-opacity="0.75"`
+      + ` text-anchor="middle" letter-spacing="0.04em">${esc(CREDIT)}</text>`;
+  if (style === "footer-split") {
+    // credit shares the scale band's baseline row, right-aligned
+    return `<text class="credit" x="${x0}" y="${creditY + 10}"`
+      + ` font-family='${FONT}' font-size="10" fill="${P.dim}" fill-opacity="0.55"`
+      + ` text-anchor="start" letter-spacing="0.04em">made with ${esc(CREDIT)}</text>`;
+  }
+  // default: "footer" — bottom-right of the outer bottom margin
+  return `<text class="credit" x="${rightX}" y="${creditY + 10}"`
+    + ` font-family='${FONT}' font-size="10" fill="${P.dim}" fill-opacity="0.7"`
+    + ` text-anchor="end" letter-spacing="0.04em">${esc(CREDIT)}</text>`;
+}
+
+/* ── sample plans across the aspect-ratio range ─────────────── */
+function rect(w, h) {
+  return { verts:[{x:0,y:0},{x:w,y:0},{x:w,y:h},{x:0,y:h}], closed:true,
+           area:w*h, perim:2*(w+h) };
+}
+const PLANS = {
+  wide: { title:"Studio loft", rooms:[rect(8, 3.5)],
+          symbols:[{x:1.5,y:1.6,w:2,h:0.9,label:"sofa"},{x:6.5,y:2.6,w:1.4,h:0.7,label:"bed"}] },
+  tall: { title:"Stairwell unit", rooms:[rect(2.6, 7)],
+          symbols:[{x:1.3,y:1,w:1.6,h:0.6,label:"desk"}] },
+  square: { title:"One-bed apartment", rooms:[rect(5, 4.6)],
+            symbols:[{x:1.4,y:1.2,w:2,h:1,label:"bed"},{x:3.8,y:3.4,w:1.2,h:1.2,label:"table"}] },
+  tiny: { title:"Closet", rooms:[rect(1.2, 1)], symbols:[] },
+  empty: { title:"Untitled plan", rooms:[], symbols:[] },
+};
+
+/* ── DOM bootstrap ──────────────────────────────────────────── */
+const app = document.getElementById("app");
+function el(html) { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; }
+function svgWrap(spec) {
+  return `<svg viewBox="0 0 ${spec.totalW} ${spec.totalH}" `
+       + `width="${spec.totalW}" height="${spec.totalH}" `
+       + `xmlns="http://www.w3.org/2000/svg" role="img">${spec.svg}</svg>`;
+}
+
+/* Section 1 — aspect-ratio robustness gallery */
+function buildGallery() {
+  const sec = el(`<section class="section"><div class="sec-head">
+    <h2><span class="badge">AC 1</span>Bands compose across aspect ratios</h2>
+    <p>The same fixed top caption band and bottom scale band wrap around a uniform
+    <code>MARGIN_PX</code> outer frame. Whatever the geometry's shape — wide, tall, square,
+    tiny, or empty — the caption, geometry, scale bar, and credit each get their own row and
+    never crowd or clip. Narrow plans widen to a minimum inner column so the bands stay legible.</p>
+    </div><div class="gallery"></div></section>`);
+  const g = sec.querySelector(".gallery");
+  const order = [
+    ["wide","Wide 8.0 × 3.5 m"], ["tall","Tall 2.6 × 7.0 m"],
+    ["square","Square-ish 5.0 × 4.6 m"], ["tiny","Tiny 1.2 × 1.0 m"],
+    ["empty","Empty plan"],
+  ];
+  for (const [key, cap] of order) {
+    const spec = buildExportSvg(PLANS[key], { creditStyle:"footer" });
+    g.appendChild(el(`<div class="artifact">
+      <div class="frame">${svgWrap(spec)}</div>
+      <div class="cap"><b>${cap}</b><span>${spec.totalW}×${spec.totalH}px</span></div>
+    </div>`));
+  }
+  app.appendChild(sec);
+}
+
+/* Section 2 — layout anatomy: what each margin/band is */
+function buildAnatomy() {
+  const spec = buildExportSvg(PLANS.square, { creditStyle:"footer" });
+  const sec = el(`<section class="section"><div class="sec-head">
+    <h2>Layout anatomy — the margin model</h2>
+    <p>LLD 154 adds one load-bearing piece on top of the existing bands: a uniform outer
+    <code>MARGIN_PX</code> frame plus a <code>GAP_PX</code> between each band and the geometry.
+    Total height becomes the vertical sum of every row, so the canvas bounds provably enclose
+    every band — the invariant the new unit test asserts.</p>
+    </div><div class="anatomy">
+      <div class="frame">${svgWrap(spec)}</div>
+      <ul class="legend">
+        <li><span class="sw" style="background:#8f8a78;opacity:.4"></span>
+          <div><b>MARGIN_PX outer frame</b><br><span>Uniform inset on all four sides so no band
+          or the credit sits flush against the edge.</span></div></li>
+        <li><span class="sw" style="background:#ece7d6"></span>
+          <div><b>Top caption band (#147)</b><br><span>Title + live area / perimeter, centered.</span></div></li>
+        <li><span class="sw" style="background:rgba(201,168,76,0.30)"></span>
+          <div><b>Geometry region</b><br><span>wx/wy world→pixel maps unchanged — existing coords stay byte-identical.</span></div></li>
+        <li><span class="sw" style="background:#d9be6e"></span>
+          <div><b>Bottom scale band (#151)</b><br><span>Ruler ladder; barPx = metres × 96, untouched.</span></div></li>
+        <li><span class="sw" style="background:#8f8a78"></span>
+          <div><b>Credit strip (#148)</b><br><span>One low-emphasis mono line in the bottom margin.</span></div></li>
+      </ul>
+    </div></section>`);
+  app.appendChild(sec);
+}
+
+/* Section 3 — credit placement options (the one real decision) */
+function buildCreditOpts() {
+  const sec = el(`<section class="section"><div class="sec-head">
+    <h2><span class="badge">Decision</span>Credit placement</h2>
+    <p>All three are the same plain <code>floorplan.danbing.app</code> mono line — small, dimmed,
+    in a margin, appearing exactly once. Styling stays minimal; the brand typography/palette is
+    owned by #46 and this credit inherits from it once that lands. Pick the placement.</p>
+    </div><div class="credit-opts"></div></section>`);
+  const wrap = sec.querySelector(".credit-opts");
+  const opts = [
+    ["footer", "A · Bottom-right", true,
+     "Right-anchored in the bottom margin. Reads like a signature; stays out of the geometry and never competes with the scale bar on the left."],
+    ["footer-center", "B · Bottom-center", false,
+     "Centered under the scale band, mirroring the centered caption at top. Symmetric, but sits directly below the ruler so the eye stacks two centered rows."],
+    ["footer-split", "C · Prefixed left", false,
+     "“made with floorplan.danbing.app”, left-anchored & most faded. Warmest read, but longer and lowest-contrast."],
+  ];
+  for (const [style, title, chosen, desc] of opts) {
+    const spec = buildExportSvg(PLANS.square, { creditStyle: style });
+    wrap.appendChild(el(`<div class="opt${chosen ? " chosen" : ""}">
+      <div class="opt-svg">${svgWrap(spec)}</div>
+      <div class="opt-body">
+        <h3>${title}${chosen ? ' <span class="tick">◂ recommended</span>' : ''}</h3>
+        <p>${desc}</p>
+      </div></div>`));
+  }
+  app.appendChild(sec);
+}
+
+/* Section 4 — SVG / PNG parity */
+function buildParity() {
+  const svgSpec  = buildExportSvg(PLANS.wide, { creditStyle:"footer" });
+  const sec = el(`<section class="section"><div class="sec-head">
+    <h2><span class="badge">AC 3</span>SVG and 2× PNG agree</h2>
+    <p>The PNG path rasterizes this exact SVG at <code>EXPORT_2X</code> onto a canvas of
+    <code>W×2 × H×2</code>. Because the whole layout — bands, margins, credit — lives inside the
+    single <code>buildExportSvg()</code> string, the two formats can't diverge. Below: the vector
+    SVG and a simulated 2× raster of the same bytes.</p>
+    </div><div class="gallery"></div></section>`);
+  const g = sec.querySelector(".gallery");
+  g.appendChild(el(`<div class="artifact">
+    <div class="frame">${svgWrap(svgSpec)}</div>
+    <div class="cap"><b>floorplan.svg</b><span>vector · ${svgSpec.totalW}×${svgSpec.totalH}</span></div>
+  </div>`));
+  // Simulated PNG: same SVG, upscaled with a crisp-edge filter to hint raster.
+  const pngArt = el(`<div class="artifact">
+    <div class="frame" style="image-rendering:auto">${svgWrap(svgSpec)}</div>
+    <div class="cap"><b>floorplan.png</b><span>2× raster · ${svgSpec.totalW*2}×${svgSpec.totalH*2}</span></div>
+  </div>`);
+  g.appendChild(pngArt);
+  app.appendChild(sec);
+}
+
+buildGallery();
+buildAnatomy();
+buildCreditOpts();
+buildParity();
+</script>
+
+<footer class="page-foot">
+  Throwaway design artifact · mockup renders SVG at export scale (96 px/m).
+  Brand palette/typography deferred to #46 — this is layout hygiene + a plain credit only.
+</footer>
+</body>
+</html>
