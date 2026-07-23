@@ -10984,7 +10984,7 @@ describe("exportImg.buildExportSvg — structural", () => {
     setUnit("m");
     // Room: 3m wide × 2m tall, min at (0,0).
     // wM = 3 + 2*0.5 = 4, hM = 2 + 2*0.5 = 3 → W = 4*96 = 384, contentH = 3*96 = 288
-    // Non-empty plan: H = contentH + BAND_PX = 288 + 56 = 344
+    // Non-empty plan with enclosed area: H = contentH + BAND_PX + CAPTION_PX = 288 + 56 + 40 = 384
     model.rooms.push({ id: "w0", closed: true, verts: [
       { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
     ]});
@@ -11000,7 +11000,8 @@ describe("exportImg.buildExportSvg — structural", () => {
     if (vbX !== 0 || vbY !== 0) throw new Error(`viewBox should start at 0 0, got: ${vb}`);
     const W = 4 * 96;          // 384
     const BAND_PX = 56;
-    const H = 3 * 96 + BAND_PX; // 288 + 56 = 344
+    const CAPTION_PX = 40;
+    const H = 3 * 96 + BAND_PX + CAPTION_PX; // 288 + 56 + 40 = 384
     expect(vbW).toBeCloseTo(W, 6);
     expect(vbH).toBeCloseTo(H, 6);
     // width and height attributes should also match
@@ -11066,7 +11067,7 @@ describe("exportImg.buildExportSvg — structural", () => {
   it("dimension labels: n edges → n <text> nodes per closed room", () => {
     resetAll();
     setUnit("m");
-    // Closed rectangle: 4 edges → 4 dimension labels (excluding scale-bar texts)
+    // Closed rectangle: 4 edges → 4 dimension labels (excluding scale-bar and caption texts)
     model.rooms.push({ id: "w0", closed: true, verts: [
       { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
     ]});
@@ -11076,15 +11077,18 @@ describe("exportImg.buildExportSvg — structural", () => {
     // Exclude scale-bar texts (inside <g class="scale-bar">)
     const scaleBarGroup = doc.querySelector(".scale-bar");
     const scaleBarTextCount = scaleBarGroup ? scaleBarGroup.querySelectorAll("text").length : 0;
+    // Exclude caption texts (inside <g class="plan-caption">)
+    const captionGroup = doc.querySelector(".plan-caption");
+    const captionTextCount = captionGroup ? captionGroup.querySelectorAll("text").length : 0;
     const texts = doc.querySelectorAll("text");
-    const contentTexts = texts.length - scaleBarTextCount;
+    const contentTexts = texts.length - scaleBarTextCount - captionTextCount;
     if (contentTexts !== 4) throw new Error(`Expected 4 content <text> nodes for 4 edges, got ${contentTexts}`);
   });
 
   it("room edges + symbols → correct total <text> count", () => {
     resetAll();
     setUnit("m");
-    // Closed 4-edge room + 2 symbols → 4 + 2 = 6 content text nodes (excluding scale-bar)
+    // Closed 4-edge room + 2 symbols → 4 + 2 = 6 content text nodes (excluding scale-bar and caption)
     model.rooms.push({ id: "w0", closed: true, verts: [
       { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
     ]});
@@ -11096,8 +11100,11 @@ describe("exportImg.buildExportSvg — structural", () => {
     // Exclude scale-bar texts (inside <g class="scale-bar">)
     const scaleBarGroup = doc.querySelector(".scale-bar");
     const scaleBarTextCount = scaleBarGroup ? scaleBarGroup.querySelectorAll("text").length : 0;
+    // Exclude caption texts (inside <g class="plan-caption">)
+    const captionGroup = doc.querySelector(".plan-caption");
+    const captionTextCount = captionGroup ? captionGroup.querySelectorAll("text").length : 0;
     const texts = doc.querySelectorAll("text");
-    const contentTexts = texts.length - scaleBarTextCount;
+    const contentTexts = texts.length - scaleBarTextCount - captionTextCount;
     if (contentTexts !== 6) throw new Error(`Expected 6 content <text> nodes (4 edge + 2 symbol), got ${contentTexts}`);
   });
 
@@ -11292,6 +11299,191 @@ describe("exportImg.buildExportSvg — scale bar (LLD 151)", () => {
     if (!Number.isFinite(num) || num !== Math.round(num)) {
       throw new Error(`Expected round integer, got: "${text}"`);
     }
+  });
+});
+
+// ─── Tests: LLD 153 — caption band in export SVG ─────────────────────────────
+
+describe("exportImg.buildExportSvg — caption band (LLD 153)", () => {
+  // Constants matching documented literals
+  const CAPTION_PX_LIT = 40;
+  const BAND_PX_LIT    = 56;
+  const EXPORT_PX_PER_M_LIT = 96;
+
+  // Helper: build a non-empty plan with a 3×2m closed room (area = 6 m²)
+  function buildClosedPlan() {
+    resetAll();
+    model.rooms.push({ id: "cp0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+  }
+
+  // ── Value correctness ───────────────────────────────────────────────────────
+
+  it("metric: .plan-metrics text equals fmtArea·areaUnitLabel·fmtLen·unitLabel", () => {
+    buildClosedPlan();
+    setUnit("m");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const metricsEl = doc.querySelector(".plan-metrics");
+    if (!metricsEl) throw new Error("Expected .plan-metrics element");
+    // Compute expected values from roomMetrics (same path as measure.js)
+    const m = roomMetrics(model.rooms[0]);
+    const expected = `${fmtArea(m.area)} ${areaUnitLabel()} · ${fmtLen(m.perimeter)} ${unitLabel()}`;
+    const actual = metricsEl.textContent;
+    if (actual !== expected) throw new Error(`Expected metrics "${expected}", got "${actual}"`);
+  });
+
+  it("imperial: .plan-metrics text equals fmtArea·areaUnitLabel·fmtLen·unitLabel", () => {
+    buildClosedPlan();
+    setUnit("ft");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const metricsEl = doc.querySelector(".plan-metrics");
+    if (!metricsEl) throw new Error("Expected .plan-metrics element");
+    // Compute expected values from roomMetrics (same path as measure.js)
+    const m = roomMetrics(model.rooms[0]);
+    const expected = `${fmtArea(m.area)} ${areaUnitLabel()} · ${fmtLen(m.perimeter)} ${unitLabel()}`;
+    const actual = metricsEl.textContent;
+    if (actual !== expected) throw new Error(`Expected metrics "${expected}", got "${actual}"`);
+  });
+
+  it("multi-room: metrics equal summed totals across all closed rooms", () => {
+    resetAll();
+    setUnit("m");
+    // Two closed rooms
+    model.rooms.push({ id: "r1", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+    model.rooms.push({ id: "r2", closed: true, verts: [
+      { x: 4, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 3 }, { x: 4, y: 3 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const metricsEl = doc.querySelector(".plan-metrics");
+    if (!metricsEl) throw new Error("Expected .plan-metrics element");
+    // Sum metrics over closed rooms
+    let totalArea = 0, totalPerim = 0;
+    for (const room of model.rooms.filter(r => r.closed)) {
+      const m = roomMetrics(room);
+      totalArea += m.area;
+      totalPerim += m.perimeter;
+    }
+    const expected = `${fmtArea(totalArea)} ${areaUnitLabel()} · ${fmtLen(totalPerim)} ${unitLabel()}`;
+    const actual = metricsEl.textContent;
+    if (actual !== expected) throw new Error(`Expected multi-room metrics "${expected}", got "${actual}"`);
+  });
+
+  // ── Structure & layout ──────────────────────────────────────────────────────
+
+  it("non-empty plan with enclosed area: <g class='plan-caption'> present with correct children", () => {
+    buildClosedPlan();
+    setUnit("m");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const captionGroup = doc.querySelector(".plan-caption");
+    if (!captionGroup) throw new Error("Expected a <g class='plan-caption'> element");
+    // .plan-title: text-anchor="start"
+    const titleEl = captionGroup.querySelector(".plan-title");
+    if (!titleEl) throw new Error("Expected .plan-title inside .plan-caption");
+    if (titleEl.textContent !== "Floor plan") throw new Error(`Expected "Floor plan", got "${titleEl.textContent}"`);
+    const titleAnchor = titleEl.getAttribute("text-anchor");
+    if (titleAnchor !== "start") throw new Error(`Expected text-anchor="start", got "${titleAnchor}"`);
+    // .plan-metrics: text-anchor="end"
+    const metricsEl = captionGroup.querySelector(".plan-metrics");
+    if (!metricsEl) throw new Error("Expected .plan-metrics inside .plan-caption");
+    const metricsAnchor = metricsEl.getAttribute("text-anchor");
+    if (metricsAnchor !== "end") throw new Error(`Expected text-anchor="end", got "${metricsAnchor}"`);
+  });
+
+  it("H grows by CAPTION_PX and geometry group has translate(0, CAPTION_PX)", () => {
+    buildClosedPlan();
+    setUnit("m");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    // Room: 3m×2m → wM=4, hM=3 → W=384, contentH=288
+    // H = 288 + BAND_PX + CAPTION_PX = 288 + 56 + 40 = 384
+    const svg = doc.querySelector("svg");
+    const expectedH = 3 * EXPORT_PX_PER_M_LIT + BAND_PX_LIT + CAPTION_PX_LIT;
+    const actualH = parseFloat(svg.getAttribute("height"));
+    if (Math.abs(actualH - expectedH) > 0.01) {
+      throw new Error(`Expected H=${expectedH}, got ${actualH}`);
+    }
+    // The geometry group must have transform="translate(0,40)"
+    // (first <g> with a translate transform)
+    const groups = doc.querySelectorAll("g");
+    let foundTranslate = false;
+    for (const g of groups) {
+      const t = g.getAttribute("transform");
+      if (t && t.includes(`translate(0,${CAPTION_PX_LIT})`)) {
+        foundTranslate = true;
+        break;
+      }
+    }
+    if (!foundTranslate) throw new Error(`Expected a <g transform="translate(0,${CAPTION_PX_LIT})"> but none found`);
+  });
+
+  it("caption y within [0, CAPTION_PX] and scale bar y >= CAPTION_PX", () => {
+    buildClosedPlan();
+    setUnit("m");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    // Caption title y value (in absolute top-band space)
+    const titleEl = doc.querySelector(".plan-title");
+    if (!titleEl) throw new Error("Expected .plan-title");
+    const captionY = parseFloat(titleEl.getAttribute("y"));
+    if (captionY < 0 || captionY > CAPTION_PX_LIT) {
+      throw new Error(`Expected caption y in [0, ${CAPTION_PX_LIT}], got ${captionY}`);
+    }
+    // Scale bar baseline y: the scale-bar-line y1 is relative to the translate group,
+    // so its absolute position is y1 + CAPTION_PX >= CAPTION_PX + contentH > CAPTION_PX
+    const scaleLine = doc.querySelector(".scale-bar-line");
+    if (!scaleLine) throw new Error("Expected .scale-bar-line");
+    const scaleY1 = parseFloat(scaleLine.getAttribute("y1"));
+    // scaleY1 is measured from the translated group origin (after translate(0,CAPTION_PX))
+    // so absolute y = scaleY1 + CAPTION_PX. We just verify scaleY1 >= 0 (it's contentH + offset)
+    if (scaleY1 < 0) throw new Error(`Expected scale bar y1 >= 0, got ${scaleY1}`);
+  });
+
+  // ── Degenerate ──────────────────────────────────────────────────────────────
+
+  it("empty plan: no .plan-caption, SVG valid, H = contentH", () => {
+    resetAll();
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in empty-plan SVG");
+    const captionGroup = doc.querySelector(".plan-caption");
+    if (captionGroup) throw new Error("Expected no .plan-caption for empty plan");
+    // Empty plan: contentH = 5m * 96 = 480, H = 480 (no band, no caption)
+    const svg = doc.querySelector("svg");
+    const expectedH = 5 * EXPORT_PX_PER_M_LIT;
+    const actualH = parseFloat(svg.getAttribute("height"));
+    if (Math.abs(actualH - expectedH) > 0.01) {
+      throw new Error(`Expected H=${expectedH} for empty plan, got ${actualH}`);
+    }
+  });
+
+  it("open-chain-only plan: no .plan-caption, scale bar still present, SVG valid", () => {
+    resetAll();
+    setUnit("m");
+    // Open chain (no closed room → area = 0)
+    model.rooms.push({ id: "oc0", closed: false, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in open-chain SVG");
+    const captionGroup = doc.querySelector(".plan-caption");
+    if (captionGroup) throw new Error("Expected no .plan-caption when area=0");
+    // Scale bar must still be present (bounds is truthy)
+    const scaleBar = doc.querySelector(".scale-bar");
+    if (!scaleBar) throw new Error("Expected .scale-bar for open-chain plan");
   });
 });
 
