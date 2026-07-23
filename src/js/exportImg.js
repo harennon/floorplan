@@ -9,13 +9,21 @@
 import { model as wallsModel, edgeLength, WALL_M } from "./walls.js";
 import { model as symbolsModel, corners, CATALOG } from "./symbols.js";
 import { model as measurementsModel } from "./measurements.js";
-import { fmtLen, unitLabel } from "./units.js";
+import { fmtLen, unitLabel, M_PER_FT } from "./units.js";
 import { palette } from "./theme.js";
 
 /** Export scale: pixels per metre in the exported image */
 const EXPORT_PX_PER_M = 96; // ~100px/m for a readable print-scale output
 const MARGIN_M = 0.5;        // world-space margin around content, metres
 const EXPORT_2X = 2;         // pixel density multiplier for PNG
+
+/** Bottom band constants — used by the scale bar; #147/#148 extend this band */
+const BAND_PX     = 56;   // bottom band height, export px
+const BAND_PAD_PX = 16;   // inset from band/image edges
+
+/** Round-length ladders for scale bar selection */
+const SCALE_LADDER_M  = [1, 2, 5];       // metres
+const SCALE_LADDER_FT = [1, 3, 5, 10];   // feet
 
 const FONT_FAMILY = '"DM Mono", "Courier New", monospace';
 
@@ -88,7 +96,9 @@ export function buildExportSvg() {
   }
 
   const W = wM * EXPORT_PX_PER_M;
-  const H = hM * EXPORT_PX_PER_M;
+  const contentH = hM * EXPORT_PX_PER_M;
+  // Extend height with bottom band only when there is actual content
+  const H = bounds ? contentH + BAND_PX : contentH;
 
   // Convert world → export pixels
   const wx = (worldX) => (worldX - originX) * EXPORT_PX_PER_M;
@@ -205,11 +215,15 @@ export function buildExportSvg() {
     body += `<text x="${mx}" y="${my}" font-family='${FONT_FAMILY}' font-size="10" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${_escapeXml(labelText)}</text>\n`;
   }
 
+  // Append scale bar when plan is non-empty
+  const scaleBar = bounds ? _scaleBarSvg(W, contentH, p) : "";
+
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`,
     `  <rect width="${W}" height="${H}" fill="${p.bg}"/>`,
     body,
+    scaleBar,
     `</svg>`,
   ].join("\n");
 }
@@ -274,6 +288,90 @@ export async function exportPng() {
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Choose the round scale-bar length for the active unit that fits availPx.
+ * @param {number} availPx  usable band width = W - 2*BAND_PAD_PX
+ * @returns {{ metres:number, label:string }}
+ */
+function _pickScaleBar(availPx) {
+  const isMetric = unitLabel() === "m";
+  const ladder = isMetric ? SCALE_LADDER_M : SCALE_LADDER_FT;
+
+  // Pick the largest round length whose bar pixel width fits availPx
+  let chosen = ladder[0];
+  for (const L of ladder) {
+    const metres = isMetric ? L : L * M_PER_FT;
+    const barPx  = metres * EXPORT_PX_PER_M;
+    if (barPx <= availPx) {
+      chosen = L;
+    }
+  }
+
+  const label = `${chosen} ${unitLabel()}`;
+  const metres = isMetric ? chosen : chosen * M_PER_FT;
+  return { metres, label };
+}
+
+/**
+ * Emit the Style-A ruler-ladder scale bar inside the bottom band.
+ * @param {number} W         total image width (px)
+ * @param {number} contentH  height of content region (px); band starts here
+ * @param {Palette} p        resolved theme palette (concrete colors)
+ * @returns {string}         SVG fragment (a single <g class="scale-bar"> …)
+ */
+function _scaleBarSvg(W, contentH, p) {
+  const availPx = W - 2 * BAND_PAD_PX;
+  const { metres, label } = _pickScaleBar(availPx);
+
+  const barPx = metres * EXPORT_PX_PER_M;
+
+  // Position: left-anchored at BAND_PAD_PX; vertical centre of the band
+  const x0 = BAND_PAD_PX;
+  const x1 = x0 + barPx;
+
+  // Baseline sits 10px below the band top (contentH), leaving room for label above
+  const baselineY = contentH + 10 + 14; // label row (14px) + tick area
+  const tallTickH  = 10;  // end ticks at 0 and L
+  const shortTickH =  5;  // interior ticks
+
+  // Determine subdivision ticks
+  const isMetric = unitLabel() === "m";
+  const L = Math.round(metres / (isMetric ? 1 : M_PER_FT));
+
+  // Build tick x-positions (display-unit boundaries)
+  const tickXs = [];
+  for (let i = 0; i <= L; i++) {
+    const mL = isMetric ? i : i * M_PER_FT;
+    tickXs.push(x0 + mL * EXPORT_PX_PER_M);
+  }
+  // For L===1 metric, add the 0.5 m midpoint
+  if (isMetric && L === 1) {
+    tickXs.push(x0 + 0.5 * EXPORT_PX_PER_M);
+    tickXs.sort((a, b) => a - b);
+  }
+
+  let out = `<g class="scale-bar">\n`;
+
+  // Baseline
+  out += `  <line class="scale-bar-line" x1="${x0}" y1="${baselineY}" x2="${x1}" y2="${baselineY}" stroke="${p.ink}" stroke-width="1.5" stroke-linecap="round"/>\n`;
+
+  // Ticks
+  for (const tx of tickXs) {
+    const isEnd = (tx === x0 || Math.abs(tx - x1) < 0.5);
+    const h = isEnd ? tallTickH : shortTickH;
+    out += `  <line x1="${tx}" y1="${baselineY - h}" x2="${tx}" y2="${baselineY}" stroke="${p.ink}" stroke-width="1.5" stroke-linecap="round"/>\n`;
+  }
+
+  // "0" origin mark (below left end tick)
+  out += `  <text x="${x0}" y="${baselineY + 12}" font-family='${FONT_FAMILY}' font-size="9" fill="${p.dim}" text-anchor="middle" dominant-baseline="auto">${_escapeXml("0")}</text>\n`;
+
+  // Length label (above / at right end)
+  out += `  <text class="scale-bar-label" x="${x1}" y="${contentH + 10}" font-family='${FONT_FAMILY}' font-size="10" fill="${p.dim}" text-anchor="end" dominant-baseline="hanging">${_escapeXml(label)}</text>\n`;
+
+  out += `</g>`;
+  return out;
+}
 
 function _triggerDownload(blobUrl, filename) {
   const a = document.createElement("a");
