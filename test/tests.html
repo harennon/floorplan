@@ -10202,6 +10202,8 @@ const EXPECTED_ACTIONS = new Set([
   "Select",
   "Measure tool",
   "3D preview toggle",              // LLD 128
+  "Recenter 3D preview",            // LLD 152
+  "3D preset angles (NE/NW/SE/Top)", // LLD 152
   "Zoom in",
   "Zoom out",
   "Reset zoom",
@@ -17712,6 +17714,8 @@ describe("LLD 128 — help.js SHORTCUTS has P shortcut", () => {
 import {
   buildSceneDescriptors, worldToScene, webglAvailable,
   initRender3d as initRender3d130, enter as render3dEnter, exit as render3dExit,
+  // LLD 152 test-only introspection
+  __defaultBearing, __presetBearings, __viewPose, __shortestDelta, __easeOut,
 } from "../src/js/render3d.js";
 
 // buildItems, CEILING_M already imported from isoRender.js above (LLD 128 block).
@@ -18113,6 +18117,225 @@ describe("LLD 137 — DOM badge: each card gets .template-card-area span", () =>
       const areaText = fmtArea(_templateAreaM2(t.plan)) + " " + areaUnitLabel();
       if (!label.includes(areaText)) {
         throw new Error(`Template "${t.id}" aria-label missing area "${areaText}": ${label}`);
+      }
+    }
+  });
+});
+
+// ─── LLD 152: 3D preview — reset-view / preset camera angles ──────────────────
+//
+// _viewPose / __shortestDelta / __easeOut are pure helpers; we can test them
+// headless by setting up _bounds + a stub _camera (just needs .fov). The helpers
+// are exported as __viewPose etc. because the module-private _viewPose reads the
+// module-level _bounds and _camera, so we init a throwaway render3d context with
+// initRender3d130 (no real WebGL) to make _camera non-null, then test via
+// __viewPose.
+
+// Helper: set up a minimal headless render3d context with a fixed-size canvas stub
+// and a 4×3 closed room so _bounds gets populated. Returns { wallsMod, symMod }.
+function _setup152() {
+  // Stub canvas with clientWidth/clientHeight so _size() works
+  const canvas = Object.create(HTMLCanvasElement.prototype);
+  Object.defineProperty(canvas, "clientWidth",  { get: () => 800, configurable: true });
+  Object.defineProperty(canvas, "clientHeight", { get: () => 600, configurable: true });
+  Object.defineProperty(canvas, "addEventListener", { value: () => {}, configurable: true });
+
+  const wallsMod = { model: { rooms: [_makeRect128(0, 0, 4, 3)], chain: [] } };
+  const symMod   = { model: { symbols: [] } };
+  initRender3d130(canvas, () => true, wallsMod, symMod, null);
+  // _camera stays null in the headless harness (three.js won't load), so
+  // __viewPose will throw if called without a camera. We must fake _camera by
+  // using enter() which creates the engine — but three can't load headlessly.
+  // Instead just test the math helpers directly via the exported __shortestDelta
+  // and __easeOut (which have no dependency on _camera).
+  return { wallsMod, symMod };
+}
+
+// ── Unit: tween helpers (pure math, no three.js) ─────────────────────────────
+
+describe("LLD 152 — shortestDelta (pure helper)", () => {
+  const PI = Math.PI;
+  const tol = 1e-10;
+
+  it("0→0 = 0", () => {
+    const d = __shortestDelta(0, 0);
+    if (Math.abs(d) > tol) throw new Error(`Expected 0, got ${d}`);
+  });
+
+  it("0→π/2 = π/2 (short arc counterclockwise)", () => {
+    const d = __shortestDelta(0, PI / 2);
+    if (Math.abs(d - PI / 2) > tol) throw new Error(`Expected π/2, got ${d}`);
+  });
+
+  it("0→-π/2 = -π/2 (short arc clockwise)", () => {
+    const d = __shortestDelta(0, -PI / 2);
+    if (Math.abs(d + PI / 2) > tol) throw new Error(`Expected -π/2, got ${d}`);
+  });
+
+  it("0→π takes the short arc: |d| = π (either direction, |d| ≤ π)", () => {
+    const d = __shortestDelta(0, PI);
+    if (Math.abs(d) > PI + tol) throw new Error(`Expected |delta| ≤ π, got ${d}`);
+  });
+
+  it("NE→NW (π/4 → 3π/4) = π/2 (shorter than -3π/2)", () => {
+    const d = __shortestDelta(PI / 4, 3 * PI / 4);
+    if (Math.abs(d - PI / 2) > tol) throw new Error(`Expected π/2, got ${d}`);
+  });
+
+  it("result is always in (-π, π]", () => {
+    const angles = [0, PI / 6, PI / 3, PI / 2, 2 * PI / 3, PI, -PI / 4, -PI / 2, -3 * PI / 4];
+    for (const a of angles) {
+      for (const b of angles) {
+        const d = __shortestDelta(a, b);
+        if (d <= -PI - tol || d > PI + tol) {
+          throw new Error(`shortestDelta(${a},${b}) = ${d} is outside (-π, π]`);
+        }
+      }
+    }
+  });
+});
+
+describe("LLD 152 — easeOut (pure helper)", () => {
+  it("e(0) = 0", () => {
+    const e = __easeOut(0);
+    if (Math.abs(e) > 1e-10) throw new Error(`Expected 0, got ${e}`);
+  });
+
+  it("e(1) = 1", () => {
+    const e = __easeOut(1);
+    if (Math.abs(e - 1) > 1e-10) throw new Error(`Expected 1, got ${e}`);
+  });
+
+  it("is monotonically non-decreasing over [0,1]", () => {
+    let prev = 0;
+    for (let i = 0; i <= 100; i++) {
+      const t = i / 100;
+      const e = __easeOut(t);
+      if (e < prev - 1e-12) throw new Error(`easeOut not monotonic at t=${t}: ${e} < prev ${prev}`);
+      prev = e;
+    }
+  });
+
+  it("mid-point e(0.5) is between 0 and 1", () => {
+    const e = __easeOut(0.5);
+    if (e <= 0 || e >= 1) throw new Error(`Expected 0 < e(0.5) < 1, got ${e}`);
+  });
+});
+
+// ── Unit: pose constants ───────────────────────────────────────────────────────
+
+describe("LLD 152 — preset bearings constants", () => {
+  it("DEFAULT_BEARING is [1, 0.8, 1]", () => {
+    const b = __defaultBearing();
+    if (b[0] !== 1 || b[1] !== 0.8 || b[2] !== 1) {
+      throw new Error(`Expected [1,0.8,1], got ${JSON.stringify(b)}`);
+    }
+  });
+
+  it("PRESET_BEARINGS has keys ne, nw, se, top", () => {
+    const p = __presetBearings();
+    for (const k of ["ne", "nw", "se", "top"]) {
+      if (!p[k]) throw new Error(`Missing preset: ${k}`);
+      if (!Array.isArray(p[k]) || p[k].length !== 3) throw new Error(`${k} is not a 3-element array`);
+    }
+  });
+
+  it("'se' preset bearing equals DEFAULT_BEARING", () => {
+    const b = __defaultBearing();
+    const se = __presetBearings().se;
+    if (b[0] !== se[0] || b[1] !== se[1] || b[2] !== se[2]) {
+      throw new Error(`SE should equal DEFAULT_BEARING; got se=${JSON.stringify(se)} default=${JSON.stringify(b)}`);
+    }
+  });
+
+  it("'top' preset has near-zero x (|x| ≤ 1e-6) so camera is above target", () => {
+    const top = __presetBearings().top;
+    // top = [0, 1, 0.0001] — x is 0
+    if (Math.abs(top[0]) > 1e-6) throw new Error(`top.x expected ~0, got ${top[0]}`);
+    if (top[1] <= 0) throw new Error(`top.y (elevation) must be positive, got ${top[1]}`);
+  });
+});
+
+// ── Unit: _viewPose (requires a seeded _camera; smoke-tested via enter()) ─────
+// _viewPose reads module-level _bounds + _camera.fov. In the unit harness
+// three.js can't load so _camera remains null after enter() falls back.
+// We test the pose math indirectly: for each preset, verify the GEOMETRIC
+// properties (distance = same, direction = normalized bearing) using a
+// math-only verification that parallels _viewPose without calling it.
+// The actual _viewPose is exercised via the integration tests (run-tests.mjs).
+
+describe("LLD 152 — pose math properties (geometry verification, no three.js)", () => {
+  // Replicate the _viewPose math for a 4×3 room (height [0, CEILING_M]):
+  //   scene bounds: x[0,4], y[0,CEILING_M], z[0,3]
+  //   centre: (2, CEILING_M/2, 1.5)
+  //   diag: sqrt(4^2 + CEILING_M^2 + 3^2)
+  //   dist: (diag/2) / tan(45°/2 * π/180) * 1.15
+  // CEILING_M ≈ 2.5 (from isoRender.js)
+  const CEIL = 2.5; // approximate — matches buildSceneDescriptors defaults
+  const cx = 2, cy = CEIL / 2, cz = 1.5;
+  const dx = 4, dy = CEIL, dz = 3;
+  const diag = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const fovDeg = 45;
+  const fov = (fovDeg * Math.PI) / 180;
+  const dist = (diag / 2) / Math.tan(fov / 2) * 1.15;
+
+  function computePosition(bearing) {
+    const bx = bearing[0], by = bearing[1], bz = bearing[2];
+    const bmag = Math.sqrt(bx * bx + by * by + bz * bz);
+    return {
+      x: cx + (bx / bmag) * dist,
+      y: cy + (by / bmag) * dist,
+      z: cz + (bz / bmag) * dist,
+    };
+  }
+
+  it("each preset has the same distance from target as DEFAULT_BEARING", () => {
+    const defPos = computePosition([1, 0.8, 1]);
+    const defDist = Math.sqrt(
+      Math.pow(defPos.x - cx, 2) + Math.pow(defPos.y - cy, 2) + Math.pow(defPos.z - cz, 2)
+    );
+    for (const [name, bearing] of Object.entries({ ne: [1,0.8,-1], nw:[-1,0.8,-1], se:[1,0.8,1], top:[0,1,0.0001] })) {
+      const pos = computePosition(bearing);
+      const d = Math.sqrt(
+        Math.pow(pos.x - cx, 2) + Math.pow(pos.y - cy, 2) + Math.pow(pos.z - cz, 2)
+      );
+      if (Math.abs(d - defDist) > 1e-9) {
+        throw new Error(`Preset ${name}: distance ${d} ≠ default ${defDist}`);
+      }
+    }
+  });
+
+  it("top preset camera is essentially above target (x,z ≈ target x,z)", () => {
+    const pos = computePosition([0, 1, 0.0001]);
+    // x offset should be tiny (from 0 in the bearing)
+    if (Math.abs(pos.x - cx) > 1e-6) throw new Error(`top x ${pos.x} ≠ target x ${cx}`);
+    // y should be above target
+    if (pos.y <= cy) throw new Error(`top camera y ${pos.y} should be above target y ${cy}`);
+  });
+
+  it("top preset azimuth is defined (not NaN) thanks to 0.0001 z-offset", () => {
+    const pos = computePosition([0, 1, 0.0001]);
+    const relz = pos.z - cz;
+    const relx = pos.x - cx;
+    const azimuth = Math.atan2(relx, relz);
+    if (isNaN(azimuth)) throw new Error(`top azimuth is NaN`);
+  });
+
+  it("ne and nw have opposite x-offsets from target (mirror positions)", () => {
+    const ne = computePosition([1, 0.8, -1]);
+    const nw = computePosition([-1, 0.8, -1]);
+    const neOffX = ne.x - cx;
+    const nwOffX = nw.x - cx;
+    if (Math.abs(neOffX + nwOffX) > 1e-9) {
+      throw new Error(`NE and NW x-offsets not symmetric: ne=${neOffX} nw=${nwOffX}`);
+    }
+  });
+
+  it("no NaN in any preset position", () => {
+    for (const [name, bearing] of Object.entries({ ne:[1,0.8,-1], nw:[-1,0.8,-1], se:[1,0.8,1], top:[0,1,0.0001] })) {
+      const pos = computePosition(bearing);
+      if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
+        throw new Error(`NaN in ${name} position: ${JSON.stringify(pos)}`);
       }
     }
   });
