@@ -1,391 +1,397 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" data-theme="dark">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>3D preview — live theme recolor · mockup</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Libre+Baskerville:wght@400;700&display=swap" rel="stylesheet" />
-  <style>
-    /* ── Theme tokens (mirrored from src/index.html) ─────────────────── */
-    :root {
-      --bg:         #14140f;
-      --bg-deep:    #100f0b;
-      --ink:        #ece7d6;
-      --muted:      #8f8a78;
-      --gold:       #c9a84c;
-      --gold-soft:  rgba(201, 168, 76, 0.55);
-      --panel:      rgba(20, 20, 15, 0.72);
-      --hairline:   rgba(201, 168, 76, 0.18);
-      --font-mono:    "DM Mono", "Courier New", monospace;
-      --font-display: "Libre Baskerville", Georgia, serif;
-      /* 3D scene palette — dark */
-      --scene-sky-a:  #1b1b13;
-      --scene-sky-b:  #0e0d09;
-      --scene-floor:  rgba(201,168,76,0.10);
-      --scene-wall:   #6f5f30;
-      --scene-wall-lit: #b79a4e;
-      --scene-sofa:   #7a6cae;
-      --scene-rug:    #9c5a4a;
-      --scene-table:  #8a7048;
-    }
-    html[data-theme="light"] {
-      --bg:         #f3ecda;
-      --bg-deep:    #e7dcc2;
-      --ink:        #3a3020;
-      --muted:      #8a7c60;
-      --gold:       #a9812a;
-      --gold-soft:  rgba(169, 129, 42, 0.5);
-      --panel:      rgba(248, 242, 228, 0.82);
-      --hairline:   rgba(120, 96, 50, 0.22);
-      /* 3D scene palette — light */
-      --scene-sky-a:  #efe6cf;
-      --scene-sky-b:  #ddd0b0;
-      --scene-floor:  rgba(107,88,54,0.10);
-      --scene-wall:   #b7a271;
-      --scene-wall-lit: #ded0a3;
-      --scene-sofa:   #9a8ecb;
-      --scene-rug:    #c47a67;
-      --scene-table:  #b79a63;
-    }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mockup · 3D preview live theme recolor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ── Tokens mirrored from src/index.html ─────────────────────────── */
+      :root {
+        --bg:#14140f; --bg-deep:#100f0b; --ink:#ece7d6; --muted:#8f8a78;
+        --gold:#c9a84c; --gold-soft:rgba(201,168,76,0.55);
+        --panel:rgba(20,20,15,0.72); --hairline:rgba(201,168,76,0.18);
+        --room-fill:rgba(201,168,76,0.07);
+        --font-ui:"DM Sans",system-ui,sans-serif;
+        --font-mono:"DM Mono","Courier New",monospace;
+        --font-display:"Libre Baskerville",Georgia,serif;
+        /* 3D scene colors (opaque-ised, dark) */
+        --scene-bg:#14140f; --scene-floor:#26241a;
+        --scene-wall:#b7a05a; --scene-wall-2:#8f7c42;
+        --scene-sofa:#7f6a3a; --scene-rug:#5a4e2c;
+      }
+      html[data-theme="light"] {
+        --bg:#f3ecda; --bg-deep:#e7dcc2; --ink:#3a3020; --muted:#8a7c60;
+        --gold:#a9812a; --gold-soft:rgba(169,129,42,0.5);
+        --panel:rgba(248,242,228,0.82); --hairline:rgba(120,96,50,0.22);
+        --room-fill:rgba(107,88,54,0.07);
+        --scene-bg:#f3ecda; --scene-floor:#e0d3b2;
+        --scene-wall:#b79a5a; --scene-wall-2:#9d8248;
+        --scene-sofa:#c2a56a; --scene-rug:#cbb488;
+      }
+      *,*::before,*::after{box-sizing:border-box;}
+      html,body{height:100%;margin:0;}
+      body{
+        font-family:var(--font-ui); background:var(--bg-deep); color:var(--ink);
+        transition:background .5s ease,color .5s ease;
+      }
+      /* ── Mockup scaffold ─────────────────────────────────────────────── */
+      .doc{max-width:1080px;margin:0 auto;padding:32px 24px 80px;}
+      .doc h1{font-family:var(--font-display);font-weight:700;font-size:1.5rem;margin:0 0 4px;}
+      .doc .lede{color:var(--muted);font-size:.9rem;max-width:60ch;line-height:1.5;margin:0 0 8px;}
+      .doc .note{color:var(--muted);font-size:.8rem;max-width:70ch;line-height:1.5;
+        border-left:2px solid var(--gold-soft);padding:6px 0 6px 12px;margin:14px 0 26px;}
+      .doc code{font-family:var(--font-mono);color:var(--gold);font-size:.82em;}
+      .opt-head{display:flex;align-items:baseline;gap:10px;margin:34px 0 4px;}
+      .opt-head .tag{font-family:var(--font-mono);font-size:.7rem;letter-spacing:.08em;
+        text-transform:uppercase;color:var(--bg-deep);background:var(--gold);
+        padding:2px 7px;border-radius:4px;font-weight:500;}
+      .opt-head h2{font-family:var(--font-display);font-size:1.05rem;margin:0;font-weight:700;}
+      .opt-desc{color:var(--muted);font-size:.84rem;line-height:1.5;margin:6px 0 16px;max-width:64ch;}
 
-    * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; }
-    body {
-      background: var(--bg-deep);
-      color: var(--ink);
-      font-family: var(--font-mono);
-      -webkit-font-smoothing: antialiased;
-      padding: 2rem 1.5rem 4rem;
-    }
-    .doc { max-width: 1140px; margin: 0 auto; }
-    h1 {
-      font-family: var(--font-display);
-      color: var(--gold);
-      font-size: 1.5rem;
-      margin: 0 0 0.25rem;
-    }
-    .sub { color: var(--muted); font-size: 0.8rem; margin: 0 0 2rem; letter-spacing: 0.04em; }
-    .opt-label {
-      font-family: var(--font-display);
-      color: var(--gold);
-      font-size: 1.05rem;
-      margin: 2.4rem 0 0.15rem;
-    }
-    .opt-desc { color: var(--muted); font-size: 0.78rem; margin: 0 0 0.9rem; max-width: 62ch; line-height: 1.5; }
+      /* ── Faux editor frame ───────────────────────────────────────────── */
+      .frame{
+        position:relative;border:1px solid var(--hairline);border-radius:12px;
+        overflow:hidden;background:var(--bg);box-shadow:0 8px 30px rgba(0,0,0,.28);
+        aspect-ratio:16/10;
+      }
+      /* topbar: brand + actions cluster (theme toggle lives here) */
+      .topbar{
+        position:absolute;inset:0 0 auto 0;height:52px;z-index:6;
+        display:flex;align-items:center;justify-content:space-between;
+        padding:0 14px;pointer-events:none;
+      }
+      .brand-name{font-family:var(--font-display);font-weight:700;font-size:.95rem;line-height:1;}
+      .brand-sub{font-family:var(--font-mono);font-size:.6rem;letter-spacing:.12em;
+        text-transform:uppercase;color:var(--muted);margin-top:2px;}
+      .actions{display:flex;align-items:center;gap:8px;pointer-events:auto;}
+      .actions button{
+        font-family:var(--font-ui);font-size:.72rem;color:var(--muted);
+        background:var(--panel);border:1px solid var(--hairline);border-radius:8px;
+        padding:6px 10px;cursor:pointer;backdrop-filter:blur(6px);
+        display:inline-flex;align-items:center;gap:5px;
+        transition:color .2s,border-color .2s,box-shadow .3s;
+      }
+      .actions button:hover{color:var(--gold);border-color:var(--gold-soft);}
+      .theme-toggle{font-size:.9rem;line-height:1;width:32px;justify-content:center;padding:6px 0;}
+      /* tool rail */
+      .rail{
+        position:absolute;left:12px;top:50%;transform:translateY(-50%);z-index:6;
+        display:flex;flex-direction:column;gap:6px;padding:7px;
+        background:var(--panel);border:1px solid var(--hairline);border-radius:12px;
+        backdrop-filter:blur(6px);
+      }
+      .rail button{
+        width:34px;height:34px;border-radius:8px;border:1px solid transparent;
+        background:transparent;color:var(--muted);cursor:pointer;font-size:.85rem;
+        display:flex;align-items:center;justify-content:center;
+        transition:color .2s,background .2s,border-color .2s;
+      }
+      .rail button:hover{color:var(--gold);}
+      .rail button[aria-pressed="true"]{
+        color:var(--gold);border-color:var(--gold-soft);background:var(--room-fill);
+      }
+      .rail-sep{height:1px;background:var(--hairline);margin:2px 4px;}
 
-    /* ── Stage (fake 3D preview surface) ─────────────────────────────── */
-    .stage {
-      position: relative;
-      height: 380px;
-      border-radius: 12px;
-      overflow: hidden;
-      border: 1px solid var(--hairline);
-      background:
-        radial-gradient(120% 90% at 65% 15%, var(--scene-sky-a), var(--scene-sky-b) 75%);
-      transition: background 0.45s ease;
-    }
-    /* The mock scene is an SVG isometric-ish room. Colors come from CSS vars so
-       "recolor" is a real CSS transition, standing in for a three.js rebuild. */
-    .scene { position: absolute; inset: 0; width: 100%; height: 100%; }
-    .scene .floor  { fill: var(--scene-floor); transition: fill 0.45s ease; }
-    .scene .rug    { fill: var(--scene-rug);   transition: fill 0.45s ease; }
-    .scene .wall   { fill: var(--scene-wall);  transition: fill 0.45s ease; }
-    .scene .wall-lit { fill: var(--scene-wall-lit); transition: fill 0.45s ease; }
-    .scene .sofa   { fill: var(--scene-sofa);  transition: fill 0.45s ease; }
-    .scene .table  { fill: var(--scene-table); transition: fill 0.45s ease; }
+      /* ── Faux 3D stage (canvas stand-in) ─────────────────────────────── */
+      .stage3d{
+        position:absolute;inset:0;overflow:hidden;
+        background:radial-gradient(120% 120% at 50% 20%,
+          color-mix(in srgb,var(--scene-bg) 88%, #fff 4%), var(--scene-bg));
+        transition:background .5s ease;
+      }
+      .scene{
+        position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);
+        width:360px;height:250px;
+        transform-style:preserve-3d;
+        transform:translate(-50%,-50%) rotateX(58deg) rotateZ(-38deg);
+      }
+      .floor{
+        position:absolute;inset:0;background:var(--scene-floor);
+        border:1px solid color-mix(in srgb,var(--scene-wall) 40%, transparent);
+        transition:background .5s ease,border-color .5s ease;
+      }
+      .rug{
+        position:absolute;left:26%;top:30%;width:48%;height:42%;
+        background:var(--scene-rug);opacity:.9;
+        transition:background .5s ease;
+      }
+      /* extruded boxes via stacked faces */
+      .box{position:absolute;transform-style:preserve-3d;}
+      .box .top,.box .side{position:absolute;transition:background .5s ease;}
+      .wall .top{background:var(--scene-wall);}
+      .wall .side{background:var(--scene-wall-2);}
+      .sofa .top{background:var(--scene-sofa);}
+      .sofa .side{background:color-mix(in srgb,var(--scene-sofa) 72%, #000 12%);}
 
-    /* Hard-rebuild variant: no CSS transition — colors snap (a dispose+rebuild
-       flashes the new palette in a single frame, no interpolation). */
-    .stage.hard, .stage.hard .floor, .stage.hard .rug, .stage.hard .wall,
-    .stage.hard .wall-lit, .stage.hard .sofa, .stage.hard .table { transition: none; }
+      /* recolor pulse ring shown while a rebuild happens */
+      .stage3d.rebuilding::after{
+        content:"";position:absolute;inset:0;pointer-events:none;
+        box-shadow:inset 0 0 0 2px var(--gold-soft);
+        animation:flash .5s ease;
+      }
+      @keyframes flash{from{opacity:.9;}to{opacity:0;}}
 
-    /* Rebuild flash: a one-shot dim used by the hard-rebuild variant to signal
-       the dispose/rebuild moment (a single frame the scene is torn down). */
-    .rebuild-flash {
-      position: absolute; inset: 0; background: var(--bg-deep);
-      opacity: 0; pointer-events: none;
-    }
-    .rebuild-flash.fire { animation: flashdim 0.22s ease; }
-    @keyframes flashdim { 0% { opacity: 0; } 35% { opacity: 0.55; } 100% { opacity: 0; } }
-    @media (prefers-reduced-motion: reduce) {
-      .stage, .scene .floor, .scene .rug, .scene .wall, .scene .wall-lit,
-      .scene .sofa, .scene .table { transition: none; }
-      .rebuild-flash.fire { animation: none; }
-    }
+      /* tiny rebuild toast */
+      .rebuild-toast{
+        position:absolute;left:50%;bottom:16px;transform:translateX(-50%) translateY(8px);
+        z-index:7;font-family:var(--font-mono);font-size:.68rem;letter-spacing:.04em;
+        color:var(--ink);background:var(--panel);border:1px solid var(--hairline);
+        border-radius:20px;padding:5px 12px;backdrop-filter:blur(6px);
+        opacity:0;transition:opacity .3s,transform .3s;pointer-events:none;
+      }
+      .rebuild-toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
-    /* ── Floating chrome inside the stage ────────────────────────────── */
-    .brand { position: absolute; top: 1rem; left: 1.1rem; pointer-events: none; user-select: none; }
-    .brand-name { font-family: var(--font-display); font-size: 1rem; font-weight: 700; color: var(--gold); }
-    .brand-sub  { font-family: var(--font-mono); font-size: 0.58rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
-
-    .preview-tag {
-      position: absolute; top: 1rem; left: 50%; transform: translateX(-50%);
-      background: var(--panel); border: 1px solid var(--hairline);
-      border-radius: 100px; padding: 0.28rem 0.85rem;
-      font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase;
-      color: var(--gold); backdrop-filter: blur(8px);
-    }
-
-    /* actions-cluster pill styling (matches app) */
-    .actions {
-      position: absolute; top: 1rem; right: 1.1rem;
-      display: flex; gap: 0.35rem; align-items: center;
-    }
-    .actions button {
-      background: var(--panel); border: 1px solid var(--hairline);
-      color: var(--muted); font-family: var(--font-mono); font-size: 0.72rem;
-      padding: 0.32rem 0.6rem; border-radius: 100px; cursor: pointer;
-      backdrop-filter: blur(8px); transition: color 0.15s, border-color 0.15s, background 0.15s, opacity 0.2s;
-      line-height: 1;
-    }
-    .actions button:hover { color: var(--ink); }
-    .theme-toggle { font-size: 0.85rem; }
-    .theme-toggle:hover { color: var(--gold); border-color: var(--gold-soft); }
-    /* When preview hides the cluster (Option A baseline) */
-    .actions.hidden-in-preview { opacity: 0.18; filter: grayscale(0.6); pointer-events: none; }
-
-    /* In-scene minimal theme control (Option B) */
-    .scene-theme-btn {
-      position: absolute; top: 1rem; right: 1.1rem;
-      background: var(--panel); border: 1px solid var(--gold-soft);
-      color: var(--gold); font-size: 0.9rem; line-height: 1;
-      width: 34px; height: 34px; border-radius: 50%;
-      cursor: pointer; backdrop-filter: blur(8px);
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 0 0 2px rgba(201,168,76,0.16);
-      transition: transform 0.15s, box-shadow 0.15s;
-    }
-    .scene-theme-btn:hover { transform: rotate(-12deg); box-shadow: 0 0 0 3px rgba(201,168,76,0.28); }
-
-    /* Tool rail (bottom center) */
-    .tool-rail {
-      position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%);
-      display: flex; gap: 0.3rem; background: var(--panel);
-      border: 1px solid var(--hairline); border-radius: 100px;
-      padding: 0.3rem; backdrop-filter: blur(8px);
-    }
-    .tool-rail button {
-      background: transparent; border: 1px solid transparent; color: var(--muted);
-      width: 34px; height: 34px; border-radius: 100px; cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
-    }
-    .tool-rail button[aria-pressed="true"] {
-      color: var(--gold); background: rgba(201,168,76,0.1);
-      border-color: var(--gold-soft); box-shadow: 0 0 0 2px rgba(201,168,76,0.35);
-    }
-
-    /* "Recolor" pulse ring on the theme control right after a toggle */
-    .recolored { animation: ring 0.5s ease; }
-    @keyframes ring { 0% { box-shadow: 0 0 0 0 rgba(201,168,76,0.5); } 100% { box-shadow: 0 0 0 10px rgba(201,168,76,0); } }
-
-    /* ── Demo controls under each stage ──────────────────────────────── */
-    .ctrl { display: flex; gap: 0.6rem; align-items: center; margin: 0.7rem 0 0.3rem; flex-wrap: wrap; }
-    .ctrl .demo-btn {
-      background: transparent; border: 1px solid var(--gold-soft); color: var(--gold);
-      font-family: var(--font-mono); font-size: 0.72rem; padding: 0.4rem 0.8rem;
-      border-radius: 100px; cursor: pointer; transition: background 0.15s;
-    }
-    .ctrl .demo-btn:hover { background: rgba(201,168,76,0.12); }
-    .ctrl .note { color: var(--muted); font-size: 0.7rem; }
-    .badge {
-      display: inline-block; font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase;
-      padding: 0.12rem 0.5rem; border-radius: 100px; border: 1px solid var(--hairline);
-      color: var(--muted); margin-left: 0.4rem;
-    }
-    .badge.rec { color: var(--gold); border-color: var(--gold-soft); }
-
-    .callout {
-      border-left: 2px solid var(--gold-soft); padding: 0.5rem 0 0.5rem 0.9rem;
-      margin: 1rem 0 0; color: var(--ink); font-size: 0.78rem; line-height: 1.55;
-    }
-    .callout code {
-      background: rgba(201,168,76,0.12); padding: 0.05rem 0.35rem; border-radius: 4px;
-      font-family: var(--font-mono); font-size: 0.72rem; color: var(--gold);
-    }
-    .rule { border: none; border-top: 1px solid var(--hairline); margin: 2.8rem 0 0; }
-  </style>
-</head>
-<body>
-  <div class="doc">
-    <h1>3D preview — live theme recolor while preview is active</h1>
-    <p class="sub">Issue #132 · follow-up to LLD 130 · the 3D scene stands in for the three.js canvas; colors are CSS vars so a toggle triggers a real recolor.</p>
-
-    <div class="callout">
-      <strong>What this issue is really about.</strong> The engine change is tiny: rebuild
-      <code>_planGroup</code> on <code>onThemeChange()</code> while <code>preview.isActive()</code>.
-      The design decision is the prerequisite — <em>should the theme toggle even be reachable during
-      preview, and if so, how does the recolor read?</em> The options below answer both.
-    </div>
-
-    <!-- ===== OPTION A ===== -->
-    <p class="opt-label">Option A — Keep the theme toggle out of preview (status quo) <span class="badge">no engine change</span></p>
-    <p class="opt-desc">
-      The actions cluster (with the ☀/☽ toggle) stays hidden during preview, exactly as today.
-      The theme can only change on the next preview entry, where colors already re-derive correctly.
-      This is the current LLD 130 Edge Case 10 behavior — shown as the baseline to react against.
-      No live-recolor path; #132 stays deferred.
-    </p>
-    <div class="stage" id="stageA" data-scene="A">
-      <div class="brand"><div class="brand-name">floorplan</div><div class="brand-sub">warm blueprint</div></div>
-      <div class="preview-tag">3D Preview</div>
-      <div class="actions hidden-in-preview" title="Hidden while preview is active">
-        <button>Share</button><button>Export</button>
-        <button class="theme-toggle">☀</button>
+      /* preview badge (top-center) */
+      .preview-badge{
+        position:absolute;left:50%;top:12px;transform:translateX(-50%);z-index:6;
+        font-family:var(--font-mono);font-size:.62rem;letter-spacing:.14em;
+        text-transform:uppercase;color:var(--muted);
+        background:var(--panel);border:1px solid var(--hairline);
+        border-radius:20px;padding:4px 12px;backdrop-filter:blur(6px);
+      }
+      /* controls under each frame */
+      .frame-ctl{
+        display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0 4px;
+      }
+      .frame-ctl .btn{
+        font-family:var(--font-ui);font-size:.78rem;cursor:pointer;
+        background:var(--gold);color:var(--bg-deep);border:none;border-radius:8px;
+        padding:8px 14px;font-weight:700;transition:filter .15s;
+      }
+      .frame-ctl .btn:hover{filter:brightness(1.08);}
+      .frame-ctl .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--hairline);font-weight:400;}
+      .frame-ctl .hint{color:var(--muted);font-size:.75rem;}
+      @media (prefers-reduced-motion:reduce){
+        *{transition-duration:.001ms !important;animation-duration:.001ms !important;}
+      }
+    </style>
+  </head>
+  <body>
+    <div class="doc">
+      <h1>3D preview — live theme recolor</h1>
+      <p class="lede">
+        When the light/dark toggle fires while the 3D preview is active, the WebGL
+        scene must recolor to match. LLD 129 deferred this as dead code because the
+        theme was assumed unreachable during preview. This mockup shows the three
+        ways the recolor could feel, and asks a prior question: should the theme
+        toggle even be reachable during preview?
+      </p>
+      <p class="note">
+        Finding while reading the code: the theme toggle (<code>#btn-theme-toggle</code>)
+        sits in the topbar <code>.actions-cluster</code>, a sibling of <code>.stage</code>.
+        No <code>.stage--preview</code> rule hides the topbar — so structurally the toggle
+        is <em>already on screen</em> during preview; it is only unwired to a recolor path.
+        The frontend decision is really: expose it (Options A/B) or explicitly gate it out
+        (Option C). Toggle the theme in the header of any frame below to preview each behavior.
+      </p>
+      <div class="frame-ctl" style="margin-bottom:22px;">
+        <button class="btn" id="globalTheme">Toggle page theme ☀ / ☽</button>
+        <span class="hint">The whole mockup follows the same theme tokens as the real app.</span>
       </div>
-      <div class="scene-mount"></div>
-      <div class="rebuild-flash"></div>
-      <nav class="tool-rail">
-        <button title="Select">▱</button>
-        <button title="Wall">╱</button>
-        <button aria-pressed="true" title="3D preview (P)">◈</button>
-      </nav>
     </div>
-    <div class="ctrl">
-      <span class="note">The toggle is dimmed &amp; inert — theme is unreachable. Exit preview to change it.</span>
+    <div class="doc">
+
+      <!-- OPTION A -->
+      <div class="opt-head"><span class="tag">Option A</span>
+        <h2>Instant recolor — silent rebuild</h2></div>
+      <p class="opt-desc">
+        Theme toggle stays where it is. On <code>onThemeChange</code> while
+        <code>preview.isActive()</code>, dispose &amp; rebuild <code>_planGroup</code>
+        immediately, then render one frame. No banner, no delay — the scene just
+        matches the new theme, exactly like re-entering preview would. Simplest, and
+        the closest match to the LLD note ("rebuild on <code>onThemeChange</code>").
+      </p>
+      <div class="frame" data-opt="A"></div>
+      <div class="frame-ctl">
+        <button class="btn theme" data-target="A">Toggle theme ☀ / ☽</button>
+        <span class="hint">Watch the walls, floor and rug swap palette in place.</span>
+      </div>
+
+      <!-- OPTION B -->
+      <div class="opt-head"><span class="tag">Option B</span>
+        <h2>Recolor with a confirming cue</h2></div>
+      <p class="opt-desc">
+        Same rebuild as A, but acknowledged: a brief inset flash on the canvas plus a
+        transient "Recolored to light" chip. Because a full <code>_planGroup</code>
+        dispose+rebuild can micro-stutter on a large plan, a tiny cue reassures the
+        user the toggle registered. Costs one toast component and an animation.
+      </p>
+      <div class="frame" data-opt="B"></div>
+      <div class="frame-ctl">
+        <button class="btn theme" data-target="B">Toggle theme ☀ / ☽</button>
+        <span class="hint">Flash + chip fire on each rebuild.</span>
+      </div>
+
+      <!-- OPTION C -->
+      <div class="opt-head"><span class="tag">Option C</span>
+        <h2>Gate the toggle out of preview (keep it dead-code-free)</h2></div>
+      <p class="opt-desc">
+        Honor LLD 129's original stance: while preview is active, disable the theme
+        toggle (dimmed, <code>aria-disabled</code>, tooltip "Exit preview to change
+        theme"). No recolor path ships at all — the scene re-derives colors on the
+        next entry. This is the "nothing speculative" choice: it makes the
+        unreachability explicit and visible rather than relying on layout accident.
+      </p>
+      <div class="frame" data-opt="C"></div>
+      <div class="frame-ctl">
+        <button class="btn theme" data-target="C">Try to toggle theme</button>
+        <span class="hint">Toggle is inert during preview; exit first.</span>
+      </div>
+
     </div>
-
-    <hr class="rule" />
-
-    <!-- ===== OPTION B ===== -->
-    <p class="opt-label">Option B — In-scene theme control + soft recolor <span class="badge rec">recommended</span></p>
-    <p class="opt-desc">
-      Expose one minimal ☀/☽ button pinned to the 3D stage (not the full actions cluster — that
-      stays hidden to preserve read-only). Toggling it recolors the live scene with a brief
-      cross-fade (~0.4s) so the change reads as intentional rather than a jarring flash. This is the
-      case that makes #132's engine work worthwhile: rebuild <code>_planGroup</code> on
-      <code>onThemeChange</code>, but ease materials to the new palette instead of a raw dispose flash.
-    </p>
-    <div class="stage" id="stageB" data-scene="B">
-      <div class="brand"><div class="brand-name">floorplan</div><div class="brand-sub">warm blueprint</div></div>
-      <div class="preview-tag">3D Preview</div>
-      <button class="scene-theme-btn" id="btnB" aria-label="Toggle theme" title="Toggle light/dark theme">☀</button>
-      <div class="scene-mount"></div>
-      <div class="rebuild-flash"></div>
-      <nav class="tool-rail">
-        <button title="Select">▱</button>
-        <button title="Wall">╱</button>
-        <button aria-pressed="true" title="3D preview (P)">◈</button>
-      </nav>
-    </div>
-    <div class="ctrl">
-      <button class="demo-btn" id="toggleB">Toggle theme (live)</button>
-      <span class="note">One pinned control. Scene eases to the new palette — no full-scene flash.</span>
-    </div>
-
-    <hr class="rule" />
-
-    <!-- ===== OPTION C ===== -->
-    <p class="opt-label">Option C — In-scene control + hard rebuild snap <span class="badge">simplest engine</span></p>
-    <p class="opt-desc">
-      Same pinned control as B, but the recolor is a literal dispose + rebuild in one frame: colors
-      snap with a momentary tear-down dim (the honest depiction of what the minimal
-      <code>onThemeChange → _disposePlanGroup(); _buildPlanGroup()</code> does with no easing). Cheapest
-      to build and closest to the issue's literal scope, but the flash can read as a glitch on large plans.
-    </p>
-    <div class="stage hard" id="stageC" data-scene="C">
-      <div class="brand"><div class="brand-name">floorplan</div><div class="brand-sub">warm blueprint</div></div>
-      <div class="preview-tag">3D Preview</div>
-      <button class="scene-theme-btn" id="btnC" aria-label="Toggle theme" title="Toggle light/dark theme">☀</button>
-      <div class="scene-mount"></div>
-      <div class="rebuild-flash"></div>
-      <nav class="tool-rail">
-        <button title="Select">▱</button>
-        <button title="Wall">╱</button>
-        <button aria-pressed="true" title="3D preview (P)">◈</button>
-      </nav>
-    </div>
-    <div class="ctrl">
-      <button class="demo-btn" id="toggleC">Toggle theme (live)</button>
-      <span class="note">Colors snap in one frame with a brief rebuild dim. No interpolation.</span>
-    </div>
-
-    <div class="callout" style="margin-top:2.6rem">
-      <strong>Recommendation: Option B.</strong> If the theme becomes reachable during preview at all,
-      a single pinned control keeps the read-only contract (no dock/inspector re-exposed) while the
-      soft cross-fade makes the recolor feel like a deliberate view change. Option A remains valid if
-      we decide the theme should simply stay unreachable (then #132 stays closed as deferred). Option C
-      is the fallback if easing three.js materials proves fiddly and we accept the snap.
-    </div>
-  </div>
-
-  <script>
-    // A simple pseudo-3D room drawn as an isometric SVG. Each surface is a
-    // class whose fill is a CSS var, so a theme change repaints it — mimicking a
-    // three.js material recolor without shipping a WebGL engine into the mockup.
-    const SCENE = `
-      <svg class="scene" viewBox="0 0 600 380" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-        <!-- floor slab -->
-        <polygon class="floor" points="300,120 520,235 300,350 80,235" />
-        <!-- rug decal -->
-        <polygon class="rug" points="300,205 385,250 300,295 215,250" />
-        <!-- back-left wall -->
-        <polygon class="wall" points="80,235 300,120 300,70 80,185" />
-        <polygon class="wall-lit" points="300,120 520,235 520,185 300,70" />
-        <!-- sofa (box) -->
-        <g>
-          <polygon class="sofa" points="150,235 205,262 205,235 150,208" />
-          <polygon class="wall-lit" points="205,262 260,235 260,208 205,235" opacity="0.5" />
-          <polygon class="sofa" points="150,208 205,235 260,208 205,181" />
-        </g>
-        <!-- table (box) -->
-        <g>
-          <polygon class="table" points="335,255 375,278 375,262 335,239" />
-          <polygon class="wall-lit" points="375,278 415,255 415,239 375,262" opacity="0.45" />
-          <polygon class="table" points="335,239 375,262 415,239 375,216" />
-        </g>
-      </svg>`;
-
-    document.querySelectorAll('.scene-mount').forEach(m => { m.outerHTML = SCENE; });
-
-    // Per-stage theme state (each stage recolors independently for demo clarity).
-    function toggleStage(stage, btn) {
-      const cur = stage.getAttribute('data-theme') || 'dark';
-      const next = cur === 'dark' ? 'light' : 'dark';
-      // Apply theme vars by cloning the appropriate token set onto the stage.
-      applyTheme(stage, next);
-      stage.setAttribute('data-theme', next);
-      if (btn) {
-        btn.textContent = next === 'light' ? '☽' : '☀';
-        btn.classList.remove('recolored'); void btn.offsetWidth; btn.classList.add('recolored');
+    <script>
+      // ── Faux extruded box (CSS 3D) ──────────────────────────────────────
+      function box(cls, x, y, w, h, lift){
+        const b = document.createElement("div");
+        b.className = "box " + cls;
+        b.style.left = x + "px"; b.style.top = y + "px";
+        b.style.width = w + "px"; b.style.height = h + "px";
+        const top = document.createElement("div");
+        top.className = "top";
+        top.style.left = 0; top.style.top = 0;
+        top.style.width = w + "px"; top.style.height = h + "px";
+        top.style.transform = "translateZ(" + lift + "px)";
+        const side = document.createElement("div");
+        side.className = "side";
+        side.style.width = w + "px"; side.style.height = lift + "px";
+        side.style.left = 0; side.style.bottom = 0;
+        side.style.transformOrigin = "bottom";
+        side.style.transform = "rotateX(-90deg)";
+        b.appendChild(side); b.appendChild(top);
+        return b;
       }
-      // Hard-rebuild variant: fire the tear-down flash.
-      if (stage.classList.contains('hard')) {
-        const f = stage.querySelector('.rebuild-flash');
-        f.classList.remove('fire'); void f.offsetWidth; f.classList.add('fire');
+
+      function buildScene(stage){
+        const scene = document.createElement("div");
+        scene.className = "scene";
+        const floor = document.createElement("div"); floor.className = "floor";
+        const rug = document.createElement("div"); rug.className = "rug";
+        scene.appendChild(floor); scene.appendChild(rug);
+        scene.appendChild(box("wall", 0, 0, 360, 12, 34));
+        scene.appendChild(box("wall", 0, 238, 360, 12, 34));
+        scene.appendChild(box("wall", 0, 0, 12, 250, 34));
+        scene.appendChild(box("wall", 348, 0, 12, 250, 34));
+        scene.appendChild(box("sofa", 40, 150, 120, 55, 20));
+        stage.appendChild(scene);
       }
-    }
+    </script>
+    <script>
+      // ── Chrome: build the topbar + rail into a frame ────────────────────
+      function buildChrome(frame, opt){
+        const bar = document.createElement("div");
+        bar.className = "topbar";
+        bar.innerHTML =
+          '<div><div class="brand-name">floorplan</div>' +
+          '<div class="brand-sub">warm blueprint</div></div>' +
+          '<div class="actions">' +
+            '<button>Share</button><button>Export</button>' +
+            '<button class="theme-toggle" data-role="theme">☀</button>' +
+          '</div>';
+        const rail = document.createElement("div");
+        rail.className = "rail";
+        rail.innerHTML =
+          '<button title="Draw">✎</button>' +
+          '<button title="Symbols">▦</button>' +
+          '<div class="rail-sep"></div>' +
+          '<button title="3D preview" aria-pressed="true">◈</button>';
+        const badge = document.createElement("div");
+        badge.className = "preview-badge";
+        badge.textContent = "3D preview · read-only";
+        frame.appendChild(bar); frame.appendChild(rail); frame.appendChild(badge);
+      }
 
-    // Light/dark scene token maps (subset needed for the scene surfaces).
-    const TOKENS = {
-      dark: {
-        '--scene-sky-a': '#1b1b13', '--scene-sky-b': '#0e0d09',
-        '--scene-floor': 'rgba(201,168,76,0.10)', '--scene-wall': '#6f5f30',
-        '--scene-wall-lit': '#b79a4e', '--scene-sofa': '#7a6cae',
-        '--scene-rug': '#9c5a4a', '--scene-table': '#8a7048',
-      },
-      light: {
-        '--scene-sky-a': '#efe6cf', '--scene-sky-b': '#ddd0b0',
-        '--scene-floor': 'rgba(107,88,54,0.10)', '--scene-wall': '#b7a271',
-        '--scene-wall-lit': '#ded0a3', '--scene-sofa': '#9a8ecb',
-        '--scene-rug': '#c47a67', '--scene-table': '#b79a63',
-      },
-    };
-    function applyTheme(stage, theme) {
-      const t = TOKENS[theme];
-      for (const k in t) stage.style.setProperty(k, t[k]);
-    }
+      // Set the sun/moon glyph on a frame's in-canvas theme toggle.
+      function syncGlyph(frame){
+        const t = document.documentElement.getAttribute("data-theme");
+        const g = frame.querySelector('[data-role="theme"]');
+        if (g) g.textContent = t === "light" ? "☽" : "☀";
+      }
+    </script>
+    <script>
+      const root = document.documentElement;
+      const frames = {};
 
-    document.getElementById('toggleB').addEventListener('click', () =>
-      toggleStage(document.getElementById('stageB'), document.getElementById('btnB')));
-    document.getElementById('btnB').addEventListener('click', () =>
-      toggleStage(document.getElementById('stageB'), document.getElementById('btnB')));
-    document.getElementById('toggleC').addEventListener('click', () =>
-      toggleStage(document.getElementById('stageC'), document.getElementById('btnC')));
-    document.getElementById('btnC').addEventListener('click', () =>
-      toggleStage(document.getElementById('stageC'), document.getElementById('btnC')));
-  </script>
-</body>
+      // Build all three frames.
+      document.querySelectorAll(".frame[data-opt]").forEach((frame) => {
+        const opt = frame.dataset.opt;
+        const stage = document.createElement("div");
+        stage.className = "stage3d";
+        frame.appendChild(stage);
+        buildScene(stage);
+        buildChrome(frame, opt);
+        // Option C: dim + disable the in-canvas theme toggle to show it's gated.
+        if (opt === "C") {
+          const g = frame.querySelector('[data-role="theme"]');
+          g.style.opacity = ".4";
+          g.style.cursor = "not-allowed";
+          g.setAttribute("aria-disabled", "true");
+          g.title = "Exit preview to change theme";
+        }
+        frames[opt] = { frame, stage };
+        syncGlyph(frame);
+      });
+
+      // Simulate a scene rebuild (dispose+rebuild _planGroup) for an option.
+      function rebuild(opt, withCue){
+        const { frame, stage } = frames[opt];
+        // rebuild the scene DOM (mirrors dispose+rebuild from live palette)
+        stage.querySelector(".scene")?.remove();
+        buildScene(stage);
+        if (withCue){
+          stage.classList.remove("rebuilding");
+          void stage.offsetWidth;            // restart animation
+          stage.classList.add("rebuilding");
+          let toast = frame.querySelector(".rebuild-toast");
+          if (!toast){
+            toast = document.createElement("div");
+            toast.className = "rebuild-toast";
+            frame.appendChild(toast);
+          }
+          const t = root.getAttribute("data-theme");
+          toast.textContent = "Recolored to " + (t === "light" ? "light" : "dark");
+          toast.classList.add("show");
+          clearTimeout(toast._h);
+          toast._h = setTimeout(() => toast.classList.remove("show"), 1400);
+        }
+      }
+
+      function flipTheme(){
+        const next = root.getAttribute("data-theme") === "light" ? "dark" : "light";
+        root.setAttribute("data-theme", next);
+        Object.values(frames).forEach(({ frame }) => syncGlyph(frame));
+      }
+
+      // Per-frame theme buttons.
+      document.querySelectorAll(".btn.theme").forEach((b) => {
+        b.addEventListener("click", () => {
+          const opt = b.dataset.target;
+          if (opt === "C"){
+            // Gated: theme does NOT change; nudge the disabled toggle.
+            const g = frames.C.frame.querySelector('[data-role="theme"]');
+            g.animate(
+              [{ transform:"translateX(0)" },{ transform:"translateX(-3px)" },
+               { transform:"translateX(3px)" },{ transform:"translateX(0)" }],
+              { duration:220 }
+            );
+            return;
+          }
+          flipTheme();
+          rebuild(opt, opt === "B");   // A silent, B with cue
+        });
+      });
+
+      // Global page-theme button (top of doc): recolors A & B live, leaves C.
+      document.getElementById("globalTheme").addEventListener("click", () => {
+        flipTheme();
+        rebuild("A", false);
+        rebuild("B", true);
+      });
+    </script>
+  </body>
 </html>
