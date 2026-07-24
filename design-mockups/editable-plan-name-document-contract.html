@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Editable plan name · mockups · floorplan</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ── Tokens copied from src/index.html (warm blueprint dark) ─────── */
+      :root {
+        --bg:         #14140f;
+        --bg-deep:    #100f0b;
+        --ink:        #ece7d6;
+        --muted:      #8f8a78;
+        --gold:       #c9a84c;
+        --gold-soft:  rgba(201, 168, 76, 0.55);
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --panel:      rgba(20, 20, 15, 0.72);
+        --hairline:   rgba(201, 168, 76, 0.18);
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+        --error: #e57373;
+      }
+      html[data-theme="light"] {
+        --bg:         #f3ecda;
+        --bg-deep:    #e7dcc2;
+        --ink:        #3a3020;
+        --muted:      #8a7c60;
+        --gold:       #a9812a;
+        --gold-soft:  rgba(169, 129, 42, 0.5);
+        --grid-fine:  rgba(120, 96, 50, 0.07);
+        --grid-major: rgba(120, 96, 50, 0.16);
+        --panel:      rgba(248, 242, 228, 0.82);
+        --hairline:   rgba(120, 96, 50, 0.22);
+      }
+
+      *, *::before, *::after { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: var(--font-ui);
+        color: var(--ink);
+        background: var(--bg-deep);
+      }
+
+      /* ── Mockup document scaffolding (not part of the app) ───────────── */
+      .doc-head {
+        max-width: 60rem;
+        margin: 0 auto;
+        padding: 2.5rem 1.5rem 0.5rem;
+      }
+      .doc-head h1 {
+        font-family: var(--font-display);
+        font-size: 1.5rem;
+        color: var(--gold);
+        margin: 0 0 0.35rem;
+      }
+      .doc-head p {
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        color: var(--muted);
+        line-height: 1.6;
+        margin: 0.2rem 0;
+        max-width: 46rem;
+      }
+      .doc-controls {
+        max-width: 60rem;
+        margin: 1rem auto 0;
+        padding: 0 1.5rem;
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .doc-controls button {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        padding: 0.35rem 0.8rem;
+        border-radius: 100px;
+        cursor: pointer;
+      }
+      .doc-controls button[aria-pressed="true"] {
+        color: var(--gold);
+        border-color: var(--gold-soft);
+      }
+      .variant {
+        max-width: 60rem;
+        margin: 1.5rem auto;
+        padding: 0 1.5rem;
+      }
+      .variant > h2 {
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--gold);
+        border-bottom: 1px solid var(--hairline);
+        padding-bottom: 0.4rem;
+        margin: 0 0 0.4rem;
+      }
+      .variant > .note {
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--muted);
+        line-height: 1.6;
+        margin: 0 0 0.9rem;
+      }
+
+      /* Simulated app stage: graph-paper canvas with floating chrome */
+      .stage {
+        position: relative;
+        height: 340px;
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        overflow: hidden;
+        background:
+          radial-gradient(ellipse 90% 80% at 50% 50%, var(--bg) 0%, var(--bg-deep) 100%);
+      }
+      .stage::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(var(--grid-major) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+        background-size: 22px 22px, 22px 22px, 110px 110px, 110px 110px;
+        pointer-events: none;
+      }
+
+      /* Brand — top left (mirrors .brand in the app) */
+      .brand {
+        position: absolute;
+        top: 1rem;
+        left: 1rem;
+        user-select: none;
+        z-index: 2;
+      }
+      .brand-name {
+        font-family: var(--font-display);
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--gold);
+        line-height: 1.2;
+      }
+      .brand-sub {
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        color: var(--muted);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      /* Actions cluster + unit toggle (top-right), compacted for mockup */
+      .top-right {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        z-index: 2;
+      }
+      .pill {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        padding: 0.3rem 0.65rem;
+        border-radius: 100px;
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+      }
+      .save-pill {
+        font-family: var(--font-mono);
+        font-size: 0.6rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .unit-toggle {
+        display: flex;
+        gap: 0.2rem;
+      }
+      .unit-toggle span {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        letter-spacing: 0.05em;
+        padding: 0.28rem 0.55rem;
+        border-radius: 100px;
+      }
+      .unit-toggle span.on { color: var(--gold); border-color: var(--gold-soft); }
+
+      /* ── Plan-name field — shared base ───────────────────────────────── */
+      /* An inline, borderless text input that reads as a title until focused,
+         then reveals a subtle editable affordance. */
+      .plan-name {
+        font-family: var(--font-display);
+        font-weight: 700;
+        color: var(--ink);
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        padding: 0.15rem 0.45rem;
+        margin: -0.15rem -0.45rem;
+        outline: none;
+        max-width: 18rem;
+        min-width: 4rem;
+        text-overflow: ellipsis;
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .plan-name::placeholder {
+        color: var(--muted);
+        font-style: italic;
+        font-weight: 400;
+        opacity: 1;
+      }
+      .plan-name:hover {
+        border-color: var(--hairline);
+      }
+      .plan-name:focus {
+        border-color: var(--gold-soft);
+        background: var(--panel);
+        box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.18);
+      }
+      /* A pencil affordance that fades in on hover, hinting editability */
+      .plan-name-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        position: relative;
+      }
+      .plan-name-wrap .edit-hint {
+        opacity: 0;
+        color: var(--muted);
+        transition: opacity 0.15s;
+        pointer-events: none;
+        flex-shrink: 0;
+      }
+      .plan-name-wrap:hover .edit-hint,
+      .plan-name-wrap:focus-within .edit-hint { opacity: 0.7; }
+
+      /* Variant A: brand replaced by the editable title (title IS the identity) */
+      .vA .brand-name { display: none; }
+      .vA .plan-name { font-size: 1.05rem; }
+
+      /* Variant B: title as a centered top bar, brand stays top-left */
+      .vB .title-bar {
+        position: absolute;
+        top: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1;
+        max-width: 40vw;
+      }
+      .vB .plan-name { font-size: 1rem; text-align: center; }
+
+      /* Variant C: title sits under the brand wordmark, left-aligned */
+      .vC .plan-name { font-size: 0.92rem; margin-top: 0.15rem; }
+
+      /* Character counter shown near cap while editing */
+      .char-count {
+        font-family: var(--font-mono);
+        font-size: 0.58rem;
+        color: var(--muted);
+      }
+      .char-count.near { color: var(--gold); }
+      .char-count.at { color: var(--error); }
+    </style>
+  </head>
+  <body>
+    <div class="doc-head">
+      <h1>Editable plan name</h1>
+      <p>
+        Adds a single editable plan name to the document contract (localStorage +
+        JSON + share round-trip). Three placement options for where the title
+        lands in the header, plus the empty/placeholder, typing, near-cap, and
+        long-name states. Toggle the theme to preview both blueprints.
+      </p>
+    </div>
+
+    <div class="doc-controls">
+      <button id="btn-theme" aria-pressed="false">Toggle light / dark</button>
+      <button id="btn-fill">Fill in a name</button>
+      <button id="btn-clear">Clear name (show placeholder)</button>
+    </div>
+
+    <!-- ── Variant A — title replaces the wordmark subline (RECOMMENDED) ── -->
+    <section class="variant vA">
+      <h2>Variant A · Title in the brand slot (recommended)</h2>
+      <p class="note">
+        The wordmark keeps its "warm blueprint" sub-line role but the big line
+        becomes the editable plan name. Zero new chrome — the plan name simply
+        <em>is</em> the top-left identity. Click the title to rename in place.
+      </p>
+      <div class="stage" role="img" aria-label="App stage — Variant A">
+        <div class="brand">
+          <div class="brand-name">floorplan</div>
+          <div class="plan-name-wrap">
+            <input
+              class="plan-name jsname"
+              type="text"
+              maxlength="60"
+              placeholder="Untitled plan"
+              aria-label="Plan name"
+              value="Studio on 5th"
+            />
+            <svg class="edit-hint" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+        <div class="top-right">
+          <span class="save-pill">Saved</span>
+          <span class="pill">Share</span>
+          <span class="pill">Export</span>
+          <div class="unit-toggle"><span class="on">FT</span><span>M</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Variant B — centered title bar ─────────────────────────────── -->
+    <section class="variant vB">
+      <h2>Variant B · Centered title bar</h2>
+      <p class="note">
+        Brand stays put; the plan name floats top-center like a document title.
+        Reads clearly as "the name of this thing" but competes for the center of
+        the canvas and can collide with the tool rail on narrow screens.
+      </p>
+      <div class="stage" role="img" aria-label="App stage — Variant B">
+        <div class="brand">
+          <div class="brand-name">floorplan</div>
+          <div class="brand-sub">warm blueprint</div>
+        </div>
+        <div class="title-bar">
+          <div class="plan-name-wrap">
+            <input
+              class="plan-name jsname"
+              type="text"
+              maxlength="60"
+              placeholder="Untitled plan"
+              aria-label="Plan name"
+              value="Studio on 5th"
+            />
+            <svg class="edit-hint" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+        <div class="top-right">
+          <span class="save-pill">Saved</span>
+          <span class="pill">Share</span>
+          <div class="unit-toggle"><span class="on">FT</span><span>M</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Variant C — title stacked under the wordmark ───────────────── -->
+    <section class="variant vC">
+      <h2>Variant C · Stacked under the wordmark</h2>
+      <p class="note">
+        Keeps the wordmark <em>and</em> its sub-line, adding the editable name as
+        a third line. Preserves the brand fully but the top-left block grows
+        taller and the three text lines can feel busy.
+      </p>
+      <div class="stage" role="img" aria-label="App stage — Variant C">
+        <div class="brand">
+          <div class="brand-name">floorplan</div>
+          <div class="brand-sub">warm blueprint</div>
+          <div class="plan-name-wrap">
+            <input
+              class="plan-name jsname"
+              type="text"
+              maxlength="60"
+              placeholder="Untitled plan"
+              aria-label="Plan name"
+              value="Studio on 5th"
+            />
+            <svg class="edit-hint" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+        <div class="top-right">
+          <span class="save-pill">Saved</span>
+          <span class="pill">Share</span>
+          <div class="unit-toggle"><span class="on">FT</span><span>M</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── States gallery (uses recommended Variant A styling) ─────────── -->
+    <section class="variant vA">
+      <h2>States · empty · long name · near cap</h2>
+      <p class="note">
+        Left→right: empty (placeholder "Untitled plan"), a long name that
+        ellipsis-truncates without pushing the actions cluster, and the near-cap
+        counter that appears while typing past ~50 of the 60-char limit. The
+        placeholder is what old, name-less plans and share links fall back to.
+      </p>
+      <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+        <div style="flex:1; min-width:16rem;">
+          <div class="stage" style="height:120px;" role="img" aria-label="Empty / placeholder state">
+            <div class="brand">
+              <div class="brand-name">floorplan</div>
+              <div class="plan-name-wrap">
+                <input class="plan-name" type="text" maxlength="60"
+                       placeholder="Untitled plan" aria-label="Plan name" value="" />
+                <svg class="edit-hint" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1; min-width:16rem;">
+          <div class="stage" style="height:120px;" role="img" aria-label="Long-name truncation state">
+            <div class="brand">
+              <div class="brand-name">floorplan</div>
+              <div class="plan-name-wrap">
+                <input class="plan-name" type="text" maxlength="60"
+                       aria-label="Plan name"
+                       value="Two-bed garden flat — Camberwell renovation option 2" />
+                <svg class="edit-hint" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1; min-width:16rem;">
+          <div class="stage" style="height:120px;" role="img" aria-label="Near-cap counter state">
+            <div class="brand">
+              <div class="brand-name">floorplan</div>
+              <div class="plan-name-wrap">
+                <input class="plan-name" type="text" maxlength="60"
+                       aria-label="Plan name"
+                       value="Master bedroom + walk-in closet layout v" />
+                <span class="char-count near">52 / 60</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="doc-head" style="padding-top:0.5rem;">
+      <p>
+        <strong style="color:var(--ink);">Round-trip &amp; back-compat:</strong>
+        the name is one optional <code>name</code> string on the plan document,
+        capped and sanitised by <code>validatePlan</code> (never throws; malformed
+        → placeholder). It rides localStorage, JSON export/import and the share
+        hash. Older plans / links with no <code>name</code> load unchanged and
+        show the placeholder. Type in a field above to see live truncation.
+      </p>
+    </div>
+
+    <script>
+      const root = document.documentElement;
+      const themeBtn = document.getElementById("btn-theme");
+      themeBtn.addEventListener("click", () => {
+        const light = root.getAttribute("data-theme") === "light";
+        root.setAttribute("data-theme", light ? "dark" : "light");
+        themeBtn.setAttribute("aria-pressed", String(!light));
+      });
+
+      const named = document.querySelectorAll(".jsname");
+      document.getElementById("btn-fill").addEventListener("click", () => {
+        named.forEach((el) => { el.value = "Studio on 5th"; });
+      });
+      document.getElementById("btn-clear").addEventListener("click", () => {
+        named.forEach((el) => { el.value = ""; });
+      });
+
+      // Live width: grow the input to fit its content up to the max-width cap
+      function autosize(el) {
+        el.style.width = "auto";
+        const probe = Math.min(el.scrollWidth + 4, 288); // 18rem cap
+        el.style.width = Math.max(probe, 64) + "px";
+      }
+      document.querySelectorAll(".plan-name").forEach((el) => {
+        autosize(el);
+        el.addEventListener("input", () => autosize(el));
+        el.addEventListener("focus", () => el.select());
+      });
+    </script>
+  </body>
+</html>
