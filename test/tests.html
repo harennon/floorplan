@@ -10985,7 +10985,8 @@ describe("exportImg.buildExportSvg — structural", () => {
     resetAll();
     setUnit("m");
     // Room: 3m wide × 2m tall, min at (0,0).
-    // wM = 3 + 2*0.5 = 4, hM = 2 + 2*0.5 = 3 → W = 4*96 = 384, H = 3*96 = 288
+    // wM = 3 + 2*0.5 = 4, hM = 2 + 2*0.5 = 3 → W = 4*96 = 384, contentH = 3*96 = 288
+    // Non-empty plan: H = contentH + BAND_PX = 288 + 56 = 344
     model.rooms.push({ id: "w0", closed: true, verts: [
       { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
     ]});
@@ -10999,8 +11000,9 @@ describe("exportImg.buildExportSvg — structural", () => {
     // viewBox must be "0 0 W H"
     const [vbX, vbY, vbW, vbH] = vb.split(" ").map(Number);
     if (vbX !== 0 || vbY !== 0) throw new Error(`viewBox should start at 0 0, got: ${vb}`);
-    const W = 4 * 96;  // 384
-    const H = 3 * 96;  // 288
+    const W = 4 * 96;          // 384
+    const BAND_PX = 56;
+    const H = 3 * 96 + BAND_PX; // 288 + 56 = 344
     expect(vbW).toBeCloseTo(W, 6);
     expect(vbH).toBeCloseTo(H, 6);
     // width and height attributes should also match
@@ -11066,21 +11068,25 @@ describe("exportImg.buildExportSvg — structural", () => {
   it("dimension labels: n edges → n <text> nodes per closed room", () => {
     resetAll();
     setUnit("m");
-    // Closed rectangle: 4 edges → 4 dimension labels
+    // Closed rectangle: 4 edges → 4 dimension labels (excluding scale-bar texts)
     model.rooms.push({ id: "w0", closed: true, verts: [
       { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
     ]});
     const svgStr = buildExportSvg();
     const doc = parseSvg(svgStr);
     if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    // Exclude scale-bar texts (inside <g class="scale-bar">)
+    const scaleBarGroup = doc.querySelector(".scale-bar");
+    const scaleBarTextCount = scaleBarGroup ? scaleBarGroup.querySelectorAll("text").length : 0;
     const texts = doc.querySelectorAll("text");
-    if (texts.length !== 4) throw new Error(`Expected 4 <text> nodes for 4 edges, got ${texts.length}`);
+    const contentTexts = texts.length - scaleBarTextCount;
+    if (contentTexts !== 4) throw new Error(`Expected 4 content <text> nodes for 4 edges, got ${contentTexts}`);
   });
 
   it("room edges + symbols → correct total <text> count", () => {
     resetAll();
     setUnit("m");
-    // Closed 4-edge room + 2 symbols → 4 + 2 = 6 text nodes
+    // Closed 4-edge room + 2 symbols → 4 + 2 = 6 content text nodes (excluding scale-bar)
     model.rooms.push({ id: "w0", closed: true, verts: [
       { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
     ]});
@@ -11089,8 +11095,12 @@ describe("exportImg.buildExportSvg — structural", () => {
     const svgStr = buildExportSvg();
     const doc = parseSvg(svgStr);
     if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    // Exclude scale-bar texts (inside <g class="scale-bar">)
+    const scaleBarGroup = doc.querySelector(".scale-bar");
+    const scaleBarTextCount = scaleBarGroup ? scaleBarGroup.querySelectorAll("text").length : 0;
     const texts = doc.querySelectorAll("text");
-    if (texts.length !== 6) throw new Error(`Expected 6 <text> nodes (4 edge + 2 symbol), got ${texts.length}`);
+    const contentTexts = texts.length - scaleBarTextCount;
+    if (contentTexts !== 6) throw new Error(`Expected 6 content <text> nodes (4 edge + 2 symbol), got ${contentTexts}`);
   });
 
   it("text content is XML-safe: no raw < or & characters", () => {
@@ -11139,6 +11149,152 @@ describe("exportImg.buildExportSvg — structural", () => {
     if (fill !== "#14140f") throw new Error(`Expected bg fill #14140f, got ${fill}`);
   });
 
+});
+
+// ─── Tests: LLD 151 — scale bar in export SVG ────────────────────────────────
+
+describe("exportImg.buildExportSvg — scale bar (LLD 151)", () => {
+  // EXPORT_PX_PER_M = 96 (documented literal)
+  const EXPORT_PX_PER_M_LIT = 96;
+  const M_PER_FT_LIT = 0.3048;
+
+  // Helper: build a non-empty plan with a 3×2m closed room
+  function buildNonEmptyPlan() {
+    resetAll();
+    model.rooms.push({ id: "sb0", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+  }
+
+  it("non-empty plan: <g class='scale-bar'> is present", () => {
+    buildNonEmptyPlan();
+    setUnit("m");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const group = doc.querySelector(".scale-bar");
+    if (!group) throw new Error("Expected a <g class='scale-bar'> element");
+  });
+
+  it("invariant (metric): barPx = label_metres * EXPORT_PX_PER_M", () => {
+    buildNonEmptyPlan();
+    setUnit("m");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+
+    const baseline = doc.querySelector(".scale-bar-line");
+    if (!baseline) throw new Error("Expected .scale-bar-line element");
+    const x1 = parseFloat(baseline.getAttribute("x1"));
+    const x2 = parseFloat(baseline.getAttribute("x2"));
+    const barPx = Math.abs(x2 - x1);
+
+    const labelEl = doc.querySelector(".scale-bar-label");
+    if (!labelEl) throw new Error("Expected .scale-bar-label element");
+    const labelText = labelEl.textContent;
+    if (!labelText.endsWith(" m")) throw new Error(`Expected metric label ending in ' m', got: "${labelText}"`);
+    const numStr = labelText.slice(0, -2).trim();
+    const num = parseFloat(numStr);
+    if (!Number.isFinite(num) || num !== Math.round(num)) {
+      throw new Error(`Expected round integer numeral in metric label, got: "${numStr}"`);
+    }
+    const expectedPx = num * EXPORT_PX_PER_M_LIT;
+    if (Math.abs(barPx - expectedPx) > 0.01) {
+      throw new Error(`Invariant failed: barPx=${barPx} ≠ ${num} m × ${EXPORT_PX_PER_M_LIT} = ${expectedPx}`);
+    }
+  });
+
+  it("invariant (imperial): barPx = label_metres * EXPORT_PX_PER_M", () => {
+    buildNonEmptyPlan();
+    setUnit("ft");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+
+    const baseline = doc.querySelector(".scale-bar-line");
+    if (!baseline) throw new Error("Expected .scale-bar-line element");
+    const x1 = parseFloat(baseline.getAttribute("x1"));
+    const x2 = parseFloat(baseline.getAttribute("x2"));
+    const barPx = Math.abs(x2 - x1);
+
+    const labelEl = doc.querySelector(".scale-bar-label");
+    if (!labelEl) throw new Error("Expected .scale-bar-label element");
+    const labelText = labelEl.textContent;
+    if (!labelText.endsWith(" ft")) throw new Error(`Expected imperial label ending in ' ft', got: "${labelText}"`);
+    const numStr = labelText.slice(0, -3).trim();
+    const num = parseFloat(numStr);
+    if (!Number.isFinite(num) || num !== Math.round(num)) {
+      throw new Error(`Expected round integer numeral in imperial label, got: "${numStr}"`);
+    }
+    const metres = num * M_PER_FT_LIT;
+    const expectedPx = metres * EXPORT_PX_PER_M_LIT;
+    if (Math.abs(barPx - expectedPx) > 0.01) {
+      throw new Error(`Invariant failed: barPx=${barPx} ≠ ${num} ft × M_PER_FT × ${EXPORT_PX_PER_M_LIT} = ${expectedPx}`);
+    }
+  });
+
+  it("empty plan: no <g class='scale-bar'> present", () => {
+    resetAll();
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in empty-plan SVG");
+    const group = doc.querySelector(".scale-bar");
+    if (group) throw new Error("Expected no scale-bar group for empty plan");
+    // Also verify existing empty-plan counts still hold
+    const rects = doc.querySelectorAll("rect");
+    if (rects.length !== 1) throw new Error(`Expected 1 <rect> (bg) for empty plan, got ${rects.length}`);
+    const polygons = doc.querySelectorAll("polygon");
+    if (polygons.length !== 0) throw new Error(`Expected 0 <polygon> for empty plan, got ${polygons.length}`);
+    const texts = doc.querySelectorAll("text");
+    if (texts.length !== 0) throw new Error(`Expected 0 <text> for empty plan, got ${texts.length}`);
+  });
+
+  it("palette wiring: scale-bar stroke equals palette().ink", () => {
+    buildNonEmptyPlan();
+    setUnit("m");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const baseline = doc.querySelector(".scale-bar-line");
+    if (!baseline) throw new Error("Expected .scale-bar-line element");
+    const stroke = baseline.getAttribute("stroke");
+    const p = palette();
+    if (stroke !== p.ink) {
+      throw new Error(`scale-bar stroke "${stroke}" does not match palette().ink "${p.ink}"`);
+    }
+  });
+
+  it("metric label ends in ' m' with a round integer numeral", () => {
+    buildNonEmptyPlan();
+    setUnit("m");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const labelEl = doc.querySelector(".scale-bar-label");
+    if (!labelEl) throw new Error("Expected .scale-bar-label element");
+    const text = labelEl.textContent;
+    if (!text.endsWith(" m")) throw new Error(`Expected metric label to end in ' m', got: "${text}"`);
+    const num = parseFloat(text);
+    if (!Number.isFinite(num) || num !== Math.round(num)) {
+      throw new Error(`Expected round integer, got: "${text}"`);
+    }
+  });
+
+  it("imperial label ends in ' ft' with a round integer numeral", () => {
+    buildNonEmptyPlan();
+    setUnit("ft");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const labelEl = doc.querySelector(".scale-bar-label");
+    if (!labelEl) throw new Error("Expected .scale-bar-label element");
+    const text = labelEl.textContent;
+    if (!text.endsWith(" ft")) throw new Error(`Expected imperial label to end in ' ft', got: "${text}"`);
+    const num = parseFloat(text);
+    if (!Number.isFinite(num) || num !== Math.round(num)) {
+      throw new Error(`Expected round integer, got: "${text}"`);
+    }
+  });
 });
 
 // ─── Tests: LLD 61 — wallRender.render (mounted SVG) ─────────────────────────
