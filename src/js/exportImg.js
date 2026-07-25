@@ -6,10 +6,10 @@
  * labels. No grid, snap glyphs, or UI chrome.
  */
 
-import { model as wallsModel, edgeLength, WALL_M } from "./walls.js";
+import { model as wallsModel, edgeLength, WALL_M, roomMetrics } from "./walls.js";
 import { model as symbolsModel, corners, CATALOG } from "./symbols.js";
 import { model as measurementsModel } from "./measurements.js";
-import { fmtLen, unitLabel, M_PER_FT } from "./units.js";
+import { fmtLen, unitLabel, M_PER_FT, fmtArea, areaUnitLabel } from "./units.js";
 import { palette } from "./theme.js";
 
 /** Export scale: pixels per metre in the exported image */
@@ -20,6 +20,10 @@ const EXPORT_2X = 2;         // pixel density multiplier for PNG
 /** Bottom band constants — used by the scale bar; #147/#148 extend this band */
 const BAND_PX     = 56;   // bottom band height, export px
 const BAND_PAD_PX = 16;   // inset from band/image edges
+
+/** Top caption band constants */
+const CAPTION_PX  = 40;              // top caption band height, export px
+const PLAN_TITLE  = "Floor plan";    // fixed title (no custom-name field in v1)
 
 /** Round-length ladders for scale bar selection */
 const SCALE_LADDER_M  = [1, 2, 5];       // metres
@@ -97,8 +101,12 @@ export function buildExportSvg() {
 
   const W = wM * EXPORT_PX_PER_M;
   const contentH = hM * EXPORT_PX_PER_M;
-  // Extend height with bottom band only when there is actual content
-  const H = bounds ? contentH + BAND_PX : contentH;
+  // Compute caption totals; show caption only when there is enclosed area
+  const totals = _planTotals();
+  const showCaption = !!bounds && totals.area > 0;
+  const topBand = showCaption ? CAPTION_PX : 0;
+  // Extend height with bottom band (scale bar) and top band (caption)
+  const H = (bounds ? contentH + BAND_PX : contentH) + topBand;
 
   // Convert world → export pixels
   const wx = (worldX) => (worldX - originX) * EXPORT_PX_PER_M;
@@ -217,13 +225,18 @@ export function buildExportSvg() {
 
   // Append scale bar when plan is non-empty
   const scaleBar = bounds ? _scaleBarSvg(W, contentH, p) : "";
+  // Caption band above the geometry (omitted when no enclosed area)
+  const caption = showCaption ? _captionSvg(W, p, totals) : "";
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`,
     `  <rect width="${W}" height="${H}" fill="${p.bg}"/>`,
+    `<g transform="translate(0,${topBand})">`,
     body,
     scaleBar,
+    `</g>`,
+    caption,
     `</svg>`,
   ].join("\n");
 }
@@ -369,6 +382,39 @@ function _scaleBarSvg(W, contentH, p) {
   // Length label (above / at right end)
   out += `  <text class="scale-bar-label" x="${x1}" y="${contentH + 10}" font-family='${FONT_FAMILY}' font-size="10" fill="${p.dim}" text-anchor="end" dominant-baseline="hanging">${_escapeXml(label)}</text>\n`;
 
+  out += `</g>`;
+  return out;
+}
+
+/**
+ * Sum area + perimeter over closed rooms — same path as measure.js update().
+ * @returns {{ area:number, perimeter:number }}
+ */
+function _planTotals() {
+  let area = 0;
+  let perim = 0;
+  for (const room of wallsModel.rooms) {
+    if (!room.closed) continue;
+    const m = roomMetrics(room);
+    area += m.area;
+    perim += m.perimeter;
+  }
+  return { area, perimeter: perim };
+}
+
+/**
+ * Emit the Option-A caption band (title left, "area · perimeter" right).
+ * @param {number} W        total image width (px)
+ * @param {object} p        resolved theme palette (concrete colors)
+ * @param {{ area:number, perimeter:number }} totals
+ * @returns {string}        SVG fragment (<g class="plan-caption"> … </g>)
+ */
+function _captionSvg(W, p, totals) {
+  const by = CAPTION_PX / 2;
+  const metricsStr = `${fmtArea(totals.area)} ${areaUnitLabel()} · ${fmtLen(totals.perimeter)} ${unitLabel()}`;
+  let out = `<g class="plan-caption">\n`;
+  out += `  <text class="plan-title" x="${BAND_PAD_PX}" y="${by}" font-family='${FONT_FAMILY}' font-size="13" fill="${p.ink}" text-anchor="start" dominant-baseline="middle">${_escapeXml(PLAN_TITLE)}</text>\n`;
+  out += `  <text class="plan-metrics" x="${W - BAND_PAD_PX}" y="${by}" font-family='${FONT_FAMILY}' font-size="12" fill="${p.dim}" text-anchor="end" dominant-baseline="middle">${_escapeXml(metricsStr)}</text>\n`;
   out += `</g>`;
   return out;
 }
