@@ -209,7 +209,22 @@ let _bounds = null;
 
 /** @type {number|null} rAF handle for the self-terminating damping loop */
 let _loopHandle = null;
+/** @type {number|null} rAF handle for the in-flight view tween */
+let _tweenHandle = null;
 let _listenersBound = false;
+
+// ── Preset bearings (LLD 152) ────────────────────────────────────────────────
+
+/** Unit bearing (target→camera) for the default fit-to-bounds three-quarter view. */
+const DEFAULT_BEARING = [1, 0.8, 1];
+
+/** Named preset bearings (unit-normalized at use). */
+const PRESET_BEARINGS = {
+  ne: [1, 0.8, -1],
+  nw: [-1, 0.8, -1],
+  se: [1, 0.8, 1],
+  top: [0, 1, 0.0001],
+};
 
 /**
  * Lazy-load three.js once, via the render3dEngine.js facade. A single dynamic
@@ -251,6 +266,7 @@ export function initRender3d(canvasEl, getActive, wallsMod, symbolsMod, loadingE
     _canvas.addEventListener("webglcontextlost", (e) => {
       e.preventDefault();
       _stopLoop();
+      _cancelTween();
     });
     _canvas.addEventListener("webglcontextrestored", () => {
       if (_getActive && _getActive() && _three) {
@@ -314,11 +330,13 @@ export async function enter() {
 }
 
 /**
- * Exit preview: stop the loop, dispose the plan group + cached materials, keep
- * renderer/scene/camera/controls alive for cheap re-entry (Approach §7).
+ * Exit preview: stop the loop, cancel any tween, dispose the plan group +
+ * cached materials, keep renderer/scene/camera/controls alive for cheap
+ * re-entry (Approach §7).
  */
 export function exit() {
   _stopLoop();
+  _cancelTween();
   _disposePlanGroup();
 }
 
@@ -349,6 +367,8 @@ function _ensureEngine(THREE) {
   _controls.maxPolarAngle = Math.PI / 2 - 0.04; // stay above the floor slab
   _controls.addEventListener("start", _armLoop);
   _controls.addEventListener("change", _armLoop);
+  // Cancel any in-flight tween when the user starts interacting (Edge Case 4).
+  _controls.addEventListener("start", _cancelTween);
 }
 
 /** Cache/create the material for a descriptor (one instance per distinct look). */
@@ -469,19 +489,19 @@ function _buildPlanGroup() {
   _scene.add(_planGroup);
 }
 
-/**
- * Recompute the camera to fit the current scene bounds (~10% margin). A pleasant
- * three-quarter view from a +X/+Y/+Z corner, echoing the retired isometric angle.
- */
-export function frame() {
-  if (!_camera || !_controls) return;
-  const THREE = _three;
-  const { w, h } = _size();
-  _camera.aspect = w / h;
+// ── View pose computation (pure-ish; reads _bounds + _camera.fov) ────────────
 
+/**
+ * Compute the canonical camera pose for a given bearing from the current scene
+ * bounds. Pure w.r.t. _bounds/_camera.fov — no side effects, no tween. Uses
+ * only plain math (no THREE dependency) so the helpers are unit-testable headless.
+ * @param {[number,number,number]} bearing  target→camera direction (need not be unit)
+ * @returns {{ target:{x,y,z}, position:{x,y,z}, near:number, far:number,
+ *             minDistance:number, maxDistance:number }}
+ */
+function _viewPose(bearing) {
   let cx, cy, cz, diag;
   if (_bounds) {
-    // world → scene: x unchanged, height(z)→y, world-y→z.
     const sMinX = _bounds.minX, sMaxX = _bounds.maxX;
     const sMinY = _bounds.minZ, sMaxY = _bounds.maxZ; // height range → scene Y
     const sMinZ = _bounds.minY, sMaxZ = _bounds.maxY; // world-y → scene Z
@@ -491,26 +511,249 @@ export function frame() {
     const dx = sMaxX - sMinX, dy = sMaxY - sMinY, dz = sMaxZ - sMinZ;
     diag = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
   } else {
-    // Empty plan (Edge Case 4): default frame at the origin, no crash.
     cx = 0; cy = CEILING_M / 2; cz = 0;
     diag = 8;
   }
 
   const fov = (_camera.fov * Math.PI) / 180;
-  const dist = (diag / 2) / Math.tan(fov / 2) * 1.15; // fit + ~10-15% margin
+  const dist = (diag / 2) / Math.tan(fov / 2) * 1.15;
 
-  // Three-quarter bearing: up and to a corner (elevation ~30-35°).
-  const off = new THREE.Vector3(1, 0.8, 1).normalize().multiplyScalar(dist);
-  _camera.position.set(cx + off.x, cy + off.y, cz + off.z);
-  _camera.near = Math.max(0.1, dist - diag);
-  _camera.far = dist + diag * 3;
+  // Normalize bearing with plain math (avoids THREE.Vector3 dependency so _viewPose
+  // is testable headless without three.js).
+  const bx = bearing[0], by = bearing[1], bz = bearing[2];
+  const bmag = Math.sqrt(bx * bx + by * by + bz * bz) || 1;
+  const ox = (bx / bmag) * dist;
+  const oy = (by / bmag) * dist;
+  const oz = (bz / bmag) * dist;
+
+  return {
+    target: { x: cx, y: cy, z: cz },
+    position: { x: cx + ox, y: cy + oy, z: cz + oz },
+    near: Math.max(0.1, dist - diag),
+    far: dist + diag * 3,
+    minDistance: diag * 0.15,
+    maxDistance: dist * 4 + diag,
+  };
+}
+
+/**
+ * Recompute the camera to fit the current scene bounds (~10% margin). A pleasant
+ * three-quarter view from a +X/+Y/+Z corner, echoing the retired isometric angle.
+ * Applies instantly (used by entry/resize/context-restore). Contract unchanged.
+ */
+export function frame() {
+  if (!_camera || !_controls) return;
+  const { w, h } = _size();
+  _camera.aspect = w / h;
+  const pose = _viewPose(DEFAULT_BEARING);
+
+  _camera.position.set(pose.position.x, pose.position.y, pose.position.z);
+  _camera.near = pose.near;
+  _camera.far = pose.far;
   _camera.updateProjectionMatrix();
 
-  _controls.target.set(cx, cy, cz);
-  _controls.minDistance = diag * 0.15;
-  _controls.maxDistance = dist * 4 + diag;
+  _controls.target.set(pose.target.x, pose.target.y, pose.target.z);
+  _controls.minDistance = pose.minDistance;
+  _controls.maxDistance = pose.maxDistance;
   _controls.update();
 }
+
+// ── Reduced-motion helper ────────────────────────────────────────────────────
+
+/** True when the OS-level prefers-reduced-motion setting is active. */
+function _reducedMotion() {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
+
+// ── Tween helpers (orbit-space interpolation) ────────────────────────────────
+
+/** Ease-out cubic: 0→0, 1→1, monotonic. */
+function _easeOut(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+/**
+ * Shortest signed delta between two angles in radians. Result is in (-π, π].
+ * Used to pick the short arc for azimuth interpolation (NE→NW never spins
+ * the long way).
+ */
+function _shortestDelta(a, b) {
+  let d = ((b - a) % (2 * Math.PI));
+  // Normalise to (-π, π]
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d <= -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
+/** Cancel any in-flight tween rAF. */
+function _cancelTween() {
+  if (_tweenHandle !== null) {
+    cancelAnimationFrame(_tweenHandle);
+    _tweenHandle = null;
+  }
+}
+
+/** Lerp a scalar. */
+function _lerp(a, b, t) { return a + (b - a) * t; }
+
+/** Lerp a Vec3 object {x,y,z}. */
+function _lerpVec(a, b, t) {
+  return { x: _lerp(a.x, b.x, t), y: _lerp(a.y, b.y, t), z: _lerp(a.z, b.z, t) };
+}
+
+/**
+ * Apply a pose snapshot immediately (without tween). Shared by frame() after
+ * refactor, resetView(animate:false), setPreset(animate:false), and reduced-motion.
+ * @param {{ target:{x,y,z}, position:{x,y,z}, near:number, far:number,
+ *           minDistance:number, maxDistance:number }} pose
+ */
+function _applyPoseInstant(pose) {
+  _camera.position.set(pose.position.x, pose.position.y, pose.position.z);
+  _camera.near = pose.near;
+  _camera.far = pose.far;
+  _camera.updateProjectionMatrix();
+  _controls.target.set(pose.target.x, pose.target.y, pose.target.z);
+  _controls.minDistance = pose.minDistance;
+  _controls.maxDistance = pose.maxDistance;
+  _controls.update();
+  _renderOnce();
+}
+
+/**
+ * Start an eased orbit-space tween from the current camera pose to `goalPose`.
+ * Duration ~300 ms. Cancels any previous tween first. The tween runs its own
+ * rAF loop distinct from _loopHandle (the damping loop).
+ * @param {{ target:{x,y,z}, position:{x,y,z}, near:number, far:number,
+ *           minDistance:number, maxDistance:number }} goalPose
+ */
+function _startTween(goalPose) {
+  _cancelTween();
+
+  // Read start state from live camera
+  const startTarget = {
+    x: _controls.target.x,
+    y: _controls.target.y,
+    z: _controls.target.z,
+  };
+  const camPos = _camera.position;
+
+  // Convert start camera position to spherical relative to startTarget
+  const dx0 = camPos.x - startTarget.x;
+  const dy0 = camPos.y - startTarget.y;
+  const dz0 = camPos.z - startTarget.z;
+  const startRadius = Math.sqrt(dx0 * dx0 + dy0 * dy0 + dz0 * dz0) || 1;
+  const startPolar = Math.acos(Math.max(-1, Math.min(1, dy0 / startRadius)));
+  const startAzimuth = Math.atan2(dx0, dz0);
+
+  // Convert goal position to spherical relative to goalTarget
+  const gtx = goalPose.target.x, gty = goalPose.target.y, gtz = goalPose.target.z;
+  const gdx = goalPose.position.x - gtx;
+  const gdy = goalPose.position.y - gty;
+  const gdz = goalPose.position.z - gtz;
+  const goalRadius = Math.sqrt(gdx * gdx + gdy * gdy + gdz * gdz) || 1;
+  const goalPolar = Math.acos(Math.max(-1, Math.min(1, gdy / goalRadius)));
+  const goalAzimuth = Math.atan2(gdx, gdz);
+
+  const azimuthDelta = _shortestDelta(startAzimuth, goalAzimuth);
+
+  const DURATION_MS = 300;
+  let startTime = null;
+
+  function _tweenFrame(now) {
+    if (!_controls || !_renderer || !_scene || !_camera) { _tweenHandle = null; return; }
+
+    if (startTime === null) startTime = now;
+    const elapsed = now - startTime;
+    const rawT = Math.min(1, elapsed / DURATION_MS);
+    const e = _easeOut(rawT);
+
+    // Interpolate target
+    const target = _lerpVec(startTarget, goalPose.target, e);
+
+    // Interpolate spherical coords (azimuth via shortest arc)
+    const radius = _lerp(startRadius, goalRadius, e);
+    const polar = Math.max(0.01, _lerp(startPolar, goalPolar, e));
+    const azimuth = startAzimuth + azimuthDelta * e;
+
+    // Reconstruct camera position from spherical
+    const sinPolar = Math.sin(polar);
+    const px = target.x + radius * sinPolar * Math.sin(azimuth);
+    const py = target.y + radius * Math.cos(polar);
+    const pz = target.z + radius * sinPolar * Math.cos(azimuth);
+
+    _controls.target.set(target.x, target.y, target.z);
+    _camera.position.set(px, py, pz);
+    _controls.update();
+    _renderer.render(_scene, _camera);
+
+    if (rawT < 1) {
+      _tweenHandle = requestAnimationFrame(_tweenFrame);
+    } else {
+      // Settle exactly at goal
+      _applyPoseInstant(goalPose);
+      _tweenHandle = null;
+    }
+  }
+
+  _tweenHandle = requestAnimationFrame(_tweenFrame);
+}
+
+// ── Public API: reset + presets (LLD 152) ────────────────────────────────────
+
+/**
+ * Return the orbit camera to the default fit-to-bounds framing (Recenter / Home).
+ * Eased orbit-space tween by default; instant when animate:false or reduced-motion.
+ * No-op if the engine/camera does not yet exist (loading / fallback).
+ * @param {{ animate?: boolean }} [opts]
+ */
+export function resetView(opts) {
+  if (!_camera || !_controls || !_renderer) return;
+  const animate = (opts && opts.animate === false) ? false : !_reducedMotion();
+  const pose = _viewPose(DEFAULT_BEARING);
+  if (animate) {
+    _startTween(pose);
+  } else {
+    _cancelTween();
+    _applyPoseInstant(pose);
+  }
+}
+
+/**
+ * Snap/tween to a named preset bearing (NE/NW/SE/Top). Same pose machinery as
+ * resetView. No-op if name unknown or camera absent.
+ * @param {"ne"|"nw"|"se"|"top"} name
+ * @param {{ animate?: boolean }} [opts]
+ */
+export function setPreset(name, opts) {
+  if (!_camera || !_controls || !_renderer) return;
+  const bearing = PRESET_BEARINGS[name];
+  if (!bearing) return;
+  const animate = (opts && opts.animate === false) ? false : !_reducedMotion();
+  const pose = _viewPose(bearing);
+  if (animate) {
+    _startTween(pose);
+  } else {
+    _cancelTween();
+    _applyPoseInstant(pose);
+  }
+}
+
+// ── Test-only accessors for pure helpers ─────────────────────────────────────
+
+/** @internal — exposed for unit tests: the DEFAULT_BEARING constant. */
+export function __defaultBearing() { return DEFAULT_BEARING.slice(); }
+/** @internal — exposed for unit tests: the PRESET_BEARINGS map. */
+export function __presetBearings() { return Object.assign({}, PRESET_BEARINGS); }
+/** @internal — exposed for unit tests: compute a pose from current _bounds/_camera. */
+export function __viewPose(bearing) { return _viewPose(bearing); }
+/** @internal — exposed for unit tests: the shortest-delta helper. */
+export function __shortestDelta(a, b) { return _shortestDelta(a, b); }
+/** @internal — exposed for unit tests: the ease-out helper. */
+export function __easeOut(t) { return _easeOut(t); }
 
 /** Update renderer size + camera aspect on a window resize (Edge Case 12). */
 export function resize() {
@@ -562,10 +805,12 @@ function _stopLoop() {
  */
 export function dispose() {
   _stopLoop();
+  _cancelTween();
   _disposePlanGroup();
   if (_controls) {
     _controls.removeEventListener("start", _armLoop);
     _controls.removeEventListener("change", _armLoop);
+    _controls.removeEventListener("start", _cancelTween);
     if (_controls.dispose) _controls.dispose();
   }
   if (_renderer) {

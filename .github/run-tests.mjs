@@ -213,6 +213,25 @@ async function runPreviewTest(name, fn, browser) {
   }
 }
 
+// ── LLD 152 reset/preset integration counters ──────────────────────────────────
+
+const RESET_SUITE = "LLD 152 reset-view / preset angles integration";
+const resetFailures = [];
+let resetTotal = 0;
+let resetPassed = 0;
+
+async function runResetTest(name, fn, browser) {
+  resetTotal++;
+  try {
+    await fn(browser);
+    resetPassed++;
+    process.stdout.write(`  PASS: ${name}\n`);
+  } catch (err) {
+    resetFailures.push({ suite: RESET_SUITE, name, error: String(err) });
+    process.stderr.write(`  FAIL: ${name}\n    ${err}\n`);
+  }
+}
+
 async function runWxhIntegrationTests(browser) {
   process.stdout.write(`\n${INTEGRATION_SUITE}\n`);
 
@@ -696,6 +715,242 @@ async function runPreview3dIntegrationTests(browser) {
   );
 }
 
+// ── Integration tests (LLD 152 — reset-view / preset angles) ─────────────────
+//
+// These drive the built dist/ app (APP_PAGE). They are all WebGL-gated: if the
+// CI Chromium has no GPU context they skip with a note rather than failing, so
+// the gate pattern matches the LLD 130 tests above.
+
+async function runResetPresetIntegrationTests(browser) {
+  process.stdout.write(`\n${RESET_SUITE}\n`);
+
+  // ── Test 1: Recenter button visible in preview success mode ─────────────────
+  await runResetTest(
+    "Recenter button (#btn-recenter) is visible in 3D preview success mode",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (!webglOK) {
+          process.stdout.write(`    (skipped — no GL context)\n`);
+          return;
+        }
+
+        // Enter preview
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 1500));
+
+        const btnVisible = await page.evaluate(() => {
+          const btn = document.getElementById("btn-recenter");
+          if (!btn) return false;
+          const style = getComputedStyle(btn);
+          return style.display !== "none" && style.visibility !== "hidden";
+        });
+        if (!btnVisible) throw new Error("#btn-recenter not visible in preview success mode");
+        if (page._pageErrors.length) throw new Error("Page errors: " + page._pageErrors.join("; "));
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 2: Recenter button hidden in 2D mode ────────────────────────────────
+  await runResetTest(
+    "Recenter button hidden in 2D editing mode",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        // No preview entered — should be hidden
+        const btnVisible = await page.evaluate(() => {
+          const btn = document.getElementById("btn-recenter");
+          if (!btn) return true; // element missing is unexpected
+          const style = getComputedStyle(btn);
+          return style.display !== "none";
+        });
+        if (btnVisible) throw new Error("#btn-recenter should be hidden in 2D mode");
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 3: Recenter button hidden on fallback path ──────────────────────────
+  await runResetTest(
+    "Recenter button hidden on WebGL-unavailable 2.5D fallback path",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser, { forceNoWebgl: true });
+      try {
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 600));
+
+        const btnVisible = await page.evaluate(() => {
+          const btn = document.getElementById("btn-recenter");
+          if (!btn) return false;
+          const style = getComputedStyle(btn);
+          return style.display !== "none";
+        });
+        if (btnVisible) throw new Error("#btn-recenter should be hidden on fallback path");
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 4: resetView() no-op when camera absent (early-return guard) ────────
+  await runResetTest(
+    "resetView() is a no-op (no throw) when called before preview engine is built",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        // Call resetView() in 2D mode (camera is null)
+        const threw = await page.evaluate(() => {
+          try {
+            window.__render3d.resetView();
+            return false;
+          } catch {
+            return true;
+          }
+        });
+        if (threw) throw new Error("resetView() threw when camera is null");
+        if (page._pageErrors.length) throw new Error("Page errors: " + page._pageErrors.join("; "));
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 5: setPreset() no-op when camera absent ──────────────────────────────
+  await runResetTest(
+    "setPreset() is a no-op (no throw) when called before preview engine is built",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const threw = await page.evaluate(() => {
+          try {
+            window.__render3d.setPreset("ne");
+            window.__render3d.setPreset("nw");
+            window.__render3d.setPreset("se");
+            window.__render3d.setPreset("top");
+            window.__render3d.setPreset("unknown"); // unknown name should also no-op
+            return false;
+          } catch {
+            return true;
+          }
+        });
+        if (threw) throw new Error("setPreset() threw when camera is null");
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 6: reset + presets leave plan models unchanged (read-only) ───────────
+  await runResetTest(
+    "resetView() + setPreset() leave walls.model and symbols.model unchanged",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (!webglOK) {
+          process.stdout.write(`    (skipped — no GL context)\n`);
+          return;
+        }
+
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 1500));
+
+        const before = await page.evaluate(() => window.__testState().rooms);
+
+        // Call reset + all presets
+        await page.evaluate(() => {
+          window.__render3d.resetView({ animate: false });
+          window.__render3d.setPreset("ne",  { animate: false });
+          window.__render3d.setPreset("nw",  { animate: false });
+          window.__render3d.setPreset("se",  { animate: false });
+          window.__render3d.setPreset("top", { animate: false });
+          window.__render3d.resetView({ animate: false });
+        });
+        await new Promise(r => setTimeout(r, 200));
+
+        const after = await page.evaluate(() => window.__testState().rooms);
+
+        if (JSON.stringify(before) !== JSON.stringify(after)) {
+          throw new Error(`reset/preset mutated room verts: ${JSON.stringify(before)} vs ${JSON.stringify(after)}`);
+        }
+        if (page._pageErrors.length) throw new Error("Page errors: " + page._pageErrors.join("; "));
+        process.stdout.write(`    (WebGL branch — rooms unchanged after reset+presets)\n`);
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 7: Home key triggers resetView in preview mode ──────────────────────
+  await runResetTest(
+    "Home key calls resetView() when preview is active (no throw, no page error)",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (!webglOK) {
+          process.stdout.write(`    (skipped — no GL context)\n`);
+          return;
+        }
+
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Click stage to ensure focus is on the document (not an input)
+        await page.click("#stage3d", { position: { x: 400, y: 300 } });
+        await page.keyboard.press("Home");
+        await new Promise(r => setTimeout(r, 350));
+
+        if (page._pageErrors.length) throw new Error("Page errors after Home key: " + page._pageErrors.join("; "));
+        process.stdout.write(`    (Home key handled without errors)\n`);
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 8: preset keys 1-4 in preview mode (no throw, no page error) ────────
+  await runResetTest(
+    "Keys 1–4 call setPreset() in preview mode (no throw, no page error)",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (!webglOK) {
+          process.stdout.write(`    (skipped — no GL context)\n`);
+          return;
+        }
+
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 1500));
+
+        await page.click("#stage3d", { position: { x: 400, y: 300 } });
+        for (const key of ["1", "2", "3", "4"]) {
+          await page.keyboard.press(key);
+          await new Promise(r => setTimeout(r, 200));
+        }
+
+        if (page._pageErrors.length) throw new Error("Page errors after 1-4 keys: " + page._pageErrors.join("; "));
+        process.stdout.write(`    (keys 1-4 handled without errors)\n`);
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const server = await serve();
@@ -738,9 +993,23 @@ if (previewFailures.length > 0) {
   }
 }
 
+// ── Run integration tests (LLD 152 reset-view / preset angles) ───────────────
+await runResetPresetIntegrationTests(browser);
+
+const resetIcon = resetFailures.length === 0 ? "PASS" : "FAIL";
+process.stdout.write(`${resetIcon}  ${resetPassed}/${resetTotal} reset/preset integration tests passed`);
+if (resetFailures.length > 0) process.stdout.write(` (${resetFailures.length} failed)\n`);
+else process.stdout.write("\n");
+
+if (resetFailures.length > 0) {
+  for (const f of resetFailures) {
+    process.stderr.write(`  - ${f.suite}\n      ${f.name}\n      ${f.error}\n`);
+  }
+}
+
 // ── Teardown ──────────────────────────────────────────────────────────────────
 await browser.close();
 server.close();
 
-const anyFailed = failed > 0 || integrationFailures.length > 0 || previewFailures.length > 0;
+const anyFailed = failed > 0 || integrationFailures.length > 0 || previewFailures.length > 0 || resetFailures.length > 0;
 if (anyFailed) process.exit(1);

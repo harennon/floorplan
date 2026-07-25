@@ -170,11 +170,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnHelp        = document.getElementById("btn-help");
   const helpOverlayEl  = document.getElementById("help-overlay");
 
-  // 3D preview (LLD 128 / LLD 130)
+  // 3D preview (LLD 128 / LLD 130 / LLD 152)
   const gIso            = document.getElementById("iso");
   const btnPreview      = document.getElementById("tool-preview");
   const canvas3d        = document.getElementById("stage3d");
   const previewLoadingEl = document.getElementById("preview-loading");
+  const btnRecenter     = document.getElementById("btn-recenter");
 
   // Theme toggle button
   const btnThemeToggle = document.getElementById("btn-theme-toggle");
@@ -432,6 +433,11 @@ document.addEventListener("DOMContentLoaded", () => {
     render3d.initRender3d(canvas3d, previewIsActive, _wallsModRef, _symbolsModRef, previewLoadingEl);
   }
 
+  // Recenter button (LLD 152): click → resetView() in 3D preview mode.
+  if (btnRecenter) {
+    btnRecenter.addEventListener("click", () => render3d.resetView());
+  }
+
   // Expose the 3D renderer module for headless integration tests (LLD 130 Test
   // Requirements). Introspection-only — the module exports no mutators, so this
   // handle cannot change plan state; it just lets the Playwright rig call the
@@ -625,11 +631,25 @@ document.addEventListener("DOMContentLoaded", () => {
   if (inspDuplicate) inspDuplicate.title = `Duplicate (${_mod}D)`;
   if (inspDelete)    inspDelete.title    = "Delete (Del)";
 
-  // ── Global editing keyboard shortcuts (LLD-21, extended LLD-54) ──────────────
+  // ── Global editing keyboard shortcuts (LLD-21, extended LLD-54, LLD-152) ─────
   window.addEventListener("keydown", (e) => {
     // Guard: ignore when focus is in an editable element
     const tag = document.activeElement?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+    // 3D preview shortcuts (LLD 152): gated to active, non-fallback preview only.
+    // Must run before generic zoom/tool handling so 1–4 don't fall through to zoom.
+    if (previewIsActive() && !e.ctrlKey && !e.metaKey) {
+      if (e.key === "Home") {
+        e.preventDefault();
+        render3d.resetView();
+        return;
+      }
+      if (e.key === "1") { e.preventDefault(); render3d.setPreset("ne");  return; }
+      if (e.key === "2") { e.preventDefault(); render3d.setPreset("nw");  return; }
+      if (e.key === "3") { e.preventDefault(); render3d.setPreset("se");  return; }
+      if (e.key === "4") { e.preventDefault(); render3d.setPreset("top"); return; }
+    }
 
     const meta  = e.ctrlKey || e.metaKey;
 
