@@ -107,7 +107,8 @@ export function onChange(cb) { _subs.push(cb); }
   - **JSON export:** `name` is a field in the downloaded `.json` (via `serializePlan`).
   - **Share URL hash:** `name` rides as `n` inside the `v:1` compact payload (or in the full JSON for the `u`/`d` codecs).
 - **Not persisted / transient:** the placeholder text is UI-only; an empty name is stored as *absent* (`buildPlan` omits it), never as the literal `"Untitled plan"`.
-- **Lifecycle:** boot `applyPlan` → `setPlanName` → `onChange` → input shows name (or placeholder if empty). Reset plan → `applyPlan` with a name-less plan → `setPlanName("")` → placeholder.
+- **Lifecycle:** boot `applyPlan` → `setPlanName` → `onChange` → input shows name (or placeholder if empty).
+- **Reset (special case — does NOT go through `applyPlan`):** `actions.js` `_confirmReset` (lines 340–356) bypasses `applyPlan`, calling `hydrateWalls`/`hydrateSymbols` directly, so it will **not** clear the name on its own. `_confirmReset` must additionally call `setPlanName("")` (before `render()`), which fires `onChange` → the header input clears to the placeholder. Without this, the stale name lingers in the input and is re-persisted to localStorage by the `render()`-driven autosave. See Edge Case 14.
 
 ## Edge Cases
 
@@ -124,10 +125,12 @@ export function onChange(cb) { _subs.push(cb); }
 11. **Name-only change (no geometry edit)** → still triggers autosave via `scheduleRender`; `serializePlan` includes `name` so the dirty-check sees the delta.
 12. **Undo/redo after a name edit** → name is untouched by `history.js` (not snapshotted); consistent with `unit`/`view`. A name edit is not undoable — acceptable and documented.
 13. **Share-vs-local conflict where only the name differs** → serialized strings differ, so `main.js` treats it as a conflict and shows the existing "Opened shared plan / Keep my last plan" toast — correct, no special-casing.
+14. **Reset with a name set** → `actions.js` `_confirmReset` must call `setPlanName("")` so the header input clears to the placeholder; otherwise the stale name survives Reset (since `_confirmReset` bypasses `applyPlan`) and is re-persisted by the `render()`-driven autosave. After the fix: name cleared to placeholder, not re-persisted. (Test in integration.)
 
 ## Dependencies
 
 - **Existing, already present** (no new packages): `plan.js`, `store.js`, `exportJson.js`, `share.js`, `main.js`, `units.js` (pattern reference), `surface.js` (`scheduleRender`/`onRender`).
+- **`actions.js` (must be edited):** `_confirmReset` (lines 340–356) bypasses `applyPlan`, so it must import `setPlanName` from `./planName.js` and call `setPlanName("")` before `render()` to clear the name on Reset (see State Model / Edge Case 14).
 - **Frontend decision:** Variant A is **decided** (CEO, see Frontend Design) — not blocked.
 - **Must land before** #154 (export caption uses the name) and #155 (tab title / share greeting use the name). This LLD is the foundation those build on; it must not implement their surfaces.
 
@@ -188,6 +191,7 @@ Rationale: serves the CX north star (the name is the artifact you read/screensho
 - Type a name in `#plan-title`, reload, assert the name persists (localStorage round-trip) and the input shows it.
 - Type a name → build a share link → open it in a fresh context → assert the name is restored.
 - Assert a long (60-char) name does not overflow/push the `.actions-cluster` (bounding-box non-overlap check).
+- Type a name → trigger Reset (confirm) → assert the input shows the placeholder (empty value) and, after the autosave debounce, the persisted localStorage plan has no `name` (Edge Case 14).
 
 **Security:**
 - A name containing `<script>`/HTML markup round-trips as literal text and is never interpreted as HTML (assert it appears verbatim in the input value / no injected node).
