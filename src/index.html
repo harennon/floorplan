@@ -337,7 +337,10 @@
         position: absolute;
         top: 1.25rem;
         left: 1.25rem;
-        /* pointer-events enabled so the input is focusable */
+        /* Container stays click-through (like the old brand) so empty space above
+           the canvas doesn't intercept #stage clicks; only .brand-title re-enables
+           pointer-events so the title input remains focusable. */
+        pointer-events: none;
         user-select: none;
       }
       /* Eyebrow: "floorplan" wordmark demoted to small mono label */
@@ -372,6 +375,8 @@
         text-overflow: ellipsis;
         outline: none;
         cursor: text;
+        /* Re-enable interaction on the input itself (parent .brand is click-through) */
+        pointer-events: auto;
         transition: border-color 0.15s, box-shadow 0.15s;
       }
       /* Placeholder text */
