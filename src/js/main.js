@@ -37,6 +37,7 @@ import {
 import { init as initStore, loadLocal, saveNow } from "./store.js";
 import { readBootHash } from "./share.js";
 import { applyPlan, isEmptyPlan, serializePlan } from "./plan.js";
+import { setPlanName, onChange as onPlanNameChange } from "./planName.js";
 import { contentBounds } from "./exportImg.js";
 import { init as initActions, showToast, showConflictBanner, setHistoryReset, setOpenTemplates } from "./actions.js";
 import { init as initTemplates, open as openTemplates } from "./templates.js";
@@ -179,6 +180,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Theme toggle button
   const btnThemeToggle = document.getElementById("btn-theme-toggle");
+
+  // Plan title input (LLD 157)
+  const planTitleEl = document.getElementById("plan-title");
 
   // ── Theme init (must run before first render) ──────────────────────────────
   initTheme();
@@ -893,6 +897,25 @@ document.addEventListener("DOMContentLoaded", () => {
       clearanceToggle.textContent = "▸";
       clearanceToggle.setAttribute("aria-expanded", "false");
     }
+  }
+
+  // ── Plan title (LLD 157) ──────────────────────────────────────────────────
+  // Wire onChange before boot-restore so programmatic applyPlan() → setPlanName()
+  // → onChange() → input update happens on the very first restore.
+  if (planTitleEl) {
+    // State → view: reflect programmatic name changes (import/share/restore) in the input
+    onPlanNameChange((n) => { planTitleEl.value = n; });
+
+    // View → state: typing updates live state + triggers debounced autosave
+    planTitleEl.addEventListener("input", () => {
+      setPlanName(planTitleEl.value);
+      scheduleRender();
+    });
+
+    // Blur on Enter (optional ergonomics, no state change)
+    planTitleEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") planTitleEl.blur();
+    });
   }
 
   // ── Wire re-render on view / unit / snap-mode / clearance-state changes ──

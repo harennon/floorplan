@@ -11,10 +11,30 @@ import { model as measurementsModel, hydrate as hydrateMeasurements } from "./me
 import { view, setView } from "./view.js";
 import { unit, setUnit } from "./units.js";
 import { coerceColor } from "./palette.js";
+import { getPlanName, setPlanName } from "./planName.js";
 
 export const PLAN_SCHEMA = 1;
 const APP_TAG = "floorplan";
 const VALID_UNITS = ["ft", "m"];
+
+/** Max stored plan-name length (characters). */
+export const MAX_NAME_LEN = 60;
+
+/**
+ * Normalise a raw name value into a safe, capped string, or undefined.
+ * Never throws. Trims, strips control/newline characters, caps at MAX_NAME_LEN.
+ * Returns undefined for non-strings or empty/whitespace-only input.
+ * @param {unknown} raw
+ * @returns {string|undefined}
+ */
+function _coerceName(raw) {
+  if (typeof raw !== "string") return undefined;
+  // Strip control characters (including newlines, carriage returns, tabs)
+  // eslint-disable-next-line no-control-regex
+  const stripped = raw.replace(/[\x00-\x1F\x7F]/g, "").trim();
+  if (stripped.length === 0) return undefined;
+  return stripped.slice(0, MAX_NAME_LEN);
+}
 
 // ── Compact codec (LLD 77) ────────────────────────────────────────────────────
 
@@ -41,6 +61,7 @@ function _mmRound(v) {
  * @property {Array<{c:0|1, p:number[][]}>} r  rooms
  * @property {number[][]} k     chain vertices (draft), tuple [x,y] each
  * @property {Array<Object>} s   symbols
+ * @property {string} [n]        optional plan name
  *
  * @param {import("./plan.js").Plan} plan
  * @returns {CompactPlan}
@@ -81,7 +102,9 @@ export function buildCompact(plan) {
     _mmRound(me.b.y),
   ]);
 
-  return { v: COMPACT_VERSION, u: plan.unit, r, k, s, m };
+  const out = { v: COMPACT_VERSION, u: plan.unit, r, k, s, m };
+  if (plan.name) out.n = plan.name;
+  return out;
 }
 
 /**
@@ -170,7 +193,7 @@ export function parseCompact(compact) {
       measurements.push({ id: `m${i}`, a: { x: ax, y: ay }, b: { x: bx, y: by } });
     }
 
-    return {
+    const obj = {
       schema: PLAN_SCHEMA,
       app: APP_TAG,
       walls: { rooms, chain },
@@ -179,6 +202,9 @@ export function parseCompact(compact) {
       view: { zoom: 1, panX: 0, panY: 0 },
       unit: compact.u,
     };
+    const nm = _coerceName(compact.n);
+    if (nm !== undefined) obj.name = nm;
+    return obj;
   } catch {
     return null;
   }
@@ -189,7 +215,7 @@ export function parseCompact(compact) {
  * @returns {Plan}
  */
 export function buildPlan() {
-  return {
+  const plan = {
     schema: PLAN_SCHEMA,
     app: APP_TAG,
     walls: {
@@ -207,6 +233,9 @@ export function buildPlan() {
     },
     unit: unit,
   };
+  const name = getPlanName();
+  if (name) plan.name = name;
+  return plan;
 }
 
 /**
@@ -310,7 +339,7 @@ export function validatePlan(raw) {
       return ns;
     });
 
-    return {
+    const result = {
       schema: raw.schema,
       app: raw.app,
       walls: {
@@ -328,6 +357,12 @@ export function validatePlan(raw) {
       },
       unit: raw.unit,
     };
+
+    // name: OPTIONAL-ADDITIVE. Never rejects the plan; normalises to omitted when invalid.
+    const nm = _coerceName(raw.name);
+    if (nm !== undefined) result.name = nm;
+
+    return result;
   } catch {
     return null;
   }
@@ -345,6 +380,7 @@ export function applyPlan(plan) {
   hydrateMeasurements({ measurements: plan.measurements });
   setView(plan.view);
   setUnit(plan.unit);
+  setPlanName(plan.name || "");
 }
 
 /**
@@ -363,7 +399,8 @@ export function isEmptyPlan() {
  * @returns {string}
  */
 export function serializePlan(plan) {
-  // Fixed key order for stability
+  // Fixed key order for stability. name: undefined ⇒ omitted by JSON.stringify,
+  // so name-less plans serialize identically to before.
   return JSON.stringify({
     schema: plan.schema,
     app: plan.app,
@@ -372,6 +409,7 @@ export function serializePlan(plan) {
     measurements: plan.measurements,
     view: plan.view,
     unit: plan.unit,
+    name: plan.name,
   });
 }
 

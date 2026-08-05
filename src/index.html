@@ -332,27 +332,63 @@
 
       /* ── Floating chrome ──────────────────────────────────────────────── */
 
-      /* Brand — top left */
+      /* Brand — top left (LLD 157: now contains an editable title input) */
       .brand {
         position: absolute;
         top: 1.25rem;
         left: 1.25rem;
-        pointer-events: none;
+        /* pointer-events enabled so the input is focusable */
         user-select: none;
       }
-      .brand-name {
-        font-family: var(--font-display);
-        font-size: 1.1rem;
-        font-weight: 700;
-        color: var(--gold);
-        line-height: 1.2;
-      }
-      .brand-sub {
+      /* Eyebrow: "floorplan" wordmark demoted to small mono label */
+      .brand-eyebrow {
         font-family: var(--font-mono);
         font-size: 0.65rem;
         color: var(--muted);
         letter-spacing: 0.08em;
         text-transform: uppercase;
+        line-height: 1.3;
+        pointer-events: none;
+        user-select: none;
+      }
+      /* Editable plan title — the big display line */
+      .brand-title {
+        display: block;
+        font-family: var(--font-display);
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--gold);
+        line-height: 1.2;
+        /* Borderless by default: reads as a title, not a form field */
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        padding: 0.1rem 0.35rem;
+        margin: 0;
+        /* Truncation: long names show an ellipsis, never push into the actions cluster */
+        max-width: min(46vw, 22rem);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        outline: none;
+        cursor: text;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      /* Placeholder text */
+      .brand-title::placeholder {
+        color: var(--muted);
+      }
+      /* Hover affordance: subtle border signals "editable" */
+      .brand-title:hover {
+        border-color: var(--hairline);
+      }
+      /* Focus: gold ring */
+      .brand-title:focus {
+        border-color: var(--gold-soft);
+        box-shadow: 0 0 0 2px var(--gold-soft);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .brand-title { transition: none; }
       }
 
       /* Unit toggle — top right */
@@ -2349,10 +2385,19 @@
       <!-- Rail collapse toggle (mobile ≤480px); shown only when rail is collapsed -->
       <button class="tool-rail-toggle" aria-label="Toggle tool rail">≡</button>
 
-      <!-- Brand -->
-      <div class="brand" aria-hidden="true">
-        <div class="brand-name">floorplan</div>
-        <div class="brand-sub">warm blueprint</div>
+      <!-- Brand + editable plan title (Variant A, LLD 157) -->
+      <div class="brand">
+        <div class="brand-eyebrow">floorplan</div>
+        <input
+          id="plan-title"
+          class="brand-title"
+          type="text"
+          maxlength="60"
+          placeholder="Untitled plan"
+          aria-label="Plan name"
+          autocomplete="off"
+          spellcheck="false"
+        />
       </div>
 
       <!-- Actions cluster (Share / Export / Overflow / Save pill) -->
