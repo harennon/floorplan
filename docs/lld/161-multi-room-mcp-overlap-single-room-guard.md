@@ -26,9 +26,10 @@ real the moment a brief has more than one room.
   are the deliverable, not multi-room modelling.
 - **No coordinated multi-room convergence.** Driving an agent to *resolve* an overlap across
   two rooms (the joint-convergence loop) is #50 (M6 joint-convergence gap), not this.
-- **No `src/` changes.** The test lives entirely under `mcp/`; it reuses `pointInRoom` from
-  `clearance.js` (already exported through `core.js`) but adds no new `src/js` function and
-  does not touch the `plan.js` document contract or the browser editor.
+- **No `src/` changes.** The test lives entirely under `mcp/` (a self-contained `overlap.js`
+  with its own point-in-polygon logic — it does *not* reuse `clearance.js`'s `pointInRoom`,
+  whose on-edge behaviour is undefined). It adds no new `src/js` function and does not touch the
+  `plan.js` document contract or the browser editor.
 - **No overlap *auto-repair*** (no `suggestedMove` for rooms). `check_brief` only *reports*
   the overlap; repositioning rooms is the agent's job via `move_room`/`resize_room`.
 - **No session-store migration.** The single-session → multi-session store migration noted in
@@ -42,27 +43,92 @@ A new pure module **`mcp/src/overlap.js`**, exported through nothing else — im
 by `tools.js` for the `check_brief` wiring. Keeping it in `mcp/` (not `walls.js`) honours the
 "stay isolated to `mcp/`, no `src/` change" constraint: the browser editor has no room-overlap
 requirement today, so adding the primitive to `src/` would be speculative surface area. The
-function is pure (verts in, boolean out) and reuses `pointInRoom` (already Node-clean, already
-re-exported by `core.js`) for the containment leg.
+module is self-contained and pure (verts in, boolean out); it does **not** import
+`clearance.js`'s `pointInRoom`, because that function explicitly disclaims on-edge results and
+the overlap decision must be deterministic on boundary-touching configurations. `overlap.js`
+carries its own `pointStrictlyInside` with an explicit boundary epsilon (below).
 
-### The intersection algorithm (general polygons, not just rectangles)
+### The overlap definition (deterministic — the "interiors intersect" rule)
 
 `add_room {rect}` produces axis-aligned rectangles, but `add_room {verts}` can produce convex
-*or* concave polygons, so the test must be general. Two closed polygons A, B intersect iff
-**any of**:
+*or* concave polygons, so the test must be general.
 
-1. **An edge of A properly crosses an edge of B** — segment–segment intersection at an interior
-   point (orientation-sign test; collinear/endpoint-only touches excluded). Catches partial
-   overlaps and X-crossings.
-2. **A vertex of B lies strictly inside A**, or a **vertex of A lies strictly inside B**
-   (`pointInRoom`, strict interior). Catches full containment (one room entirely within
-   another), which produces no edge crossing.
+**Definition.** Two closed rooms A, B **overlap** iff their *interiors* share positive area.
+Boundary-only contact — a shared full edge (wall-adjacency), a shared partial edge, or a shared
+single vertex — is **NOT** an overlap. This is the single rule from which every guarantee below
+follows; it is what makes the two firm test assertions (identical rooms → `true`, shared-wall
+rooms → `false`) consistent rather than contradictory.
 
-If neither holds, the rooms are **disjoint or merely edge-adjacent** (sharing a wall) → not an
-overlap. This is deliberate: two rooms sharing a wall is a legitimate adjacent-room layout, not
-a defect. Proper (interior-crossing, non-collinear) segment intersection returns `false` for a
-shared collinear edge, and strict `pointInRoom` treats on-edge points as indeterminate, so a
-clean shared wall does not false-positive.
+**Why boundary handling must be explicit.** The obvious implementation — "any vertex of B lies
+inside A" via `pointInRoom` — is *not* deterministic: `pointInRoom` (clearance.js:162-163)
+disclaims on-edge results ("may return true or false — not guaranteed"). For two identical
+rectangles A = B, *every* vertex of B lies exactly on A's boundary and no edge properly crosses,
+so a vertex-based test could return either answer. The design below never queries a vertex; it
+queries a **constructed strictly-interior point**, which by construction is off the other room's
+boundary in exactly the degenerate cases (identical, adjacency, containment) that made the naive
+test ambiguous. That is the fix.
+
+**Algorithm.** `roomsOverlap(a, b)` returns `true` iff **either**:
+
+1. **Proper edge crossing** — some edge of A and some edge of B cross at a point interior to
+   *both* segments (`segmentsProperlyIntersect`, below). This is an orientation-sign test: it
+   requires strict sign opposition of the two cross-products on each side, so **collinear
+   overlaps, endpoint-only touches, and T-junctions all return `false`**. Catches every partial
+   overlap and X-crossing. A shared collinear wall is collinear → not a proper crossing.
+
+2. **Interior containment** — a *constructed strictly-interior point* of A lies strictly inside
+   B, **or** a strictly-interior point of B lies strictly inside A (`pointStrictlyInside`,
+   below). Catches full containment and the identical-room case, neither of which produces an
+   edge crossing.
+
+**Why one interior point per room is sufficient (and deterministic).** For two *simple*
+polygons, if no pair of edges properly crosses then their boundaries do not interleave, so one
+region is either wholly inside the other, wholly outside, or shares only boundary. Containment
+is therefore all-or-nothing in the no-crossing branch: *any* interior point of the contained
+room lies inside the container, so a single representative point decides it. And because we only
+reach leg 2 when there is no proper crossing, the constructed interior point is never *on* the
+other room's boundary for the cases we must decide firmly:
+
+- **Identical rooms** (A = B): interior point of B is strictly inside B = strictly inside A →
+  `pointStrictlyInside(A, …) === true` → overlap. Deterministic.
+- **Shared-wall adjacency**: interior point of B is strictly inside B, held off the shared wall
+  by B's own interior, and A's interior is disjoint from B's → `false` for both directions → no
+  overlap. Deterministic.
+- **Containment** (B inside A): interior point of B is strictly inside A → overlap.
+
+### Constructing a strictly-interior point (`interiorPoint`)
+
+`interiorPoint(poly)` returns a point guaranteed strictly inside a simple polygon, deterministic
+and robust for convex *and* concave rooms (standard extreme-vertex/ear construction):
+
+1. Pick the vertex `v` with the smallest `y` (ties broken by smallest `x`). An extreme vertex is
+   always a *convex* corner. Let `u`, `w` be its polygon neighbours.
+2. Scan the remaining vertices for any that fall strictly inside triangle `(u, v, w)`.
+   - **None inside** → `(u, v, w)` is an "ear"; return its centroid `(u+v+w)/3`, which is
+     strictly interior to the triangle and hence to the polygon.
+   - **Some inside** → let `q` be the one maximising distance from the line `u–w` (the "deepest"
+     reflex intruder); return the midpoint of segment `v–q`, which is strictly interior.
+
+For a rectangle (or any convex room) no vertex is ever inside the corner triangle, so this
+reduces to the corner-triangle centroid — always strictly interior. `interiorPoint` never
+returns a vertex, so it is never on another room's edge in the degenerate cases above.
+
+### `pointStrictlyInside` and the epsilon rule
+
+`pointStrictlyInside(poly, p)` is even-odd ray casting (the same rule as `clearance.js`
+`pointInRoom`, reused conceptually) but with an explicit boundary guard: if `p` lies within
+`OVERLAP_EPS` of any edge of `poly` it returns `false` (boundary is not "strictly inside").
+`OVERLAP_EPS = 1e-9` metres — far below the 0.01 m display precision and the 1e-4 physical
+contact tolerances already in `clearance.js`, and far above FP round-off (~1e-15). Because leg 2
+only runs in the no-crossing branch, the query point is either clearly interior or clearly
+exterior; the epsilon guard exists only to reject the measure-zero coincidence of a constructed
+point landing on an edge, making the result deterministic in all cases. The same `OVERLAP_EPS`
+governs the collinear/touch threshold in `segmentsProperlyIntersect` (|cross-product| ≤
+`OVERLAP_EPS` ⇒ collinear ⇒ not a proper crossing).
+
+This is the single "interior-vs-touch" rule the reviewer asked to be made explicit: **positive
+epsilon of edge-proximity or collinearity counts as *touch* (not overlap); strict interior
+crossing or strict interior containment counts as *overlap*.**
 
 ### Wiring into `check_brief`
 
@@ -87,26 +153,60 @@ foot-gun cheaply and synchronously; the evaluator catches genuine multi-room ove
 ## Interfaces / Types
 
 ```js
-// mcp/src/overlap.js — new pure module.
+// mcp/src/overlap.js — new pure module. Vanilla JS + JSDoc (no TS annotations).
+
+/** Boundary / collinearity tolerance (metres). Below display + contact precision,
+ *  above FP round-off. |cross| ≤ this ⇒ collinear/touch; used by both fns below. */
+const OVERLAP_EPS = 1e-9;
 
 /**
- * True iff segments p1→p2 and p3→p4 cross at an interior point.
- * Orientation-sign test; collinear and endpoint-only touches return false
- * (so shared room walls are NOT treated as crossings).
- * @param {{x,y}} p1 @param {{x,y}} p2 @param {{x,y}} p3 @param {{x,y}} p4
+ * True iff segments p1→p2 and p3→p4 cross at a point interior to BOTH segments.
+ * Orientation-sign test with strict sign opposition; collinear overlaps,
+ * endpoint-only touches, and T-junctions all return false (so shared room walls
+ * are NOT treated as crossings). Uses OVERLAP_EPS as the collinearity threshold.
+ * @param {{x:number,y:number}} p1
+ * @param {{x:number,y:number}} p2
+ * @param {{x:number,y:number}} p3
+ * @param {{x:number,y:number}} p4
  * @returns {boolean}
  */
-export function segmentsProperlyIntersect(p1, p2, p3, p4): boolean
+export function segmentsProperlyIntersect(p1, p2, p3, p4)
 
 /**
- * True iff two CLOSED room polygons intersect (partial overlap, X-crossing, or
- * full containment). Edge-adjacent (shared-wall) rooms return false.
+ * A point guaranteed STRICTLY inside a simple polygon (convex or concave),
+ * constructed via the extreme-vertex ear method. Never returns a vertex, so it
+ * never coincides with another room's edge in the degenerate (identical /
+ * adjacent / contained) cases. Assumes ≥3 verts, non-self-intersecting.
+ * @param {{x:number,y:number}[]} verts  polygon vertices in order
+ * @returns {{x:number,y:number}}
+ */
+export function interiorPoint(verts)
+
+/**
+ * True iff point p is strictly inside poly (even-odd ray cast) AND farther than
+ * OVERLAP_EPS from every edge of poly. On-boundary points return false.
+ * @param {{x:number,y:number}[]} verts
+ * @param {{x:number,y:number}} p
+ * @returns {boolean}
+ */
+export function pointStrictlyInside(verts, p)
+
+/**
+ * True iff the INTERIORS of two CLOSED room polygons share positive area
+ * (partial overlap, X-crossing, full containment, or identical rooms). Boundary-
+ * only contact — shared full/partial edge or shared vertex — returns false, so
+ * wall-adjacent rooms are NOT flagged. Deterministic for all configurations.
  * @param {import("../../src/js/walls.js").Room} a  closed room
  * @param {import("../../src/js/walls.js").Room} b  closed room
  * @returns {boolean}
  */
-export function roomsOverlap(a, b): boolean
+export function roomsOverlap(a, b)
 ```
+
+`roomsOverlap` is implemented directly in `overlap.js` on top of the three helpers above; it does
+**not** call `pointInRoom` from `clearance.js` (that function disclaims on-edge results, which is
+exactly the ambiguity this design removes). The `core.js` `pointInRoom` re-export is therefore no
+longer a dependency of this LLD.
 
 No change to `Brief`, `ClearanceReport`, `Gap`, or `BriefReport` types. The only observable
 contract change is additional strings in `BriefReport.unmet`:
@@ -140,42 +240,54 @@ That migration remains future work.
 
 1. **Fewer than 2 closed rooms.** Overlap pass iterates zero pairs → no `unmet` entry. The
    single-room MVP path is completely unaffected (no behaviour change, no cost).
-2. **Shared-wall adjacency** (two rooms sharing a full edge). Not an overlap: proper segment
-   intersection excludes collinear edges and strict `pointInRoom` excludes on-edge vertices.
-   Reported as satisfied (correct — adjacent rooms are valid).
-3. **Full containment** (room B entirely inside room A, no edge crossing). Caught by the
-   vertex-in-polygon leg (a vertex of B is strictly inside A).
-4. **Vertex exactly on the other room's edge** (degenerate touch). `pointInRoom` is documented
-   as indeterminate on an edge; a pure boundary touch may or may not flag. Accepted for MVP —
-   a genuine overlap always has a strictly-interior vertex or a proper crossing; a boundary
-   kiss is not a meaningful overlap. Documented, not special-cased.
-5. **Concave (e.g. L-shaped) room.** The general algorithm (any-edge-cross OR
-   vertex-containment) handles concave polygons; no convexity assumption. `add_room {verts}`
-   can produce these.
-6. **Open / unclosed rooms.** `check_brief` filters to `r.closed` before pairing, matching the
+2. **Shared-wall adjacency** (two rooms sharing a full edge). **Firmly not an overlap** (`false`).
+   The shared wall is collinear → no proper crossing (leg 1). Each room's *constructed interior
+   point* sits strictly inside its own room, off the shared wall, and outside the other room →
+   `pointStrictlyInside` is `false` both directions (leg 2). Deterministic; reported as satisfied
+   (correct — adjacent rooms are valid).
+3. **Full containment** (room B entirely inside room A, no edge crossing). Caught by leg 2: B's
+   interior point is strictly inside A. Symmetric for A inside B.
+4. **Identical rooms** (A = B). **Firmly an overlap** (`true`). No edge properly crosses (all
+   edges collinear), so leg 1 is `false`; leg 2 decides it: B's constructed interior point is
+   strictly inside B, which equals A, so `pointStrictlyInside(A, …)` is `true`. This is exactly
+   the case the naive vertex-based test could not decide — resolved deterministically because the
+   query point is a strict interior point, never a shared vertex.
+5. **Pure boundary touch** — rooms meeting only at a shared vertex or along a partial shared edge,
+   with no shared interior area. **Firmly not an overlap** (`false`), by the same reasoning as
+   EC2: touching is collinear/endpoint contact (no proper crossing) and neither interior point
+   lies inside the other room. Consistent with the "interiors share positive area" definition:
+   zero shared area ⇒ not an overlap.
+6. **Concave (e.g. L-shaped) room.** The general algorithm (proper-edge-cross OR
+   interior-point-containment) handles concave polygons; no convexity assumption. `interiorPoint`
+   uses the extreme-vertex ear construction, which is valid for concave simple polygons.
+   `add_room {verts}` can produce these.
+7. **Open / unclosed rooms.** `check_brief` filters to `r.closed` before pairing, matching the
    existing room-size logic; an in-progress chain is never tested.
-7. **Self-overlap / degenerate room.** `add_room` already rejects zero-area and <3-corner
+8. **Self-overlap / degenerate room.** `add_room` already rejects zero-area and <3-corner
    rooms (`tool_add_room` EC5), so a persisted room is always a valid closed polygon; the
    overlap test assumes ≥3 verts.
-8. **Guard: brief with no `room` field, agent draws 2 rooms that overlap.** Guard does not fire
+9. **Guard: brief with no `room` field, agent draws 2 rooms that overlap.** Guard does not fire
    (no single-room brief); overlap evaluator catches it in `check_brief`. This is the exact
    residual case the evaluator exists for.
-9. **Guard: no brief set.** Guard does not fire (matches existing behaviour); overlap evaluator
-   still runs whenever ≥2 closed rooms exist, so overlaps are still reported.
-10. **Many rooms (N).** Pairwise scan is O(N²) polygon pairs × O(E²) edge pairs. Room counts in
+10. **Guard: no brief set.** Guard does not fire (matches existing behaviour); overlap evaluator
+    still runs whenever ≥2 closed rooms exist, so overlaps are still reported.
+11. **Many rooms (N).** Pairwise scan is O(N²) polygon pairs × O(E²) edge pairs. Room counts in
     a hand-authored plan are tiny (single digits); no spatial index needed. Not optimised.
 
 ## Dependencies
 
 **Must exist before implementation (all present):**
-- `mcp/src/core.js` — re-exports `pointInRoom` from `clearance.js` (present, Node-clean).
 - `mcp/src/tools.js` — `tool_check_brief` (present) and `tool_add_room` with the existing
   single-room guard (present, #83).
 - `mcp/src/brief.js` — `getBrief` (present); `Brief.room` shape unchanged.
 - `src/js/walls.js` `Room` type (`{ id, verts:[{x,y}], closed }`) — read-only consumer.
 
+`mcp/src/core.js`'s `pointInRoom` re-export is **not** a dependency: `overlap.js` deliberately
+does not use it (its on-edge behaviour is undefined) and carries its own `pointStrictlyInside`.
+
 **New (all under `mcp/`, no `src/` changes):**
-- `mcp/src/overlap.js` — `segmentsProperlyIntersect`, `roomsOverlap`.
+- `mcp/src/overlap.js` — `segmentsProperlyIntersect`, `interiorPoint`, `pointStrictlyInside`,
+  `roomsOverlap`, and the module-private `OVERLAP_EPS`.
 - `mcp/test/overlap.test.js` — unit tests for the geometry.
 - Additions to an existing `check_brief` test file (or a new one) for the wiring.
 
@@ -189,10 +301,24 @@ Tests live under `mcp/`, run via `node --test` (headless, no browser). Organised
 **Unit — overlap geometry (`overlap.js`):**
 - `segmentsProperlyIntersect`: crossing segments → true; disjoint → false; collinear-overlapping
   → false; endpoint-only touch → false; T-junction (endpoint on the other's interior) → false.
-- `roomsOverlap`: two rectangles partially overlapping → true; disjoint rectangles → false;
-  shared-wall-adjacent rectangles (sharing a full edge) → **false**; one rectangle fully inside
-  another → **true**; concave (L-shaped) room overlapping a rectangle → true; two identical
-  rooms → true.
+- `interiorPoint`: for a rectangle → a point strictly inside (verify via `pointStrictlyInside`);
+  for a concave L-shaped polygon → a point strictly inside (and specifically *not* in the notch,
+  which the ear construction guarantees); result is never equal to any input vertex.
+- `pointStrictlyInside`: clearly-interior point → true; clearly-exterior point → false; point
+  exactly on an edge → **false**; point exactly on a vertex → **false**; point within
+  `OVERLAP_EPS` of an edge → **false** (boundary guard).
+- `roomsOverlap` — the firm, deterministic assertions (each must hold every run, no
+  indeterminacy):
+  - two rectangles partially overlapping → **true**
+  - disjoint rectangles → **false**
+  - shared-wall-adjacent rectangles (sharing a full edge, e.g. A=[(0,0),(4,0),(4,3),(0,3)],
+    B=[(4,0),(8,0),(8,3),(4,3)]) → **false**
+  - two identical rectangles (A=B=[(0,0),(4,0),(4,3),(0,3)]) → **true**
+  - rooms touching only at a single shared vertex → **false**
+  - rooms sharing only a partial edge (collinear, no interior overlap) → **false**
+  - one rectangle fully inside another → **true**
+  - concave (L-shaped) room overlapping a rectangle → **true**
+  - symmetry: `roomsOverlap(a,b) === roomsOverlap(b,a)` for all above pairs.
 
 **Unit — `check_brief` wiring (`tools.js`):**
 - Two overlapping closed rooms in the plan → `check_brief` returns `satisfied:false` with an
