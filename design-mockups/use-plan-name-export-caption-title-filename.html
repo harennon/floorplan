@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Export caption title + filename — mockup</title>
+<style>
+  :root {
+    --bg:        #14140f;
+    --bg-deep:   #100f0b;
+    --ink:       #ece7d6;
+    --muted:     #8f8a78;
+    --gold:      #c9a84c;
+    --gold-soft: rgba(201, 168, 76, 0.55);
+    --dim:       #8f8a78;
+    --hairline:  rgba(201, 168, 76, 0.22);
+    --room-fill: rgba(201, 168, 76, 0.07);
+    --wall-line: #d9be6e;
+    --font-mono:    "DM Mono", "Courier New", monospace;
+    --font-sans:    "DM Sans", system-ui, sans-serif;
+    --font-display: "Libre Baskerville", Georgia, serif;
+  }
+  html[data-theme="light"] {
+    --bg:        #f3ecda;
+    --bg-deep:   #e7dcc2;
+    --ink:       #3a3020;
+    --muted:     #8a7c60;
+    --gold:      #a9812a;
+    --gold-soft: rgba(169, 129, 42, 0.5);
+    --dim:       #8a7c60;
+    --hairline:  rgba(169, 129, 42, 0.28);
+    --room-fill: rgba(169, 129, 42, 0.08);
+    --wall-line: #a9812a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg-deep);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  header.page {
+    display: flex; align-items: baseline; gap: 1rem;
+    flex-wrap: wrap; margin-bottom: 0.5rem;
+  }
+  header.page h1 {
+    font-family: var(--font-display);
+    color: var(--gold);
+    font-size: 1.5rem; font-weight: 700; margin: 0;
+  }
+  .sub {
+    font-family: var(--font-mono);
+    color: var(--muted);
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  p.lede { color: var(--muted); max-width: 62ch; margin: 0.25rem 0 2rem; }
+  .theme-toggle {
+    margin-left: auto;
+    font-family: var(--font-mono); font-size: 0.7rem;
+    background: transparent; color: var(--ink);
+    border: 1px solid var(--hairline); border-radius: 6px;
+    padding: 0.35rem 0.7rem; cursor: pointer;
+  }
+  .theme-toggle:hover { border-color: var(--gold-soft); color: var(--gold); }
+  section { margin-bottom: 2.75rem; }
+  h2.sec {
+    font-family: var(--font-mono); font-size: 0.78rem;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--gold); margin: 0 0 0.9rem;
+    padding-bottom: 0.4rem; border-bottom: 1px solid var(--hairline);
+  }
+  .note { color: var(--muted); font-size: 0.85rem; margin: 0.6rem 0 0; }
+  .note code, code.inline {
+    font-family: var(--font-mono); font-size: 0.82em;
+    background: rgba(201,168,76,0.10); color: var(--gold);
+    padding: 0.06em 0.35em; border-radius: 4px;
+  }
+
+  /* ── Export preview surface (mimics the exported PNG/SVG canvas) ── */
+  .exports { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+  .export-card { display: flex; flex-direction: column; gap: 0.55rem; }
+  .export-label {
+    font-family: var(--font-mono); font-size: 0.72rem;
+    color: var(--muted); display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .export-label .tag {
+    color: var(--gold); border: 1px solid var(--hairline);
+    border-radius: 4px; padding: 0.05rem 0.4rem;
+  }
+  .canvas {
+    background: var(--bg);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  }
+  .canvas svg { display: block; width: 100%; height: auto; }
+
+  /* filename chip beneath a canvas */
+  .filename {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink);
+  }
+  .filename .dl {
+    color: var(--gold); font-size: 0.85rem;
+  }
+  .filename .name {
+    background: rgba(201,168,76,0.10); border: 1px solid var(--hairline);
+    border-radius: 5px; padding: 0.12rem 0.5rem; color: var(--ink);
+  }
+  .filename .from { color: var(--muted); font-size: 0.72rem; }
+
+  /* ── Slug rules table ── */
+  table.slug { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  table.slug th, table.slug td {
+    text-align: left; padding: 0.55rem 0.7rem;
+    border-bottom: 1px solid var(--hairline); vertical-align: top;
+  }
+  table.slug th {
+    font-family: var(--font-mono); font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); font-weight: 500;
+  }
+  table.slug td.in { font-family: var(--font-sans); color: var(--ink); }
+  table.slug td.out { font-family: var(--font-mono); color: var(--gold); }
+  table.slug td.why { color: var(--muted); font-size: 0.82rem; }
+  table.slug tr:last-child td { border-bottom: none; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&family=Libre+Baskerville:wght@400;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <h1>Export caption title &amp; filename</h1>
+    <span class="sub">LLD 158 · uses plan name from LLD 157</span>
+    <button class="theme-toggle" id="themeBtn">Toggle light / dark</button>
+  </header>
+  <p class="lede">
+    Once a plan has a name (LLD 157), the exported PNG/SVG should say what it is and save
+    under a recognizable filename. This swaps the fixed <code class="inline">"Floor plan"</code>
+    literal in the caption band (LLD 153) for the plan name, and derives the download filename
+    from a slugified name. Everything below is rendered at the same layout the real export path
+    produces — the caption band is a top strip, geometry sits below it, scale bar at the bottom.
+  </p>
+
+  <section>
+    <h2 class="sec">1 · Caption title states</h2>
+    <div class="exports">
+
+      <!-- Named plan -->
+      <div class="export-card">
+        <div class="export-label"><span>Named plan</span><span class="tag">caption = name</span></div>
+        <div class="canvas">
+          <svg viewBox="0 0 480 360" xmlns="http://www.w3.org/2000/svg" font-family='"DM Mono","Courier New",monospace'>
+            <rect width="480" height="360" fill="var(--bg)"/>
+            <!-- caption band (top strip, 40px scaled) -->
+            <g class="plan-caption">
+              <text x="16" y="24" font-size="15" fill="var(--ink)" text-anchor="start" dominant-baseline="middle">My Studio</text>
+              <text x="464" y="24" font-size="14" fill="var(--dim)" text-anchor="end" dominant-baseline="middle">26.95 m² · 20.80 m</text>
+            </g>
+            <!-- geometry, translated below the band -->
+            <g transform="translate(0,48)">
+              <rect x="60" y="30" width="360" height="230" fill="var(--room-fill)" stroke="var(--wall-line)" stroke-width="7" stroke-linejoin="round"/>
+              <text x="240" y="20" font-size="11" fill="var(--dim)" text-anchor="middle">5.50 m</text>
+              <text x="240" y="278" font-size="11" fill="var(--dim)" text-anchor="middle">5.50 m</text>
+              <!-- scale bar -->
+              <g>
+                <line x1="16" y1="292" x2="112" y2="292" stroke="var(--ink)" stroke-width="1.5"/>
+                <line x1="16" y1="282" x2="16" y2="292" stroke="var(--ink)" stroke-width="1.5"/>
+                <line x1="112" y1="282" x2="112" y2="292" stroke="var(--ink)" stroke-width="1.5"/>
+                <text x="112" y="278" font-size="10" fill="var(--dim)" text-anchor="end">1 m</text>
+                <text x="16" y="304" font-size="9" fill="var(--dim)" text-anchor="middle">0</text>
+              </g>
+            </g>
+          </svg>
+        </div>
+        <div class="filename">
+          <span class="dl">↓</span><span class="name">my-studio.png</span>
+          <span class="from">from "My Studio"</span>
+        </div>
+      </div>
+
+      <!-- Unnamed plan (fallback) -->
+      <div class="export-card">
+        <div class="export-label"><span>Unnamed plan</span><span class="tag">fallback</span></div>
+        <div class="canvas">
+          <svg viewBox="0 0 480 360" xmlns="http://www.w3.org/2000/svg" font-family='"DM Mono","Courier New",monospace'>
+            <rect width="480" height="360" fill="var(--bg)"/>
+            <g class="plan-caption">
+              <text x="16" y="24" font-size="15" fill="var(--ink)" text-anchor="start" dominant-baseline="middle">Floor plan</text>
+              <text x="464" y="24" font-size="14" fill="var(--dim)" text-anchor="end" dominant-baseline="middle">26.95 m² · 20.80 m</text>
+            </g>
+            <g transform="translate(0,48)">
+              <rect x="60" y="30" width="360" height="230" fill="var(--room-fill)" stroke="var(--wall-line)" stroke-width="7" stroke-linejoin="round"/>
+              <text x="240" y="20" font-size="11" fill="var(--dim)" text-anchor="middle">5.50 m</text>
+              <text x="240" y="278" font-size="11" fill="var(--dim)" text-anchor="middle">5.50 m</text>
+              <g>
+                <line x1="16" y1="292" x2="112" y2="292" stroke="var(--ink)" stroke-width="1.5"/>
+                <line x1="16" y1="282" x2="16" y2="292" stroke="var(--ink)" stroke-width="1.5"/>
+                <line x1="112" y1="282" x2="112" y2="292" stroke="var(--ink)" stroke-width="1.5"/>
+                <text x="112" y="278" font-size="10" fill="var(--dim)" text-anchor="end">1 m</text>
+                <text x="16" y="304" font-size="9" fill="var(--dim)" text-anchor="middle">0</text>
+              </g>
+            </g>
+          </svg>
+        </div>
+        <div class="filename">
+          <span class="dl">↓</span><span class="name">floorplan.png</span>
+          <span class="from">empty name → literal fallback</span>
+        </div>
+      </div>
+
+      <!-- Degenerate: no enclosed area -->
+      <div class="export-card">
+        <div class="export-label"><span>No enclosed area</span><span class="tag">caption omitted</span></div>
+        <div class="canvas">
+          <svg viewBox="0 0 480 360" xmlns="http://www.w3.org/2000/svg" font-family='"DM Mono","Courier New",monospace'>
+            <rect width="480" height="360" fill="var(--bg)"/>
+            <!-- no caption band: geometry starts at top, band = 0 -->
+            <g transform="translate(0,0)">
+              <polyline points="70,60 240,60 240,210" fill="none" stroke="var(--wall-line)" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/>
+              <text x="155" y="50" font-size="11" fill="var(--dim)" text-anchor="middle">3.00 m</text>
+              <g>
+                <line x1="16" y1="330" x2="112" y2="330" stroke="var(--ink)" stroke-width="1.5"/>
+                <line x1="16" y1="320" x2="16" y2="330" stroke="var(--ink)" stroke-width="1.5"/>
+                <line x1="112" y1="320" x2="112" y2="330" stroke="var(--ink)" stroke-width="1.5"/>
+                <text x="112" y="316" font-size="10" fill="var(--dim)" text-anchor="end">1 m</text>
+                <text x="16" y="342" font-size="9" fill="var(--dim)" text-anchor="middle">0</text>
+              </g>
+            </g>
+          </svg>
+        </div>
+        <div class="filename">
+          <span class="dl">↓</span><span class="name">my-studio.svg</span>
+          <span class="from">filename still uses name; caption omitted (LLD 153 rule kept)</span>
+        </div>
+      </div>
+
+    </div>
+    <p class="note">
+      The caption band swaps the <code>"Floor plan"</code> literal for the plan name; the
+      right-hand <code>area · perimeter</code> metrics are unchanged (LLD 153). When the name is
+      empty/absent the title falls back to <code>"Floor plan"</code> so the band never renders
+      blank. When there is no enclosed area the whole caption band is omitted (band height 0) —
+      but the <strong>filename still derives from the name</strong>, since a name-only plan is
+      still recognizably "my-studio".
+    </p>
+  </section>
+
+  <section>
+    <h2 class="sec">2 · Long name in the caption — collision handling</h2>
+    <p class="note" style="margin-top:0;margin-bottom:1rem">
+      Title is left-anchored, metrics right-anchored (LLD 153). A 60-char name on a narrow plan
+      can run into the metrics. LLD 153 Edge Case 5 explicitly accepts overlap for v1, but since
+      the name is now user-controlled it is worth choosing. Two options:
+    </p>
+    <div class="exports">
+
+      <!-- Option A: truncate title with ellipsis -->
+      <div class="export-card">
+        <div class="export-label"><span>Option A — truncate title (ellipsis)</span><span class="tag">recommended</span></div>
+        <div class="canvas">
+          <svg viewBox="0 0 480 340" xmlns="http://www.w3.org/2000/svg" font-family='"DM Mono","Courier New",monospace'>
+            <rect width="480" height="340" fill="var(--bg)"/>
+            <defs><clipPath id="capClipA"><rect x="16" y="0" width="300" height="48"/></clipPath></defs>
+            <g class="plan-caption">
+              <g clip-path="url(#capClipA)">
+                <text x="16" y="24" font-size="15" fill="var(--ink)" text-anchor="start" dominant-baseline="middle">Master bedroom &amp; ensuite renovat…</text>
+              </g>
+              <text x="464" y="24" font-size="14" fill="var(--dim)" text-anchor="end" dominant-baseline="middle">12.4 m² · 14.2 m</text>
+            </g>
+            <g transform="translate(0,48)">
+              <rect x="90" y="30" width="300" height="200" fill="var(--room-fill)" stroke="var(--wall-line)" stroke-width="7" stroke-linejoin="round"/>
+              <g>
+                <line x1="16" y1="262" x2="112" y2="262" stroke="var(--ink)" stroke-width="1.5"/>
+                <line x1="16" y1="252" x2="16" y2="262" stroke="var(--ink)" stroke-width="1.5"/>
+                <line x1="112" y1="252" x2="112" y2="262" stroke="var(--ink)" stroke-width="1.5"/>
+                <text x="112" y="248" font-size="10" fill="var(--dim)" text-anchor="end">1 m</text>
+              </g>
+            </g>
+          </svg>
+        </div>
+        <p class="note" style="margin-top:0.2rem">
+          Title is clipped to a max width (metrics width reserved) and an ellipsis is appended in
+          SVG. Metrics always readable; no overlap. Costs a text-measurement pass (measure the
+          metrics string, budget the remaining width for the title).
+        </p>
+      </div>
+
+      <!-- Option B: accept overlap (LLD 153 status quo) -->
+      <div class="export-card">
+        <div class="export-label"><span>Option B — accept overlap (v1 status quo)</span><span class="tag">simplest</span></div>
+        <div class="canvas">
+          <svg viewBox="0 0 480 340" xmlns="http://www.w3.org/2000/svg" font-family='"DM Mono","Courier New",monospace'>
+            <rect width="480" height="340" fill="var(--bg)"/>
+            <g class="plan-caption">
+              <text x="16" y="24" font-size="15" fill="var(--ink)" text-anchor="start" dominant-baseline="middle">Master bedroom &amp; ensuite renovation plan</text>
+              <text x="464" y="24" font-size="14" fill="var(--dim)" text-anchor="end" dominant-baseline="middle">12.4 m² · 14.2 m</text>
+            </g>
+            <g transform="translate(0,48)">
+              <rect x="90" y="30" width="300" height="200" fill="var(--room-fill)" stroke="var(--wall-line)" stroke-width="7" stroke-linejoin="round"/>
+              <g>
+                <line x1="16" y1="262" x2="112" y2="262" stroke="var(--ink)" stroke-width="1.5"/>
+                <line x1="16" y1="252" x2="16" y2="262" stroke="var(--ink)" stroke-width="1.5"/>
+                <line x1="112" y1="252" x2="112" y2="262" stroke="var(--ink)" stroke-width="1.5"/>
+                <text x="112" y="248" font-size="10" fill="var(--dim)" text-anchor="end">1 m</text>
+              </g>
+            </g>
+          </svg>
+        </div>
+        <p class="note" style="margin-top:0.2rem">
+          Exactly what LLD 153 does today: both anchored, no measurement, they can overlap on a
+          narrow export. Zero added code. The name is capped at 60 chars, so worst case is bounded,
+          and most plans are named short ("Studio", "Apt 3B"). Only ugly on genuinely narrow plans
+          with genuinely long names.
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2 class="sec">3 · Filename slug rules (live)</h2>
+    <p class="note" style="margin-top:0;margin-bottom:1rem">
+      Type a plan name to see the derived download filename. Rules: lowercase, spaces → hyphens,
+      strip anything that isn't <code>a–z 0–9 -</code>, collapse repeated hyphens, trim leading/trailing
+      hyphens. If the result is empty (emoji-only, symbols-only, whitespace-only), fall back to
+      <code>floorplan</code>.
+    </p>
+    <div style="display:flex;gap:0.6rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem">
+      <input id="slugIn" type="text" maxlength="60" value="My Studio"
+        placeholder="Type a plan name…"
+        style="flex:1 1 260px;font-family:var(--font-sans);font-size:0.95rem;background:var(--bg);color:var(--ink);border:1px solid var(--hairline);border-radius:6px;padding:0.5rem 0.7rem;" />
+      <span class="filename"><span class="dl">↓</span><span class="name"><span id="slugOut">my-studio</span>.png</span></span>
+    </div>
+    <table class="slug">
+      <thead><tr><th>Plan name</th><th>→ filename</th><th>Why</th></tr></thead>
+      <tbody id="slugRows"></tbody>
+    </table>
+    <p class="note">
+      Applies identically to SVG (<code>.svg</code>) and the 2× PNG (<code>.png</code>) — only the
+      extension differs. The slug is derived once and reused by both <code>exportSvg()</code> and
+      <code>exportPng()</code>.
+    </p>
+  </section>
+
+</div>
+<script>
+  // ── Theme toggle ──
+  document.getElementById("themeBtn").addEventListener("click", () => {
+    const html = document.documentElement;
+    html.setAttribute("data-theme", html.getAttribute("data-theme") === "light" ? "dark" : "light");
+  });
+
+  // ── Slug derivation (candidate implementation for exportImg.js) ──
+  function slugify(name) {
+    const slug = String(name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")   // non-alnum runs → single hyphen
+      .replace(/^-+|-+$/g, "");       // trim edge hyphens
+    return slug || "floorplan";       // empty → fallback stem
+  }
+
+  // ── Live demo ──
+  const slugIn  = document.getElementById("slugIn");
+  const slugOut = document.getElementById("slugOut");
+  function updateSlug() { slugOut.textContent = slugify(slugIn.value); }
+  slugIn.addEventListener("input", updateSlug);
+  updateSlug();
+
+  // ── Edge-case table ──
+  const cases = [
+    ["My Studio",                       "spaces → hyphens, lowercased"],
+    ["Apt 3B — living room",            "em-dash & spaces collapse to one hyphen"],
+    ["  Loft   #2  ",                   "trim + collapse; '#' stripped"],
+    ["Café ☕ plan 🏠",                  "accents/emoji are non-[a-z0-9], stripped"],
+    ["日本語の間取り",                    "no ASCII alnum → empty → fallback"],
+    ["🏠🛋️✨",                          "emoji-only → empty → fallback"],
+    ["----",                            "symbols-only → empty → fallback"],
+    ["",                                "no name → fallback stem"],
+  ];
+  const rows = document.getElementById("slugRows");
+  for (const [name, why] of cases) {
+    const tr = document.createElement("tr");
+    const display = name === "" ? "(empty)" : name;
+    const tdIn  = document.createElement("td"); tdIn.className = "in";  tdIn.textContent = display;
+    const tdOut = document.createElement("td"); tdOut.className = "out"; tdOut.textContent = slugify(name) + ".png";
+    const tdWhy = document.createElement("td"); tdWhy.className = "why"; tdWhy.textContent = why;
+    tr.append(tdIn, tdOut, tdWhy);
+    rows.appendChild(tr);
+  }
+</script>
+</body>
+</html>
