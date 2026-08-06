@@ -228,6 +228,39 @@ test("roomsOverlap: concave (L-shaped) room overlapping a rectangle → true", (
   assert.equal(roomsOverlap(a, b), true);
 });
 
+test("roomsOverlap: side-by-side same-height band overlap (shared aligned edge line) → true", () => {
+  // A = rect(0,0,4,3), B = rect(3,0,4,3): overlap in x=[3,4], same y=[0,3].
+  // No edge properly crosses (T-junctions only); neither interior point is inside the other.
+  // This is the regression case identified by QA.
+  const a = makeRoom(rect(0, 0, 4, 3));
+  const b = makeRoom(rect(3, 0, 4, 3));
+  assert.equal(roomsOverlap(a, b), true);
+  assert.equal(roomsOverlap(b, a), true);
+});
+
+test("roomsOverlap: stacked same-width band overlap (shared aligned edge line) → true", () => {
+  // A = rect(0,0,4,3), B = rect(0,2,4,3): overlap in y=[2,3], same x=[0,4].
+  // Same structural problem — axis-aligned band overlap.
+  const a = makeRoom(rect(0, 0, 4, 3));
+  const b = makeRoom(rect(0, 2, 4, 3));
+  assert.equal(roomsOverlap(a, b), true);
+  assert.equal(roomsOverlap(b, a), true);
+});
+
+test("check_brief: two rooms overlapping by a band (x[0,3]/x[2,5], same y) → satisfied:false", () => {
+  // End-to-end regression for the QA-confirmed check_brief false-negative.
+  tools.tool_set_brief({ minWalkwayM: 0.90 });
+  session.newPlan();
+  const r1 = tools.tool_add_room({ rect: { x: 0, y: 0, w: 3, h: 10 } });
+  const r2 = tools.tool_add_room({ rect: { x: 2, y: 0, w: 3, h: 10 } }); // 1m wide overlap band
+  assert.equal(r1.ok, true);
+  assert.equal(r2.ok, true);
+  const briefResult = tools.tool_check_brief();
+  assert.equal(briefResult.satisfied, false);
+  const overlapMsg = briefResult.unmet.find((u) => /overlap/.test(u));
+  assert.ok(overlapMsg, `expected overlap unmet entry; got: ${JSON.stringify(briefResult.unmet)}`);
+});
+
 test("roomsOverlap: symmetry holds for all cases", () => {
   const pairs = [
     // overlapping

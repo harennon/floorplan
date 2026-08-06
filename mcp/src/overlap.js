@@ -204,12 +204,34 @@ export function roomsOverlap(a, b) {
   }
 
   // Leg 2: interior containment — constructed strictly-interior point of one
-  // polygon inside the other.
+  // polygon inside the other. Catches full containment and identical rooms.
   const pa = interiorPoint(av);
   if (pointStrictlyInside(bv, pa)) return true;
 
   const pb = interiorPoint(bv);
   if (pointStrictlyInside(av, pb)) return true;
+
+  // Leg 3: edge-midpoint containment — the midpoint of each edge is checked
+  // against the other polygon. Catches axis-aligned band overlaps where edges
+  // meet only at endpoints (T-junctions), so no proper crossing fires (leg 1)
+  // and neither interior point lands inside the other room (leg 2), yet the
+  // overlap region is non-empty. The boundary guard in pointStrictlyInside
+  // ensures midpoints of adjacent rooms, which land exactly on the other
+  // room's boundary, still return false.
+  for (let i = 0; i < an; i++) {
+    const mid = {
+      x: (av[i].x + av[(i + 1) % an].x) / 2,
+      y: (av[i].y + av[(i + 1) % an].y) / 2,
+    };
+    if (pointStrictlyInside(bv, mid)) return true;
+  }
+  for (let j = 0; j < bn; j++) {
+    const mid = {
+      x: (bv[j].x + bv[(j + 1) % bn].x) / 2,
+      y: (bv[j].y + bv[(j + 1) % bn].y) / 2,
+    };
+    if (pointStrictlyInside(av, mid)) return true;
+  }
 
   return false;
 }
