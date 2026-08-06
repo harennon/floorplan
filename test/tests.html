@@ -17913,6 +17913,10 @@ import {
   initRender3d as initRender3d130, enter as render3dEnter, exit as render3dExit,
   // LLD 152 test-only introspection
   __defaultBearing, __presetBearings, __viewPose, __shortestDelta, __easeOut,
+  // LLD 160 shadow wiring probes
+  __shadowEnabled, __shadowMapType, __dirLightShadowInfo, __meshShadowFlags,
+  __shadowCameraFrustum, __sceneBounds, __lightCounts,
+  __liveGeometryCount, __hasRenderer,
 } from "../src/js/render3d.js";
 
 // buildItems, CEILING_M already imported from isoRender.js above (LLD 128 block).
@@ -18821,6 +18825,101 @@ describe("LLD 157 — compact codec: name round-trip", () => {
     // The name must survive as literal text, never execute or be dropped
     expect(v.name).toBe(xssName.trim());
     setPlanName("");
+  });
+});
+
+// ─── LLD 160: 3D preview — contact / soft shadows ────────────────────────────
+//
+// WebGL is not reliably available headless (render3dEngine.js can't resolve
+// "three" in the raw-browser unit harness). The shadow pixel tests are manual-QA.
+// These unit tests assert the WIRING invariants:
+//   - buildSceneDescriptors output shape unchanged (pure layer regression guard)
+//   - enter()/exit() smoke with shadow flags set does not throw
+//   - read-only: toggle leaves plan models unchanged
+//
+// The WebGL-gated wiring tests (shadowMap.enabled, light.castShadow, mesh flags,
+// shadow-camera frustum) live in run-tests.mjs integration suite where a real
+// renderer is available (dist/ + real Chromium GL).
+
+// ── Regression guard: buildSceneDescriptors output shape unchanged (pure layer) ─
+
+describe("LLD 160 — buildSceneDescriptors: output shape unchanged (pure layer regression)", () => {
+  it("descriptor shape has no new field for shadows (kind/footprint/z0/z1/color/flat only)", () => {
+    const wallsMod = { rooms: [_makeRect128(0, 0, 4, 3)], chain: [] };
+    const symMod   = { symbols: [{ id: "s1", type: "sofa", x: 2, y: 1.5, w: 2.0, h: 0.90, rot: 0 }] };
+    const items = buildItems(wallsMod, symMod);
+    const { descriptors } = buildSceneDescriptors(items, wallsMod, "#333333");
+    const EXPECTED_KEYS = new Set(["kind", "footprint", "z0", "z1", "color", "flat"]);
+    for (const d of descriptors) {
+      const keys = Object.keys(d);
+      for (const k of keys) {
+        if (!EXPECTED_KEYS.has(k)) {
+          throw new Error(`Unexpected key "${k}" on descriptor — pure layer must not carry shadow fields`);
+        }
+      }
+      for (const k of EXPECTED_KEYS) {
+        if (!Object.prototype.hasOwnProperty.call(d, k)) {
+          throw new Error(`Missing key "${k}" from descriptor`);
+        }
+      }
+    }
+  });
+
+  it("wall descriptors: kind='wall', flat:false — no shadow field added", () => {
+    const wallsMod = { rooms: [_makeRect128(0, 0, 4, 3)], chain: [] };
+    const { descriptors } = buildSceneDescriptors(buildItems(wallsMod, { symbols: [] }), wallsMod, "#333");
+    for (const d of descriptors.filter(x => x.kind === "wall")) {
+      if ("castShadow" in d) throw new Error("wall descriptor should not have castShadow — shadow flags are mesh-level");
+      if ("receiveShadow" in d) throw new Error("wall descriptor should not have receiveShadow");
+    }
+  });
+
+  it("floor descriptor: kind='floor', flat:true — no shadow field added", () => {
+    const wallsMod = { rooms: [_makeRect128(0, 0, 4, 3)], chain: [] };
+    const { descriptors } = buildSceneDescriptors(buildItems(wallsMod, { symbols: [] }), wallsMod, "#333");
+    for (const d of descriptors.filter(x => x.kind === "floor")) {
+      if ("castShadow" in d) throw new Error("floor descriptor should not have castShadow");
+      if ("receiveShadow" in d) throw new Error("floor descriptor should not have receiveShadow");
+    }
+  });
+
+  it("rug descriptor: kind='rug', flat:true — no shadow field added", () => {
+    const rugSym = { id: "r0", type: "rug", x: 2, y: 2, w: 2.44, h: 3.05, rot: 0 };
+    const items = buildItems({ rooms: [], chain: [] }, { symbols: [rugSym] });
+    const { descriptors } = buildSceneDescriptors(items, { rooms: [] }, "#333");
+    for (const d of descriptors.filter(x => x.kind === "rug")) {
+      if ("castShadow" in d) throw new Error("rug descriptor should not have castShadow");
+      if ("receiveShadow" in d) throw new Error("rug descriptor should not have receiveShadow");
+    }
+  });
+});
+
+// ── Smoke: enter()/exit() with shadow wiring does not throw ──────────────────
+
+describe("LLD 160 — render3d enter()/exit() smoke with shadow wiring", () => {
+  it("enter() resolves to a well-formed result (ok:boolean) without throwing", async () => {
+    const canvas = document.createElement("canvas");
+    let active = true;
+    initRender3d130(canvas, () => active, { model: { rooms: [], chain: [] } }, { model: { symbols: [] } }, null);
+    const r = await render3dEnter();
+    if (!r || typeof r.ok !== "boolean") throw new Error("enter() should resolve to { ok:boolean }");
+    if (r.ok === false && r.fallback !== true) throw new Error("non-ok enter() must set fallback:true");
+    active = false;
+    render3dExit();
+  });
+
+  it("enter()/exit() leaves plan models unchanged (read-only — shadows add no mutation)", async () => {
+    const wallsMod = { model: { rooms: [_makeRect128(0, 0, 4, 3)], chain: [] } };
+    const symMod   = { model: { symbols: [{ id: "s1", type: "sofa", x: 2, y: 1.5, w: 2.0, h: 0.90, rot: 0 }] } };
+    const before = JSON.stringify({ rooms: wallsMod.model.rooms, symbols: symMod.model.symbols });
+    const canvas = document.createElement("canvas");
+    let active = true;
+    initRender3d130(canvas, () => active, wallsMod, symMod, null);
+    await render3dEnter();
+    active = false;
+    render3dExit();
+    const after = JSON.stringify({ rooms: wallsMod.model.rooms, symbols: symMod.model.symbols });
+    if (before !== after) throw new Error("preview enter/exit mutated plan models (shadows should not mutate)");
   });
 });
 
