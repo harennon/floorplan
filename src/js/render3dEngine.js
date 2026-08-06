@@ -29,6 +29,7 @@ import {
   Vector3,
   DoubleSide,
   FrontSide,
+  PCFSoftShadowMap,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
@@ -48,5 +49,6 @@ export {
   Vector3,
   DoubleSide,
   FrontSide,
+  PCFSoftShadowMap,
   OrbitControls,
 };

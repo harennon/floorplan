@@ -232,6 +232,25 @@ async function runResetTest(name, fn, browser) {
   }
 }
 
+// ── LLD 160 shadow wiring integration counters ────────────────────────────────
+
+const SHADOW_SUITE = "LLD 160 contact/soft shadows integration";
+const shadowFailures = [];
+let shadowTotal = 0;
+let shadowPassed = 0;
+
+async function runShadowTest(name, fn, browser) {
+  shadowTotal++;
+  try {
+    await fn(browser);
+    shadowPassed++;
+    process.stdout.write(`  PASS: ${name}\n`);
+  } catch (err) {
+    shadowFailures.push({ suite: SHADOW_SUITE, name, error: String(err) });
+    process.stderr.write(`  FAIL: ${name}\n    ${err}\n`);
+  }
+}
+
 async function runWxhIntegrationTests(browser) {
   process.stdout.write(`\n${INTEGRATION_SUITE}\n`);
 
@@ -951,6 +970,296 @@ async function runResetPresetIntegrationTests(browser) {
   );
 }
 
+// ── Integration tests (LLD 160 — contact/soft shadows) ───────────────────────
+//
+// All tests are WebGL-gated: they skip cleanly with a note if Chromium has no GL
+// context (matching the LLD 130 / 152 patterns). Tests drive the built dist/ app
+// and use the __render3d probes exposed by main.js.
+//
+// PCFSoftShadowMap = 2 (three.js constant, confirmed from source).
+// Note: three.js 0.185+ deprecates PCFSoftShadowMap and falls back to
+// PCFShadowMap (1) internally, so we accept either value — what matters is that
+// the shadow map is enabled and uses a PCF-family filter (not BasicShadowMap=0).
+const PCF_SHADOW_MAP      = 1;  // three.js PCFShadowMap (fallback for deprecated PCFSoftShadowMap)
+const PCF_SOFT_SHADOW_MAP = 2;  // three.js PCFSoftShadowMap
+const BASIC_SHADOW_MAP    = 0;  // BasicShadowMap — must NOT be selected
+
+async function runShadowIntegrationTests(browser) {
+  process.stdout.write(`\n${SHADOW_SUITE}\n`);
+
+  // ── Test 1: renderer shadow map enabled + PCF-family shadow type ────────────
+  await runShadowTest(
+    "after preview entry: renderer.shadowMap.enabled=true, type is PCF-family (not Basic)",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (!webglOK) {
+          process.stdout.write(`    (skipped — no GL context)\n`);
+          return;
+        }
+
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 1500));
+
+        const info = await page.evaluate(() => ({
+          enabled: window.__render3d.__shadowEnabled(),
+          type:    window.__render3d.__shadowMapType(),
+        }));
+
+        if (!info.enabled) throw new Error("renderer.shadowMap.enabled is not true after preview entry");
+        // Accept PCFSoftShadowMap(2) or PCFShadowMap(1) — three.js 0.185+ falls back from
+        // PCFSoftShadowMap to PCFShadowMap internally (deprecation), so either is correct.
+        if (info.type !== PCF_SOFT_SHADOW_MAP && info.type !== PCF_SHADOW_MAP) {
+          throw new Error(`renderer.shadowMap.type=${info.type}, expected PCF-family (${PCF_SHADOW_MAP} or ${PCF_SOFT_SHADOW_MAP}), not BasicShadowMap`);
+        }
+        if (info.type === BASIC_SHADOW_MAP) {
+          throw new Error("renderer.shadowMap.type is BasicShadowMap — shadows are too hard (wrong option)");
+        }
+        if (page._pageErrors.length) throw new Error("Page errors: " + page._pageErrors.join("; "));
+        process.stdout.write(`    (WebGL branch — shadowMap.enabled=true, type=${info.type} — PCF-family shadow)\n`);
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 2: directional light castShadow + mapSize + bias/normalBias ────────
+  await runShadowTest(
+    "directional light: castShadow=true, mapSize=1024x1024, bias and normalBias set",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (!webglOK) {
+          process.stdout.write(`    (skipped — no GL context)\n`);
+          return;
+        }
+
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 1500));
+
+        const li = await page.evaluate(() => window.__render3d.__dirLightShadowInfo());
+        if (!li) throw new Error("__dirLightShadowInfo() returned null — no directional light retained");
+        if (!li.castShadow) throw new Error("directional light castShadow is not true");
+        if (li.mapW !== 1024 || li.mapH !== 1024) {
+          throw new Error(`shadow mapSize is ${li.mapW}x${li.mapH}, expected 1024x1024`);
+        }
+        if (typeof li.bias !== "number" || li.bias >= 0) {
+          throw new Error(`shadow.bias=${li.bias} should be a small negative number`);
+        }
+        if (typeof li.normalBias !== "number" || li.normalBias <= 0) {
+          throw new Error(`shadow.normalBias=${li.normalBias} should be a small positive number`);
+        }
+        if (page._pageErrors.length) throw new Error("Page errors: " + page._pageErrors.join("; "));
+        process.stdout.write(`    (dir light castShadow=true, map=1024x1024, bias=${li.bias}, normalBias=${li.normalBias})\n`);
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 3: exactly one directional + one ambient light in the scene ─────────
+  await runShadowTest(
+    "scene has exactly 1 DirectionalLight and 1 AmbientLight (no extra lights)",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (!webglOK) {
+          process.stdout.write(`    (skipped — no GL context)\n`);
+          return;
+        }
+
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 1500));
+
+        const counts = await page.evaluate(() => window.__render3d.__lightCounts());
+        if (!counts) throw new Error("__lightCounts() returned null — no scene");
+        if (counts.directional !== 1) {
+          throw new Error(`Expected 1 DirectionalLight, got ${counts.directional}`);
+        }
+        if (counts.ambient !== 1) {
+          throw new Error(`Expected 1 AmbientLight, got ${counts.ambient}`);
+        }
+        if (page._pageErrors.length) throw new Error("Page errors: " + page._pageErrors.join("; "));
+        process.stdout.write(`    (1 directional + 1 ambient light in scene)\n`);
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 4: wall/furniture meshes castShadow=true, receiveShadow=true ────────
+  await runShadowTest(
+    "wall and furniture meshes have castShadow=true and receiveShadow=true",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (!webglOK) {
+          process.stdout.write(`    (skipped — no GL context)\n`);
+          return;
+        }
+
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 1500));
+
+        const flags = await page.evaluate(() => window.__render3d.__meshShadowFlags());
+        if (!flags || flags.length === 0) throw new Error("__meshShadowFlags() returned empty — no meshes in plan group");
+
+        // All meshes in our PREVIEW_PLAN with a sofa should have receiveShadow=true
+        // (walls, furniture=castShadow, floor/rug=receiveShadow only)
+        const allReceive = flags.every(f => f.receiveShadow === true);
+        if (!allReceive) {
+          const failing = flags.filter(f => !f.receiveShadow);
+          throw new Error(`${failing.length} mesh(es) have receiveShadow=false — all meshes must receive shadows`);
+        }
+        // At least some meshes must cast (walls + furniture)
+        const anyCast = flags.some(f => f.castShadow === true);
+        if (!anyCast) {
+          throw new Error("No mesh has castShadow=true — walls and furniture should cast");
+        }
+        if (page._pageErrors.length) throw new Error("Page errors: " + page._pageErrors.join("; "));
+        process.stdout.write(`    (${flags.length} meshes checked: ${flags.filter(f=>f.castShadow).length} cast, all receive)\n`);
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 5: shadow-camera frustum is finite, non-NaN, and sized for the plan ──
+  // The shadow camera is an orthographic camera in the light's local space;
+  // its left/right/top/bottom are NOT world coordinates. The correctness check
+  // is: values are all finite/non-NaN, near > 0, far > near, and the half-extent
+  // (frustum.right) is large enough to cover at least half the plan diagonal so
+  // the map resolution is not wasted on empty space.
+  await runShadowTest(
+    "shadow-camera frustum is finite and sized for the plan bounds (non-empty plan)",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (!webglOK) {
+          process.stdout.write(`    (skipped — no GL context)\n`);
+          return;
+        }
+
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 1500));
+
+        const result = await page.evaluate(() => {
+          const f = window.__render3d.__shadowCameraFrustum();
+          const b = window.__render3d.__sceneBounds();
+          return { frustum: f, bounds: b };
+        });
+
+        if (!result.frustum) throw new Error("__shadowCameraFrustum() returned null");
+        const { frustum, bounds } = result;
+
+        // All values must be finite and not NaN
+        for (const [k, v] of Object.entries(frustum)) {
+          if (!isFinite(v) || isNaN(v)) throw new Error(`frustum.${k}=${v} is not finite/valid`);
+        }
+        // near/far sanity
+        if (frustum.near <= 0) throw new Error(`frustum.near=${frustum.near} should be positive`);
+        if (frustum.far <= frustum.near) throw new Error(`frustum.far=${frustum.far} should exceed near=${frustum.near}`);
+        // Symmetric extent: left should be negative, right positive
+        if (frustum.left >= 0) throw new Error(`frustum.left=${frustum.left} should be negative`);
+        if (frustum.right <= 0) throw new Error(`frustum.right=${frustum.right} should be positive`);
+        // The frustum should be symmetric (left = -right, bottom = -top)
+        if (Math.abs(frustum.left + frustum.right) > 1e-6) {
+          throw new Error(`frustum is not symmetric: left=${frustum.left}, right=${frustum.right}`);
+        }
+
+        if (bounds) {
+          // The half-extent (right) should be roughly proportional to the bounds diagonal.
+          // For a 4×3 room, diagonal ≈ sqrt(4²+3²+2.5²) / 2 ≈ 2.9; halfExt=1.1x that ≈ 3.2
+          // We just verify it is positive and finite (computed above) and > 0.
+          const dx = bounds.maxX - bounds.minX;
+          const dz = bounds.maxY - bounds.minY;
+          const dy = bounds.maxZ - bounds.minZ;
+          const halfDiag = Math.sqrt(dx * dx + dy * dy + dz * dz) / 2;
+          // The frustum half-extent must be at least 90% of half-diagonal (covers the plan)
+          if (frustum.right < halfDiag * 0.9) {
+            throw new Error(`frustum.right=${frustum.right.toFixed(3)} too small for plan half-diagonal=${halfDiag.toFixed(3)}`);
+          }
+          process.stdout.write(`    (frustum right=${frustum.right.toFixed(2)}, plan half-diag=${halfDiag.toFixed(2)}, near=${frustum.near.toFixed(2)}, far=${frustum.far.toFixed(2)})\n`);
+        } else {
+          process.stdout.write(`    (bounds null — fallback frustum: finite values confirmed)\n`);
+        }
+
+        if (page._pageErrors.length) throw new Error("Page errors: " + page._pageErrors.join("; "));
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 6: teardown — __liveGeometryCount=0 and __hasRenderer after toggle ──
+  await runShadowTest(
+    "on/off cycles with shadows: 0 live geometries after exit, renderer reused",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const webglOK = await page.evaluate(() => window.__render3d.webglAvailable());
+        if (!webglOK) {
+          process.stdout.write(`    (skipped — no GL context)\n`);
+          return;
+        }
+
+        for (let i = 0; i < 2; i++) {
+          await page.click("#tool-preview");          // ON
+          await new Promise(r => setTimeout(r, 900));
+          await page.click("#tool-preview");          // OFF
+          await new Promise(r => setTimeout(r, 250));
+          const state = await page.evaluate(() => ({
+            live:        window.__render3d.__liveGeometryCount(),
+            hasRenderer: window.__render3d.__hasRenderer(),
+          }));
+          if (state.live !== 0) throw new Error(`cycle ${i}: geometry leak — ${state.live} live after exit`);
+          if (!state.hasRenderer) throw new Error(`cycle ${i}: renderer was destroyed (should be reused)`);
+        }
+        if (page._pageErrors.length) throw new Error("Page errors during shadow teardown cycles: " + page._pageErrors.join("; "));
+        process.stdout.write(`    (2 on/off cycles — no leak, renderer reused)\n`);
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 7: read-only — shadows do not mutate walls/symbols models ────────────
+  await runShadowTest(
+    "preview with shadows leaves walls.model and symbols.model unchanged",
+    async (browser) => {
+      const { page } = await openPreviewApp(browser);
+      try {
+        const before = await page.evaluate(() => window.__testState().rooms);
+
+        await page.click("#tool-preview");
+        await new Promise(r => setTimeout(r, 1500));
+        await page.click("#tool-preview");            // exit
+        await new Promise(r => setTimeout(r, 300));
+
+        const after = await page.evaluate(() => window.__testState().rooms);
+        if (JSON.stringify(before) !== JSON.stringify(after)) {
+          throw new Error(`shadows mutated room verts: ${JSON.stringify(before)} vs ${JSON.stringify(after)}`);
+        }
+        if (page._pageErrors.length) throw new Error("Page errors: " + page._pageErrors.join("; "));
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const server = await serve();
@@ -1007,9 +1316,23 @@ if (resetFailures.length > 0) {
   }
 }
 
+// ── Run integration tests (LLD 160 contact/soft shadows) ─────────────────────
+await runShadowIntegrationTests(browser);
+
+const shadowIcon = shadowFailures.length === 0 ? "PASS" : "FAIL";
+process.stdout.write(`${shadowIcon}  ${shadowPassed}/${shadowTotal} shadow integration tests passed`);
+if (shadowFailures.length > 0) process.stdout.write(` (${shadowFailures.length} failed)\n`);
+else process.stdout.write("\n");
+
+if (shadowFailures.length > 0) {
+  for (const f of shadowFailures) {
+    process.stderr.write(`  - ${f.suite}\n      ${f.name}\n      ${f.error}\n`);
+  }
+}
+
 // ── Teardown ──────────────────────────────────────────────────────────────────
 await browser.close();
 server.close();
 
-const anyFailed = failed > 0 || integrationFailures.length > 0 || previewFailures.length > 0 || resetFailures.length > 0;
+const anyFailed = failed > 0 || integrationFailures.length > 0 || previewFailures.length > 0 || resetFailures.length > 0 || shadowFailures.length > 0;
 if (anyFailed) process.exit(1);

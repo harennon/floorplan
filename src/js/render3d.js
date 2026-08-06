@@ -195,11 +195,22 @@ let _symbolsMod = null;
 /** @type {HTMLElement|null} */
 let _loadingEl = null;
 
+// ── Shadow tuning — deploy-cheap (no per-object bias, no cascades) ───────────
+
+/** Shadow map resolution cap: 1024² (deploy-cheap). */
+const SHADOW_MAP_SIZE    = 1024;
+/** Shadow bias: suppresses shadow acne (moiré on lit faces). Tune by eye. */
+const SHADOW_BIAS        = -0.0005;
+/** Normal-bias: prevents peter-panning on thin/vertical faces (e.g. walls). */
+const SHADOW_NORMAL_BIAS = 0.02;
+
 // three.js objects — created once, kept for cheap re-entry (Approach §7).
 let _renderer = null;
 let _scene = null;
 let _camera = null;
 let _controls = null;
+/** @type {any} the single directional light, retained so _fitShadowCamera can re-aim it. */
+let _dirLight = null;
 /** @type {any} the per-plan geometry group; disposed on exit, rebuilt on entry */
 let _planGroup = null;
 /** @type {Map<string, any>} material cache keyed by "kind|color"; disposed with the group */
@@ -349,17 +360,26 @@ function _ensureEngine(THREE) {
   _renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); // HiDPI cap (Edge Case 15)
   _renderer.setSize(w, h, false); // false: CSS controls the canvas box
 
+  // Enable PCFSoft shadow map (LLD 160 §1 — decision C: soft ground shadows).
+  _renderer.shadowMap.enabled = true;
+  _renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
   _scene = new THREE.Scene();
 
   _camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 1000);
 
-  // Lights: ambient fill + one directional for gentle face differentiation.
-  // No shadows (out of scope). Directional rays are parallel, so an off-origin
-  // plan is lit uniformly regardless of position.
+  // Lights: ambient fill + one directional that also casts soft shadows (LLD 160 §2).
   _scene.add(new THREE.AmbientLight(0xffffff, 0.85));
   const dir = new THREE.DirectionalLight(0xffffff, 1.6);
   dir.position.set(1, 1.4, 1);
+  dir.castShadow = true;
+  dir.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+  dir.shadow.bias        = SHADOW_BIAS;
+  dir.shadow.normalBias  = SHADOW_NORMAL_BIAS;
+  // Add target to scene so updateMatrixWorld() in _fitShadowCamera works.
+  _scene.add(dir.target);
   _scene.add(dir);
+  _dirLight = dir;
 
   _controls = new THREE.OrbitControls(_camera, _canvas);
   _controls.enableDamping = true;
@@ -438,7 +458,12 @@ function _makeBoxMesh(THREE, d) {
   // local (worldX, worldY, height∈[0,depth]) → three (worldX, height, worldY)
   geom.applyMatrix4(_swapMatrix(THREE));
   geom.translate(0, d.z0, 0); // lift base to its z0
-  return new THREE.Mesh(geom, _material(THREE, d.kind, d.color));
+  const mesh = new THREE.Mesh(geom, _material(THREE, d.kind, d.color));
+  // Walls and furniture cast shadows onto the floor and each other;
+  // they also receive shadows from taller items (LLD 160 §3).
+  mesh.castShadow    = true;
+  mesh.receiveShadow = true;
+  return mesh;
 }
 
 /** Flat ground mesh (floor slab or rug decal). */
@@ -449,7 +474,12 @@ function _makeFlatMesh(THREE, d) {
   geom.applyMatrix4(_swapMatrix(THREE));
   const lift = d.kind === "rug" ? 0.002 : 0; // tiny lift avoids z-fighting w/ slab
   if (lift) geom.translate(0, lift, 0);
-  return new THREE.Mesh(geom, _material(THREE, d.kind, d.color));
+  const mesh = new THREE.Mesh(geom, _material(THREE, d.kind, d.color));
+  // Floor slab and rug receive shadows (furniture shadows appear on the ground);
+  // castShadow stays false — a flat sheet casts no meaningful contact shadow and
+  // could self-shadow / z-fight (LLD 160 §3).
+  mesh.receiveShadow = true;
+  return mesh;
 }
 
 /** Dispose the current plan group's geometries + cached materials, detach it. */
@@ -463,6 +493,57 @@ function _disposePlanGroup() {
   _planGroup = null;
   for (const mat of _materialCache.values()) mat.dispose();
   _materialCache.clear();
+}
+
+/**
+ * Fit the directional light's orthographic shadow-camera frustum tightly to the
+ * current scene bounds, and aim the light at the bounds centre. Called at the end
+ * of _buildPlanGroup once _bounds is known; re-runs on every rebuild. Falls back
+ * to a small fixed-origin frustum when _bounds is null (empty plan), ensuring no
+ * NaN values. (LLD 160 §4)
+ */
+function _fitShadowCamera() {
+  if (!_dirLight) return;
+
+  let cx, cy, cz, radius;
+  if (_bounds) {
+    // Scene-space centre: world XY → scene XZ, world Z → scene Y
+    cx = (_bounds.minX + _bounds.maxX) / 2;
+    cy = (_bounds.minZ + _bounds.maxZ) / 2; // height range → scene Y
+    cz = (_bounds.minY + _bounds.maxY) / 2; // world-y → scene Z
+    const dx = _bounds.maxX - _bounds.minX;
+    const dy = _bounds.maxZ - _bounds.minZ;
+    const dz = _bounds.maxY - _bounds.minY;
+    radius = Math.sqrt(dx * dx + dy * dy + dz * dz) / 2 || 4;
+  } else {
+    // Empty plan: small fixed origin frustum (mirrors _viewPose diag=8 branch).
+    cx = 0; cy = 0; cz = 0; radius = 4;
+  }
+
+  // Position the light relative to the bounds centre along the existing bearing.
+  const bearing = [1, 1.4, 1];
+  const bmag = Math.sqrt(bearing[0] ** 2 + bearing[1] ** 2 + bearing[2] ** 2);
+  const k = 2; // multiplier so the light sits comfortably above the plan
+  const lx = cx + (bearing[0] / bmag) * radius * k;
+  const ly = cy + (bearing[1] / bmag) * radius * k;
+  const lz = cz + (bearing[2] / bmag) * radius * k;
+  _dirLight.position.set(lx, ly, lz);
+
+  // Aim the light at the bounds centre.
+  _dirLight.target.position.set(cx, cy, cz);
+  _dirLight.target.updateMatrixWorld();
+
+  // Set ortho shadow frustum to enclose the full plan + 10% margin.
+  const halfExt = radius * 1.1;
+  const cam = _dirLight.shadow.camera;
+  cam.left   = -halfExt;
+  cam.right  =  halfExt;
+  cam.top    =  halfExt;
+  cam.bottom = -halfExt;
+  cam.near   = 0.1;
+  // far must comfortably reach the far side of the plan from the light position.
+  cam.far    = radius * k * 2 + radius * 2;
+  cam.updateProjectionMatrix();
 }
 
 /** (Re)build the plan group from the live models (a pure function of the plan). */
@@ -487,6 +568,9 @@ function _buildPlanGroup() {
     if (mesh) _planGroup.add(mesh);
   }
   _scene.add(_planGroup);
+
+  // Fit the shadow-camera frustum to the (potentially new) bounds (LLD 160 §4).
+  _fitShadowCamera();
 }
 
 // ── View pose computation (pure-ish; reads _bounds + _camera.fov) ────────────
@@ -821,6 +905,7 @@ export function dispose() {
   _scene = null;
   _camera = null;
   _controls = null;
+  _dirLight = null;
   _bounds = null;
 }
 
@@ -837,4 +922,91 @@ export function __liveGeometryCount() {
 /** True if a WebGLRenderer currently exists (context-reuse probe for tests). */
 export function __hasRenderer() {
   return !!_renderer;
+}
+
+// ── LLD 160 shadow wiring probes ─────────────────────────────────────────────
+
+/** True if the renderer's shadow map is enabled (LLD 160 wiring probe). */
+export function __shadowEnabled() {
+  return !!(_renderer && _renderer.shadowMap && _renderer.shadowMap.enabled);
+}
+
+/**
+ * Returns shadow map type integer, or null if no renderer.
+ * Used by tests to verify PCFSoftShadowMap (=2) is set.
+ */
+export function __shadowMapType() {
+  if (!_renderer) return null;
+  return _renderer.shadowMap.type;
+}
+
+/**
+ * Returns { castShadow, bias, normalBias, mapW, mapH } for the retained
+ * directional light, or null if no light. LLD 160 §2 wiring probe.
+ */
+export function __dirLightShadowInfo() {
+  if (!_dirLight) return null;
+  return {
+    castShadow:   _dirLight.castShadow,
+    bias:         _dirLight.shadow.bias,
+    normalBias:   _dirLight.shadow.normalBias,
+    mapW:         _dirLight.shadow.mapSize.width,
+    mapH:         _dirLight.shadow.mapSize.height,
+  };
+}
+
+/**
+ * Returns { castShadow, receiveShadow, kind } for each mesh in the plan group,
+ * or [] if no group. LLD 160 §3 wiring probe.
+ * @returns {{ castShadow:boolean, receiveShadow:boolean, kind:string|null }[]}
+ */
+export function __meshShadowFlags() {
+  if (!_planGroup) return [];
+  const out = [];
+  _planGroup.traverse((obj) => {
+    if (obj.isMesh) {
+      // Derive kind from material cache key — not easily accessible, so just
+      // expose the raw flags; tests correlate against how descriptors are ordered.
+      out.push({ castShadow: obj.castShadow, receiveShadow: obj.receiveShadow });
+    }
+  });
+  return out;
+}
+
+/**
+ * Returns the directional light's shadow camera frustum
+ * { left, right, top, bottom, near, far } or null.
+ * LLD 160 §4 shadow-camera-fit probe.
+ */
+export function __shadowCameraFrustum() {
+  if (!_dirLight) return null;
+  const cam = _dirLight.shadow.camera;
+  return {
+    left: cam.left, right: cam.right,
+    top: cam.top, bottom: cam.bottom,
+    near: cam.near, far: cam.far,
+  };
+}
+
+/**
+ * Returns the current _bounds (a SceneBounds or null). Needed by shadow-camera-fit
+ * tests to verify the frustum encloses the bounds.
+ * @returns {SceneBounds}
+ */
+export function __sceneBounds() {
+  return _bounds;
+}
+
+/**
+ * Returns the count of lights by type in the scene.
+ * Returns { directional, ambient } or null if no scene.
+ */
+export function __lightCounts() {
+  if (!_scene) return null;
+  let directional = 0, ambient = 0;
+  _scene.traverse((obj) => {
+    if (obj.isDirectionalLight) directional++;
+    if (obj.isAmbientLight) ambient++;
+  });
+  return { directional, ambient };
 }
