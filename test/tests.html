@@ -3051,8 +3051,12 @@ describe("security — no innerHTML from user input in DOM", () => {
 
 import {
   PLAN_SCHEMA, buildPlan, validatePlan, applyPlan, isEmptyPlan, serializePlan,
-  buildCompact, parseCompact, COMPACT_VERSION,
+  buildCompact, parseCompact, COMPACT_VERSION, MAX_NAME_LEN,
 } from "../src/js/plan.js";
+
+import {
+  getPlanName, setPlanName, onChange as onPlanNameChange,
+} from "../src/js/planName.js";
 
 import {
   model as measurementsModel,
@@ -3103,6 +3107,7 @@ function resetAll() {
   measurementsModel.measurements.length = 0;
   setUnit("ft");
   view.zoom = 1; view.panX = 0; view.panY = 0;
+  setPlanName("");
 }
 
 // ─── Tests: plan.js — buildPlan / validatePlan / serializePlan ────────────────
@@ -18530,6 +18535,292 @@ describe("LLD 152 — pose math properties (geometry verification, no three.js)"
         throw new Error(`NaN in ${name} position: ${JSON.stringify(pos)}`);
       }
     }
+  });
+});
+
+// ─── Tests: LLD 157 — editable plan name (document contract) ─────────────────
+
+describe("LLD 157 — planName.js: get/set/onChange", () => {
+  it("getPlanName returns empty string initially", () => {
+    setPlanName("");
+    expect(getPlanName()).toBe("");
+  });
+
+  it("setPlanName stores the value", () => {
+    setPlanName("My Studio");
+    expect(getPlanName()).toBe("My Studio");
+    setPlanName(""); // cleanup
+  });
+
+  it("setPlanName trims whitespace", () => {
+    setPlanName("  Living Room  ");
+    expect(getPlanName()).toBe("Living Room");
+    setPlanName("");
+  });
+
+  it("setPlanName caps at 60 characters", () => {
+    const long = "A".repeat(70);
+    setPlanName(long);
+    expect(getPlanName().length).toBe(60);
+    setPlanName("");
+  });
+
+  it("setPlanName notifies onChange subscribers on real change", () => {
+    setPlanName("");
+    let notified = null;
+    onPlanNameChange((n) => { notified = n; });
+    setPlanName("Test Name");
+    expect(notified).toBe("Test Name");
+    setPlanName(""); // cleanup
+  });
+
+  it("setPlanName does NOT notify if value unchanged", () => {
+    setPlanName("Same");
+    let count = 0;
+    onPlanNameChange(() => { count++; });
+    setPlanName("Same"); // same value — no notification
+    expect(count).toBe(0);
+    setPlanName(""); // cleanup
+  });
+});
+
+describe("LLD 157 — plan.js: MAX_NAME_LEN", () => {
+  it("MAX_NAME_LEN is 60", () => {
+    expect(MAX_NAME_LEN).toBe(60);
+  });
+});
+
+describe("LLD 157 — buildPlan includes name when set; omits when empty", () => {
+  it("includes name field when planName is set", () => {
+    resetAll();
+    setPlanName("My Apartment");
+    const p = buildPlan();
+    expect(p.name).toBe("My Apartment");
+    setPlanName("");
+  });
+
+  it("omits name field when planName is empty", () => {
+    resetAll();
+    setPlanName("");
+    const p = buildPlan();
+    expect(p.name).toBe(undefined);
+  });
+});
+
+describe("LLD 157 — validatePlan: name round-trip and coercion", () => {
+  function makeGoodPlan(name) {
+    resetAll();
+    const p = buildPlan();
+    if (name !== undefined) p.name = name;
+    return p;
+  }
+
+  it("full round-trip WITH a name: buildPlan → serializePlan → parse → validatePlan preserves name", () => {
+    resetAll();
+    setPlanName("Studio A");
+    const p = buildPlan();
+    const s = serializePlan(p);
+    const reparsed = JSON.parse(s);
+    const v = validatePlan(reparsed);
+    if (!v) throw new Error("validatePlan returned null");
+    expect(v.name).toBe("Studio A");
+    setPlanName("");
+  });
+
+  it("full round-trip WITHOUT a name: name absent in storage, no 'Untitled plan' literal", () => {
+    resetAll();
+    setPlanName("");
+    const p = buildPlan();
+    const s = serializePlan(p);
+    // The literal "Untitled plan" must NOT appear in the serialized form
+    if (s.includes("Untitled plan")) throw new Error("Literal 'Untitled plan' leaked into storage");
+    const v = validatePlan(JSON.parse(s));
+    if (!v) throw new Error("validatePlan returned null");
+    expect(v.name).toBe(undefined);
+  });
+
+  it("length cap: 61-char name is truncated to exactly 60 by validatePlan", () => {
+    const p = makeGoodPlan("B".repeat(61));
+    const v = validatePlan(p);
+    if (!v) throw new Error("validatePlan returned null");
+    expect(v.name.length).toBe(60);
+  });
+
+  it("exactly 60 chars: accepted verbatim, no truncation", () => {
+    const p = makeGoodPlan("C".repeat(60));
+    const v = validatePlan(p);
+    if (!v) throw new Error("validatePlan returned null");
+    expect(v.name.length).toBe(60);
+  });
+
+  it("malformed name (number) → plan valid, name omitted", () => {
+    const p = makeGoodPlan(42);
+    let result;
+    try { result = validatePlan(p); } catch (e) { throw new Error(`threw: ${e}`); }
+    if (!result) throw new Error("validatePlan returned null — plan rejected due to bad name type");
+    expect(result.name).toBe(undefined);
+  });
+
+  it("malformed name (object) → plan valid, name omitted", () => {
+    const p = makeGoodPlan({ foo: "bar" });
+    const result = validatePlan(p);
+    if (!result) throw new Error("validatePlan returned null");
+    expect(result.name).toBe(undefined);
+  });
+
+  it("malformed name (null) → plan valid, name omitted", () => {
+    const p = makeGoodPlan(null);
+    const result = validatePlan(p);
+    if (!result) throw new Error("validatePlan returned null");
+    expect(result.name).toBe(undefined);
+  });
+
+  it("malformed name (array) → plan valid, name omitted", () => {
+    const p = makeGoodPlan(["hello"]);
+    const result = validatePlan(p);
+    if (!result) throw new Error("validatePlan returned null");
+    expect(result.name).toBe(undefined);
+  });
+
+  it("whitespace-only name → name omitted", () => {
+    const p = makeGoodPlan("   ");
+    const result = validatePlan(p);
+    if (!result) throw new Error("validatePlan returned null");
+    expect(result.name).toBe(undefined);
+  });
+
+  it("newline/control chars in name → stripped to single-line or omitted", () => {
+    const p = makeGoodPlan("Hello\nWorld\t!");
+    const result = validatePlan(p);
+    if (!result) throw new Error("validatePlan returned null");
+    // The name should not contain newline or tab after coercion
+    if (result.name !== undefined) {
+      if (result.name.includes("\n") || result.name.includes("\t")) {
+        throw new Error(`Control chars not stripped: ${JSON.stringify(result.name)}`);
+      }
+    }
+  });
+
+  it("back-compat: legacy plan with no name field validates cleanly", () => {
+    resetAll();
+    setPlanName("");
+    const p = buildPlan();
+    delete p.name; // ensure absent
+    const result = validatePlan(p);
+    if (!result) throw new Error("validatePlan returned null for name-less legacy plan");
+    expect(result.name).toBe(undefined);
+  });
+});
+
+describe("LLD 157 — applyPlan sets planName live state", () => {
+  it("applyPlan with a named plan sets getPlanName()", () => {
+    resetAll();
+    const p = buildPlan();
+    p.name = "Bedroom";
+    // Validate to get a proper plan object
+    const v = validatePlan(p);
+    if (!v) throw new Error("validatePlan returned null");
+    setPlanName(""); // clear first
+    applyPlan(v);
+    expect(getPlanName()).toBe("Bedroom");
+    setPlanName("");
+  });
+
+  it("applyPlan with no name clears getPlanName()", () => {
+    resetAll();
+    setPlanName("OldName");
+    const p = buildPlan();
+    delete p.name;
+    const v = validatePlan(p);
+    if (!v) throw new Error("validatePlan returned null");
+    applyPlan(v);
+    expect(getPlanName()).toBe("");
+  });
+});
+
+describe("LLD 157 — compact codec: name round-trip", () => {
+  it("buildCompact emits 'n' key when plan has a name", () => {
+    resetAll();
+    setPlanName("Corner Office");
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    expect(compact.n).toBe("Corner Office");
+    setPlanName("");
+  });
+
+  it("buildCompact omits 'n' key when plan has no name", () => {
+    resetAll();
+    setPlanName("");
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    expect(compact.n).toBe(undefined);
+  });
+
+  it("parseCompact restores name from 'n'", () => {
+    resetAll();
+    setPlanName("Open Plan");
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    const restored = parseCompact(compact);
+    if (!restored) throw new Error("parseCompact returned null");
+    const v = validatePlan(restored);
+    if (!v) throw new Error("validatePlan rejected parseCompact output");
+    expect(v.name).toBe("Open Plan");
+    setPlanName("");
+  });
+
+  it("COMPACT_VERSION is still 1 (no bump)", () => {
+    expect(COMPACT_VERSION).toBe(1);
+  });
+
+  it("back-compat: v:1 compact with no 'n' → parseCompact succeeds, name absent", () => {
+    const compact = {
+      v: 1,
+      u: "ft",
+      r: [],
+      k: [],
+      s: [],
+      m: [],
+      // no 'n' key
+    };
+    const restored = parseCompact(compact);
+    if (!restored) throw new Error("parseCompact returned null for name-less v:1 compact");
+    const v = validatePlan(restored);
+    if (!v) throw new Error("validatePlan rejected name-less compact output");
+    expect(v.name).toBe(undefined);
+  });
+
+  it("parseCompact: over-cap 'n' is truncated to MAX_NAME_LEN", () => {
+    const compact = {
+      v: 1,
+      u: "ft",
+      r: [],
+      k: [],
+      s: [],
+      m: [],
+      n: "D".repeat(70),
+    };
+    const restored = parseCompact(compact);
+    if (!restored) throw new Error("parseCompact returned null");
+    const v = validatePlan(restored);
+    if (!v) throw new Error("validatePlan returned null");
+    expect(v.name.length).toBe(60);
+  });
+
+  it("name containing HTML/script markup round-trips as literal text", () => {
+    resetAll();
+    // Construct the name without a literal closing tag in HTML source
+    const xssName = "<" + "script>alert(1)</" + "script>";
+    setPlanName(xssName.trim());
+    const p = buildPlan();
+    const compact = buildCompact(p);
+    const restored = parseCompact(compact);
+    if (!restored) throw new Error("parseCompact returned null");
+    const v = validatePlan(restored);
+    if (!v) throw new Error("validatePlan returned null");
+    // The name must survive as literal text, never execute or be dropped
+    expect(v.name).toBe(xssName.trim());
+    setPlanName("");
   });
 });
 

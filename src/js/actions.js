@@ -15,6 +15,7 @@ import { hydrate as hydrateSymbols } from "./symbols.js";
 import { resetView } from "./view.js";
 import { render, onRender } from "./surface.js";
 import * as surface from "./surface.js";
+import { setPlanName } from "./planName.js";
 
 // history is wired in after init() via setHistoryReset()
 let _historyReset = null;
@@ -347,6 +348,10 @@ function _confirmReset() {
   clearLocal();
   // Reset history so undo cannot resurrect the wiped plan (Edge Case 11)
   if (_historyReset) _historyReset();
+  // Clear the plan name (Edge Case 14: _confirmReset bypasses applyPlan, so
+  // we must clear the name explicitly; otherwise the stale name lingers in the
+  // header input and is re-persisted by the render()-driven autosave).
+  setPlanName("");
   // Invalidate hash cache before render (render will also fire _onRenderInvalidateCache)
   _cachedHashUrl = null;
   _cacheStale = true;
