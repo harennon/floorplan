@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title id="doc-title">My Studio · floorplan</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,700;1,400&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <!-- MOCKUP: LLD 159 — reflect plan name in tab title + share-open greeting.
+         Reuses the warm-blueprint tokens from src/index.html verbatim. This is a
+         throwaway artifact demonstrating STATES, not a production layout change. -->
+    <style>
+      :root {
+        --bg:        #14140f;
+        --bg-deep:   #100f0b;
+        --ink:       #ece7d6;
+        --muted:     #8f8a78;
+        --gold:      #c9a84c;
+        --gold-soft: rgba(201, 168, 76, 0.55);
+        --panel:     rgba(20, 20, 15, 0.72);
+        --hairline:  rgba(201, 168, 76, 0.18);
+        --font-ui:      "DM Sans", system-ui, sans-serif;
+        --font-mono:    "DM Mono", "Courier New", monospace;
+        --font-display: "Libre Baskerville", Georgia, serif;
+        --grid-major: rgba(201, 168, 76, 0.14);
+        --grid-fine:  rgba(201, 168, 76, 0.055);
+      }
+      * , *::before, *::after { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg-deep);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        padding: 2.5rem 1.5rem 4rem;
+      }
+      .wrap { max-width: 56rem; margin: 0 auto; }
+      .doc-head { margin-bottom: 2rem; }
+      .doc-head h1 {
+        font-family: var(--font-display);
+        font-weight: 700;
+        color: var(--gold);
+        font-size: 1.5rem;
+        margin: 0 0 0.4rem;
+      }
+      .doc-head p {
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        color: var(--muted);
+        line-height: 1.5;
+        margin: 0;
+        max-width: 42rem;
+      }
+      .section {
+        margin-top: 2.5rem;
+        border-top: 1px solid var(--hairline);
+        padding-top: 1.5rem;
+      }
+      .section > h2 {
+        font-family: var(--font-mono);
+        font-size: 0.66rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0 0 1rem;
+      }
+      .note {
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--muted);
+        line-height: 1.55;
+        margin: 0.75rem 0 0;
+      }
+      .note b { color: var(--ink); font-weight: 500; }
+
+      /* ── Faux browser chrome (to visualise the tab <title>) ─────────────── */
+      .browser {
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--bg);
+        box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+      }
+      .browser-tabbar {
+        display: flex;
+        align-items: flex-end;
+        gap: 0;
+        background: #0b0b08;
+        padding: 0.5rem 0.6rem 0;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        max-width: 17rem;
+        min-width: 8rem;
+        padding: 0.5rem 0.8rem;
+        background: var(--bg);
+        border: 1px solid var(--hairline);
+        border-bottom: none;
+        border-radius: 8px 8px 0 0;
+        font-family: var(--font-ui);
+        font-size: 0.74rem;
+        color: var(--ink);
+      }
+      .tab .favicon {
+        width: 12px; height: 12px; border-radius: 3px;
+        background: var(--gold);
+        flex-shrink: 0;
+      }
+      .tab .tab-label {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tab .tab-close { margin-left: auto; color: var(--muted); font-size: 0.9rem; line-height: 1; }
+      .browser-urlbar {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.55rem 0.9rem;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .browser-urlbar .pill {
+        flex: 1;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid var(--hairline);
+        border-radius: 100px;
+        padding: 0.3rem 0.85rem;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .browser-urlbar .pill b { color: var(--ink); font-weight: 400; }
+
+      /* ── Stage (mini app canvas) ────────────────────────────────────────── */
+      .stage {
+        position: relative;
+        height: 20rem;
+        background:
+          radial-gradient(ellipse 90% 80% at 50% 50%, var(--bg) 0%, var(--bg-deep) 100%);
+        background-image:
+          linear-gradient(var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px),
+          linear-gradient(var(--grid-major) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+        background-size: 16px 16px, 16px 16px, 96px 96px, 96px 96px;
+        overflow: hidden;
+      }
+      /* Brand + editable title (matches src/index.html .brand markup) */
+      .brand {
+        position: absolute;
+        top: 1.1rem; left: 1.1rem;
+        user-select: none;
+      }
+      .brand-eyebrow {
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        color: var(--muted);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        line-height: 1.3;
+      }
+      .brand-title {
+        display: block;
+        font-family: var(--font-display);
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--gold);
+        line-height: 1.2;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        padding: 0.1rem 0.35rem;
+        margin: 0;
+        max-width: min(46vw, 22rem);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        outline: none;
+        cursor: text;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      .brand-title::placeholder { color: var(--muted); }
+      .brand-title:hover { border-color: var(--hairline); }
+      .brand-title:focus {
+        border-color: var(--gold-soft);
+        box-shadow: 0 0 0 2px var(--gold-soft);
+      }
+      /* Live-edit hint pill under the field, mockup-only */
+      .edit-hint {
+        position: absolute;
+        top: 4.1rem; left: 1.1rem;
+        font-family: var(--font-mono);
+        font-size: 0.6rem;
+        color: var(--muted);
+        opacity: 0.8;
+      }
+
+      /* ── Toast (matches src/index.html .toast) ──────────────────────────── */
+      .toast {
+        position: absolute;
+        bottom: 1.4rem;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 100px;
+        padding: 0.45rem 1.1rem;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--ink);
+        white-space: nowrap;
+        max-width: calc(100% - 2rem);
+        backdrop-filter: blur(8px);
+      }
+      .toast-text { overflow: hidden; text-overflow: ellipsis; }
+      .toast-text .name { color: var(--gold); }
+      .toast-action-btn {
+        background: rgba(201,168,76,0.18);
+        border: 1px solid var(--gold-soft);
+        color: var(--gold);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        padding: 0.15rem 0.55rem;
+        border-radius: 100px;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      /* ── Try-it control row ─────────────────────────────────────────────── */
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+      }
+      .controls label {
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        color: var(--muted);
+      }
+      .controls input[type="text"] {
+        font-family: var(--font-ui);
+        font-size: 0.8rem;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid var(--hairline);
+        color: var(--ink);
+        border-radius: 6px;
+        padding: 0.35rem 0.6rem;
+        min-width: 16rem;
+        outline: none;
+      }
+      .controls input[type="text"]:focus { border-color: var(--gold-soft); }
+      .toast-variants { display: flex; flex-direction: column; gap: 0.9rem; }
+      .variant-card {
+        position: relative;
+        background: var(--bg);
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        padding: 2.2rem 1rem 1.4rem;
+        min-height: 6rem;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+      }
+      .variant-card .tag {
+        position: absolute;
+        top: 0.7rem; left: 0.9rem;
+        font-family: var(--font-mono);
+        font-size: 0.6rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .variant-card .toast { position: static; transform: none; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="doc-head">
+        <h1>Plan name → tab title &amp; share greeting</h1>
+        <p>
+          LLD 159, the finishing touch of the naming arc. Two chrome surfaces now
+          echo the plan name: the browser <b>tab title</b> and the <b>share-open
+          toast</b>. No new UI elements — this is behavioural wiring on top of the
+          existing editable title (LLD 157). Edit the field below and watch this
+          page's own browser tab update live.
+        </p>
+      </div>
+
+      <!-- SECTION 1 — tab title ─────────────────────────────────────────── -->
+      <div class="section">
+        <h2>1 · Browser tab title (live)</h2>
+        <div class="controls">
+          <label for="name-input">Plan name</label>
+          <input id="name-input" type="text" maxlength="60" value="My Studio"
+                 placeholder="Untitled plan" autocomplete="off" spellcheck="false" />
+        </div>
+
+        <div class="browser">
+          <div class="browser-tabbar">
+            <div class="tab">
+              <span class="favicon"></span>
+              <span class="tab-label" id="tab-label">My Studio · floorplan</span>
+              <span class="tab-close">×</span>
+            </div>
+          </div>
+          <div class="browser-urlbar">
+            <span class="pill"><b>floorplan.danbing.app</b></span>
+          </div>
+          <div class="stage">
+            <div class="brand">
+              <div class="brand-eyebrow">floorplan</div>
+              <input id="brand-title" class="brand-title" type="text" maxlength="60"
+                     value="My Studio" placeholder="Untitled plan"
+                     aria-label="Plan name" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="edit-hint">↑ same value drives the field, the tab, and autosave</div>
+          </div>
+        </div>
+
+        <p class="note">
+          <b>Format:</b> <code>&lt;name&gt; · floorplan</code> when named;
+          falls back to the current static <code>floorplan · danbing.app</code>
+          when the name is empty. Updates on every <code>input</code> event and on
+          load of a saved/shared plan (via <code>planName.onChange</code>). Clearing
+          the field restores the default title. Try emptying the input above.
+        </p>
+      </div>
+
+      <!-- SECTION 2 — share greeting ────────────────────────────────────── -->
+      <div class="section">
+        <h2>2 · Share-open toast greeting</h2>
+        <div class="toast-variants">
+          <div class="variant-card">
+            <span class="tag">Named shared plan</span>
+            <div class="toast">
+              <span class="toast-text">Opened <span class="name">"My Studio"</span></span>
+            </div>
+          </div>
+          <div class="variant-card">
+            <span class="tag">Unnamed shared plan (unchanged)</span>
+            <div class="toast">
+              <span class="toast-text">Opened shared plan</span>
+            </div>
+          </div>
+          <div class="variant-card">
+            <span class="tag">Restore-conflict — named, with one-tap undo (preserved)</span>
+            <div class="toast">
+              <span class="toast-text">Opened <span class="name">"My Studio"</span></span>
+              <button class="toast-action-btn">Keep my last plan instead</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="note">
+          Only the greeting <b>text</b> changes: a named plan shows
+          <code>Opened "&lt;name&gt;"</code>, an unnamed plan keeps the existing
+          <code>Opened shared plan</code>. The conflict branch (auto-open shared +
+          one-tap "Keep my last plan instead" undo) is untouched apart from
+          swapping in the name-bearing text. The name is inserted via
+          <code>textContent</code> only — HTML/script-looking names render as
+          literal text, never interpreted.
+        </p>
+      </div>
+    </div>
+
+    <script>
+      // Mockup only: demonstrate the live tab-title behaviour proposed by LLD 159.
+      // In the app this lives in a small planName.onChange subscriber in main.js.
+      var DEFAULT_TITLE = "floorplan · danbing.app";
+      var nameInput  = document.getElementById("name-input");
+      var brandTitle = document.getElementById("brand-title");
+      var tabLabel   = document.getElementById("tab-label");
+      var docTitle   = document.getElementById("doc-title");
+
+      function computeTitle(name) {
+        var n = (name || "").trim();
+        return n ? n + " · floorplan" : DEFAULT_TITLE;
+      }
+      function apply(name) {
+        var t = computeTitle(name);
+        document.title = t;      // the real browser tab (this page)
+        docTitle.textContent = t;
+        tabLabel.textContent = t; // the faux tab inside the mockup
+      }
+      // Keep the two inputs mirrored (both are views of one plan-name state).
+      nameInput.addEventListener("input", function () {
+        brandTitle.value = nameInput.value;
+        apply(nameInput.value);
+      });
+      brandTitle.addEventListener("input", function () {
+        nameInput.value = brandTitle.value;
+        apply(brandTitle.value);
+      });
+      apply(nameInput.value);
+    </script>
+  </body>
+</html>
