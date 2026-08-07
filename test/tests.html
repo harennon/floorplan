@@ -19051,6 +19051,26 @@ describe("LLD 164 — _fitTitle: monospace truncation", () => {
   it("empty string → returned as-is when it fits", () => {
     expect(_fitTitle("", 100)).toBe("");
   });
+
+  it("emoji/astral title truncation does not split surrogate pairs", () => {
+    // 🏠 is a 2-UTF-16-code-unit char; truncating by code units risks a lone surrogate.
+    // With code-point-aware truncation the result must be a valid string with no lone surrogates.
+    const title = "🏠".repeat(25); // 25 house emojis
+    const availPx = 5 * (13 * 0.6); // room for ~5 monospace chars worth
+    const result = _fitTitle(title, availPx);
+    if (!result.endsWith("…")) throw new Error(`Expected … suffix, got "${result}"`);
+    // Verify no lone surrogates: re-encode to UTF-8 via TextEncoder — throws on lone surrogates
+    // in environments that check; alternatively confirm Array.from round-trips cleanly.
+    const codePoints = Array.from(result);
+    const rejoined = codePoints.join("");
+    if (rejoined !== result) throw new Error("Round-trip via Array.from changed the string — lone surrogate present");
+    // Each non-ellipsis char must be a complete emoji (🏠 is one code point)
+    const withoutEllipsis = result.slice(0, -1); // drop trailing …
+    const cpWithout = Array.from(withoutEllipsis);
+    for (const cp of cpWithout) {
+      if (cp !== "🏠") throw new Error(`Unexpected code point "${cp}" — surrogate split occurred`);
+    }
+  });
 });
 
 describe("LLD 164 — _stripControl: control character removal", () => {

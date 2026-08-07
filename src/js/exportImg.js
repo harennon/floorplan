@@ -471,9 +471,10 @@ export function _planFilename(ext) {
 export function _fitTitle(title, availPx) {
   if (availPx <= 0) return "…";
   const perChar = TITLE_FONT_PX * MONO_CH_RATIO;
-  if (title.length * perChar <= availPx) return title;
+  const codePoints = Array.from(title);
+  if (codePoints.length * perChar <= availPx) return title;
   const maxChars = Math.max(0, Math.floor(availPx / perChar) - 1);
-  return title.slice(0, maxChars).trimEnd() + "…";
+  return codePoints.slice(0, maxChars).join("").trimEnd() + "…";
 }
 
 /**
