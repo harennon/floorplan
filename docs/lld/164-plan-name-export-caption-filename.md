@@ -33,10 +33,29 @@ the CEO; do not re-open the gate. See Frontend Design.
 
 1. **Import the name at build time.** Add `import { getPlanName } from "./planName.js";`.
    In `_captionSvg`, resolve the display title as `getPlanName() || PLAN_TITLE`. Keep
-   `PLAN_TITLE = "Floor plan"` as the fallback constant (do not delete it). The name is
-   already trimmed/capped/control-stripped by `planName.js` `setPlanName` (≤ 60 chars,
-   single line), so `_captionSvg` treats it as clean text and only escapes it via the
-   existing `_escapeXml`.
+   `PLAN_TITLE = "Floor plan"` as the fallback constant (do not delete it).
+
+   **Control-char safety (do NOT assume the name is XML-clean).** `getPlanName()` returns
+   only what `planName.js` `setPlanName` stores, and `setPlanName` (line 26–31) does
+   *only* `.trim().slice(0, 60)` — it does **not** strip control characters. The
+   control-char stripping (`/[\x00-\x1F\x7F]/g`, `plan.js` `_coerceName` line 34) runs
+   *only* on the import/share deserialize path (`plan.js` lines 205, 362); the header input
+   path (`main.js:911`) pipes `planTitleEl.value` straight into `setPlanName`, and
+   `<input type=text>` value sanitization strips only CR/LF — not other C0 control chars.
+   So a user who pastes a name containing e.g. U+0007 leaves that char in the live name.
+   This LLD is the **first** code path to put the live name into the caption title, and
+   XML 1.0 forbids most C0 control chars even as numeric character references — `_escapeXml`
+   would emit them verbatim, `DOMParser` would raise `parsererror`, and `exportPng` would
+   throw "PNG export failed" while the SVG downloads corrupt (directly harming the
+   "shareable artifact" value).
+
+   **Fix:** strip control characters on the caption-title path before escaping, reusing the
+   same rule as `_coerceName`. Add a tiny pure helper `_stripControl(s)` in `exportImg.js`
+   (`s.replace(/[\x00-\x1F\x7F]/g, "")`, `// eslint-disable-next-line no-control-regex`) and
+   apply it to `rawTitle` before `_fitTitle`/`_escapeXml`. Do **not** reach into `plan.js`
+   for this (would create an unwanted `exportImg → plan` coupling); a 1-line local copy of
+   the character class is the surgical choice. The slug/filename path is **unaffected** —
+   its `[a-z0-9-]` allowlist (step 4 of `_slugifyName`) already drops these chars.
 
 2. **Truncation is display-only and lives in `_captionSvg`.** The band has a fixed width
    `W`; the metrics are right-anchored at `W - BAND_PAD_PX`, the title left-anchored at
@@ -84,6 +103,9 @@ function _planFilename(ext) // → string   ("floorplan.<ext>" when slug empty)
 
 /** Fit a title into availPx (monospace estimate), clipping with "…" if needed. */
 function _fitTitle(title, availPx) // → string
+
+/** Strip C0/DEL control chars so the caption title is XML-safe (see Approach §1). */
+function _stripControl(s) // → string   (s.replace(/[\x00-\x1F\x7F]/g, ""))
 ```
 
 `_slugifyName(name)` algorithm (order matters):
@@ -102,12 +124,14 @@ return `${slug || "floorplan"}.${ext}`;
 
 `_captionSvg(W, p, totals)` change — resolve and fit the title:
 ```js
-const rawTitle    = getPlanName() || PLAN_TITLE;
+const rawTitle    = _stripControl(getPlanName()) || PLAN_TITLE; // control-char safe
 const metricsPx   = metricsStr.length * METRICS_FONT_PX * MONO_CH_RATIO;
 const titleAvailPx = (W - 2 * BAND_PAD_PX) - metricsPx - TITLE_METRICS_GAP_PX;
 const title       = _fitTitle(rawTitle, titleAvailPx);
 // … existing <text class="plan-title" …>${_escapeXml(title)}</text>
 ```
+Note: `_stripControl` is applied **before** the `|| PLAN_TITLE` fallback so a name that is
+all control chars (strips to `""`) correctly falls back to `"Floor plan"`.
 
 `_fitTitle(title, availPx)`:
 - If `availPx <= 0`, return `"…"` (never render nothing when a name is present).
@@ -153,14 +177,22 @@ display-only truncation, the filename uses the full name.
     picked up by the existing raster path (LLD 153 Edge Case 7). Consistent with SVG.
 12. **Near-cap 60-char name** on a wide export where it fits → no truncation, full title;
     on a narrow export → truncated. Filename always uses the full 60-char slug.
+13. **Name containing control chars** (e.g. a pasted string with U+0007, only trimmed/capped
+    by `setPlanName`, never control-stripped for the header-input path) → `_stripControl`
+    removes them before escaping → caption parses without `parsererror`, PNG export does not
+    throw. If the name is *entirely* control chars, it strips to `""` and the title falls
+    back to `"Floor plan"`. The slug path already drops these via its `[a-z0-9-]` allowlist.
 
 ## Dependencies
 
-- **LLD 157 — landed.** Provides `getPlanName()` in `src/js/planName.js` (name trimmed,
-  capped at 60, control-char-stripped, single-line) and the plan-name contract.
-- **LLD 153 / #147 (PR #152) — must land first.** Provides `_captionSvg`, `PLAN_TITLE`,
-  `CAPTION_PX`, `showCaption` guard, and the caption band this LLD edits. Sequence after it
-  so this swaps the literal rather than colliding with it.
+- **LLD 157 — landed.** Provides `getPlanName()` in `src/js/planName.js`. **Caveat:**
+  `setPlanName` only trims and caps at 60 — it does **not** strip control characters (that
+  lives in `plan.js` `_coerceName`, on the import/share path only). This LLD therefore
+  strips control chars itself on the caption-title path (see Approach §1). Do not rely on
+  `getPlanName()` being XML-clean.
+- **LLD 153 — landed** (commit `6f5d074`). `_captionSvg`, `PLAN_TITLE`, `CAPTION_PX`, and
+  the `showCaption` guard already exist in `src/js/exportImg.js`; this LLD edits them
+  in place. No sequencing dependency remains.
 - `planName.js` (existing), `theme.js`, `units.js`, `walls.js` — all existing; no new
   packages, no build change.
 
@@ -212,6 +244,10 @@ block.
   (estimated title end x < metrics start x, or simply that it was truncated).
 - Name with XML-significant chars ("A & B <x>") → caption parses without `parsererror` and
   title round-trips as literal text.
+- Name with a control char (e.g. `"PlanX"` set via `setPlanName`) with enclosed area →
+  caption parses without `parsererror`, the exported SVG string round-trips through
+  `DOMParser` cleanly, and `.plan-title` text has no control char. A name that is *only*
+  control chars → title falls back to `"Floor plan"`.
 
 **Unit — filename slug (`_slugifyName` / `_planFilename`):**
 - `"My Studio"` → `my-studio`; `_planFilename("png")` → `my-studio.png`,
@@ -232,7 +268,9 @@ block.
   `floorplan.*` when unnamed.
 
 **Regression:**
-- Existing LLD 153 caption tests that assert `.plan-title` === "Floor plan" must be run
-  with an **empty** name (reset plan-name state) so they continue to pass, or updated to
-  set/clear the name explicitly. Ensure `setPlanName("")` is called in the relevant
-  `beforeEach`/setup so caption-band tests are deterministic.
+- Existing LLD 153 caption tests stay deterministic as-is: the caption `describe` block's
+  `buildClosedPlan()` path calls `resetAll()`, which already calls `setPlanName("")`
+  (`tests.html:3110`). So the existing `.plan-title` === "Floor plan" assertions keep
+  passing with no new scaffolding. The **new** named-plan title test just needs to call
+  `setPlanName("…")` *after* `buildClosedPlan()` (and rely on the next test's `resetAll()`
+  to clear it). Do not add a redundant `setPlanName("")` reset — it already runs.
