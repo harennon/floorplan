@@ -11,6 +11,7 @@ import { model as symbolsModel, corners, CATALOG } from "./symbols.js";
 import { model as measurementsModel } from "./measurements.js";
 import { fmtLen, unitLabel, M_PER_FT, fmtArea, areaUnitLabel } from "./units.js";
 import { palette } from "./theme.js";
+import { getPlanName } from "./planName.js";
 
 /** Export scale: pixels per metre in the exported image */
 const EXPORT_PX_PER_M = 96; // ~100px/m for a readable print-scale output
@@ -23,7 +24,13 @@ const BAND_PAD_PX = 16;   // inset from band/image edges
 
 /** Top caption band constants */
 const CAPTION_PX  = 40;              // top caption band height, export px
-const PLAN_TITLE  = "Floor plan";    // fixed title (no custom-name field in v1)
+const PLAN_TITLE  = "Floor plan";    // fallback title when no plan name is set
+
+/** Title truncation tuning (monospace estimate; DM Mono ≈ 0.6 em advance). */
+const TITLE_FONT_PX        = 13;   // matches .plan-title font-size
+const METRICS_FONT_PX      = 12;   // matches .plan-metrics font-size
+const MONO_CH_RATIO        = 0.6;  // approx glyph advance / font-size for DM Mono
+const TITLE_METRICS_GAP_PX = 16;   // min gap between title and metrics
 
 /** Round-length ladders for scale bar selection */
 const SCALE_LADDER_M  = [1, 2, 5];       // metres
@@ -247,7 +254,7 @@ export function buildExportSvg() {
 export function exportSvg() {
   const svgStr = buildExportSvg();
   const blob = new Blob([svgStr], { type: "image/svg+xml" });
-  _triggerDownload(URL.createObjectURL(blob), "floorplan.svg");
+  _triggerDownload(URL.createObjectURL(blob), _planFilename("svg"));
 }
 
 /**
@@ -291,7 +298,7 @@ export async function exportPng() {
       throw new Error("toBlob returned null");
     }
 
-    _triggerDownload(URL.createObjectURL(pngBlob), "floorplan.png");
+    _triggerDownload(URL.createObjectURL(pngBlob), _planFilename("png"));
   } catch {
     // Edge Case 13: toast handled by actions.js caller
     throw new Error("PNG export failed");
@@ -412,11 +419,72 @@ function _planTotals() {
 function _captionSvg(W, p, totals) {
   const by = CAPTION_PX / 2;
   const metricsStr = `${fmtArea(totals.area)} ${areaUnitLabel()} · ${fmtLen(totals.perimeter)} ${unitLabel()}`;
+  const rawTitle = _stripControl(getPlanName()) || PLAN_TITLE;
+  const metricsPx = metricsStr.length * METRICS_FONT_PX * MONO_CH_RATIO;
+  const titleAvailPx = (W - 2 * BAND_PAD_PX) - metricsPx - TITLE_METRICS_GAP_PX;
+  const title = _fitTitle(rawTitle, titleAvailPx);
   let out = `<g class="plan-caption">\n`;
-  out += `  <text class="plan-title" x="${BAND_PAD_PX}" y="${by}" font-family='${FONT_FAMILY}' font-size="13" fill="${p.ink}" text-anchor="start" dominant-baseline="middle">${_escapeXml(PLAN_TITLE)}</text>\n`;
+  out += `  <text class="plan-title" x="${BAND_PAD_PX}" y="${by}" font-family='${FONT_FAMILY}' font-size="13" fill="${p.ink}" text-anchor="start" dominant-baseline="middle">${_escapeXml(title)}</text>\n`;
   out += `  <text class="plan-metrics" x="${W - BAND_PAD_PX}" y="${by}" font-family='${FONT_FAMILY}' font-size="12" fill="${p.dim}" text-anchor="end" dominant-baseline="middle">${_escapeXml(metricsStr)}</text>\n`;
   out += `</g>`;
   return out;
+}
+
+/**
+ * Slug the plan name for use as a download filename.
+ * Returns "" when nothing usable remains (emoji-only, symbols-only, etc.).
+ * @param {string} name
+ * @returns {string}
+ */
+export function _slugifyName(name) {
+  if (typeof name !== "string") return "";
+  // 1. NFKD normalise, then strip combining diacritical marks
+  let s = name.normalize("NFKD").replace(/[̀-ͯ]/g, "");
+  // 2. Lowercase
+  s = s.toLowerCase();
+  // 3. Replace runs of whitespace and underscores with a single "-"
+  s = s.replace(/[\s_]+/g, "-");
+  // 4. Drop every character not in [a-z0-9-]
+  s = s.replace(/[^a-z0-9-]/g, "");
+  // 5. Collapse repeated "-" and trim leading/trailing "-"
+  s = s.replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "");
+  return s;
+}
+
+/**
+ * Full download filename for an export.
+ * Falls back to "floorplan.<ext>" when slug is empty.
+ * @param {"svg"|"png"} ext
+ * @returns {string}
+ */
+export function _planFilename(ext) {
+  const slug = _slugifyName(getPlanName());
+  return `${slug || "floorplan"}.${ext}`;
+}
+
+/**
+ * Fit a title into availPx (monospace estimate), clipping with "…" if needed.
+ * @param {string} title
+ * @param {number} availPx
+ * @returns {string}
+ */
+export function _fitTitle(title, availPx) {
+  if (availPx <= 0) return "…";
+  const perChar = TITLE_FONT_PX * MONO_CH_RATIO;
+  if (title.length * perChar <= availPx) return title;
+  const maxChars = Math.max(0, Math.floor(availPx / perChar) - 1);
+  return title.slice(0, maxChars).trimEnd() + "…";
+}
+
+/**
+ * Strip C0/DEL control chars so the caption title is XML-safe.
+ * Replicates the rule used by plan.js _coerceName; kept local to avoid coupling.
+ * @param {string} s
+ * @returns {string}
+ */
+export function _stripControl(s) {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x1F\x7F]/g, "");
 }
 
 function _triggerDownload(blobUrl, filename) {

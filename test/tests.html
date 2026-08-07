@@ -3079,6 +3079,7 @@ import {
 
 import {
   contentBounds, buildExportSvg,
+  _slugifyName, _planFilename, _fitTitle, _stripControl,
 } from "../src/js/exportImg.js";
 
 import {
@@ -18920,6 +18921,307 @@ describe("LLD 160 — render3d enter()/exit() smoke with shadow wiring", () => {
     render3dExit();
     const after = JSON.stringify({ rooms: wallsMod.model.rooms, symbols: symMod.model.symbols });
     if (before !== after) throw new Error("preview enter/exit mutated plan models (shadows should not mutate)");
+  });
+});
+
+// ─── Tests: LLD 164 — plan name as export caption title and download filename ──
+
+describe("LLD 164 — _slugifyName: slug derivation", () => {
+  it("simple name slugifies correctly", () => {
+    expect(_slugifyName("My Studio")).toBe("my-studio");
+  });
+
+  it("diacritics stripped (Café Plan → cafe-plan)", () => {
+    expect(_slugifyName("Café Plan")).toBe("cafe-plan");
+  });
+
+  it("special chars and punctuation dropped (Flat #3 (v2)! → flat-3-v2)", () => {
+    expect(_slugifyName("Flat #3 (v2)!")).toBe("flat-3-v2");
+  });
+
+  it("underscores and mixed whitespace → hyphens (my__studio  plan → my-studio-plan)", () => {
+    expect(_slugifyName("my__studio  plan")).toBe("my-studio-plan");
+  });
+
+  it("emoji-only name → empty string (falls back to floorplan)", () => {
+    expect(_slugifyName("🏠🏠")).toBe("");
+  });
+
+  it("symbols-only → empty string", () => {
+    expect(_slugifyName("!!!")).toBe("");
+  });
+
+  it("whitespace-only → empty string", () => {
+    expect(_slugifyName("   ")).toBe("");
+  });
+
+  it("non-ASCII only with no diacritic base (Japanese 図面) → empty string", () => {
+    expect(_slugifyName("図面")).toBe("");
+  });
+
+  it("empty string → empty string", () => {
+    expect(_slugifyName("")).toBe("");
+  });
+
+  it("collapsed hyphens and trimmed", () => {
+    expect(_slugifyName("--my  plan--")).toBe("my-plan");
+  });
+});
+
+describe("LLD 164 — _planFilename: filename derivation", () => {
+  it("named plan → slug-based filename (.svg)", () => {
+    setPlanName("My Studio");
+    expect(_planFilename("svg")).toBe("my-studio.svg");
+    setPlanName("");
+  });
+
+  it("named plan → slug-based filename (.png)", () => {
+    setPlanName("My Studio");
+    expect(_planFilename("png")).toBe("my-studio.png");
+    setPlanName("");
+  });
+
+  it("unnamed plan → floorplan.svg", () => {
+    setPlanName("");
+    expect(_planFilename("svg")).toBe("floorplan.svg");
+  });
+
+  it("unnamed plan → floorplan.png", () => {
+    setPlanName("");
+    expect(_planFilename("png")).toBe("floorplan.png");
+  });
+
+  it("slug-empty name (emoji-only) → floorplan.svg", () => {
+    setPlanName("🏠🏠");
+    expect(_planFilename("svg")).toBe("floorplan.svg");
+    setPlanName("");
+  });
+
+  it("slug-empty name (symbols-only) → floorplan.png", () => {
+    setPlanName("!!!");
+    expect(_planFilename("png")).toBe("floorplan.png");
+    setPlanName("");
+  });
+
+  it("full name used for filename even when caption title would be truncated", () => {
+    const longName = "A".repeat(60);
+    setPlanName(longName);
+    // The slug of 60 'a' chars is 60 'a' chars
+    expect(_planFilename("svg")).toBe(`${"a".repeat(60)}.svg`);
+    setPlanName("");
+  });
+});
+
+describe("LLD 164 — _fitTitle: monospace truncation", () => {
+  // TITLE_FONT_PX=13, MONO_CH_RATIO=0.6 → perChar=7.8
+  const perChar = 13 * 0.6; // 7.8
+
+  it("short title that fits → returned unchanged", () => {
+    const title = "Short";
+    const availPx = title.length * perChar + 10; // plenty of room
+    expect(_fitTitle(title, availPx)).toBe("Short");
+  });
+
+  it("title exactly fitting availPx → returned unchanged", () => {
+    const title = "Exact";
+    const availPx = title.length * perChar; // exactly fits
+    expect(_fitTitle(title, availPx)).toBe("Exact");
+  });
+
+  it("title overflowing availPx → clipped with …", () => {
+    const title = "This Is A Long Title";
+    const availPx = 5 * perChar; // only space for ~5 chars
+    const result = _fitTitle(title, availPx);
+    if (!result.endsWith("…")) throw new Error(`Expected result to end with …, got "${result}"`);
+    if (result.length >= title.length) throw new Error(`Expected truncation, got "${result}"`);
+  });
+
+  it("availPx <= 0 → returns …", () => {
+    expect(_fitTitle("Hello", 0)).toBe("…");
+    expect(_fitTitle("Hello", -1)).toBe("…");
+  });
+
+  it("availPx for 1 char → returns … (maxChars=0)", () => {
+    const result = _fitTitle("Hello", perChar * 1);
+    // maxChars = max(0, floor(perChar/perChar) - 1) = max(0, 0) = 0
+    // slice(0, 0).trimEnd() + "…" = "…"
+    expect(result).toBe("…");
+  });
+
+  it("empty string → returned as-is when it fits", () => {
+    expect(_fitTitle("", 100)).toBe("");
+  });
+});
+
+describe("LLD 164 — _stripControl: control character removal", () => {
+  it("string with no control chars returned unchanged", () => {
+    expect(_stripControl("My Studio")).toBe("My Studio");
+  });
+
+  it("strips NUL (U+0000)", () => {
+    expect(_stripControl("Plan\x00Name")).toBe("PlanName");
+  });
+
+  it("strips BEL (U+0007)", () => {
+    expect(_stripControl("Plan\x07Name")).toBe("PlanName");
+  });
+
+  it("strips DEL (U+007F)", () => {
+    expect(_stripControl("Plan\x7FName")).toBe("PlanName");
+  });
+
+  it("strips all C0 control chars", () => {
+    const s = "\x00\x01\x02\x1E\x1FHello\x7F";
+    expect(_stripControl(s)).toBe("Hello");
+  });
+
+  it("preserves regular ASCII including tabs? No — tab is \\x09 (C0), stripped", () => {
+    expect(_stripControl("a\x09b")).toBe("ab");
+  });
+
+  it("empty string → empty string", () => {
+    expect(_stripControl("")).toBe("");
+  });
+
+  it("all-control-char string → empty string (triggers PLAN_TITLE fallback)", () => {
+    expect(_stripControl("\x00\x01\x07\x7F")).toBe("");
+  });
+});
+
+describe("LLD 164 — caption title: named plan", () => {
+  function buildClosedPlan164() {
+    resetAll();
+    model.rooms.push({ id: "cp164", closed: true, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+    ]});
+  }
+
+  it("named plan: .plan-title shows plan name, not 'Floor plan'", () => {
+    buildClosedPlan164();
+    setUnit("m");
+    setPlanName("My Studio");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const titleEl = doc.querySelector(".plan-title");
+    if (!titleEl) throw new Error("Expected .plan-title element");
+    if (titleEl.textContent !== "My Studio") {
+      throw new Error(`Expected "My Studio", got "${titleEl.textContent}"`);
+    }
+    setPlanName("");
+  });
+
+  it("unnamed plan: .plan-title falls back to 'Floor plan'", () => {
+    buildClosedPlan164();
+    setUnit("m");
+    setPlanName("");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const titleEl = doc.querySelector(".plan-title");
+    if (!titleEl) throw new Error("Expected .plan-title element");
+    if (titleEl.textContent !== "Floor plan") {
+      throw new Error(`Expected "Floor plan", got "${titleEl.textContent}"`);
+    }
+  });
+
+  it("long name: caption title ends with … and is shorter than raw name", () => {
+    buildClosedPlan164();
+    setUnit("m");
+    const longName = "A Very Long Studio Name That Will Certainly Overflow On Export";
+    setPlanName(longName.slice(0, 60));
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const titleEl = doc.querySelector(".plan-title");
+    if (!titleEl) throw new Error("Expected .plan-title element");
+    const titleText = titleEl.textContent;
+    if (!titleText.endsWith("…")) throw new Error(`Expected title to end with …, got "${titleText}"`);
+    if (titleText.length >= longName.slice(0, 60).length) {
+      throw new Error(`Expected truncation: title="${titleText}" is not shorter than name`);
+    }
+    setPlanName("");
+  });
+
+  it("name with XML-significant chars: caption parses without parsererror and round-trips", () => {
+    buildClosedPlan164();
+    setUnit("m");
+    setPlanName("A & B <x>");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror — XML escape failed");
+    const titleEl = doc.querySelector(".plan-title");
+    if (!titleEl) throw new Error("Expected .plan-title element");
+    // textContent should be the literal text (DOM decodes entities)
+    if (titleEl.textContent !== "A & B <x>") {
+      throw new Error(`Expected literal "A & B <x>", got "${titleEl.textContent}"`);
+    }
+    setPlanName("");
+  });
+
+  it("name with control char: caption parses without parsererror, title has no control char", () => {
+    buildClosedPlan164();
+    setUnit("m");
+    // Directly set via setPlanName — setPlanName only trims/caps, does not strip control chars
+    setPlanName("PlanX\x07Name");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror — control char in SVG");
+    const titleEl = doc.querySelector(".plan-title");
+    if (!titleEl) throw new Error("Expected .plan-title element");
+    const titleText = titleEl.textContent;
+    // eslint-disable-next-line no-control-regex
+    if (/[\x00-\x1F\x7F]/.test(titleText)) {
+      throw new Error(`Control char present in caption title: "${titleText}"`);
+    }
+    expect(titleText).toBe("PlanXName");
+    setPlanName("");
+  });
+
+  it("name that is only control chars: title falls back to 'Floor plan'", () => {
+    buildClosedPlan164();
+    setUnit("m");
+    setPlanName("\x00\x07\x1F");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in SVG");
+    const titleEl = doc.querySelector(".plan-title");
+    if (!titleEl) throw new Error("Expected .plan-title element");
+    if (titleEl.textContent !== "Floor plan") {
+      throw new Error(`Expected "Floor plan" fallback, got "${titleEl.textContent}"`);
+    }
+    setPlanName("");
+  });
+});
+
+describe("LLD 164 — degenerate: name set, no enclosed area or empty plan", () => {
+  it("open-chain plan with name set: no .plan-caption; _planFilename returns name slug", () => {
+    resetAll();
+    setUnit("m");
+    setPlanName("My Studio");
+    model.rooms.push({ id: "oc164", closed: false, verts: [
+      { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 },
+    ]});
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in open-chain SVG");
+    const captionGroup = doc.querySelector(".plan-caption");
+    if (captionGroup) throw new Error("Expected no .plan-caption when area=0");
+    // filename still uses name slug
+    expect(_planFilename("svg")).toBe("my-studio.svg");
+    setPlanName("");
+  });
+
+  it("empty plan, unnamed: no caption; _planFilename falls back to floorplan.*", () => {
+    resetAll();
+    setPlanName("");
+    const svgStr = buildExportSvg();
+    const doc = parseSvg(svgStr);
+    if (doc.querySelector("parsererror")) throw new Error("parsererror in empty-plan SVG");
+    const captionGroup = doc.querySelector(".plan-caption");
+    if (captionGroup) throw new Error("Expected no .plan-caption for empty plan");
+    expect(_planFilename("svg")).toBe("floorplan.svg");
+    expect(_planFilename("png")).toBe("floorplan.png");
   });
 });
 
