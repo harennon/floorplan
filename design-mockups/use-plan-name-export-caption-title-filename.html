@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Export caption title + filename — mockups</title>
+<style>
+  :root {
+    /* dark theme (default) — mirrors src/index.html tokens */
+    --bg:        #14140f;
+    --bg-deep:   #100f0b;
+    --ink:       #ece7d6;
+    --muted:     #8f8a78;
+    --gold:      #c9a84c;
+    --gold-soft: rgba(201, 168, 76, 0.55);
+    --hairline:  rgba(201, 168, 76, 0.18);
+    --dim:       #8f8a78;
+    --room-fill: rgba(201, 168, 76, 0.07);
+    --wall-body: rgba(201, 168, 76, 0.30);
+    --wall-line: #d9be6e;
+    --sym-fill:  rgba(201, 168, 76, 0.12);
+    --sym-stroke:#d9be6e;
+    --font-mono:    "DM Mono", "Courier New", monospace;
+    --font-display: "Libre Baskerville", Georgia, serif;
+    --font-ui:      "DM Sans", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 700px at 20% -5%, rgba(201,168,76,0.05), transparent 60%),
+      linear-gradient(180deg, var(--bg) 0%, var(--bg-deep) 100%);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+    padding: 3rem clamp(1rem, 5vw, 4rem) 5rem;
+  }
+  .page-head { max-width: 60rem; margin: 0 auto 2.5rem; }
+  .eyebrow {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 0.68rem;
+    color: var(--gold);
+    margin: 0 0 0.6rem;
+  }
+  .page-head h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+    margin: 0 0 0.75rem;
+    color: var(--ink);
+    line-height: 1.15;
+  }
+  .page-head p {
+    color: var(--muted);
+    max-width: 46rem;
+    line-height: 1.6;
+    margin: 0 0 0.4rem;
+    font-size: 0.95rem;
+  }
+  .theme-toggle {
+    position: fixed;
+    top: 1rem; right: 1rem;
+    z-index: 10;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    background: var(--bg);
+    color: var(--muted);
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    padding: 0.5rem 0.9rem;
+    cursor: pointer;
+  }
+  .theme-toggle:hover { color: var(--gold); border-color: var(--gold-soft); }
+  .wrap { max-width: 60rem; margin: 0 auto; }
+  section.block { margin: 0 0 3.5rem; }
+  .block-title {
+    display: flex; align-items: baseline; gap: 0.75rem;
+    border-bottom: 1px solid var(--hairline);
+    padding-bottom: 0.6rem; margin-bottom: 1.4rem;
+  }
+  .block-title h2 {
+    font-family: var(--font-display);
+    font-weight: 700; font-size: 1.15rem; margin: 0; color: var(--gold);
+  }
+  .block-title .num {
+    font-family: var(--font-mono); font-size: 0.72rem;
+    color: var(--muted); letter-spacing: 0.1em;
+  }
+  .block > p.lead { color: var(--muted); line-height: 1.6; margin: 0 0 1.4rem; font-size: 0.9rem; }
+
+  .cards { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+  .card {
+    background: rgba(0,0,0,0.12);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 1rem 1rem 1.1rem;
+  }
+  html[data-theme="light"] .card { background: rgba(255,255,255,0.25); }
+  .card-label {
+    font-family: var(--font-mono); font-size: 0.7rem;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--muted); margin: 0 0 0.7rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .card-label .tag {
+    font-size: 0.6rem; padding: 0.1rem 0.4rem; border-radius: 4px;
+    border: 1px solid var(--hairline); color: var(--gold);
+    letter-spacing: 0.06em;
+  }
+  /* the exported-image frame: represents the downloaded PNG/SVG */
+  .export-frame {
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.35);
+  }
+  .export-frame svg { display: block; width: 100%; height: auto; }
+
+  /* filename chip — the derived download name */
+  .filename {
+    display: flex; align-items: center; gap: 0.55rem;
+    margin-top: 0.85rem;
+    font-family: var(--font-mono); font-size: 0.82rem;
+  }
+  .filename .arrow { color: var(--muted); }
+  .filename .fn {
+    color: var(--gold);
+    background: rgba(201,168,76,0.08);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 0.25rem 0.55rem;
+  }
+  .filename .dl { color: var(--muted); font-size: 0.72rem; }
+  .note {
+    margin-top: 0.7rem; font-size: 0.76rem; color: var(--muted);
+    line-height: 1.5; font-family: var(--font-mono);
+  }
+  .note b { color: var(--ink); font-weight: 500; }
+
+  /* slug transform table */
+  .slug-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  .slug-table th, .slug-table td {
+    text-align: left; padding: 0.55rem 0.7rem; border-bottom: 1px solid var(--hairline);
+  }
+  .slug-table th {
+    font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.1em;
+    font-size: 0.66rem; color: var(--muted); font-weight: 500;
+  }
+  .slug-table td.in { color: var(--ink); font-family: var(--font-ui); }
+  .slug-table td.out { color: var(--gold); font-family: var(--font-mono); }
+  .slug-table td.fb { color: var(--muted); }
+  .slug-table tr:last-child td { border-bottom: none; }
+
+  html[data-theme="light"] {
+    --bg:        #f3ecda;
+    --bg-deep:   #e7dcc2;
+    --ink:       #3a3020;
+    --muted:     #8a7c60;
+    --gold:      #a9812a;
+    --gold-soft: rgba(169, 129, 42, 0.5);
+    --hairline:  rgba(120, 96, 50, 0.22);
+    --dim:       #8a7c60;
+    --room-fill: rgba(169, 129, 42, 0.08);
+    --wall-body: rgba(169, 129, 42, 0.30);
+    --wall-line: #7a5e1f;
+    --sym-fill:  rgba(169, 129, 42, 0.14);
+    --sym-stroke:#7a5e1f;
+  }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;700&family=Libre+Baskerville:wght@400;700&display=swap"
+  rel="stylesheet"
+/>
+</head>
+<body>
+<button class="theme-toggle" id="themeBtn">Dark theme</button>
+
+<header class="page-head">
+  <p class="eyebrow">floorplan · export · LLD 163</p>
+  <h1>Plan name as export caption &amp; filename</h1>
+  <p>
+    The exported PNG/SVG is the artifact people actually send. Today the caption title is the
+    fixed literal <b style="color:var(--ink)">&ldquo;Floor plan&rdquo;</b> and the file always
+    saves as <code style="font-family:var(--font-mono);color:var(--gold)">floorplan.png</code>.
+    Once a plan has a name (LLD&nbsp;157), the caption should say what it is and the file should
+    save under a recognizable, slugified name.
+  </p>
+  <p style="font-size:0.82rem;">
+    Each frame below is a scaled render of the <b style="color:var(--ink)">exported image</b> —
+    the same top caption band + bottom scale bar from LLD&nbsp;153/151 — so you're reviewing the
+    real downloaded artifact, not the app UI. Toggle the theme to check both exports.
+  </p>
+</header>
+
+<div class="wrap">
+  <!-- SECTIONS INJECTED HERE -->
+</div>
+
+<script>
+// ── Export constants (mirror src/js/exportImg.js) ──────────────────────────
+const PX_PER_M = 96, MARGIN_M = 0.5, CAPTION_PX = 40, BAND_PX = 56, PAD = 16;
+const FONT = '"DM Mono","Courier New",monospace';
+
+function tok(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+
+// ── Filename slug (the derived download name) ──────────────────────────────
+// Recommended rule: lowercase, spaces/underscores→hyphen, strip non [a-z0-9-],
+// collapse repeats, trim hyphens; empty result → fallback "floorplan".
+function slugify(name) {
+  const s = String(name || "")
+    .trim().toLowerCase()
+    .normalize("NFKD").replace(/[̀-ͯ]/g, "") // strip diacritics
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9-]+/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return s || "floorplan";
+}
+function fileFor(name, ext) { return slugify(name) + "." + ext; }
+
+// ── A tiny sample plan: L-shaped studio (world metres) ─────────────────────
+// verts + one furniture rect + computed area/perimeter caption text.
+const STUDIO = {
+  verts: [ {x:0,y:0}, {x:4.2,y:0}, {x:4.2,y:3.6}, {x:0,y:3.6} ],
+  edges: ["4.20 m","3.60 m","4.20 m","3.60 m"],
+  furniture: { x:0.4, y:0.4, w:2.0, h:0.9, label:"sofa" },
+  metrics: "15.12 m² · 15.60 m"
+};
+
+// Build a faithful export-image SVG string for a given caption title.
+// showCaption=false demonstrates the degenerate (no enclosed area) case.
+function buildExportSvg(title, opts) {
+  opts = opts || {};
+  const showCaption = opts.showCaption !== false;
+  const p = {
+    bg: tok('--bg'), ink: tok('--ink'), dim: tok('--dim'),
+    roomFill: tok('--room-fill'), wallBody: tok('--wall-body'),
+    wallLine: tok('--wall-line'), symFill: tok('--sym-fill'), symStroke: tok('--sym-stroke'),
+  };
+  const b = STUDIO;
+  const minX = 0, minY = 0, maxX = 4.2, maxY = 3.6;
+  const originX = minX - MARGIN_M, originY = minY - MARGIN_M;
+  const wM = (maxX - minX) + 2*MARGIN_M, hM = (maxY - minY) + 2*MARGIN_M;
+  const W = wM * PX_PER_M, contentH = hM * PX_PER_M;
+  const topBand = showCaption ? CAPTION_PX : 0;
+  const H = contentH + BAND_PX + topBand;
+  const wx = x => (x - originX) * PX_PER_M;
+  const wy = y => (y - originY) * PX_PER_M;
+  const wallPx = Math.max(6, 0.1 * PX_PER_M);
+
+  let body = "";
+  const pts = b.verts.map(v => wx(v.x)+","+wy(v.y)).join(" ");
+  body += `<polygon points="${pts}" fill="${p.roomFill}" stroke="none"/>`;
+  body += `<polygon points="${pts}" fill="none" stroke="${p.wallBody}" stroke-width="${wallPx}" stroke-linejoin="round"/>`;
+  body += `<polygon points="${pts}" fill="none" stroke="${p.wallLine}" stroke-width="1.5" stroke-linejoin="round"/>`;
+  // edge dimension labels
+  const n = b.verts.length;
+  for (let i=0;i<n;i++){
+    const a=b.verts[i], c=b.verts[(i+1)%n];
+    const mx=wx((a.x+c.x)/2), my=wy((a.y+c.y)/2);
+    body += `<text x="${mx}" y="${my}" font-family='${FONT}' font-size="10" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${esc(b.edges[i])}</text>`;
+  }
+  // furniture
+  const f=b.furniture;
+  body += `<rect x="${wx(f.x)}" y="${wy(f.y)}" width="${f.w*PX_PER_M}" height="${f.h*PX_PER_M}" fill="${p.symFill}" stroke="${p.symStroke}" stroke-width="1.5"/>`;
+  body += `<text x="${wx(f.x+f.w/2)}" y="${wy(f.y+f.h/2)}" font-family='${FONT}' font-size="9" fill="${p.dim}" text-anchor="middle" dominant-baseline="middle">${esc(f.label)}</text>`;
+
+  // scale bar (1 m)
+  const sbY = contentH + 24, x0 = PAD, x1 = x0 + PX_PER_M;
+  let sb = `<g>`;
+  sb += `<line x1="${x0}" y1="${sbY}" x2="${x1}" y2="${sbY}" stroke="${p.ink}" stroke-width="1.5"/>`;
+  sb += `<line x1="${x0}" y1="${sbY-10}" x2="${x0}" y2="${sbY}" stroke="${p.ink}" stroke-width="1.5"/>`;
+  sb += `<line x1="${(x0+x1)/2}" y1="${sbY-5}" x2="${(x0+x1)/2}" y2="${sbY}" stroke="${p.ink}" stroke-width="1.5"/>`;
+  sb += `<line x1="${x1}" y1="${sbY-10}" x2="${x1}" y2="${sbY}" stroke="${p.ink}" stroke-width="1.5"/>`;
+  sb += `<text x="${x0}" y="${sbY+12}" font-family='${FONT}' font-size="9" fill="${p.dim}" text-anchor="middle">0</text>`;
+  sb += `<text x="${x1}" y="${contentH+10}" font-family='${FONT}' font-size="10" fill="${p.dim}" text-anchor="end" dominant-baseline="hanging">1 m</text>`;
+  sb += `</g>`;
+
+  // caption band — TITLE now uses the plan name (falls back to "Floor plan")
+  let cap = "";
+  if (showCaption) {
+    const by = CAPTION_PX/2;
+    cap += `<g>`;
+    cap += `<text x="${PAD}" y="${by}" font-family='${FONT}' font-size="13" fill="${p.ink}" text-anchor="start" dominant-baseline="middle">${esc(title)}</text>`;
+    cap += `<text x="${W-PAD}" y="${by}" font-family='${FONT}' font-size="12" fill="${p.dim}" text-anchor="end" dominant-baseline="middle">${esc(b.metrics)}</text>`;
+    cap += `</g>`;
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+    + `<rect width="${W}" height="${H}" fill="${p.bg}"/>`
+    + `<g transform="translate(0,${topBand})">${body}${sb}</g>${cap}</svg>`;
+}
+
+// ── Card factory ───────────────────────────────────────────────────────────
+function card(o) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.dataset.title = o.title;
+  el.dataset.showCaption = o.showCaption === false ? "0" : "1";
+  el.dataset.name = o.rawName == null ? "" : o.rawName;
+  const png = fileFor(o.rawName, "png");
+  const svg = fileFor(o.rawName, "svg");
+  el.innerHTML =
+    `<p class="card-label">${esc(o.label)}${o.tag ? `<span class="tag">${esc(o.tag)}</span>` : ""}</p>`
+    + `<div class="export-frame"></div>`
+    + `<div class="filename"><span class="arrow">↓</span>`
+      + `<span class="fn">${esc(png)}</span>`
+      + `<span class="dl">and</span><span class="fn">${esc(svg)}</span></div>`
+    + (o.note ? `<p class="note">${o.note}</p>` : "");
+  return el;
+}
+
+function renderCardSvgs() {
+  document.querySelectorAll(".card").forEach(el => {
+    const frame = el.querySelector(".export-frame");
+    frame.innerHTML = buildExportSvg(el.dataset.title, {
+      showCaption: el.dataset.showCaption !== "0",
+    });
+  });
+}
+
+// ── Sections ───────────────────────────────────────────────────────────────
+function block(num, heading, lead) {
+  const s = document.createElement("section");
+  s.className = "block";
+  s.innerHTML = `<div class="block-title"><h2>${heading}</h2><span class="num">${num}</span></div>`
+    + (lead ? `<p class="lead">${lead}</p>` : "")
+    + `<div class="cards"></div>`;
+  return s;
+}
+
+const wrap = document.querySelector(".wrap");
+
+// Block 1 — the core behavior: named vs unnamed
+const b1 = block("named / fallback",
+  "Caption title follows the plan name",
+  "The caption title (top-left of the export band) becomes the plan name. When the plan "
+  + "has no name, it falls back to the literal &ldquo;Floor plan&rdquo; — pixel-for-pixel today's output.");
+const g1 = b1.querySelector(".cards");
+g1.appendChild(card({
+  label: "Named plan", tag: "primary",
+  title: "My Studio", rawName: "My Studio",
+  note: `Caption reads <b>My Studio</b>; file saves as the slugified name.`
+}));
+g1.appendChild(card({
+  label: "Unnamed plan (fallback)", tag: "no regression",
+  title: "Floor plan", rawName: "",
+  note: `Empty/absent name → caption <b>Floor plan</b>, file <b>floorplan.*</b> — identical to today.`
+}));
+wrap.appendChild(b1);
+
+// Block 2 — the real design decision: long name vs right-aligned metrics
+const b2 = block("layout decision",
+  "Long names in a fixed-width band",
+  "The caption band is a fixed single baseline: title left, metrics right (LLD 153). "
+  + "A long name (names cap at 60 chars) can crowd the metrics on a narrow export. "
+  + "Two ways to handle it — the mockup shows both so you can pick the rule for the LLD.");
+const g2 = b2.querySelector(".cards");
+g2.appendChild(card({
+  label: "Option A — let them meet", tag: "simplest",
+  title: "Downtown Loft — 2BR Renovation Concept", rawName: "Downtown Loft — 2BR Renovation Concept",
+  note: `<b>No new code.</b> Title left, metrics right; on a wide export they never touch. `
+    + `On a narrow one they can nearly meet. Matches LLD 153 Edge Case 5 &mdash; accepted for v1.`
+}));
+g2.appendChild(card({
+  label: "Option B — truncate title with …", tag: "safe",
+  title: "Downtown Loft — 2BR Renovat…", rawName: "Downtown Loft — 2BR Renovation Concept",
+  note: `Title is measured and trimmed to a max width (leaving a gap before the metrics), `
+    + `appending an ellipsis. Guarantees no overlap; adds a small text-measure step to the SVG builder. `
+    + `<b>Filename still uses the full name.</b>`
+}));
+wrap.appendChild(b2);
+
+// Block 3 — degenerate: no enclosed area
+const b3 = block("degenerate",
+  "No enclosed area → caption omitted",
+  "Per LLD 153, when the plan has no closed room the whole caption band is dropped and the SVG "
+  + "stays valid. The name change must preserve this: no name-driven title renders when there's no area. "
+  + "The filename is still derived from the name.");
+const g3 = b3.querySelector(".cards");
+g3.appendChild(card({
+  label: "Named plan, no enclosed area", tag: "SVG valid",
+  title: "My Studio", rawName: "My Studio", showCaption: false,
+  note: `Open chain / furniture only → <b>no caption band</b> (no title, no metrics), scale bar kept. `
+    + `Filename still slugifies the name.`
+}));
+wrap.appendChild(b3);
+
+// Block 4 — the filename slug rule, with edge cases
+const b4 = block("filename slug",
+  "How the download filename is derived",
+  "The download name is the plan name, slugified: lowercased, whitespace/underscores → hyphen, "
+  + "diacritics stripped, non &lbrack;a&ndash;z0&ndash;9-&rbrack; dropped, repeats collapsed, "
+  + "ends trimmed. Anything that reduces to empty → <b style='color:var(--ink)'>floorplan</b>.");
+const slugRows = [
+  ["My Studio", null],
+  ["Downtown Loft — 2BR", null],
+  ["café déjà vu", null],
+  ["  spaced   out  ", null],
+  ["Studio 🛋️ v2", null],
+  ["!!!", "fallback"],
+  ["（empty / whitespace）", "fallback"],
+];
+const tbl = document.createElement("table");
+tbl.className = "slug-table";
+tbl.innerHTML = "<tr><th>Plan name (input)</th><th>Download filename</th></tr>";
+slugRows.forEach(([name, fb]) => {
+  const raw = fb === "fallback" && name.startsWith("（") ? "   " : name;
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td class="in">${esc(name)}</td>`
+    + `<td class="out${fb ? " fb" : ""}">${esc(fileFor(raw, "png"))}${fb ? " · " + esc(fileFor(raw,"svg")) : ""}</td>`;
+  tbl.appendChild(tr);
+});
+const card4 = document.createElement("div");
+card4.className = "card";
+card4.style.gridColumn = "1 / -1";
+card4.appendChild(tbl);
+b4.querySelector(".cards").appendChild(card4);
+wrap.appendChild(b4);
+
+// ── Render + theme toggle ────────────────────────────────────────────────
+renderCardSvgs();
+
+const btn = document.getElementById("themeBtn");
+function syncBtn() {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  btn.textContent = dark ? "Dark theme" : "Light theme";
+}
+btn.addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+  syncBtn();
+  renderCardSvgs(); // re-resolve palette tokens into the exported SVGs
+});
+syncBtn();
+</script>
+</body>
+</html>
+
+</html>
