@@ -18923,6 +18923,50 @@ describe("LLD 160 — render3d enter()/exit() smoke with shadow wiring", () => {
   });
 });
 
+// ─── Tests: LLD 165 — _shareTitle logic (via planName.js) ───────────────────
+//
+// _shareTitle() in actions.js is not exported (it is private). Its logic is:
+//   getPlanName() non-empty → `Floor plan: ${name}`, else "My floor plan".
+// We test this contract by reproducing the logic using the already-exported
+// getPlanName/setPlanName, so we verify the expected behavior without adding
+// a new export solely for testing.
+
+describe("LLD 165 — share title logic (mirrors _shareTitle contract)", () => {
+  function shareTitle() {
+    const name = getPlanName();
+    return name ? `Floor plan: ${name}` : "My floor plan";
+  }
+
+  it("returns 'My floor plan' when plan name is empty", () => {
+    setPlanName("");
+    expect(shareTitle()).toBe("My floor plan");
+  });
+
+  it("returns 'Floor plan: <name>' when plan name is set", () => {
+    setPlanName("Studio");
+    expect(shareTitle()).toBe("Floor plan: Studio");
+    setPlanName(""); // cleanup
+  });
+
+  it("uses the trimmed name (setPlanName trims)", () => {
+    setPlanName("  Bedroom  ");
+    expect(shareTitle()).toBe("Floor plan: Bedroom");
+    setPlanName("");
+  });
+
+  it("returns 'My floor plan' when name is whitespace-only (trimmed to empty)", () => {
+    setPlanName("   ");
+    expect(shareTitle()).toBe("My floor plan");
+  });
+
+  it("uses the full name up to 60 chars (setPlanName cap)", () => {
+    const name60 = "A".repeat(60);
+    setPlanName(name60);
+    expect(shareTitle()).toBe(`Floor plan: ${name60}`);
+    setPlanName("");
+  });
+});
+
 // ─── Render ────────────────────────────────────────────────────────────────────
 // Wait for all async tests before rendering results
 

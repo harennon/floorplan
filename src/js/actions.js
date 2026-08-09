@@ -15,7 +15,7 @@ import { hydrate as hydrateSymbols } from "./symbols.js";
 import { resetView } from "./view.js";
 import { render, onRender } from "./surface.js";
 import * as surface from "./surface.js";
-import { setPlanName } from "./planName.js";
+import { setPlanName, getPlanName } from "./planName.js";
 
 // history is wired in after init() via setHistoryReset()
 let _historyReset = null;
@@ -213,7 +213,53 @@ export function showConflictBanner(hashPlan, localPlan, onChoice) {
 
 // ── Private: share ────────────────────────────────────────────────────────────
 
-async function _onShare() {
+/**
+ * Synchronous click dispatcher. Must NOT be async so the user-activation
+ * gesture is still live when navigator.share() is called (iOS/Safari
+ * requirement). Routes to native share sheet when available and cache is
+ * fresh; otherwise falls through to the clipboard path.
+ */
+function _onShare() {
+  if (navigator.share && _cachedHashUrl && !_cacheStale) {
+    // Native path: URL is available synchronously — activation preserved.
+    _nativeShare(_cachedHashUrl);
+  } else {
+    // Clipboard path: either no native share API, or cache is stale.
+    _shareViaClipboard();
+  }
+}
+
+/**
+ * Native OS share sheet path. Called ONLY when the cache is fresh so that
+ * navigator.share() fires inside the user-activation task.
+ * @param {string} url
+ */
+function _nativeShare(url) {
+  if (url.length > URL_SOFT_LIMIT) {
+    showToast("Note: very large plans may not work in all chat apps. Try PNG/JSON export instead.");
+  }
+  navigator.share({ title: _shareTitle(), url }).catch((err) => {
+    if (err?.name === "AbortError") return; // user cancelled — silent
+    // Any other error (NotAllowedError, InvalidStateError, etc.) → clipboard fallback
+    _copyUrl(url);
+  });
+}
+
+/**
+ * Short human-readable title for the native share sheet.
+ * @returns {string}
+ */
+function _shareTitle() {
+  const name = getPlanName();
+  return name ? `Floor plan: ${name}` : "My floor plan";
+}
+
+/**
+ * Clipboard path — the previous _onShare body, unchanged.
+ * Safe to be async because it does not need the user-activation gesture
+ * (clipboard write is not activation-gated in the same way).
+ */
+async function _shareViaClipboard() {
   // Prefer synchronous path: use pre-computed cached URL if it is fresh.
   // The cache is invalidated on every render (via the onRender hook) and
   // rebuilt asynchronously in the background, so _cachedHashUrl is current
