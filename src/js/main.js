@@ -169,6 +169,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const shareCopyBtnEl   = document.getElementById("share-copy-btn");
   const shareDialogCloseEl = shareDialogEl?.querySelector(".share-dialog-close");
   const shareWarningEl   = document.getElementById("share-url-warning");
+  const shareQrEl        = document.getElementById("share-qr");
 
   // History undo/redo rail buttons + help button (LLD-21)
   const btnHistoryUndo = document.getElementById("history-undo");
@@ -505,6 +506,7 @@ document.addEventListener("DOMContentLoaded", () => {
       shareCopyBtn:     shareCopyBtnEl,
       shareDialogClose: shareDialogCloseEl,
       shareWarning:     shareWarningEl,
+      shareQr:          shareQrEl,
     });
   }
 

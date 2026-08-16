@@ -2261,6 +2261,28 @@
         line-height: 1.4;
         color: var(--muted);
       }
+      /* ── QR block (LLD-167) — fixed B/W card so the code scans on both themes ── */
+      .share-qr {
+        width: fit-content;
+        margin: 0 auto 0.9rem;
+        padding: 0.6rem;
+        background: #fff; /* mandatory quiet-zone background, theme-independent */
+        border-radius: 8px;
+        text-align: center;
+      }
+      .share-qr[hidden] { display: none; }
+      .share-qr canvas {
+        display: block;
+        margin: 0 auto;
+        image-rendering: pixelated;
+      }
+      .share-qr-caption {
+        margin: 0.5rem 0 0;
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        line-height: 1.3;
+        color: #6b6b6b; /* muted grey that reads on the white card */
+      }
       @media (prefers-reduced-motion: reduce) {
         .share-dialog-close,
         .share-copy-btn { transition: none; }
@@ -2740,6 +2762,9 @@
         <div class="share-dialog-panel">
           <div class="share-dialog-title">Share this plan</div>
           <button class="share-dialog-close" aria-label="Close">×</button>
+          <!-- QR block (LLD-167): emptied + repopulated per open; hidden when the URL is too long.
+               The <canvas> and caption are injected by _renderShareQr and hidden together. -->
+          <div id="share-qr" class="share-qr" hidden></div>
           <label class="share-dialog-label" for="share-url-field">Anyone with this link can open your plan.</label>
           <div class="share-dialog-row">
             <input id="share-url-field" class="share-url-field" type="text" readonly aria-label="Share URL" />

@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "qrcode-generator": "1.4.4",
     "three": "0.185.1"
   },
   "devDependencies": {
