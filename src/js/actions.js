@@ -69,6 +69,39 @@ let _shareDialogClose= null;  // .share-dialog-close
 let _shareWarningEl  = null;  // #share-url-warning
 let _shareDialogOpen = false; // gates the Esc/outside-click handlers
 
+// QR block ref (LLD-167), set by init(). Holds the scan target (a <canvas>).
+let _shareQrEl       = null;  // #share-qr (white card wrapping the canvas + caption)
+
+// QR canvas render size in CSS pixels (comfortable monitor scan distance).
+const QR_CSS_PX = 180;
+
+// qrcode-generator is lazily/dynamically imported (like three.js in render3d.js)
+// so the bare specifier is resolved by Vite at build time and never leaks into
+// the unbundled unit-test harness that imports this module directly. The module
+// is a tiny zero-dependency pure-client-side library; the import is cached after
+// first load and kicked off at init() so the first Share click is warm.
+let _qrcodeFactory = null;      // resolved qrcode(typeNumber, ecLevel) factory
+let _qrcodeLoadPromise = null;  // in-flight import (dedupes)
+// Monotonic token: bumps on every _renderShareQr call so a late-resolving import
+// never draws a stale canvas after the dialog was reopened with a different URL.
+let _qrRenderToken = 0;
+
+function _ensureQrcode() {
+  if (_qrcodeFactory) return Promise.resolve(_qrcodeFactory);
+  if (!_qrcodeLoadPromise) {
+    _qrcodeLoadPromise = import("qrcode-generator")
+      .then((mod) => {
+        _qrcodeFactory = mod.default || mod;
+        return _qrcodeFactory;
+      })
+      .catch((err) => {
+        _qrcodeLoadPromise = null; // allow a later retry
+        throw err;
+      });
+  }
+  return _qrcodeLoadPromise;
+}
+
 // URL length soft threshold (Edge Case 7)
 const URL_SOFT_LIMIT = 8000;
 
@@ -87,6 +120,7 @@ const URL_SOFT_LIMIT = 8000;
  *   shareCopyBtn?: HTMLElement,
  *   shareDialogClose?: HTMLElement,
  *   shareWarning?: HTMLElement,
+ *   shareQr?: HTMLElement,
  * }} els
  */
 export function init(els) {
@@ -104,6 +138,9 @@ export function init(els) {
   _shareCopyBtn     = els.shareCopyBtn;
   _shareDialogClose = els.shareDialogClose;
   _shareWarningEl   = els.shareWarning;
+  _shareQrEl        = els.shareQr; // LLD-167
+  // Warm the QR library so the first Share click renders synchronously.
+  if (_shareQrEl) _ensureQrcode().catch(() => {});
 
   // Give exportJson our toast callback
   setToastCallback(showToast);
@@ -336,7 +373,9 @@ function _openShareDialog(url) {
     return;
   }
   _shareUrlField.value = url;
-  if (_shareWarningEl) _shareWarningEl.hidden = url.length <= URL_SOFT_LIMIT;
+  const tooLong = url.length > URL_SOFT_LIMIT;
+  if (_shareWarningEl) _shareWarningEl.hidden = !tooLong;
+  _renderShareQr(url, tooLong); // LLD-167
   _shareDialogEl.classList.add("share-dialog--visible");
   _shareDialogOpen = true;
   // Focus + select after the overlay becomes visible (mirrors templates.js).
@@ -344,6 +383,92 @@ function _openShareDialog(url) {
     _shareUrlField.focus();
     _shareUrlField.select();
   }, 0);
+}
+
+/**
+ * Render (or hide) the scannable QR of the resolved share URL (LLD-167).
+ * Called from _openShareDialog after the field + warning are set, so it reuses
+ * the identical URL string and the same too-long verdict — no second URL build,
+ * no second capacity check. Client-side only; nothing is fetched.
+ *
+ *   - tooLong (url > URL_SOFT_LIMIT)  → clear + hide the QR (field + warning remain).
+ *   - else                           → build the QR (auto version, EC level "M"),
+ *                                       draw #000-on-#fff to a fresh <canvas> at
+ *                                       devicePixelRatio scale, unhide.
+ *   - library throw (data over QR capacity but under the soft limit) → treat as
+ *     tooLong: hide the QR and surface the long-URL warning (safety net; the
+ *     soft-limit gate is the primary control).
+ *
+ * The QR is drawn with fixed black modules on a white quiet-zone card regardless
+ * of the light/dark theme, because dark modules on the dark blueprint panel would
+ * not scan.
+ * @param {string} url
+ * @param {boolean} tooLong
+ */
+function _renderShareQr(url, tooLong) {
+  if (!_shareQrEl) return; // defensive: no QR markup (old cached HTML)
+  const token = ++_qrRenderToken; // invalidate any earlier in-flight render
+  _shareQrEl.replaceChildren();   // drop any previous canvas so none accumulate
+  if (tooLong) {
+    _shareQrEl.hidden = true; // caption is nested inside, hidden with it
+    return;
+  }
+  // Hide until the QR is actually drawn, so a slow first import never leaves an
+  // empty white card showing. The library resolves from cache after init warm-up.
+  _shareQrEl.hidden = true;
+  _ensureQrcode().then((qrcode) => {
+    if (token !== _qrRenderToken) return; // dialog reopened with a newer URL
+    try {
+      const qr = qrcode(0, "M"); // 0 = auto-fit smallest version; "M" = ~15% EC
+      qr.addData(url);
+      qr.make();
+
+      const count = qr.getModuleCount();
+      const dpr = window.devicePixelRatio || 1;
+      const cell = Math.floor((QR_CSS_PX * dpr) / count);
+      const sizePx = cell * count; // exact multiple of cell → crisp module edges
+
+      const canvas = document.createElement("canvas");
+      canvas.width = sizePx;
+      canvas.height = sizePx;
+      canvas.style.width = QR_CSS_PX + "px";
+      canvas.style.height = QR_CSS_PX + "px";
+      canvas.style.imageRendering = "pixelated";
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", "QR code for the share link");
+
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, sizePx, sizePx);
+      ctx.fillStyle = "#000000";
+      for (let row = 0; row < count; row++) {
+        for (let col = 0; col < count; col++) {
+          if (qr.isDark(row, col)) {
+            ctx.fillRect(col * cell, row * cell, cell, cell);
+          }
+        }
+      }
+
+      const caption = document.createElement("div");
+      caption.className = "share-qr-caption";
+      caption.textContent = "Scan with your phone to open this plan";
+
+      _shareQrEl.replaceChildren(canvas, caption);
+      _shareQrEl.hidden = false;
+    } catch {
+      // Data exceeds QR capacity while under the 8000-char soft limit — hide the
+      // QR and surface the long-URL warning (degrades to the field-only +
+      // warning state, same as the tooLong case).
+      _shareQrEl.replaceChildren();
+      _shareQrEl.hidden = true;
+      if (_shareWarningEl) _shareWarningEl.hidden = false;
+    }
+  }).catch(() => {
+    // Import failed (should not happen in a resolved bundle) — leave the QR
+    // hidden; the copy field + warning path is unaffected.
+    if (token !== _qrRenderToken) return;
+    _shareQrEl.hidden = true;
+  });
 }
 
 /** Hide the dialog and restore focus to #btn-share. */

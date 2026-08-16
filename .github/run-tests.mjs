@@ -2145,6 +2145,330 @@ async function runShareDialogIntegrationTests(browser) {
   );
 }
 
+// ── Integration tests (LLD 167 — scannable QR of the share URL) ──────────────
+//
+// Reuses the LLD-166 desktop dialog harness (navigator.share removed → dialog
+// path). The QR block hangs off _openShareDialog(url) and reuses the same
+// resolved URL string + the same URL_SOFT_LIMIT verdict as the copyable field.
+
+const QR_SUITE = "LLD 167 share-dialog QR code integration";
+const qrFailures = [];
+let qrTotal = 0;
+let qrPassed = 0;
+
+async function runQrTest(name, fn, browser) {
+  qrTotal++;
+  try {
+    await fn(browser);
+    qrPassed++;
+    process.stdout.write(`  PASS: ${name}\n`);
+  } catch (err) {
+    qrFailures.push({ suite: QR_SUITE, name, error: String(err) });
+    process.stderr.write(`  FAIL: ${name}\n    ${err}\n`);
+  }
+}
+
+// A plan whose incompressible hash URL lands ABOVE the QR "M"-level byte
+// capacity (~2331 bytes) but WELL BELOW the 8000-char URL_SOFT_LIMIT. This is
+// the common case the design reviewer flagged: qrcode-generator THROWS on
+// over-capacity data, so _renderShareQr's catch is the primary handler here —
+// the QR is hidden while the copyable field + warning remain. 80 incompressible
+// rooms yields ~3.1 kB (measured), safely in the (2331, 8000) window.
+function buildOverQrCapacityPlan() {
+  let seed = 12345;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const q = (v) => Math.round(v * 1000) / 1000;
+  const rooms = [];
+  for (let i = 0; i < 80; i++) {
+    const bx = rnd() * 90, by = rnd() * 90;
+    rooms.push({
+      id: `r${i}`,
+      closed: true,
+      verts: [
+        { x: q(bx + rnd() * 5), y: q(by + rnd() * 5) },
+        { x: q(bx + rnd() * 5), y: q(by + rnd() * 5) },
+        { x: q(bx + rnd() * 5), y: q(by + rnd() * 5) },
+        { x: q(bx + rnd() * 5), y: q(by + rnd() * 5) },
+      ],
+    });
+  }
+  return {
+    schema: 1, app: "floorplan",
+    walls: { rooms, chain: [] },
+    symbols: { symbols: [] },
+    view: { zoom: 1, panX: 0, panY: 0 },
+    unit: "m",
+  };
+}
+
+async function runShareQrIntegrationTests(browser) {
+  process.stdout.write(`\n${QR_SUITE}\n`);
+
+  // ── Test 1: normal plan → QR renders (a <canvas>), not hidden (Acceptance 1) ──
+  await runQrTest(
+    "navigator.share absent: clicking Share renders a QR <canvas> in #share-qr (not hidden)",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 200));
+
+        const state = await page.evaluate(() => {
+          const qr = document.getElementById("share-qr");
+          return {
+            hidden: qr?.hidden,
+            canvasCount: qr?.querySelectorAll("canvas").length ?? 0,
+            hasCaption: !!qr?.querySelector(".share-qr-caption"),
+          };
+        });
+
+        if (state.hidden !== false) throw new Error("#share-qr should be visible (not hidden) for a normal plan");
+        if (state.canvasCount !== 1) throw new Error(`expected exactly 1 QR <canvas>, got ${state.canvasCount}`);
+        if (!state.hasCaption) throw new Error("expected the scan caption inside #share-qr");
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 2: QR is built from the field URL — same string round-trips (Accept. 1)
+  // The QR is constructed from the identical `url` passed to _openShareDialog,
+  // which is #share-url-field.value. Guard the field→plan round-trip (the QR is
+  // that same string by construction, so a scan opens the identical plan).
+  await runQrTest(
+    "QR content = field URL: the field URL round-trips to the seeded plan",
+    async (browser) => {
+      const seedPlan = {
+        schema: 1, app: "floorplan",
+        walls: {
+          rooms: [{ id: "rq", closed: true, verts: [
+            { x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 },
+          ]}],
+          chain: [],
+        },
+        symbols: { symbols: [] },
+        view: { zoom: 1, panX: 0, panY: 0 },
+        unit: "m",
+      };
+      const page = await openDialogApp(browser, { plan: seedPlan, shareMode: "absent" });
+      let fieldUrl;
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 200));
+        const state = await page.evaluate(() => ({
+          fieldUrl: document.getElementById("share-url-field")?.value,
+          qrHidden: document.getElementById("share-qr")?.hidden,
+          hasCanvas: !!document.getElementById("share-qr")?.querySelector("canvas"),
+        }));
+        fieldUrl = state.fieldUrl;
+        if (state.qrHidden !== false || !state.hasCanvas) {
+          throw new Error("QR did not render for the round-trip plan");
+        }
+        if (!fieldUrl) throw new Error("share field is empty — no URL to round-trip");
+      } finally {
+        await page.close();
+      }
+
+      const page2 = await browser.newPage();
+      const pageErrors2 = [];
+      page2.on("pageerror", (err) => pageErrors2.push(String(err)));
+      try {
+        await page2.goto(fieldUrl);
+        await page2.waitForLoadState("networkidle");
+        await new Promise(r => setTimeout(r, 500));
+        const rooms = await page2.evaluate(() => window.__testState?.()?.rooms);
+        if (!rooms) throw new Error("__testState() not available on round-trip page");
+        if (rooms.length !== 1) throw new Error(`Expected 1 room after round-trip, got ${rooms.length}`);
+        if (rooms[0].verts.length !== 4) throw new Error(`Expected 4 verts, got ${rooms[0].verts.length}`);
+        if (pageErrors2.length) throw new Error("Page errors on round-trip: " + pageErrors2.join("; "));
+      } finally {
+        await page2.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 3: regenerate on reopen — edited plan (new URL) → fresh single canvas
+  await runQrTest(
+    "regenerate on reopen: editing the plan changes the URL and redraws a single fresh QR canvas",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 200));
+        const firstUrl = await page.evaluate(() => document.getElementById("share-url-field")?.value);
+
+        // Close, then edit the plan via the plan-name input (name is in the codec,
+        // so the hash URL changes) and let the cache rebuild.
+        await page.keyboard.press("Escape");
+        await new Promise(r => setTimeout(r, 100));
+        await page.fill("#plan-title", "A brand new plan name");
+        await new Promise(r => setTimeout(r, 400)); // debounced render + async cache rebuild
+
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 300));
+        const state = await page.evaluate(() => {
+          const qr = document.getElementById("share-qr");
+          return {
+            secondUrl: document.getElementById("share-url-field")?.value,
+            hidden: qr?.hidden,
+            canvasCount: qr?.querySelectorAll("canvas").length ?? 0,
+          };
+        });
+
+        if (state.secondUrl === firstUrl) {
+          throw new Error("URL did not change after editing the plan name — cannot verify regeneration");
+        }
+        if (state.hidden !== false) throw new Error("#share-qr should be visible after reopen");
+        if (state.canvasCount !== 1) {
+          throw new Error(`expected exactly 1 canvas after reopen (previous replaced), got ${state.canvasCount}`);
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 4: URL > URL_SOFT_LIMIT (8000) → QR hidden, field + warning remain (AC3)
+  await runQrTest(
+    "long URL (>URL_SOFT_LIMIT): #share-qr is hidden (no canvas), field + warning remain",
+    async (browser) => {
+      const page = await openDialogApp(browser, { plan: buildIncompressiblePlan(), shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 800));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 400));
+
+        const state = await page.evaluate(() => {
+          const qr = document.getElementById("share-qr");
+          const field = document.getElementById("share-url-field");
+          return {
+            qrHidden: qr?.hidden,
+            canvasCount: qr?.querySelectorAll("canvas").length ?? 0,
+            warningHidden: document.getElementById("share-url-warning")?.hidden,
+            fieldLen: field?.value.length ?? 0,
+          };
+        });
+
+        if (state.fieldLen <= 8000) {
+          throw new Error(`test plan URL is not long enough to trip the soft limit (len=${state.fieldLen})`);
+        }
+        if (state.qrHidden !== true) throw new Error("#share-qr should be hidden for a URL over the soft limit");
+        if (state.canvasCount !== 0) throw new Error(`expected no QR canvas for a too-long URL, got ${state.canvasCount}`);
+        if (state.warningHidden !== false) throw new Error("#share-url-warning should be visible for a too-long URL");
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 5 (design-reviewer REQUIRED): URL under 8000 but over QR capacity ───
+  // The library throws → _renderShareQr's catch is the PRIMARY handler here.
+  // The QR must be hidden while the copyable field + warning remain (AC3).
+  await runQrTest(
+    "under-8000 but over QR capacity: library throws → QR hidden, field + warning remain",
+    async (browser) => {
+      const page = await openDialogApp(browser, { plan: buildOverQrCapacityPlan(), shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 800));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 400));
+
+        const state = await page.evaluate(() => {
+          const qr = document.getElementById("share-qr");
+          const field = document.getElementById("share-url-field");
+          return {
+            qrHidden: qr?.hidden,
+            canvasCount: qr?.querySelectorAll("canvas").length ?? 0,
+            warningHidden: document.getElementById("share-url-warning")?.hidden,
+            fieldLen: field?.value.length ?? 0,
+          };
+        });
+
+        // Confirm the fixture is genuinely in the (QR-capacity, soft-limit) window.
+        if (state.fieldLen > 8000) {
+          throw new Error(`fixture URL exceeds the soft limit (len=${state.fieldLen}); not the over-capacity case`);
+        }
+        if (state.fieldLen <= 2331) {
+          throw new Error(`fixture URL (len=${state.fieldLen}) is within QR "M" capacity; will not trigger the throw path`);
+        }
+        if (state.qrHidden !== true) throw new Error("#share-qr should be hidden when the QR library throws on over-capacity data");
+        if (state.canvasCount !== 0) throw new Error(`expected no QR canvas on the throw path, got ${state.canvasCount}`);
+        if (state.warningHidden !== false) throw new Error("#share-url-warning should be surfaced by the catch (safety net)");
+        // The copyable field must still hold the full URL.
+        if (state.fieldLen < 2000) throw new Error(`field lost the URL (len=${state.fieldLen})`);
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 6: no network attributable to QR generation (Acceptance 4) ──────────
+  await runQrTest(
+    "no network request is made when the dialog opens and the QR renders (client-side only)",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 600));
+        // Start counting requests only around the Share click / QR render.
+        const requests = [];
+        const onReq = (req) => requests.push(req.url());
+        page.on("request", onReq);
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 400));
+        page.off("request", onReq);
+
+        const state = await page.evaluate(() => ({
+          hidden: document.getElementById("share-qr")?.hidden,
+          hasCanvas: !!document.getElementById("share-qr")?.querySelector("canvas"),
+        }));
+        if (state.hidden !== false || !state.hasCanvas) {
+          throw new Error("QR did not render, so the no-network assertion is meaningless");
+        }
+        if (requests.length !== 0) {
+          throw new Error(`expected zero network requests during QR render, got ${requests.length}: ${requests.join(", ")}`);
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 7: single canvas on repeat opens (idempotent, no accumulation) ──────
+  await runQrTest(
+    "repeat open/close/open leaves exactly one QR <canvas> in #share-qr",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 150));
+        await page.keyboard.press("Escape");
+        await new Promise(r => setTimeout(r, 100));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 200));
+
+        const canvasCount = await page.evaluate(() =>
+          document.getElementById("share-qr")?.querySelectorAll("canvas").length ?? 0);
+        if (canvasCount !== 1) {
+          throw new Error(`expected exactly 1 canvas after reopen, got ${canvasCount}`);
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const server = await serve();
@@ -2243,9 +2567,23 @@ if (dialogFailures.length > 0) {
   }
 }
 
+// ── Run integration tests (LLD 167 share-dialog QR code) ─────────────────────
+await runShareQrIntegrationTests(browser);
+
+const qrIcon = qrFailures.length === 0 ? "PASS" : "FAIL";
+process.stdout.write(`${qrIcon}  ${qrPassed}/${qrTotal} share-QR integration tests passed`);
+if (qrFailures.length > 0) process.stdout.write(` (${qrFailures.length} failed)\n`);
+else process.stdout.write("\n");
+
+if (qrFailures.length > 0) {
+  for (const f of qrFailures) {
+    process.stderr.write(`  - ${f.suite}\n      ${f.name}\n      ${f.error}\n`);
+  }
+}
+
 // ── Teardown ──────────────────────────────────────────────────────────────────
 await browser.close();
 server.close();
 
-const anyFailed = failed > 0 || integrationFailures.length > 0 || previewFailures.length > 0 || resetFailures.length > 0 || shadowFailures.length > 0 || shareFailures.length > 0 || dialogFailures.length > 0;
+const anyFailed = failed > 0 || integrationFailures.length > 0 || previewFailures.length > 0 || resetFailures.length > 0 || shadowFailures.length > 0 || shareFailures.length > 0 || dialogFailures.length > 0 || qrFailures.length > 0;
 if (anyFailed) process.exit(1);
