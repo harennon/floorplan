@@ -53,6 +53,7 @@ import {
 } from "./brief.js";
 import { buildClearanceReport } from "./feedback.js";
 import { savePlanFile } from "./io.js";
+import { roomsOverlap } from "./overlap.js";
 
 const SHARE_BASE = "https://floorplan.danbing.app/#";
 
@@ -677,6 +678,21 @@ export function tool_check_brief() {
           ? `brief needs a ${label.toLowerCase()}; none placed`
           : `brief needs ${req.count} ${label.toLowerCase()}(s); ${need} more to place`
       );
+    }
+  }
+
+  // Room-overlap check: enumerate all unordered pairs of closed rooms.
+  // Only runs when ≥ 2 closed rooms exist; the single-room MVP path is unaffected.
+  const closedRooms = wallsModel.rooms.filter((r) => r.closed);
+  for (let i = 0; i < closedRooms.length; i++) {
+    for (let j = i + 1; j < closedRooms.length; j++) {
+      const ra = closedRooms[i];
+      const rb = closedRooms[j];
+      if (roomsOverlap(ra, rb)) {
+        unmet.push(
+          `rooms ${ra.id} and ${rb.id} overlap — move or resize one so they do not intersect`
+        );
+      }
     }
   }
 
