@@ -61,6 +61,14 @@ let _bannerEl        = null;
 let _toastTimer      = null;
 const TOAST_DURATION_MS = 3500;
 
+// Share dialog refs + state (LLD-166), set by init().
+let _shareDialogEl   = null;  // #share-dialog (scrim + panel)
+let _shareUrlField   = null;  // #share-url-field (readonly input)
+let _shareCopyBtn    = null;  // #share-copy-btn
+let _shareDialogClose= null;  // .share-dialog-close
+let _shareWarningEl  = null;  // #share-url-warning
+let _shareDialogOpen = false; // gates the Esc/outside-click handlers
+
 // URL length soft threshold (Edge Case 7)
 const URL_SOFT_LIMIT = 8000;
 
@@ -74,6 +82,11 @@ const URL_SOFT_LIMIT = 8000;
  *   overflowMenu: HTMLElement,
  *   toast: HTMLElement,
  *   banner: HTMLElement,
+ *   shareDialog?: HTMLElement,
+ *   shareUrlField?: HTMLElement,
+ *   shareCopyBtn?: HTMLElement,
+ *   shareDialogClose?: HTMLElement,
+ *   shareWarning?: HTMLElement,
  * }} els
  */
 export function init(els) {
@@ -85,6 +98,13 @@ export function init(els) {
   _toastEl        = els.toast;
   _bannerEl       = els.banner;
 
+  // Share dialog refs (LLD-166)
+  _shareDialogEl    = els.shareDialog;
+  _shareUrlField    = els.shareUrlField;
+  _shareCopyBtn     = els.shareCopyBtn;
+  _shareDialogClose = els.shareDialogClose;
+  _shareWarningEl   = els.shareWarning;
+
   // Give exportJson our toast callback
   setToastCallback(showToast);
 
@@ -95,6 +115,16 @@ export function init(els) {
 
   // ── Share button ────────────────────────────────────────────────────────────
   _btnShare?.addEventListener("click", _onShare);
+
+  // ── Share dialog (LLD-166) — desktop copy-URL surface ────────────────────────
+  _shareCopyBtn?.addEventListener("click", () => _copyUrl(_shareUrlField.value));
+  _shareDialogClose?.addEventListener("click", _closeShareDialog);
+  // Capture-phase Esc: close before the bubble-phase wall/measure Esc listeners
+  // (mirrors templates.js._onKey — NO active-element guard, since the dialog
+  // auto-focuses the readonly URL input).
+  window.addEventListener("keydown", _onShareDialogKey, true /* capture */);
+  // Outside-click dismissal (bubble phase on document).
+  document.addEventListener("click", _onShareDialogDocClick);
 
   // ── Export menu button ──────────────────────────────────────────────────────
   _btnExport?.addEventListener("click", (e) => {
@@ -255,26 +285,100 @@ function _shareTitle() {
 }
 
 /**
- * Clipboard path — the previous _onShare body, unchanged.
- * Safe to be async because it does not need the user-activation gesture
- * (clipboard write is not activation-gated in the same way).
+ * Fallback path (no fresh native share). Resolves the URL exactly as before,
+ * then branches on navigator.share presence (LLD-166):
+ *   - navigator.share ABSENT (desktop) → open the copy-URL dialog.
+ *   - navigator.share PRESENT (mobile stale-cache fall-through) → _copyUrl
+ *     (silent copy + toast), preserving LLD-165 behavior exactly.
+ * Safe to be async because this path does not need the user-activation gesture
+ * (clipboard write is not activation-gated in the same way, and the manual Copy
+ * click inside the dialog is itself a fresh gesture).
  */
 async function _shareViaClipboard() {
-  // Prefer synchronous path: use pre-computed cached URL if it is fresh.
-  // The cache is invalidated on every render (via the onRender hook) and
-  // rebuilt asynchronously in the background, so _cachedHashUrl is current
-  // as long as the plan has not changed since the last background rebuild.
+  // Resolve the URL first. Prefer the synchronous cached URL when it is fresh;
+  // the cache is invalidated on every render (via the onRender hook) and rebuilt
+  // asynchronously in the background, so _cachedHashUrl is current as long as the
+  // plan has not changed since the last background rebuild.
+  let url;
   if (_cachedHashUrl && !_cacheStale) {
-    _copyUrl(_cachedHashUrl);
+    url = _cachedHashUrl;
   } else {
     // Async path: compute now (cache was stale or not yet built)
     try {
-      const url = await _buildAndCacheUrl();
-      _copyUrl(url);
+      url = await _buildAndCacheUrl();
     } catch {
       showToast("Couldn't build share link");
+      return;
     }
   }
+
+  if (navigator.share) {
+    // Mobile stale-cache fall-through — unchanged LLD-165 behavior. Must NOT
+    // open the desktop dialog (would hijack a share-capable device).
+    _copyUrl(url);
+  } else {
+    // Desktop — no native share API. Surface the URL in the dialog.
+    _openShareDialog(url);
+  }
+}
+
+// ── Private: share dialog (LLD-166) ─────────────────────────────────────────────
+
+/**
+ * Populate + show the share dialog for a resolved URL string. Idempotent:
+ * re-populates and re-adds the visible class on repeat opens.
+ * @param {string} url
+ */
+function _openShareDialog(url) {
+  if (!_shareDialogEl || !_shareUrlField) {
+    // No dialog markup (defensive) — fall back to the old silent copy.
+    _copyUrl(url);
+    return;
+  }
+  _shareUrlField.value = url;
+  if (_shareWarningEl) _shareWarningEl.hidden = url.length <= URL_SOFT_LIMIT;
+  _shareDialogEl.classList.add("share-dialog--visible");
+  _shareDialogOpen = true;
+  // Focus + select after the overlay becomes visible (mirrors templates.js).
+  setTimeout(() => {
+    _shareUrlField.focus();
+    _shareUrlField.select();
+  }, 0);
+}
+
+/** Hide the dialog and restore focus to #btn-share. */
+function _closeShareDialog() {
+  if (_shareDialogEl) _shareDialogEl.classList.remove("share-dialog--visible");
+  _shareDialogOpen = false;
+  _btnShare?.focus();
+}
+
+/**
+ * Capture-phase keydown handler for the dialog. Mirrors templates.js._onKey:
+ * Esc closes + stops propagation so it never reaches the bubble-phase
+ * wall/measure Esc listeners. Intentionally has NO active-element/input guard
+ * (unlike help.js) because the dialog auto-focuses the readonly URL input —
+ * such a guard would swallow Esc and leave the dialog stuck open.
+ */
+function _onShareDialogKey(e) {
+  if (e.key === "Escape" && _shareDialogOpen) {
+    e.stopPropagation();
+    e.preventDefault();
+    _closeShareDialog();
+  }
+}
+
+/**
+ * Document-level click handler: close when clicking outside the panel. Clicks
+ * inside the panel do not close; clicks on #btn-share do not close here (its own
+ * listener runs). Mirrors templates.js._onDocumentClick.
+ */
+function _onShareDialogDocClick(e) {
+  if (!_shareDialogOpen) return;
+  const panel = _shareDialogEl?.querySelector(".share-dialog-panel");
+  if (panel && panel.contains(/** @type {Node} */ (e.target))) return;
+  if (_btnShare && _btnShare.contains(/** @type {Node} */ (e.target))) return;
+  _closeShareDialog();
 }
 
 function _copyUrl(url) {

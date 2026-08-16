@@ -1665,6 +1665,486 @@ async function runShareIntegrationTests(browser) {
   );
 }
 
+// ── Integration tests (LLD 166 — desktop share dialog / copyable URL) ────────
+//
+// The desktop path is exercised by removing navigator.share before load (via
+// addInitScript, same technique as the LLD-165 suite) so _onShare falls through
+// to _shareViaClipboard, which opens the dialog when navigator.share is absent.
+
+const DIALOG_SUITE = "LLD 166 desktop share dialog integration";
+const dialogFailures = [];
+let dialogTotal = 0;
+let dialogPassed = 0;
+
+async function runDialogTest(name, fn, browser) {
+  dialogTotal++;
+  try {
+    await fn(browser);
+    dialogPassed++;
+    process.stdout.write(`  PASS: ${name}\n`);
+  } catch (err) {
+    dialogFailures.push({ suite: DIALOG_SUITE, name, error: String(err) });
+    process.stderr.write(`  FAIL: ${name}\n    ${err}\n`);
+  }
+}
+
+/**
+ * Open the app with a plan seeded and navigator.share removed/stubbed, plus a
+ * clipboard.writeText spy that records the copied text (window.__clipboardText).
+ *
+ * shareMode:
+ *   "absent"  — navigator.share deleted (desktop → dialog path)
+ *   "present" — navigator.share stubbed present + resolving (mobile/native path)
+ */
+async function openDialogApp(browser, { plan = SHARE_PLAN, shareMode = "absent" } = {}) {
+  const page = await browser.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => {
+    pageErrors.push(String(err));
+    process.stderr.write(`[dialog page uncaught] ${err}\n`);
+  });
+
+  await page.addInitScript((p) => {
+    localStorage.setItem("floorplan:plan:v1", JSON.stringify(p));
+  }, plan);
+
+  await page.addInitScript((mode) => {
+    window.__shareCalled = 0;
+    window.__shareArgs = null;
+    if (mode === "absent") {
+      delete navigator.share;
+    } else {
+      navigator.share = function (args) {
+        window.__shareCalled++;
+        window.__shareArgs = args;
+        return Promise.resolve();
+      };
+    }
+    // Spy on the async clipboard API so we can assert the copied string equals
+    // the field value. Resolves so the "Link copied" toast fires.
+    window.__clipboardText = null;
+    try {
+      navigator.clipboard.writeText = function (text) {
+        window.__clipboardText = text;
+        return Promise.resolve();
+      };
+    } catch {
+      // Some environments define navigator.clipboard as read-only; ignore.
+    }
+  }, shareMode);
+
+  await page.goto(`http://127.0.0.1:${PORT}${APP_PAGE}`);
+  await page.waitForLoadState("networkidle");
+  page._pageErrors = pageErrors;
+  return page;
+}
+
+// A plan whose encoded hash reliably exceeds URL_SOFT_LIMIT (8000). The LLD-165
+// grid plan (30 identical rooms) deflate-compresses far below the limit, so we
+// generate many rooms with high-entropy (seeded-random) coordinates that defeat
+// compression. ~300 rooms yields an ~11 kB hash. Deterministic seed → stable.
+function buildIncompressiblePlan() {
+  let seed = 12345;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const q = (v) => Math.round(v * 1000) / 1000; // match the encoder's mm rounding
+  const rooms = [];
+  for (let i = 0; i < 300; i++) {
+    const bx = rnd() * 90, by = rnd() * 90;
+    rooms.push({
+      id: `r${i}`,
+      closed: true,
+      verts: [
+        { x: q(bx + rnd() * 5), y: q(by + rnd() * 5) },
+        { x: q(bx + rnd() * 5), y: q(by + rnd() * 5) },
+        { x: q(bx + rnd() * 5), y: q(by + rnd() * 5) },
+        { x: q(bx + rnd() * 5), y: q(by + rnd() * 5) },
+      ],
+    });
+  }
+  return {
+    schema: 1, app: "floorplan",
+    walls: { rooms, chain: [] },
+    symbols: { symbols: [] },
+    view: { zoom: 1, panX: 0, panY: 0 },
+    unit: "m",
+  };
+}
+
+async function runShareDialogIntegrationTests(browser) {
+  process.stdout.write(`\n${DIALOG_SUITE}\n`);
+
+  // ── Test 1: dialog opens with URL pre-selected (Acceptance 1) ────────────────
+  await runDialogTest(
+    "navigator.share absent: clicking Share opens #share-dialog with the URL pre-selected",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 200));
+
+        const state = await page.evaluate(() => {
+          const field = document.getElementById("share-url-field");
+          return {
+            visible: document.getElementById("share-dialog")?.classList.contains("share-dialog--visible"),
+            value:   field?.value ?? "",
+            selStart: field?.selectionStart,
+            selEnd:   field?.selectionEnd,
+            origin:  location.origin,
+          };
+        });
+
+        if (!state.visible) throw new Error("#share-dialog is not visible after clicking Share");
+        if (!state.value.startsWith(state.origin)) {
+          throw new Error(`field value "${state.value}" does not start with origin "${state.origin}"`);
+        }
+        if (!state.value.includes("#")) {
+          throw new Error(`field value "${state.value}" has no hash fragment`);
+        }
+        if (state.selStart !== 0 || state.selEnd !== state.value.length) {
+          throw new Error(`URL not pre-selected: selectionStart=${state.selStart}, selectionEnd=${state.selEnd}, len=${state.value.length}`);
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 2: Copy copies exactly the field value + Link copied toast (Accept. 2) ─
+  await runDialogTest(
+    "Copy button copies the field value verbatim and shows the Link copied toast",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 200));
+        await page.click("#share-copy-btn");
+        await new Promise(r => setTimeout(r, 300));
+
+        const state = await page.evaluate(() => ({
+          fieldValue:    document.getElementById("share-url-field")?.value ?? "",
+          clipboardText: window.__clipboardText,
+          toastVisible:  document.getElementById("toast")?.classList.contains("toast--visible"),
+          toastText:     document.getElementById("toast")?.textContent ?? "",
+        }));
+
+        if (state.clipboardText !== state.fieldValue) {
+          throw new Error(`Copied text (${JSON.stringify(state.clipboardText)}) does not equal field value (${JSON.stringify(state.fieldValue)})`);
+        }
+        if (!state.toastVisible || !state.toastText.toLowerCase().includes("link copied")) {
+          throw new Error(`Expected "Link copied" toast, got visible=${state.toastVisible} text=${JSON.stringify(state.toastText)}`);
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 3: field is readonly and cannot be mutated by typing ────────────────
+  await runDialogTest(
+    "#share-url-field is readonly — typing does not mutate its value",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 200));
+
+        const before = await page.evaluate(() => document.getElementById("share-url-field")?.value);
+        const isReadonly = await page.evaluate(() => document.getElementById("share-url-field")?.hasAttribute("readonly"));
+        if (!isReadonly) throw new Error("#share-url-field is missing the readonly attribute");
+
+        await page.focus("#share-url-field");
+        await page.keyboard.type("XXXX");
+        const after = await page.evaluate(() => document.getElementById("share-url-field")?.value);
+        if (after !== before) {
+          throw new Error(`readonly field value changed after typing: "${before}" → "${after}"`);
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 4: URL round-trips (field shows a real, openable link) ──────────────
+  await runDialogTest(
+    "field URL round-trips: load it in a fresh page and decode the same plan",
+    async (browser) => {
+      const seedPlan = {
+        schema: 1, app: "floorplan",
+        walls: {
+          rooms: [{ id: "rt", closed: true, verts: [
+            { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 2 }, { x: 0, y: 2 },
+          ]}],
+          chain: [],
+        },
+        symbols: { symbols: [] },
+        view: { zoom: 1, panX: 0, panY: 0 },
+        unit: "m",
+      };
+      const page = await openDialogApp(browser, { plan: seedPlan, shareMode: "absent" });
+      let fieldUrl;
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 200));
+        fieldUrl = await page.evaluate(() => document.getElementById("share-url-field")?.value);
+        if (!fieldUrl) throw new Error("share dialog field is empty — no URL to round-trip");
+      } finally {
+        await page.close();
+      }
+
+      const page2 = await browser.newPage();
+      const pageErrors2 = [];
+      page2.on("pageerror", (err) => pageErrors2.push(String(err)));
+      try {
+        await page2.goto(fieldUrl);
+        await page2.waitForLoadState("networkidle");
+        await new Promise(r => setTimeout(r, 500));
+        const rooms = await page2.evaluate(() => window.__testState?.()?.rooms);
+        if (!rooms) throw new Error("__testState() not available on round-trip page");
+        if (rooms.length !== 1) throw new Error(`Expected 1 room after round-trip, got ${rooms.length}`);
+        if (rooms[0].verts.length !== 4) throw new Error(`Expected 4 verts, got ${rooms[0].verts.length}`);
+        if (pageErrors2.length) throw new Error("Page errors on round-trip: " + pageErrors2.join("; "));
+      } finally {
+        await page2.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 5: dismissal — Esc, scrim, panel-click, × button, focus return ──────
+  await runDialogTest(
+    "dismissal: Esc / scrim / × close; panel-click does not; focus returns to #btn-share",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "absent" });
+      try {
+        const open = async () => {
+          await page.click("#btn-share");
+          await new Promise(r => setTimeout(r, 150));
+        };
+        const isVisible = () => page.evaluate(() =>
+          document.getElementById("share-dialog")?.classList.contains("share-dialog--visible"));
+
+        await new Promise(r => setTimeout(r, 500));
+
+        // Esc closes
+        await open();
+        if (!(await isVisible())) throw new Error("dialog did not open (Esc case)");
+        await page.keyboard.press("Escape");
+        await new Promise(r => setTimeout(r, 100));
+        if (await isVisible()) throw new Error("Esc did not close the dialog");
+        // focus returns to #btn-share
+        const focusedAfterEsc = await page.evaluate(() => document.activeElement?.id);
+        if (focusedAfterEsc !== "btn-share") {
+          throw new Error(`focus not returned to #btn-share after Esc, got #${focusedAfterEsc}`);
+        }
+        // Esc must not have triggered a wall/measure side effect (rooms unchanged)
+        const roomsAfterEsc = await page.evaluate(() => window.__testState?.()?.rooms?.length);
+        if (roomsAfterEsc !== 0) {
+          throw new Error(`Esc had a side effect on the plan: expected 0 rooms, got ${roomsAfterEsc}`);
+        }
+
+        // Click inside the panel does NOT close
+        await open();
+        await page.click(".share-dialog-title");
+        await new Promise(r => setTimeout(r, 100));
+        if (!(await isVisible())) throw new Error("click inside the panel closed the dialog (should not)");
+
+        // Click on the scrim (outside the panel) closes
+        await page.mouse.click(5, 5);
+        await new Promise(r => setTimeout(r, 100));
+        if (await isVisible()) throw new Error("scrim click did not close the dialog");
+
+        // × button closes + returns focus
+        await open();
+        if (!(await isVisible())) throw new Error("dialog did not open (× case)");
+        await page.click(".share-dialog-close");
+        await new Promise(r => setTimeout(r, 100));
+        if (await isVisible()) throw new Error("× button did not close the dialog");
+        const focusedAfterClose = await page.evaluate(() => document.activeElement?.id);
+        if (focusedAfterClose !== "btn-share") {
+          throw new Error(`focus not returned to #btn-share after ×, got #${focusedAfterClose}`);
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 6: Esc with the URL field focused still closes (Fix 2 regression) ───
+  await runDialogTest(
+    "Esc closes even when the readonly URL field is focused (no help.js input guard)",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 200));
+        // The dialog auto-focuses the field; confirm that before pressing Esc.
+        const focused = await page.evaluate(() => document.activeElement?.id);
+        if (focused !== "share-url-field") {
+          throw new Error(`expected #share-url-field to be focused on open, got #${focused}`);
+        }
+        await page.keyboard.press("Escape");
+        await new Promise(r => setTimeout(r, 100));
+        const visible = await page.evaluate(() =>
+          document.getElementById("share-dialog")?.classList.contains("share-dialog--visible"));
+        if (visible) throw new Error("Esc did not close the dialog while the URL field was focused");
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 7: mobile stale-cache regression — no dialog, silent copy (Fix 1) ───
+  await runDialogTest(
+    "navigator.share present + stale cache: Share does NOT open the dialog, silently copies",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "present" });
+      try {
+        await new Promise(r => setTimeout(r, 800));
+        // Force the cache stale then immediately click Share in the same tick, so
+        // the async rebuild has not landed → _onShare falls through to
+        // _shareViaClipboard while navigator.share is present.
+        await page.evaluate(() => {
+          window.dispatchEvent(new Event("resize"));
+          document.getElementById("btn-share").click();
+        });
+        await new Promise(r => setTimeout(r, 500));
+
+        const state = await page.evaluate(() => ({
+          visible:       document.getElementById("share-dialog")?.classList.contains("share-dialog--visible"),
+          shareCalled:   window.__shareCalled ?? 0,
+          toastVisible:  document.getElementById("toast")?.classList.contains("toast--visible"),
+        }));
+
+        if (state.visible) {
+          throw new Error("share dialog opened on a navigator.share-present device (AC5 violation)");
+        }
+        // Native share must not have fired (cache was stale → clipboard path).
+        if (state.shareCalled !== 0) {
+          throw new Error(`navigator.share was called ${state.shareCalled} times — expected clipboard path`);
+        }
+        if (!state.toastVisible) {
+          throw new Error("expected a silent copy toast on the stale-cache mobile path");
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 8: long URL — in-dialog warning shown, full URL in field (Accept. 4) ─
+  await runDialogTest(
+    "long plan URL (>URL_SOFT_LIMIT): #share-url-warning is visible and field holds the full URL",
+    async (browser) => {
+      const page = await openDialogApp(browser, { plan: buildIncompressiblePlan(), shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 800));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 400));
+
+        const state = await page.evaluate(() => {
+          const field = document.getElementById("share-url-field");
+          return {
+            warningHidden: document.getElementById("share-url-warning")?.hidden,
+            fieldLen:      field?.value.length ?? 0,
+          };
+        });
+
+        if (state.fieldLen <= 8000) {
+          throw new Error(`test plan URL is not long enough to trip the soft limit (len=${state.fieldLen})`);
+        }
+        if (state.warningHidden !== false) {
+          throw new Error("#share-url-warning should be visible (not hidden) for a long URL");
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 9: short URL keeps the warning hidden (Edge Case 10) ────────────────
+  await runDialogTest(
+    "short plan URL: #share-url-warning stays hidden",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 200));
+        const hidden = await page.evaluate(() => document.getElementById("share-url-warning")?.hidden);
+        if (hidden !== true) throw new Error("#share-url-warning should stay hidden for a short URL");
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 10: toast z-index sits above the dialog scrim (Fix 3) ───────────────
+  await runDialogTest(
+    "#toast z-index (50) exceeds #share-dialog z-index (40) so the toast shows over the scrim",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "absent" });
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 200));
+        await page.click("#share-copy-btn");
+        await new Promise(r => setTimeout(r, 200));
+
+        const z = await page.evaluate(() => ({
+          toast:  parseInt(getComputedStyle(document.getElementById("toast")).zIndex, 10),
+          dialog: parseInt(getComputedStyle(document.getElementById("share-dialog")).zIndex, 10),
+        }));
+        if (!(z.toast > z.dialog)) {
+          throw new Error(`toast z-index (${z.toast}) must exceed dialog z-index (${z.dialog})`);
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+
+  // ── Test 11: native path still fires, dialog never opens (Acceptance 5) ──────
+  await runDialogTest(
+    "navigator.share present + fresh cache: Share calls navigator.share and never opens the dialog",
+    async (browser) => {
+      const page = await openDialogApp(browser, { shareMode: "present" });
+      try {
+        await new Promise(r => setTimeout(r, 500));
+        await page.click("#btn-share");
+        await new Promise(r => setTimeout(r, 300));
+
+        const state = await page.evaluate(() => ({
+          called:  window.__shareCalled ?? 0,
+          visible: document.getElementById("share-dialog")?.classList.contains("share-dialog--visible"),
+        }));
+        if (state.called !== 1) {
+          throw new Error(`expected navigator.share called once, got ${state.called}`);
+        }
+        if (state.visible) {
+          throw new Error("share dialog opened on the native (fresh-cache) path — must not");
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    browser
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const server = await serve();
@@ -1749,9 +2229,23 @@ if (shareFailures.length > 0) {
   }
 }
 
+// ── Run integration tests (LLD 166 desktop share dialog) ─────────────────────
+await runShareDialogIntegrationTests(browser);
+
+const dialogIcon = dialogFailures.length === 0 ? "PASS" : "FAIL";
+process.stdout.write(`${dialogIcon}  ${dialogPassed}/${dialogTotal} share-dialog integration tests passed`);
+if (dialogFailures.length > 0) process.stdout.write(` (${dialogFailures.length} failed)\n`);
+else process.stdout.write("\n");
+
+if (dialogFailures.length > 0) {
+  for (const f of dialogFailures) {
+    process.stderr.write(`  - ${f.suite}\n      ${f.name}\n      ${f.error}\n`);
+  }
+}
+
 // ── Teardown ──────────────────────────────────────────────────────────────────
 await browser.close();
 server.close();
 
-const anyFailed = failed > 0 || integrationFailures.length > 0 || previewFailures.length > 0 || resetFailures.length > 0 || shadowFailures.length > 0 || shareFailures.length > 0;
+const anyFailed = failed > 0 || integrationFailures.length > 0 || previewFailures.length > 0 || resetFailures.length > 0 || shadowFailures.length > 0 || shareFailures.length > 0 || dialogFailures.length > 0;
 if (anyFailed) process.exit(1);

@@ -1838,7 +1838,9 @@
         pointer-events: none;
         opacity: 0;
         transition: opacity 0.2s, transform 0.2s;
-        z-index: 30;
+        /* Above the overlay tier (40) so the "Link copied" toast renders over
+           the share dialog scrim (LLD-166). */
+        z-index: 50;
         white-space: nowrap;
         max-width: calc(100vw - 2rem);
         text-align: center;
@@ -2154,6 +2156,114 @@
         .template-card-name { font-size: 0.7rem; }
         .template-card-desc { font-size: 0.6rem; }
         .template-card-area { font-size: 0.58rem; }
+      }
+
+      /* ── Share dialog (LLD-166) — reuses the template-overlay chrome ─────── */
+      .share-dialog {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(16,15,11,0.62);
+        z-index: 40;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(3px);
+        -webkit-backdrop-filter: blur(3px);
+      }
+      .share-dialog.share-dialog--visible {
+        display: flex;
+      }
+      .share-dialog-panel {
+        position: relative;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        padding: 1.25rem 1.5rem 1.5rem;
+        width: min(90vw, 32rem);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 6px 32px rgba(0,0,0,0.6);
+      }
+      .share-dialog-title {
+        font-family: var(--font-display);
+        font-size: 1rem;
+        color: var(--gold);
+        margin-bottom: 0.9rem;
+        font-weight: 700;
+        padding-right: 2rem; /* space for close button */
+      }
+      .share-dialog-close {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        background: transparent;
+        border: none;
+        color: var(--muted);
+        font-size: 1.3rem;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+        transition: color 0.12s;
+      }
+      .share-dialog-close:hover {
+        color: var(--ink);
+      }
+      .share-dialog-label {
+        display: block;
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        color: var(--muted);
+        margin-bottom: 0.5rem;
+      }
+      .share-dialog-row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: stretch;
+      }
+      .share-url-field {
+        flex: 1;
+        min-width: 0;
+        background: rgba(201,168,76,0.04);
+        border: 1px solid var(--hairline);
+        border-radius: 6px;
+        padding: 0.45rem 0.6rem;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--ink);
+      }
+      .share-url-field:focus-visible {
+        border-color: var(--gold-soft);
+        outline: none;
+      }
+      .share-copy-btn {
+        flex: 0 0 auto;
+        background: var(--panel);
+        border: 1px solid var(--gold-soft);
+        color: var(--gold);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        padding: 0.45rem 1rem;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .share-copy-btn:hover,
+      .share-copy-btn:focus-visible {
+        border-color: var(--gold);
+        background: rgba(201,168,76,0.1);
+        outline: none;
+      }
+      .share-url-warning {
+        margin: 0.75rem 0 0;
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        line-height: 1.4;
+        color: var(--muted);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .share-dialog-close,
+        .share-copy-btn { transition: none; }
       }
 
       /* ── Empty-state CTA (LLD-43) ─────────────────────────────────────────── */
@@ -2616,6 +2726,28 @@
           <div class="template-grid" role="list">
             <!-- cards populated by templates.js -->
           </div>
+        </div>
+      </div>
+
+      <!-- Share dialog (LLD-166): desktop copy-URL surface (navigator.share absent) -->
+      <div
+        id="share-dialog"
+        class="share-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Share this plan"
+      >
+        <div class="share-dialog-panel">
+          <div class="share-dialog-title">Share this plan</div>
+          <button class="share-dialog-close" aria-label="Close">×</button>
+          <label class="share-dialog-label" for="share-url-field">Anyone with this link can open your plan.</label>
+          <div class="share-dialog-row">
+            <input id="share-url-field" class="share-url-field" type="text" readonly aria-label="Share URL" />
+            <button id="share-copy-btn" class="share-copy-btn">Copy</button>
+          </div>
+          <p id="share-url-warning" class="share-url-warning" hidden>
+            Very large plan — this link may not work in all chat apps. Try PNG/JSON export instead.
+          </p>
         </div>
       </div>
 
