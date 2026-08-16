@@ -164,6 +164,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const overflowMenuEl = document.getElementById("overflow-menu");
   const toastEl        = document.getElementById("toast");
   const bannerEl       = document.getElementById("conflict-banner");
+  const shareDialogEl    = document.getElementById("share-dialog");
+  const shareUrlFieldEl  = document.getElementById("share-url-field");
+  const shareCopyBtnEl   = document.getElementById("share-copy-btn");
+  const shareDialogCloseEl = shareDialogEl?.querySelector(".share-dialog-close");
+  const shareWarningEl   = document.getElementById("share-url-warning");
 
   // History undo/redo rail buttons + help button (LLD-21)
   const btnHistoryUndo = document.getElementById("history-undo");
@@ -495,6 +500,11 @@ document.addEventListener("DOMContentLoaded", () => {
       overflowMenu: overflowMenuEl,
       toast:        toastEl,
       banner:       bannerEl,
+      shareDialog:      shareDialogEl,
+      shareUrlField:    shareUrlFieldEl,
+      shareCopyBtn:     shareCopyBtnEl,
+      shareDialogClose: shareDialogCloseEl,
+      shareWarning:     shareWarningEl,
     });
   }
 
